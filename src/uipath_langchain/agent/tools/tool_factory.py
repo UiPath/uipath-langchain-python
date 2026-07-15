@@ -45,7 +45,7 @@ def _is_user_token() -> bool:
 
 
 async def create_tools_from_resources(
-    agent: LowCodeAgentDefinition, llm: BaseChatModel, source: str | None = None
+    agent: LowCodeAgentDefinition, llm: BaseChatModel
 ) -> list[BaseTool]:
 
     tools: list[BaseTool] = []
@@ -75,7 +75,7 @@ async def create_tools_from_resources(
             type(resource).__name__,
         )
         tool = await _build_tool_for_resource(
-            resource, llm, agent=agent, run_as_me=run_as_me, source=source
+            resource, llm, agent=agent, run_as_me=run_as_me
         )
         if tool is not None:
             if isinstance(tool, list):
@@ -100,13 +100,12 @@ async def _build_tool_for_resource(
     llm: BaseChatModel,
     agent: LowCodeAgentDefinition | None = None,
     run_as_me: bool = False,
-    source: str | None = None,
 ) -> BaseTool | list[BaseTool] | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
         return create_process_tool(resource, run_as_me=run_as_me)
 
     elif isinstance(resource, AgentContextResourceConfig):
-        return create_context_tool(resource, llm=llm, agent=agent, source=source)
+        return create_context_tool(resource, llm=llm, agent=agent)
 
     elif isinstance(resource, AgentEscalationResourceConfig):
         return create_escalation_tool(resource, agent=agent)

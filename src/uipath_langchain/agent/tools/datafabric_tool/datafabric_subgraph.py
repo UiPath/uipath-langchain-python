@@ -49,18 +49,17 @@ class DataFabricSubgraphState(BaseModel):
 class QueryExecutor:
     """Executes SQL queries against Data Fabric."""
 
-    def __init__(
-        self, entities_service: EntitiesService, source: str | None = None
-    ) -> None:
+    def __init__(self, entities_service: EntitiesService) -> None:
         self._entities = entities_service
-        self._source = source
 
     async def __call__(self, sql_query: str) -> dict[str, Any]:
         logger.debug("execute_sql called with SQL: %s", sql_query)
         try:
+            # Relationship (FK) fields are typed as their scalar id so the SQL the
+            # agent writes can join on `relationshipField = Other.Id`.
             records = await self._entities.query_entity_records_async(
                 sql_query=sql_query,
-                source=self._source,
+                relationships_as_scalar=True,
             )
             return {
                 "records": records,
@@ -92,11 +91,10 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
-        source: str | None = None,
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
-            entities_service, entities, source
+            entities_service, entities
         )
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
@@ -208,7 +206,6 @@ class DataFabricGraph:
         self,
         entities_service: EntitiesService,
         entities: list[Entity],
-        source: str | None = None,
     ) -> BaseTool:
         """Create the inner ``execute_sql`` tool."""
         entity_names = ", ".join(e.name for e in entities)
@@ -220,7 +217,7 @@ class DataFabricGraph:
                 "tables and columns. Retry with a corrected query on errors."
             ),
             args_schema=DataFabricExecuteSqlInput,
-            coroutine=QueryExecutor(entities_service, source),
+            coroutine=QueryExecutor(entities_service),
             metadata={"tool_type": "datafabric_sql"},
         )
 
@@ -232,7 +229,6 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
-        source: str | None = None,
     ) -> CompiledStateGraph[Any]:
         """Create and return a compiled Data Fabric sub-graph."""
         graph = DataFabricGraph(
@@ -242,6 +238,5 @@ class DataFabricGraph:
             max_iterations,
             resource_description,
             base_system_prompt,
-            source,
         )
         return graph.compiled_graph

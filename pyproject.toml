@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "uipath>=2.13.7, <2.14.0",
     "uipath-core>=0.5.29, <0.6.0",
-    "uipath-platform>=0.2.8, <0.3.0",
+    "uipath-platform>=0.2.11, <0.3.0",
     "uipath-runtime>=0.12.1, <0.13.0",
     "uipath-llm-client>=1.16.3, <1.17.0",
     "langgraph>=1.1.8, <2.0.0",

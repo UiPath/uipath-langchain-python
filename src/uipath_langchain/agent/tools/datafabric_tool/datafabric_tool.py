@@ -44,13 +44,11 @@ class DataFabricTextQueryHandler:
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
-        source: str | None = None,
     ) -> None:
         self._entity_set = entity_set
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
-        self._source = source
         self._compiled: CompiledStateGraph[Any] | None = None
         self._init_lock = asyncio.Lock()
 
@@ -84,7 +82,6 @@ class DataFabricTextQueryHandler:
                 entities_service=resolution.entities_service,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
-                source=self._source,
             )
             return self._compiled
 
@@ -147,7 +144,6 @@ def create_datafabric_query_tool(
     llm: BaseChatModel,
     tool_name: str = "query_datafabric",
     agent_config: dict[str, str] | None = None,
-    source: str | None = None,
 ) -> BaseTool:
     """Create the ``query_datafabric`` agentic tool.
 
@@ -168,7 +164,6 @@ def create_datafabric_query_tool(
         llm=llm,
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
-        source=source,
     )
     entity_lines = []
     for e in entity_set:
