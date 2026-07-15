@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from langgraph.graph import END, START, StateGraph
 from uipath.runtime import HydrationPolicy, HydrationRuntime, UiPathRuntimeContext
 
-from uipath_langchain.deepagents import (
+from uipath_langchain.deepagents.metadata import (
     UiPathDeepAgentRuntimeSpec,
     set_uipath_deep_agent_runtime_spec,
 )

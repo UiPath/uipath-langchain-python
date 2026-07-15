@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 _RUNTIME_SPEC_ATTR = "__uipath_deep_agent_runtime_spec__"
+_DEEPAGENTS_INTEGRATION_NAME = "deepagents"
 
 UiPathDeepAgentHydrationPolicy = Literal[
     "suspend_only",
@@ -52,7 +53,7 @@ def get_uipath_deep_agent_runtime_spec(
             getattr(builder, _RUNTIME_SPEC_ATTR, None) if builder is not None else None
         )
     if raw is None:
-        return None
+        return UiPathDeepAgentRuntimeSpec() if is_deep_agent_graph(graph) else None
     if isinstance(raw, UiPathDeepAgentRuntimeSpec):
         return raw
     if isinstance(raw, dict):
@@ -60,3 +61,39 @@ def get_uipath_deep_agent_runtime_spec(
     raise TypeError(
         "UiPath DeepAgents runtime spec must be a UiPathDeepAgentRuntimeSpec or dict."
     )
+
+
+def is_deep_agent_graph(graph: Any) -> bool:
+    """Return whether a graph-like object carries DeepAgents LangSmith metadata."""
+    return _contains_deepagents_metadata(graph, seen=set())
+
+
+def _contains_deepagents_metadata(graph: Any, seen: set[int]) -> bool:
+    graph_id = id(graph)
+    if graph_id in seen:
+        return False
+    seen.add(graph_id)
+
+    if _has_deepagents_metadata(graph):
+        return True
+
+    builder = getattr(graph, "builder", None)
+    if builder is not None and _contains_deepagents_metadata(builder, seen):
+        return True
+
+    nodes = getattr(graph, "nodes", None)
+    if isinstance(nodes, dict):
+        for node in nodes.values():
+            if _contains_deepagents_metadata(node, seen):
+                return True
+            runnable = getattr(node, "runnable", None)
+            if runnable is not None and _contains_deepagents_metadata(runnable, seen):
+                return True
+
+    return False
+
+
+def _has_deepagents_metadata(graph: Any) -> bool:
+    config = getattr(graph, "config", None) or {}
+    metadata = config.get("metadata", {}) if isinstance(config, dict) else {}
+    return metadata.get("ls_integration") == _DEEPAGENTS_INTEGRATION_NAME

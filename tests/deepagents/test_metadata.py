@@ -1,15 +1,19 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from langchain.agents.structured_output import ToolStrategy
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
-from uipath_langchain.deepagents import (
+from uipath_langchain.deepagents.agent import create_uipath_deep_agent_graph
+from uipath_langchain.deepagents.backend import UiPathWorkspaceBackendFactory
+from uipath_langchain.deepagents.metadata import (
     UiPathDeepAgentRuntimeSpec,
     get_uipath_deep_agent_runtime_spec,
+    is_deep_agent_graph,
     set_uipath_deep_agent_runtime_spec,
 )
-from uipath_langchain.deepagents.agent import create_uipath_deep_agent_graph
 
 
 class State(BaseModel):
@@ -48,29 +52,19 @@ def test_runtime_spec_defaults_to_success_persistence() -> None:
     assert spec.hydration_policy == "suspend_or_success"
 
 
-def test_uipath_deep_agent_graph_exposes_hydration_policy() -> None:
+def test_uipath_deep_agent_graph_uses_internal_runtime_defaults() -> None:
     with patch(
         "uipath_langchain.deepagents.agent.create_advanced_agent_graph",
         return_value=_graph(),
-    ):
-        graph = create_uipath_deep_agent_graph(
-            model=object(),  # type: ignore[arg-type]
-            output_schema=Output,
-            hydration_policy="always",
-        )
-
-    spec = get_uipath_deep_agent_runtime_spec(graph)
-    assert spec is not None
-    assert spec.hydration_policy == "always"
-
-
-def test_conversational_mode_is_explicitly_not_implemented() -> None:
-    with pytest.raises(NotImplementedError, match="Conversational UiPath DeepAgents"):
+    ) as mock_create:
         create_uipath_deep_agent_graph(
             model=object(),  # type: ignore[arg-type]
             output_schema=Output,
-            interaction_mode="conversation",
         )
+
+    kwargs = mock_create.call_args.kwargs
+    assert isinstance(kwargs["backend"], UiPathWorkspaceBackendFactory)
+    assert isinstance(kwargs["response_format"], ToolStrategy)
 
 
 def test_subagents_are_forwarded_to_advanced_agent_graph() -> None:
@@ -134,3 +128,20 @@ def test_user_prompt_and_build_user_message_are_mutually_exclusive() -> None:
             user_prompt="Create the brief.",
             build_user_message=lambda _args: "Create the brief.",
         )
+
+
+def test_deepagents_langsmith_metadata_is_detected() -> None:
+    graph = SimpleNamespace(config={"metadata": {"ls_integration": "deepagents"}})
+
+    assert is_deep_agent_graph(graph)
+    assert get_uipath_deep_agent_runtime_spec(graph) == UiPathDeepAgentRuntimeSpec()
+
+
+def test_deepagents_langsmith_metadata_is_detected_on_subgraph_node() -> None:
+    subgraph = SimpleNamespace(config={"metadata": {"ls_integration": "deepagents"}})
+    graph = SimpleNamespace(
+        nodes={"advanced_agent": SimpleNamespace(runnable=subgraph)}
+    )
+
+    assert is_deep_agent_graph(graph)
+    assert get_uipath_deep_agent_runtime_spec(graph) == UiPathDeepAgentRuntimeSpec()

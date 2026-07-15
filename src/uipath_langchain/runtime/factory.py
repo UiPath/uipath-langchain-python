@@ -32,7 +32,7 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
-from uipath_langchain.deepagents import (
+from uipath_langchain.deepagents.metadata import (
     UiPathDeepAgentRuntimeSpec,
     get_uipath_deep_agent_runtime_spec,
     set_uipath_deep_agent_runtime_spec,
