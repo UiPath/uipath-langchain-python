@@ -32,11 +32,7 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
-from uipath_langchain.deepagents.metadata import (
-    UiPathDeepAgentRuntimeSpec,
-    get_uipath_deep_agent_runtime_spec,
-    set_uipath_deep_agent_runtime_spec,
-)
+from uipath_langchain.deepagents.metadata import is_deep_agent_graph
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -46,6 +42,9 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 _AGENT_TYPE_CODED = "uipath_coded"
 _AGENT_FRAMEWORK = "langchain"
+_DEEPAGENT_WORKSPACE_CONFIG_KEY = "uipath_workspace_path"
+_DEEPAGENT_ATTACHMENT_PREFIX = ".uipath-workspace"
+_DEEPAGENT_HYDRATION_POLICY = HydrationPolicy.SUSPEND_OR_SUCCESS
 
 
 class UiPathLangGraphRuntimeFactory:
@@ -234,9 +233,6 @@ class UiPathLangGraphRuntimeFactory:
             loaded_graph = await self._load_graph(entrypoint, **kwargs)
 
             compiled_graph = await self._compile_graph(loaded_graph, memory)
-            spec = get_uipath_deep_agent_runtime_spec(loaded_graph)
-            if spec is not None:
-                set_uipath_deep_agent_runtime_spec(compiled_graph, spec)
 
             self._graph_cache[entrypoint] = compiled_graph
 
@@ -315,11 +311,11 @@ class UiPathLangGraphRuntimeFactory:
             else None
         )
 
-        spec = get_uipath_deep_agent_runtime_spec(compiled_graph)
-        workspace = self._create_deep_agent_workspace(runtime_id, spec)
+        is_deep_agent = is_deep_agent_graph(compiled_graph)
+        workspace = self._create_deep_agent_workspace(runtime_id, is_deep_agent)
         configurable = (
-            {spec.workspace_config_key: str(workspace.path)}
-            if spec is not None and workspace is not None
+            {_DEEPAGENT_WORKSPACE_CONFIG_KEY: str(workspace.path)}
+            if workspace is not None
             else None
         )
 
@@ -339,11 +335,10 @@ class UiPathLangGraphRuntimeFactory:
             runtime_id=runtime_id,
         )
 
-        if spec is None or workspace is None:
+        if workspace is None:
             return resumable_runtime
 
         sdk = UiPath()
-        registry_runtime_id = self._deep_agent_registry_runtime_id(runtime_id, spec)
         return HydrationRuntime(
             delegate=resumable_runtime,
             workspace=workspace,
@@ -353,39 +348,25 @@ class UiPathLangGraphRuntimeFactory:
                 jobs=getattr(sdk, "jobs", None),
                 current_job_key=self.context.job_id,
                 folder_key=self.context.folder_key,
-                attachment_prefix=spec.attachment_prefix,
+                attachment_prefix=_DEEPAGENT_ATTACHMENT_PREFIX,
             ),
             registry_store=WorkspaceRegistryStore(
                 storage,
-                registry_runtime_id,
+                runtime_id,
             ),
-            policy=HydrationPolicy(spec.hydration_policy),
+            policy=_DEEPAGENT_HYDRATION_POLICY,
         )
 
     def _create_deep_agent_workspace(
         self,
         runtime_id: str,
-        spec: UiPathDeepAgentRuntimeSpec | None,
+        is_deep_agent: bool,
     ) -> Workspace | None:
-        if spec is None:
+        if not is_deep_agent:
             return None
-        if spec.interaction_mode == "conversation":
-            raise NotImplementedError(
-                "Conversational UiPath DeepAgents require a chat-runtime adapter. "
-                "Task-mode DeepAgents are supported by this PoC."
-            )
 
         base_dir = Path(self.context.runtime_dir or "__uipath") / "workspaces"
         return Workspace.create(base_dir / runtime_id, cleanup=True)
-
-    def _deep_agent_registry_runtime_id(
-        self,
-        runtime_id: str,
-        spec: UiPathDeepAgentRuntimeSpec,
-    ) -> str:
-        if spec.workspace_scope == "conversation" and self.context.conversation_id:
-            return self.context.conversation_id
-        return runtime_id
 
     async def new_runtime(
         self,

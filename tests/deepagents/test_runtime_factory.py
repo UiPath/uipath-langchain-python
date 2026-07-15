@@ -1,13 +1,9 @@
 from typing import Any, TypedDict
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from langgraph.graph import END, START, StateGraph
 from uipath.runtime import HydrationPolicy, HydrationRuntime, UiPathRuntimeContext
 
-from uipath_langchain.deepagents.metadata import (
-    UiPathDeepAgentRuntimeSpec,
-    set_uipath_deep_agent_runtime_spec,
-)
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 
 
@@ -23,7 +19,7 @@ def _build_graph() -> StateGraph[Any, Any, Any]:
     return graph
 
 
-async def test_tagged_deep_agent_runtime_uses_hydrated_workspace(tmp_path) -> None:
+async def test_detected_deep_agent_runtime_uses_hydrated_workspace(tmp_path) -> None:
     context = UiPathRuntimeContext(
         runtime_dir=str(tmp_path),
         state_file="state.db",
@@ -32,15 +28,13 @@ async def test_tagged_deep_agent_runtime_uses_hydrated_workspace(tmp_path) -> No
     )
     factory = UiPathLangGraphRuntimeFactory(context)
     compiled = _build_graph().compile()
-    spec = UiPathDeepAgentRuntimeSpec(
-        workspace_config_key="workspace",
-        hydration_policy="always",
-        attachment_prefix=".deepagent-workspace",
-    )
-    set_uipath_deep_agent_runtime_spec(compiled, spec)
+    compiled.config = {"metadata": {"ls_integration": "deepagents"}}
 
     sdk = MagicMock()
-    with patch("uipath_langchain.runtime.factory.UiPath", return_value=sdk):
+    with (
+        patch("uipath_langchain.runtime.factory.UiPath", return_value=sdk),
+        patch.object(factory, "_get_memory", AsyncMock(return_value=MagicMock())),
+    ):
         runtime = await factory._create_runtime_instance(
             compiled_graph=compiled,
             runtime_id="runtime-1",
@@ -48,13 +42,13 @@ async def test_tagged_deep_agent_runtime_uses_hydrated_workspace(tmp_path) -> No
         )
 
     assert isinstance(runtime, HydrationRuntime)
-    assert runtime.policy == HydrationPolicy.ALWAYS
+    assert runtime.policy == HydrationPolicy.SUSPEND_OR_SUCCESS
     assert runtime.workspace.path.parent == tmp_path / "workspaces"
 
     resumable_runtime = runtime.delegate
     langgraph_runtime = resumable_runtime.delegate
     assert langgraph_runtime.configurable == {
-        "workspace": str(runtime.workspace.path),
+        "uipath_workspace_path": str(runtime.workspace.path),
     }
 
     assert runtime.hydrator.workspace_path == runtime.workspace.path
@@ -62,7 +56,5 @@ async def test_tagged_deep_agent_runtime_uses_hydrated_workspace(tmp_path) -> No
     assert runtime.hydrator.jobs is sdk.jobs
     assert runtime.hydrator.current_job_key == "job-1"
     assert runtime.hydrator.folder_key == "folder-1"
-    assert runtime.hydrator.attachment_prefix == ".deepagent-workspace"
+    assert runtime.hydrator.attachment_prefix == ".uipath-workspace"
     assert runtime.registry_store.runtime_id == "runtime-1"
-
-    await factory.dispose()

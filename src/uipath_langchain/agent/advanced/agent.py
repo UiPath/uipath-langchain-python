@@ -7,7 +7,7 @@ from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
 from deepagents.backends import BackendProtocol
 from deepagents.backends.protocol import BackendFactory
-from langchain.agents.structured_output import ResponseFormat
+from langchain.agents.structured_output import ResponseFormat, ToolStrategy
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from uipath.core.chat import UiPathConversationMessageData
 
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
+from uipath_langchain.deepagents.backend import create_workspace_backend_factory
 
 from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
 from .utils import (
@@ -58,8 +59,6 @@ def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str,
-    backend: BackendProtocol | BackendFactory | None,
-    response_format: ResponseFormat[Any] | None,
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
@@ -68,12 +67,14 @@ def create_advanced_agent_graph(
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
-    With a filesystem workspace backend, attachment-shaped inputs are downloaded
-    into the workspace and given a ``FilePath`` before the user message is built.
-    Filesystem workspaces also enable workspace memory: deepagents'
-    ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
-    Memory stays disabled for backends which carry no workspace.
+    The UiPath workspace backend and structured-output strategy are selected by
+    the integration. Attachment-shaped inputs are downloaded into the workspace
+    and given a ``FilePath`` before the user message is built. DeepAgents'
+    ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from that workspace each
+    turn.
     """
+    backend = create_workspace_backend_factory()
+    response_format = ToolStrategy(output_schema)
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if is_workspace_filesystem_backend(backend) else []
     )

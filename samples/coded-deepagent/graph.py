@@ -1,10 +1,10 @@
-"""Task-mode coded DeepAgent using the UiPath DeepAgents contract."""
+"""Task-mode coded DeepAgent using the standard advanced-agent graph builder."""
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from uipath_langchain.agent.advanced import create_advanced_agent_graph
 from uipath_langchain.chat import UiPathChat
-from uipath_langchain.deepagents import create_uipath_deep_agent_graph
 
 
 class BriefInput(BaseModel):
@@ -65,8 +65,8 @@ finalizing the answer.
 
 Tailor all planning to this audience: {args["audience"]}.
 
-The UiPath runtime provides your DeepAgents filesystem through the tagged graph
-contract. Write these workspace files before producing the final answer:
+The UiPath runtime detects this DeepAgents graph and provides its filesystem.
+Write these workspace files before producing the final answer:
 - /launch/brief.md with the final launch brief
 - /launch/risks.md with the risk review
 
@@ -87,12 +87,12 @@ Constraints:
 """
 
 
-graph = create_uipath_deep_agent_graph(
+graph = create_advanced_agent_graph(
     model=MODEL,
     input_schema=BriefInput,
     output_schema=BriefOutput,
     system_prompt=build_system_prompt,
-    user_prompt=build_user_prompt,
+    build_user_message=build_user_prompt,
     tools=[score_launch_readiness],
     subagents=[RISK_REVIEWER],
 )

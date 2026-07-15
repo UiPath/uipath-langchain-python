@@ -1,14 +1,14 @@
 # Coded DeepAgent
 
-This sample demonstrates a task-mode coded agent built with the UiPath
-DeepAgents contract.
+This sample demonstrates a task-mode coded agent built with the standard
+UiPath advanced-agent graph builder.
 
-The graph uses `create_uipath_deep_agent_graph`, which tags the graph for the
-UiPath LangGraph runtime. At runtime, UiPath creates a workspace, injects its
-path into LangGraph config, and hydrates that workspace through job
-attachments. Task-mode DeepAgents persist workspace changes when the run
-successfully completes or suspends. The sample does not configure a custom
-bucket backend.
+The graph itself is a DeepAgent. At runtime, UiPath detects the DeepAgents
+metadata already present on the graph, creates a workspace, injects its path
+into LangGraph config, and hydrates that workspace through job attachments.
+Task-mode DeepAgents persist workspace changes when the run successfully
+completes or suspends. The sample does not configure a backend or runtime
+policy.
 
 ## What It Shows
 

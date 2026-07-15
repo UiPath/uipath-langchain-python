@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from uipath_langchain.agent.advanced.agent import create_advanced_agent_graph
 from uipath_langchain.agent.advanced.types import AdvancedAgentGraphState
 from uipath_langchain.agent.advanced.utils import create_state_with_input
+from uipath_langchain.deepagents.backend import UiPathWorkspaceBackendFactory
+from uipath_langchain.deepagents.metadata import is_deep_agent_graph
 
 
 class _Output(BaseModel):
@@ -40,8 +43,6 @@ def _build(**overrides: Any) -> Any:
         model=_mock_model(),
         tools=[],
         system_prompt="sys",
-        backend=None,
-        response_format=None,
         input_schema=None,
         output_schema=_Output,
         build_user_message=lambda args: "hello",
@@ -54,6 +55,10 @@ def test_wrapper_graph_has_io_nodes() -> None:
     """The wrapper wires transform_input -> advanced_agent -> transform_output."""
     graph = _build()
     assert {"transform_input", "advanced_agent", "transform_output"} <= set(graph.nodes)
+
+
+def test_wrapper_is_detected_from_nested_deepagents_metadata() -> None:
+    assert is_deep_agent_graph(_build())
 
 
 def test_subagents_are_passed_to_inner_advanced_agent() -> None:
@@ -71,6 +76,18 @@ def test_subagents_are_passed_to_inner_advanced_agent() -> None:
         _build(subagents=[subagent])
 
     assert mock_create.call_args.kwargs["subagents"] == [subagent]
+
+
+def test_wrapper_owns_workspace_backend_and_response_format() -> None:
+    with patch(
+        "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+        return_value=MagicMock(),
+    ) as mock_create:
+        _build()
+
+    kwargs = mock_create.call_args.kwargs
+    assert isinstance(kwargs["backend"], UiPathWorkspaceBackendFactory)
+    assert isinstance(kwargs["response_format"], ToolStrategy)
 
 
 @pytest.mark.asyncio
