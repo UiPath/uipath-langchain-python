@@ -4498,7 +4498,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.14.8"
+version = "0.14.9"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4588,7 +4588,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-llm-client", specifier = ">=1.16.3,<1.17.0" },
-    { name = "uipath-platform", specifier = ">=0.2.9,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.10,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.12.1,<0.13.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "all"]
@@ -4672,7 +4672,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.2.9"
+version = "0.2.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4682,9 +4682,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/4e/c555419c622b77a3b939f512faceaa73407669e51337c155b3c9697abce0/uipath_platform-0.2.9.tar.gz", hash = "sha256:86abad2c124f016b8da739ca9b794a3e3dc7fa10515750b8402278979c787783", size = 426699, upload-time = "2026-07-13T18:07:58.296Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/bc/0c99f5c22d3b8631b5225bbe7e6581b893eec5f5d7b28e82bdc751a03af9/uipath_platform-0.2.10.tar.gz", hash = "sha256:d5b5fd04f70506c11e064d930c74fea9a104e6ad90ac60651d64003870042bd4", size = 427111, upload-time = "2026-07-15T13:23:05.788Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/75/94769a5107c69c0bbf0e3bbf625378bd9c0697b32bb2d602c2d6f860beb8/uipath_platform-0.2.9-py3-none-any.whl", hash = "sha256:2693668b9f00eb8c958c6f7615850b4123ced4bd735027cba28a04ba166ccada", size = 280892, upload-time = "2026-07-13T18:07:56.692Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/36/974cf3d5d352fcfdaf12d802ecc3e4ae14d2c4a7f4f61fd0c489ace33cd6/uipath_platform-0.2.10-py3-none-any.whl", hash = "sha256:bdc7d5400aecc0ac308cdbaa4e9e4a32a7035999ee412cd03e47a18696895e00", size = 280942, upload-time = "2026-07-15T13:23:04.168Z" },
 ]
 
 [[package]]
