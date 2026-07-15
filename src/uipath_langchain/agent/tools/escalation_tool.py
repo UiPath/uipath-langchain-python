@@ -27,7 +27,10 @@ from uipath_langchain._utils import (
     get_execution_folder_path,
 )
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -267,7 +270,7 @@ def create_escalation_tool(
     channel: EscalationChannel = _resolve_channel(resource)
 
     input_model: Any = create_model(channel.input_schema)
-    output_model: Any = create_model(channel.output_schema)
+    output_model: Any = create_output_model(channel.output_schema, resource.name)
 
     class EscalationToolOutput(BaseModel):
         action: Literal["approve", "reject"]
