@@ -1,22 +1,18 @@
 # Coded DeepAgent
 
-This sample demonstrates a task-mode coded agent built with the standard
-UiPath advanced-agent graph builder.
+This sample demonstrates a task-mode coded agent built directly with the
+standard `deepagents.create_deep_agent` API.
 
-The graph itself is a DeepAgent. At runtime, UiPath detects the DeepAgents
-metadata already present on the graph, creates a workspace, injects its path
-into LangGraph config, and hydrates that workspace through job attachments.
-Task-mode DeepAgents persist workspace changes when the run successfully
-completes or suspends. The sample does not configure a backend or runtime
-policy.
+The sample does not use a UiPath-specific graph factory or attach UiPath
+metadata. At runtime, UiPath detects the `ls_integration: deepagents` metadata
+already present on the graph and applies the UiPath-owned runtime policy.
 
 ## What It Shows
 
-- Typed coded-agent input and output with Pydantic models.
-- System and user prompts rendered from typed input.
+- Standard DeepAgents message input and structured output.
 - A standard LangChain tool used by the main DeepAgent.
 - A DeepAgents subagent used for risk review.
-- Runtime-provided workspace persistence through the UiPath contract.
+- Automatic runtime detection through native DeepAgents metadata.
 
 ## Files
 
@@ -39,5 +35,5 @@ uv sync
 uipath run agent "$(cat input.json)"
 ```
 
-The agent writes `/launch/brief.md` and `/launch/risks.md` in the DeepAgents
-workspace and returns those paths in `workspace_files`.
+The agent uses the filesystem tools supplied by the DeepAgents harness for its
+working files and returns a structured launch brief.

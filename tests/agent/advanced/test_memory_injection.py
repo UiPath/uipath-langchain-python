@@ -1,16 +1,18 @@
-"""Wiring test: the wrapper enables DeepAgents workspace memory.
+"""Wiring test: the wrapper enables DeepAgents memory based on the backend.
 
 Phase 1 workspace memory is delegated to deepagents' ``MemoryMiddleware``, which
 ``create_deep_agent`` builds when a ``memory=`` source list is supplied. The
 wrapper's responsibility is therefore to pass ``memory=["/memory/MEMORY.md"]``
-through to ``_create_deep_agent``. The actual loading and system-prompt
-injection are DeepAgents' concern and covered by their own tests.
+through to ``_create_deep_agent`` when (and only when) the backend is a
+``FilesystemBackend`` that carries a durable workspace. The actual loading and
+system-prompt injection are DeepAgents' concern and covered by their own tests.
 """
 
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 
@@ -38,7 +40,7 @@ def _build_user_message(args: dict[str, Any]) -> str:
     return args.get("task", "")
 
 
-def _memory_kwarg() -> Any:
+def _memory_kwarg(backend: Any) -> Any:
     """Build the wrapper graph and return the ``memory`` kwarg handed to deepagents."""
     with patch(
         "uipath_langchain.agent.advanced.agent._create_deep_agent",
@@ -48,6 +50,8 @@ def _memory_kwarg() -> Any:
             model=MagicMock(spec=BaseChatModel),
             tools=[],
             system_prompt="",
+            backend=backend,
+            response_format=None,
             input_schema=_Input,
             output_schema=_Output,
             build_user_message=_build_user_message,
@@ -56,10 +60,24 @@ def _memory_kwarg() -> Any:
 
 
 class TestWorkspaceMemoryWiring:
-    """The wrapper turns DeepAgents memory on for the UiPath workspace."""
+    """The wrapper turns DeepAgents memory on for filesystem-backed workspaces."""
 
-    def test_enables_memory_for_runtime_workspace(self) -> None:
-        assert _memory_kwarg() == [MEMORY_INDEX_VIRTUAL_PATH]
+    def test_enables_memory_for_filesystem_backend(self, tmp_path: Any) -> None:
+        backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+        assert _memory_kwarg(backend) == [MEMORY_INDEX_VIRTUAL_PATH]
+
+    def test_enables_memory_for_marked_runtime_workspace_factory(
+        self, tmp_path: Any
+    ) -> None:
+        def backend_factory(runtime: Any) -> FilesystemBackend:
+            return FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+
+        backend_factory.is_uipath_workspace_filesystem_backend = True  # type: ignore[attr-defined]
+
+        assert _memory_kwarg(backend_factory) == [MEMORY_INDEX_VIRTUAL_PATH]
+
+    def test_disables_memory_for_non_filesystem_backend(self) -> None:
+        assert _memory_kwarg(None) is None
 
 
 @pytest.mark.asyncio
@@ -84,6 +102,8 @@ class TestWrapperInputUnchanged:
                 model=MagicMock(spec=BaseChatModel),
                 tools=[],
                 system_prompt="",
+                backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+                response_format=None,
                 input_schema=_Input,
                 output_schema=_Output,
                 build_user_message=_build_user_message,

@@ -1,22 +1,10 @@
-"""Task-mode coded DeepAgent using the standard advanced-agent graph builder."""
+"""Task-mode coded DeepAgent using the standard DeepAgents API."""
 
+from deepagents import create_deep_agent
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from uipath_langchain.agent.advanced import create_advanced_agent_graph
 from uipath_langchain.chat import UiPathChat
-
-
-class BriefInput(BaseModel):
-    """Input for the product launch brief."""
-
-    product_name: str = Field(description="Name of the product or feature.")
-    audience: str = Field(description="Primary customer or user audience.")
-    objective: str = Field(description="Main launch objective.")
-    constraints: list[str] = Field(
-        default_factory=list,
-        description="Important limits, requirements, or risks to account for.",
-    )
 
 
 class BriefOutput(BaseModel):
@@ -25,7 +13,6 @@ class BriefOutput(BaseModel):
     executive_summary: str
     launch_plan: list[str]
     risk_review: list[str]
-    workspace_files: list[str]
 
 
 @tool
@@ -56,43 +43,24 @@ RISK_REVIEWER = {
 }
 
 
-def build_system_prompt(args: dict) -> str:
-    return f"""You are a product launch planning agent for {args["product_name"]}.
+SYSTEM_PROMPT = """You are a product launch planning agent.
 
 Use the planning tools provided by DeepAgents. Use score_launch_readiness to get
 a deterministic readiness signal. Delegate a plan review to risk_reviewer before
 finalizing the answer.
 
-Tailor all planning to this audience: {args["audience"]}.
-
-The UiPath runtime detects this DeepAgents graph and provides its filesystem.
-Write these workspace files before producing the final answer:
+Use the DeepAgents filesystem to write these working files before producing the
+final answer:
 - /launch/brief.md with the final launch brief
 - /launch/risks.md with the risk review
 
-Return structured output matching the schema. Include the workspace file paths
-you wrote in workspace_files."""
+Return structured output matching the schema."""
 
 
-def build_user_prompt(args: dict) -> str:
-    constraints = args.get("constraints") or []
-    constraint_lines = "\n".join(f"- {item}" for item in constraints) or "- None"
-    return f"""Create a launch brief.
-
-Product: {args["product_name"]}
-Audience: {args["audience"]}
-Objective: {args["objective"]}
-Constraints:
-{constraint_lines}
-"""
-
-
-graph = create_advanced_agent_graph(
+graph = create_deep_agent(
     model=MODEL,
-    input_schema=BriefInput,
-    output_schema=BriefOutput,
-    system_prompt=build_system_prompt,
-    build_user_message=build_user_prompt,
+    system_prompt=SYSTEM_PROMPT,
+    response_format=BriefOutput,
     tools=[score_launch_readiness],
     subagents=[RISK_REVIEWER],
 )

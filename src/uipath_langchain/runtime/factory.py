@@ -67,6 +67,7 @@ class UiPathLangGraphRuntimeFactory:
         self._memory_lock = asyncio.Lock()
 
         self._graph_cache: dict[str, CompiledStateGraph[Any, Any, Any, Any]] = {}
+        self._deep_agent_entrypoints: set[str] = set()
         self._graph_loaders: dict[str, LangGraphLoader] = {}
         self._graph_lock = asyncio.Lock()
 
@@ -231,6 +232,8 @@ class UiPathLangGraphRuntimeFactory:
                 return self._graph_cache[entrypoint]
 
             loaded_graph = await self._load_graph(entrypoint, **kwargs)
+            if is_deep_agent_graph(loaded_graph):
+                self._deep_agent_entrypoints.add(entrypoint)
 
             compiled_graph = await self._compile_graph(loaded_graph, memory)
 
@@ -311,7 +314,10 @@ class UiPathLangGraphRuntimeFactory:
             else None
         )
 
-        is_deep_agent = is_deep_agent_graph(compiled_graph)
+        is_deep_agent = (
+            entrypoint in self._deep_agent_entrypoints
+            or is_deep_agent_graph(compiled_graph)
+        )
         workspace = self._create_deep_agent_workspace(runtime_id, is_deep_agent)
         configurable = (
             {_DEEPAGENT_WORKSPACE_CONFIG_KEY: str(workspace.path)}
@@ -409,6 +415,7 @@ class UiPathLangGraphRuntimeFactory:
 
         self._graph_loaders.clear()
         self._graph_cache.clear()
+        self._deep_agent_entrypoints.clear()
 
         if self._memory_cm is not None:
             await self._memory_cm.__aexit__(None, None, None)

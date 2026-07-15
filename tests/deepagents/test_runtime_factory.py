@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any, TypedDict
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +18,22 @@ def _build_graph() -> StateGraph[Any, Any, Any]:
     graph.add_edge(START, "noop")
     graph.add_edge("noop", END)
     return graph
+
+
+async def test_native_detection_survives_runtime_recompilation(tmp_path) -> None:
+    context = UiPathRuntimeContext(runtime_dir=str(tmp_path), state_file="state.db")
+    factory = UiPathLangGraphRuntimeFactory(context)
+    loaded = SimpleNamespace(config={"metadata": {"ls_integration": "deepagents"}})
+    recompiled = _build_graph().compile()
+
+    with (
+        patch.object(factory, "_load_graph", AsyncMock(return_value=loaded)),
+        patch.object(factory, "_compile_graph", AsyncMock(return_value=recompiled)),
+    ):
+        result = await factory._resolve_and_compile_graph("agent", MagicMock())
+
+    assert result is recompiled
+    assert "agent" in factory._deep_agent_entrypoints
 
 
 async def test_detected_deep_agent_runtime_uses_hydrated_workspace(tmp_path) -> None:

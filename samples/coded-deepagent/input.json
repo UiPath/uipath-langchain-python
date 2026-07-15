@@ -1,10 +1,8 @@
 {
-  "product_name": "Invoice Exception Copilot",
-  "audience": "accounts payable operations managers",
-  "objective": "prepare a pilot launch plan for three enterprise customers",
-  "constraints": [
-    "security review must complete before external rollout",
-    "deadline is six weeks away",
-    "support team needs enablement material"
+  "messages": [
+    {
+      "type": "human",
+      "content": "Create a pilot launch plan for Invoice Exception Copilot for accounts payable operations managers at three enterprise customers. The security review must complete before external rollout, the deadline is six weeks away, and the support team needs enablement material."
+    }
   ]
 }
