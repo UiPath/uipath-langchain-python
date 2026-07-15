@@ -8,6 +8,7 @@ from pathlib import Path
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
 from langchain.tools import ToolRuntime
+from langgraph.config import get_config
 
 WORKSPACE_FILESYSTEM_BACKEND_ATTR = "is_uipath_workspace_filesystem_backend"
 
@@ -21,7 +22,12 @@ class UiPathWorkspaceBackendFactory:
     is_uipath_workspace_filesystem_backend: bool = field(default=True, init=False)
 
     def __call__(self, runtime: ToolRuntime) -> FilesystemBackend:
-        config = getattr(runtime, "config", None) or {}
+        config = getattr(runtime, "config", None)
+        if config is None:
+            try:
+                config = get_config()
+            except RuntimeError:
+                config = {}
         configurable = (
             config.get("configurable", {}) if isinstance(config, dict) else {}
         )
