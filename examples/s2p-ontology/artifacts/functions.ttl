@@ -1,0 +1,350 @@
+@prefix fno:   <https://w3id.org/function/ontology#> .
+@prefix ont:   <https://ontology.uipath.com/s2p#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+
+#############################
+#   S2P Procurement Functions (read-only)
+#
+#   Each function is a governed SPARQL SELECT the runtime reformulates
+#   to one FQS SQL via Ontop. Parameters bind as typed RDF literals
+#   (never concatenated). Functions are the EoG agent's tools —
+#   invoked per-node during graph traversal.
+#############################
+
+
+# ===========================================================
+# Spend Analytics (SPA-01)
+# ===========================================================
+
+ont:spendByCategory
+        a              fno:Function ;
+        rdfs:label     "Spend by commodity category" ;
+        rdfs:comment   "Aggregate normalized spend (USD) by commodity for a given fiscal period. Returns commodity name, total normalized amount, invoice count, and on/off-contract breakdown. Use to answer 'what did we spend on X in Q2'." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?commodityName (SUM(?normalizedAmount) AS ?totalUSD) (COUNT(?s) AS ?invoiceCount) ?onContract WHERE { ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.normalizedAmount ?normalizedAmount ; ont:SpendRecord.onContract ?onContract ; ont:spend_forCommodity ?c . ?c a ont:Commodity ; ont:Commodity.name ?commodityName } GROUP BY ?commodityName ?onContract ORDER BY DESC(?totalUSD)" ;
+        fno:expects    ( ont:param.spendByCategory.period ) .
+
+ont:param.spendByCategory.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:spendBySupplier
+        a              fno:Function ;
+        rdfs:label     "Spend by supplier" ;
+        rdfs:comment   "Aggregate normalized spend (USD) by supplier for a given fiscal period. Returns supplier name, country, total amount, invoice count, and preferred flag." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?supplierName ?country ?preferredFlag (SUM(?normalizedAmount) AS ?totalUSD) (COUNT(?s) AS ?invoiceCount) WHERE { ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.normalizedAmount ?normalizedAmount ; ont:spend_withSupplier ?sup . ?sup a ont:Supplier ; ont:Supplier.name ?supplierName ; ont:Supplier.country ?country ; ont:Supplier.preferredFlag ?preferredFlag } GROUP BY ?supplierName ?country ?preferredFlag ORDER BY DESC(?totalUSD)" ;
+        fno:expects    ( ont:param.spendBySupplier.period ) .
+
+ont:param.spendBySupplier.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:maverickSpendRate
+        a              fno:Function ;
+        rdfs:label     "Maverick spend rate" ;
+        rdfs:comment   "Calculate off-contract spend as a percentage of total spend for a period. Returns total on-contract, total off-contract, and maverick rate. Maverick spend = invoices with no matching contract or from non-preferred suppliers." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?onContract (SUM(?normalizedAmount) AS ?totalUSD) (COUNT(?s) AS ?count) WHERE { ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.normalizedAmount ?normalizedAmount ; ont:SpendRecord.onContract ?onContract } GROUP BY ?onContract" ;
+        fno:expects    ( ont:param.maverickSpendRate.period ) .
+
+ont:param.maverickSpendRate.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:commodityDescendants
+        a              fno:Function ;
+        rdfs:label     "Commodity descendants" ;
+        rdfs:comment   "List all child commodities under a given parent commodity ID in the hierarchy. Returns commodity ID, code, name, and hierarchy level for each descendant." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?commodityId ?code ?name ?level WHERE { ?c a ont:Commodity ; ont:Commodity.commodityId ?commodityId ; ont:Commodity.code ?code ; ont:Commodity.name ?name ; ont:Commodity.level ?level ; ont:Commodity.parentCommodityId ?parentCommodityId } ORDER BY ?level ?name" ;
+        fno:expects    ( ont:param.commodityDescendants.parentCommodityId ) .
+
+ont:param.commodityDescendants.parentCommodityId
+        a              fno:Parameter ;
+        ont:paramName  "parentCommodityId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:effectiveFXRates
+        a              fno:Function ;
+        rdfs:label     "Effective FX rates" ;
+        rdfs:comment   "Retrieve exchange rates for a given source currency to USD on or after an effective date. Use for currency normalization in spend calculations." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?rateId ?fromCurrency ?toCurrency ?rate ?effectiveDate WHERE { ?r a ont:FXRate ; ont:FXRate.rateId ?rateId ; ont:FXRate.fromCurrency ?fromCurrency ; ont:FXRate.toCurrency ?toCurrency ; ont:FXRate.rate ?rate ; ont:FXRate.effectiveDate ?effectiveDate } ORDER BY ?fromCurrency ?effectiveDate" .
+
+
+# ===========================================================
+# Contract Coverage (GB-02 / CTR-03)
+# ===========================================================
+
+ont:activeContractsForCommodity
+        a              fno:Function ;
+        rdfs:label     "Active contracts for a commodity" ;
+        rdfs:comment   "Find active contracts whose scope covers a given commodity group. Returns contract title, supplier name, scope region, commodity group, and validity dates. Use for contract coverage checks at requisition time." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?contractId ?title ?supplierName ?region ?commodityGroup ?validFrom ?validTo ?exclusions WHERE { ?ctr a ont:Contract ; ont:Contract.contractId ?contractId ; ont:Contract.title ?title ; ont:Contract.status \"active\" ; ont:contract_suppliedBy ?sup . ?sup a ont:Supplier ; ont:Supplier.name ?supplierName . ?scp a ont:ContractScope ; ont:scope_ofContract ?ctr ; ont:ContractScope.region ?region ; ont:ContractScope.commodityGroup ?commodityGroup ; ont:ContractScope.validFrom ?validFrom ; ont:ContractScope.validTo ?validTo . OPTIONAL { ?scp ont:ContractScope.exclusions ?exclusions } }" ;
+        fno:expects    ( ont:param.activeContractsForCommodity.commodityGroup ) .
+
+ont:param.activeContractsForCommodity.commodityGroup
+        a              fno:Parameter ;
+        ont:paramName  "commodityGroup" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:contractUtilization
+        a              fno:Function ;
+        rdfs:label     "Contract utilization" ;
+        rdfs:comment   "Calculate spend against a contract's total committed value for a period. Returns contract title, total value, spend to date, and utilization percentage." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?title ?totalValue ?currency (SUM(?normalizedAmount) AS ?spentUSD) WHERE { ?ctr a ont:Contract ; ont:Contract.contractId ?contractId ; ont:Contract.title ?title ; ont:Contract.totalValue ?totalValue ; ont:Contract.currency ?currency ; ont:contract_suppliedBy ?sup . ?sup a ont:Supplier ; ont:Supplier.supplierId ?supplierId . ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.normalizedAmount ?normalizedAmount ; ont:spend_withSupplier ?sup } GROUP BY ?title ?totalValue ?currency" ;
+        fno:expects    ( ont:param.contractUtilization.contractId ont:param.contractUtilization.period ) .
+
+ont:param.contractUtilization.contractId
+        a              fno:Parameter ;
+        ont:paramName  "contractId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+ont:param.contractUtilization.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:validateContractScope
+        a              fno:Function ;
+        rdfs:label     "Validate contract scope" ;
+        rdfs:comment   "Check whether a contract scope covers a given region and commodity group. Returns the scope details including any exclusions. An empty result means no scope match." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?scopeId ?region ?legalEntity ?commodityGroup ?validFrom ?validTo ?exclusions WHERE { ?scp a ont:ContractScope ; ont:ContractScope.scopeId ?scopeId ; ont:scope_ofContract ?ctr . ?ctr ont:Contract.contractId ?contractId . ?scp ont:ContractScope.region ?region ; ont:ContractScope.legalEntity ?legalEntity ; ont:ContractScope.commodityGroup ?commodityGroup ; ont:ContractScope.validFrom ?validFrom ; ont:ContractScope.validTo ?validTo . OPTIONAL { ?scp ont:ContractScope.exclusions ?exclusions } }" ;
+        fno:expects    ( ont:param.validateContractScope.contractId ) .
+
+ont:param.validateContractScope.contractId
+        a              fno:Parameter ;
+        ont:paramName  "contractId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+# ===========================================================
+# Supplier (VO-02)
+# ===========================================================
+
+ont:supplierProfile
+        a              fno:Function ;
+        rdfs:label     "Supplier profile" ;
+        rdfs:comment   "Retrieve supplier details: name, country, status, tax ID, preferred flag, and parent supplier hierarchy. Use to assess supplier standing before contract or exception decisions." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?name ?country ?status ?taxId ?preferredFlag ?parentSupplierId WHERE { ?sup a ont:Supplier ; ont:Supplier.supplierId ?supplierId ; ont:Supplier.name ?name ; ont:Supplier.country ?country ; ont:Supplier.status ?status ; ont:Supplier.preferredFlag ?preferredFlag . OPTIONAL { ?sup ont:Supplier.taxId ?taxId } OPTIONAL { ?sup ont:Supplier.parentSupplierId ?parentSupplierId } }" ;
+        fno:expects    ( ont:param.supplierProfile.supplierId ) .
+
+ont:param.supplierProfile.supplierId
+        a              fno:Parameter ;
+        ont:paramName  "supplierId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:supplierSpendHistory
+        a              fno:Function ;
+        rdfs:label     "Supplier spend history" ;
+        rdfs:comment   "Aggregate spend records for a specific supplier across all commodities for a period. Returns commodity name, total normalized amount, invoice count, and on-contract flag." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?commodityName (SUM(?normalizedAmount) AS ?totalUSD) (COUNT(?s) AS ?invoiceCount) ?onContract WHERE { ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.normalizedAmount ?normalizedAmount ; ont:SpendRecord.onContract ?onContract ; ont:spend_withSupplier ?sup ; ont:spend_forCommodity ?c . ?sup ont:Supplier.supplierId ?supplierId . ?c ont:Commodity.name ?commodityName } GROUP BY ?commodityName ?onContract ORDER BY DESC(?totalUSD)" ;
+        fno:expects    ( ont:param.supplierSpendHistory.supplierId ont:param.supplierSpendHistory.period ) .
+
+ont:param.supplierSpendHistory.supplierId
+        a              fno:Parameter ;
+        ont:paramName  "supplierId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+ont:param.supplierSpendHistory.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+# ===========================================================
+# Invoice & Exception Triage (INV-01)
+# ===========================================================
+
+ont:invoiceDetail
+        a              fno:Function ;
+        rdfs:label     "Invoice detail" ;
+        rdfs:comment   "Retrieve full invoice with amount, currency, status, supplier name, and matched PO amount. Use to inspect a specific invoice for exception triage." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?invoiceDate ?amount ?currency ?status ?supplierName ?poId ?poAmount WHERE { ?inv a ont:Invoice ; ont:Invoice.invoiceId ?invoiceId ; ont:Invoice.invoiceDate ?invoiceDate ; ont:Invoice.amount ?amount ; ont:Invoice.currency ?currency ; ont:Invoice.status ?status ; ont:invoice_paidTo ?sup . ?sup ont:Supplier.name ?supplierName . OPTIONAL { ?inv ont:invoice_referencesPO ?po . ?po ont:PurchaseOrder.poId ?poId ; ont:PurchaseOrder.amount ?poAmount } }" ;
+        fno:expects    ( ont:param.invoiceDetail.invoiceId ) .
+
+ont:param.invoiceDetail.invoiceId
+        a              fno:Parameter ;
+        ont:paramName  "invoiceId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:openExceptions
+        a              fno:Function ;
+        rdfs:label     "Open tolerance exceptions" ;
+        rdfs:comment   "List all open tolerance exceptions with invoice and PO context. Returns exception type, threshold, actual variance, invoice amount, PO amount, and supplier name. Use to triage pending exceptions." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?exceptionId ?exceptionType ?thresholdPct ?actualPct ?invoiceId ?invoiceAmount ?poId ?poAmount ?supplierName WHERE { ?exc a ont:ToleranceException ; ont:ToleranceException.exceptionId ?exceptionId ; ont:ToleranceException.exceptionType ?exceptionType ; ont:ToleranceException.thresholdPct ?thresholdPct ; ont:ToleranceException.actualPct ?actualPct ; ont:ToleranceException.status \"open\" ; ont:exception_onInvoice ?inv ; ont:exception_againstPO ?po . ?inv ont:Invoice.invoiceId ?invoiceId ; ont:Invoice.amount ?invoiceAmount ; ont:invoice_paidTo ?sup . ?sup ont:Supplier.name ?supplierName . ?po ont:PurchaseOrder.poId ?poId ; ont:PurchaseOrder.amount ?poAmount }" .
+
+
+ont:exceptionContext
+        a              fno:Function ;
+        rdfs:label     "Exception context" ;
+        rdfs:comment   "Get full context for a specific tolerance exception: type, variance, invoice detail, PO detail, supplier, and commodity of the line items involved." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?exceptionType ?thresholdPct ?actualPct ?status ?invoiceAmount ?invoiceCurrency ?poAmount ?supplierName ?supplierStatus ?preferredFlag ?commodityName WHERE { ?exc a ont:ToleranceException ; ont:ToleranceException.exceptionId ?exceptionId ; ont:ToleranceException.exceptionType ?exceptionType ; ont:ToleranceException.thresholdPct ?thresholdPct ; ont:ToleranceException.actualPct ?actualPct ; ont:ToleranceException.status ?status ; ont:exception_onInvoice ?inv ; ont:exception_againstPO ?po . ?inv ont:Invoice.amount ?invoiceAmount ; ont:Invoice.currency ?invoiceCurrency ; ont:invoice_paidTo ?sup . ?sup ont:Supplier.name ?supplierName ; ont:Supplier.status ?supplierStatus ; ont:Supplier.preferredFlag ?preferredFlag . ?po ont:PurchaseOrder.amount ?poAmount . OPTIONAL { ?itm a ont:Item ; ont:item_onInvoice ?inv ; ont:item_classifiedAs ?com . ?com ont:Commodity.name ?commodityName } }" ;
+        fno:expects    ( ont:param.exceptionContext.exceptionId ) .
+
+ont:param.exceptionContext.exceptionId
+        a              fno:Parameter ;
+        ont:paramName  "exceptionId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:matchingExceptionRules
+        a              fno:Function ;
+        rdfs:label     "Matching exception rules" ;
+        rdfs:comment   "Find auto-resolution rules that could apply to a given commodity. Returns rule condition, resolution action, approver, and optionally scoped supplier." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?ruleId ?condition ?resolution ?approvedBy ?createdDate ?supplierName WHERE { ?rule a ont:ExceptionRule ; ont:ExceptionRule.ruleId ?ruleId ; ont:ExceptionRule.commodityId ?commodityId ; ont:ExceptionRule.condition ?condition ; ont:ExceptionRule.resolution ?resolution ; ont:ExceptionRule.approvedBy ?approvedBy ; ont:ExceptionRule.createdDate ?createdDate . OPTIONAL { ?rule ont:rule_forSupplier ?sup . ?sup ont:Supplier.name ?supplierName } }" ;
+        fno:expects    ( ont:param.matchingExceptionRules.commodityId ) .
+
+ont:param.matchingExceptionRules.commodityId
+        a              fno:Parameter ;
+        ont:paramName  "commodityId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+ont:poDetail
+        a              fno:Function ;
+        rdfs:label     "Purchase order detail" ;
+        rdfs:comment   "Retrieve PO with amount, status, order date, supplier, and line items with their commodities. Use to compare against invoice for three-way match." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?amount ?currency ?status ?orderDate ?supplierName ?itemDescription ?quantity ?unitPrice ?commodityName WHERE { ?po a ont:PurchaseOrder ; ont:PurchaseOrder.poId ?poId ; ont:PurchaseOrder.amount ?amount ; ont:PurchaseOrder.currency ?currency ; ont:PurchaseOrder.status ?status ; ont:PurchaseOrder.orderDate ?orderDate ; ont:po_orderedFrom ?sup . ?sup ont:Supplier.name ?supplierName . OPTIONAL { ?itm a ont:Item ; ont:item_onPO ?po ; ont:Item.description ?itemDescription ; ont:Item.quantity ?quantity ; ont:Item.unitPrice ?unitPrice ; ont:item_classifiedAs ?com . ?com ont:Commodity.name ?commodityName } }" ;
+        fno:expects    ( ont:param.poDetail.poId ) .
+
+ont:param.poDetail.poId
+        a              fno:Parameter ;
+        ont:paramName  "poId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+# ===========================================================
+# Requisition (GB-02)
+# ===========================================================
+
+ont:requisitionDetail
+        a              fno:Function ;
+        rdfs:label     "Requisition detail" ;
+        rdfs:comment   "Retrieve requisition with description, requester, location, quantity, cost center, and status. Use as the starting point for contract coverage investigation." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?description ?requester ?location ?quantity ?costCenterId ?status WHERE { ?pr a ont:Requisition ; ont:Requisition.prId ?prId ; ont:Requisition.description ?description ; ont:Requisition.requester ?requester ; ont:Requisition.status ?status . OPTIONAL { ?pr ont:Requisition.location ?location } OPTIONAL { ?pr ont:Requisition.quantity ?quantity } OPTIONAL { ?pr ont:Requisition.costCenterId ?costCenterId } }" ;
+        fno:expects    ( ont:param.requisitionDetail.prId ) .
+
+ont:param.requisitionDetail.prId
+        a              fno:Parameter ;
+        ont:paramName  "prId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+# ===========================================================
+# Budget
+# ===========================================================
+
+ont:budgetUtilization
+        a              fno:Function ;
+        rdfs:label     "Budget utilization" ;
+        rdfs:comment   "Show allocated budget and actual spend for a cost center in a period. Returns budget allocation, total spend, and remaining amount." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?costCenterName ?department ?region ?allocatedAmount ?budgetCurrency (SUM(?normalizedAmount) AS ?spentUSD) WHERE { ?b a ont:Budget ; ont:Budget.costCenterId ?costCenterId ; ont:Budget.period ?period ; ont:Budget.allocatedAmount ?allocatedAmount ; ont:Budget.currency ?budgetCurrency ; ont:budget_forCostCenter ?cc . ?cc ont:CostCenter.name ?costCenterName ; ont:CostCenter.department ?department ; ont:CostCenter.region ?region . OPTIONAL { ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.normalizedAmount ?normalizedAmount . ?s ont:spend_withSupplier ?sup . } } GROUP BY ?costCenterName ?department ?region ?allocatedAmount ?budgetCurrency" ;
+        fno:expects    ( ont:param.budgetUtilization.costCenterId ont:param.budgetUtilization.period ) .
+
+ont:param.budgetUtilization.costCenterId
+        a              fno:Parameter ;
+        ont:paramName  "costCenterId" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+ont:param.budgetUtilization.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .
+
+
+# ===========================================================
+# Data Quality / Anomaly Detection (cross-cutting)
+# ===========================================================
+
+ont:duplicateInvoices
+        a              fno:Function ;
+        rdfs:label     "Duplicate invoices" ;
+        rdfs:comment   "Find invoices that share the same PO, supplier, and amount — potential duplicates. Returns pairs with invoice IDs, dates, amounts, and supplier." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?inv1Id ?inv1Date ?inv2Id ?inv2Date ?amount ?currency ?supplierName ?poId WHERE { ?inv1 a ont:Invoice ; ont:Invoice.invoiceId ?inv1Id ; ont:Invoice.invoiceDate ?inv1Date ; ont:Invoice.amount ?amount ; ont:Invoice.currency ?currency ; ont:Invoice.poId ?poId ; ont:invoice_paidTo ?sup . ?inv2 a ont:Invoice ; ont:Invoice.invoiceId ?inv2Id ; ont:Invoice.invoiceDate ?inv2Date ; ont:Invoice.amount ?amount ; ont:Invoice.currency ?currency ; ont:Invoice.poId ?poId ; ont:invoice_paidTo ?sup . ?sup ont:Supplier.name ?supplierName . FILTER(?inv1Id < ?inv2Id) }" .
+
+
+ont:blockedSupplierInvoices
+        a              fno:Function ;
+        rdfs:label     "Invoices from blocked suppliers" ;
+        rdfs:comment   "Find invoices paid to suppliers with status 'blocked'. These are policy violations requiring immediate attention." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?invoiceId ?invoiceDate ?amount ?currency ?status ?supplierName ?supplierId WHERE { ?inv a ont:Invoice ; ont:Invoice.invoiceId ?invoiceId ; ont:Invoice.invoiceDate ?invoiceDate ; ont:Invoice.amount ?amount ; ont:Invoice.currency ?currency ; ont:Invoice.status ?status ; ont:invoice_paidTo ?sup . ?sup a ont:Supplier ; ont:Supplier.supplierId ?supplierId ; ont:Supplier.name ?supplierName ; ont:Supplier.status \"blocked\" }" .
+
+
+ont:offContractSpend
+        a              fno:Function ;
+        rdfs:label     "Off-contract spend detail" ;
+        rdfs:comment   "List all spend records not covered by a contract for a given period. Returns invoice, supplier, commodity, and amount details for maverick spend investigation." ;
+        ont:kind       "FUNCTION" ;
+        ont:language   "SPARQL" ;
+        ont:statement  "PREFIX ont: <https://ontology.uipath.com/s2p#> SELECT ?invoiceId ?supplierName ?commodityName ?originalAmount ?originalCurrency ?normalizedAmount WHERE { ?s a ont:SpendRecord ; ont:SpendRecord.period ?period ; ont:SpendRecord.onContract false ; ont:SpendRecord.invoiceId ?invoiceId ; ont:SpendRecord.originalAmount ?originalAmount ; ont:SpendRecord.originalCurrency ?originalCurrency ; ont:SpendRecord.normalizedAmount ?normalizedAmount ; ont:spend_withSupplier ?sup ; ont:spend_forCommodity ?c . ?sup ont:Supplier.name ?supplierName . ?c ont:Commodity.name ?commodityName }" ;
+        fno:expects    ( ont:param.offContractSpend.period ) .
+
+ont:param.offContractSpend.period
+        a              fno:Parameter ;
+        ont:paramName  "period" ;
+        ont:paramType  "xsd:string" ;
+        ont:required   true .

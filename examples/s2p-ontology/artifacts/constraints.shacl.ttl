@@ -1,0 +1,363 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix ont:  <https://ontology.uipath.com/s2p#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ==============================================================
+# Supplier constraints
+# ==============================================================
+
+ont:SupplierShape a sh:NodeShape ;
+    sh:targetClass ont:Supplier ;
+    rdfs:label "Supplier constraints" ;
+    sh:property [
+        sh:path ont:Supplier.name ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Supplier must have a name."
+    ] ;
+    sh:property [
+        sh:path ont:Supplier.taxId ;
+        sh:minCount 1 ;
+        sh:severity sh:Warning ;
+        sh:message "Supplier should have a tax ID for compliance."
+    ] ;
+    sh:property [
+        sh:path ont:Supplier.status ;
+        sh:minCount 1 ;
+        sh:in ( "active" "inactive" "blocked" ) ;
+        sh:message "Supplier status must be one of: active, inactive, blocked."
+    ] ;
+    sh:property [
+        sh:path ont:Supplier.country ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Supplier must specify a country."
+    ] .
+
+# ==============================================================
+# Invoice constraints
+# ==============================================================
+
+ont:InvoiceShape a sh:NodeShape ;
+    sh:targetClass ont:Invoice ;
+    rdfs:label "Invoice constraints" ;
+    sh:property [
+        sh:path ont:Invoice.supplierId ;
+        sh:minCount 1 ;
+        sh:message "Invoice must reference a supplier."
+    ] ;
+    sh:property [
+        sh:path ont:Invoice.amount ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "Invoice amount must be a positive decimal."
+    ] ;
+    sh:property [
+        sh:path ont:Invoice.currency ;
+        sh:minCount 1 ;
+        sh:pattern "^[A-Z]{3}$" ;
+        sh:message "Invoice currency must be a 3-letter ISO 4217 code."
+    ] ;
+    sh:property [
+        sh:path ont:Invoice.status ;
+        sh:minCount 1 ;
+        sh:in ( "pending" "matched" "paid" "disputed" "exception" ) ;
+        sh:message "Invoice status must be one of: pending, matched, paid, disputed, exception."
+    ] ;
+    sh:property [
+        sh:path ont:invoice_paidTo ;
+        sh:minCount 1 ;
+        sh:class ont:Supplier ;
+        sh:message "Invoice must be linked to a Supplier via invoice_paidTo."
+    ] .
+
+# ==============================================================
+# PurchaseOrder constraints
+# ==============================================================
+
+ont:PurchaseOrderShape a sh:NodeShape ;
+    sh:targetClass ont:PurchaseOrder ;
+    rdfs:label "Purchase Order constraints" ;
+    sh:property [
+        sh:path ont:PurchaseOrder.supplierId ;
+        sh:minCount 1 ;
+        sh:message "PO must reference a supplier."
+    ] ;
+    sh:property [
+        sh:path ont:PurchaseOrder.amount ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "PO amount must be positive."
+    ] ;
+    sh:property [
+        sh:path ont:po_orderedFrom ;
+        sh:minCount 1 ;
+        sh:class ont:Supplier ;
+        sh:message "PO must be linked to a Supplier via po_orderedFrom."
+    ] .
+
+# ==============================================================
+# Contract constraints
+# ==============================================================
+
+ont:ContractShape a sh:NodeShape ;
+    sh:targetClass ont:Contract ;
+    rdfs:label "Contract constraints" ;
+    sh:property [
+        sh:path ont:Contract.startDate ;
+        sh:minCount 1 ;
+        sh:datatype xsd:date ;
+        sh:message "Contract must have a start date."
+    ] ;
+    sh:property [
+        sh:path ont:Contract.endDate ;
+        sh:minCount 1 ;
+        sh:datatype xsd:date ;
+        sh:message "Contract must have an end date."
+    ] ;
+    sh:property [
+        sh:path ont:Contract.status ;
+        sh:minCount 1 ;
+        sh:in ( "draft" "active" "expired" "terminated" ) ;
+        sh:message "Contract status must be one of: draft, active, expired, terminated."
+    ] ;
+    sh:property [
+        sh:path ont:contract_suppliedBy ;
+        sh:minCount 1 ;
+        sh:class ont:Supplier ;
+        sh:message "Contract must be linked to a Supplier via contract_suppliedBy."
+    ] ;
+    sh:property [
+        sh:path ont:Contract.totalValue ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "Contract total value must be positive."
+    ] .
+
+# ==============================================================
+# ContractScope constraints
+# ==============================================================
+
+ont:ContractScopeShape a sh:NodeShape ;
+    sh:targetClass ont:ContractScope ;
+    rdfs:label "Contract Scope constraints" ;
+    sh:property [
+        sh:path ont:scope_ofContract ;
+        sh:minCount 1 ;
+        sh:class ont:Contract ;
+        sh:message "Contract scope must belong to a Contract."
+    ] ;
+    sh:property [
+        sh:path ont:ContractScope.region ;
+        sh:minCount 1 ;
+        sh:message "Contract scope must specify a region."
+    ] ;
+    sh:property [
+        sh:path ont:ContractScope.commodityGroup ;
+        sh:minCount 1 ;
+        sh:message "Contract scope must specify a commodity group."
+    ] .
+
+# ==============================================================
+# Commodity constraints
+# ==============================================================
+
+ont:CommodityShape a sh:NodeShape ;
+    sh:targetClass ont:Commodity ;
+    rdfs:label "Commodity constraints" ;
+    sh:property [
+        sh:path ont:Commodity.code ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Commodity must have a classification code."
+    ] ;
+    sh:property [
+        sh:path ont:Commodity.name ;
+        sh:minCount 1 ;
+        sh:message "Commodity must have a display name."
+    ] ;
+    sh:property [
+        sh:path ont:Commodity.level ;
+        sh:minCount 1 ;
+        sh:minInclusive 1 ;
+        sh:maxInclusive 5 ;
+        sh:datatype xsd:integer ;
+        sh:message "Commodity hierarchy level must be between 1 and 5."
+    ] .
+
+# ==============================================================
+# ToleranceException constraints
+# ==============================================================
+
+ont:ToleranceExceptionShape a sh:NodeShape ;
+    sh:targetClass ont:ToleranceException ;
+    rdfs:label "Tolerance Exception constraints" ;
+    sh:property [
+        sh:path ont:exception_onInvoice ;
+        sh:minCount 1 ;
+        sh:class ont:Invoice ;
+        sh:message "Exception must reference an Invoice."
+    ] ;
+    sh:property [
+        sh:path ont:exception_againstPO ;
+        sh:minCount 1 ;
+        sh:class ont:PurchaseOrder ;
+        sh:message "Exception must reference a PurchaseOrder."
+    ] ;
+    sh:property [
+        sh:path ont:ToleranceException.exceptionType ;
+        sh:minCount 1 ;
+        sh:in ( "price_variance" "quantity_variance" "tax_variance" ) ;
+        sh:message "Exception type must be: price_variance, quantity_variance, or tax_variance."
+    ] ;
+    sh:property [
+        sh:path ont:ToleranceException.status ;
+        sh:minCount 1 ;
+        sh:in ( "open" "auto_resolved" "manually_resolved" "escalated" ) ;
+        sh:message "Exception status must be one of: open, auto_resolved, manually_resolved, escalated."
+    ] .
+
+# ==============================================================
+# ExceptionRule constraints
+# ==============================================================
+
+ont:ExceptionRuleShape a sh:NodeShape ;
+    sh:targetClass ont:ExceptionRule ;
+    rdfs:label "Exception Rule constraints" ;
+    sh:property [
+        sh:path ont:ExceptionRule.approvedBy ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Exception rule must have an approver."
+    ] ;
+    sh:property [
+        sh:path ont:ExceptionRule.condition ;
+        sh:minCount 1 ;
+        sh:message "Exception rule must have a condition expression."
+    ] ;
+    sh:property [
+        sh:path ont:ExceptionRule.resolution ;
+        sh:minCount 1 ;
+        sh:message "Exception rule must have a resolution action."
+    ] ;
+    sh:property [
+        sh:path ont:rule_appliesToCommodity ;
+        sh:minCount 1 ;
+        sh:class ont:Commodity ;
+        sh:message "Exception rule must apply to at least one Commodity."
+    ] .
+
+# ==============================================================
+# SpendRecord constraints
+# ==============================================================
+
+ont:SpendRecordShape a sh:NodeShape ;
+    sh:targetClass ont:SpendRecord ;
+    rdfs:label "Spend Record constraints" ;
+    sh:property [
+        sh:path ont:SpendRecord.normalizedAmount ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "Spend record must have a positive normalized amount."
+    ] ;
+    sh:property [
+        sh:path ont:spend_fromInvoice ;
+        sh:minCount 1 ;
+        sh:class ont:Invoice ;
+        sh:message "Spend record must reference an Invoice."
+    ] ;
+    sh:property [
+        sh:path ont:spend_withSupplier ;
+        sh:minCount 1 ;
+        sh:class ont:Supplier ;
+        sh:message "Spend record must reference a Supplier."
+    ] ;
+    sh:property [
+        sh:path ont:spend_forCommodity ;
+        sh:minCount 1 ;
+        sh:class ont:Commodity ;
+        sh:message "Spend record must reference a Commodity."
+    ] .
+
+# ==============================================================
+# FXRate constraints
+# ==============================================================
+
+ont:FXRateShape a sh:NodeShape ;
+    sh:targetClass ont:FXRate ;
+    rdfs:label "FX Rate constraints" ;
+    sh:property [
+        sh:path ont:FXRate.fromCurrency ;
+        sh:minCount 1 ;
+        sh:pattern "^[A-Z]{3}$" ;
+        sh:message "From currency must be ISO 4217."
+    ] ;
+    sh:property [
+        sh:path ont:FXRate.toCurrency ;
+        sh:minCount 1 ;
+        sh:pattern "^[A-Z]{3}$" ;
+        sh:message "To currency must be ISO 4217."
+    ] ;
+    sh:property [
+        sh:path ont:FXRate.rate ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "FX rate must be a positive number."
+    ] .
+
+# ==============================================================
+# Item constraints
+# ==============================================================
+
+ont:ItemShape a sh:NodeShape ;
+    sh:targetClass ont:Item ;
+    rdfs:label "Line Item constraints" ;
+    sh:property [
+        sh:path ont:item_classifiedAs ;
+        sh:minCount 1 ;
+        sh:class ont:Commodity ;
+        sh:message "Every line item must be classified to a Commodity."
+    ] ;
+    sh:property [
+        sh:path ont:Item.quantity ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "Item quantity must be positive."
+    ] ;
+    sh:property [
+        sh:path ont:Item.unitPrice ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:datatype xsd:decimal ;
+        sh:message "Item unit price must be positive."
+    ] .
+
+# ==============================================================
+# Requisition constraints
+# ==============================================================
+
+ont:RequisitionShape a sh:NodeShape ;
+    sh:targetClass ont:Requisition ;
+    rdfs:label "Requisition constraints" ;
+    sh:property [
+        sh:path ont:Requisition.description ;
+        sh:minCount 1 ;
+        sh:message "Requisition must have a description."
+    ] ;
+    sh:property [
+        sh:path ont:Requisition.requester ;
+        sh:minCount 1 ;
+        sh:message "Requisition must have a requester."
+    ] ;
+    sh:property [
+        sh:path ont:Requisition.status ;
+        sh:minCount 1 ;
+        sh:in ( "draft" "submitted" "approved" "fulfilled" ) ;
+        sh:message "Requisition status must be: draft, submitted, approved, or fulfilled."
+    ] .

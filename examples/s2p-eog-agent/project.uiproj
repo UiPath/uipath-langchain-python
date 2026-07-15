@@ -1,0 +1,6 @@
+{
+  "ProjectType": "Agent",
+  "Name": "s2p-eog-agent",
+  "Description": "s2p-eog-agent",
+  "MainFile": null
+}

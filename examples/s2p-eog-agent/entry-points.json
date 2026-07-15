@@ -1,0 +1,133 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "3032b724-dbed-4f93-8e1b-73a24d7ef254",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "description": "The procurement question or investigation request",
+                        "title": "Question",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "question"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "frontier": {
+                        "description": "Investigation findings as structured summary",
+                        "title": "Frontier",
+                        "type": "string"
+                    },
+                    "steps_taken": {
+                        "description": "Number of investigation steps executed",
+                        "title": "Steps Taken",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "frontier",
+                    "steps_taken"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "bootstrap",
+                        "name": "bootstrap",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "pop",
+                        "name": "pop",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "fetch",
+                        "name": "fetch",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "policy",
+                        "name": "policy",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "frontier",
+                        "name": "frontier",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "bootstrap",
+                        "label": null
+                    },
+                    {
+                        "source": "bootstrap",
+                        "target": "pop",
+                        "label": null
+                    },
+                    {
+                        "source": "fetch",
+                        "target": "policy",
+                        "label": null
+                    },
+                    {
+                        "source": "policy",
+                        "target": "pop",
+                        "label": null
+                    },
+                    {
+                        "source": "pop",
+                        "target": "fetch",
+                        "label": null
+                    },
+                    {
+                        "source": "pop",
+                        "target": "frontier",
+                        "label": null
+                    },
+                    {
+                        "source": "frontier",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}
