@@ -65,28 +65,45 @@ The answer is `assert.py`'s exit code plus the `result_summary` grid it prints.
 Exit 0 = model good on that env. Non-zero = the summary names the failing cell
 and the truncated error.
 
-## Mechanism B — CI dispatch (authoritative, all environments)
+## Mechanism B — on-demand CI run (no commit, pick the model at start)
 
-`.github/workflows/integration_tests.yml` auto-discovers this directory (the
-hyphen in `model-onboarding` is required) and runs it across the **full
-environment matrix — `alpha`, `staging`, and `cloud` (prod)** — with secrets
-wired per environment (`ALPHA_*`, `STAGING_*`, `CLOUD_*`). You get the prod
-(`cloud`) leg automatically; it is gated only on the `CLOUD_*` secrets existing
-and the model being enabled in the prod tenant. To get the canonical answer:
+`.github/workflows/model_onboarding.yml` runs this testcase against **any model
+you name at dispatch time**. The model spec comes from the workflow inputs and
+is written into `input.json` at runtime — you never edit or commit a file to
+change the model.
+
+**From the GitHub UI:** Actions → "Model onboarding" → "Run workflow", fill in
+`model_name`, `paths`, `files`, and pick the environment(s), then Run.
+
+**From the CLI:**
 
 ```bash
-git checkout -b onboard/<model>          # edit input.json first
-git commit -am "onboard <model>"
-git push -u origin onboard/<model>
-gh pr create --fill
-gh run watch <run-id>                     # model-onboarding/alpha + /staging + /cloud
+gh workflow run model_onboarding.yml \
+  -f model_name="anthropic.claude-sonnet-4-5-20250929-v1:0" \
+  -f paths="bedrock_converse,bedrock_invoke,anthropic_sdk" \
+  -f files="image,pdf" \
+  -f environments="alpha,staging,cloud"
+
+gh run watch $(gh run list --workflow=model_onboarding.yml --limit 1 --json databaseId -q '.[0].databaseId')
 # on failure:
 gh run view <run-id> --log | grep -A30 "Test Results"
 ```
 
+Environments are selectable (`alpha`, `staging`, `cloud`, or combinations);
+each leg uses its own `ALPHA_*` / `STAGING_*` / `CLOUD_*` secrets. The `cloud`
+leg is prod.
+
 > Prod note: a failing `cloud` leg for a brand-new model usually means the model
 > is not rolled out to the prod tenant yet — a provisioning signal, not a test
 > bug.
+
+## Mechanism C — push/PR gate (the committed `input.json`)
+
+`.github/workflows/integration_tests.yml` auto-discovers this directory (the
+hyphen in `model-onboarding` is required) and runs it — using the **committed**
+`input.json` — across `alpha`, `staging`, and `cloud` on every push/PR, as one
+leg of the full integration matrix. This is the regression gate; use
+Mechanism B for ad-hoc model runs.
 
 Optional enhancement (not wired): add a `workflow_dispatch:` trigger with a
 `model_spec` input so a run can be launched without a commit.
