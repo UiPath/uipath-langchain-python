@@ -18,7 +18,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel, Field
-from uipath_langchain.chat import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathChat
 
 
 # ── I/O schemas ────────────────────────────────────────────────────────
@@ -72,6 +72,16 @@ S2P_LABELS = [
     "CandidateMatch", "SupportingEvidence", "Contradiction", "Defer",
 ]
 
+_llm: UiPathChat | None = None
+
+
+def _get_llm() -> UiPathChat:
+    global _llm
+    if _llm is None:
+        _llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
+    return _llm
+
+
 SYSTEM_PROMPT = """\
 You are an S2P procurement investigation agent using the EoG pattern.
 You examine entities one at a time, label each with a role, and identify \
@@ -117,8 +127,17 @@ async def _fetch_entity_data(entity_id: str) -> list[dict]:
 # ── Graph nodes ────────────────────────────────────────────────────────
 
 async def bootstrap(state: InvestigationState) -> dict[str, Any]:
-    """Seed the investigation: call overview functions, extract entity IDs."""
+    """Seed the investigation: call discovery functions, extract entity IDs."""
     seed_data = []
+
+    # Call openExceptions to discover entities with open tolerance exceptions
+    try:
+        r = await _invoke_fn("openExceptions")
+        seed_data.append({"function": "openExceptions", "rows": r.get("rows", [])})
+    except Exception:
+        pass
+
+    # Call spend overview functions for landscape context
     for fn, params in [
         ("maverickSpendRate", {"period": "2026-Q2"}),
         ("spendByCategory", {"period": "2026-Q2"}),
@@ -129,61 +148,15 @@ async def bootstrap(state: InvestigationState) -> dict[str, Any]:
         except Exception:
             pass
 
-    # Also try openExceptions via SPARQL (the parameterless function may fail)
-    try:
-        url = f"{API_BASE}/ontology/{ONTOLOGY_NAME}/sparql"
-        query = """PREFIX ont: <https://ontology.uipath.com/ont#>
-        SELECT ?exceptionId ?exceptionType ?actualPct ?invoiceId ?poId
-        WHERE {
-            ?exc a ont:ToleranceException ;
-                 ont:ToleranceException.exceptionId ?exceptionId ;
-                 ont:ToleranceException.exceptionType ?exceptionType ;
-                 ont:ToleranceException.actualPct ?actualPct ;
-                 ont:ToleranceException.invoiceId ?invoiceId ;
-                 ont:ToleranceException.poId ?poId ;
-                 ont:ToleranceException.status "open"
-        }"""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                url, content=query,
-                headers={"Content-Type": "application/sparql-query"},
-            )
-            if resp.status_code == 200:
-                exc_data = resp.json()
-                seed_data.append({"function": "openExceptions_sparql", "rows": exc_data.get("rows", [])})
-    except Exception:
-        pass
-
-    # Extract entity IDs from seed data
+    # Extract entity IDs from seed data — scan all ID-shaped fields
     entity_ids: list[str] = []
     for sd in seed_data:
         for row in sd.get("rows", []):
-            for key in ["exceptionId", "invoiceId", "supplierId", "poId"]:
-                val = row.get(key)
-                if val and val not in entity_ids:
+            for key, val in row.items():
+                if isinstance(val, str) and any(
+                    val.startswith(p) for p in PREFIXES
+                ) and val not in entity_ids:
                     entity_ids.append(val)
-
-    # If no entity IDs found from seed functions, use known exception IDs
-    # (the parameterless openExceptions SPARQL may fail on Ontop)
-    if not entity_ids:
-        # Fetch exception context for known exceptions to bootstrap
-        for exc_id in ["EXC-001", "EXC-002", "EXC-003"]:
-            try:
-                r = await _invoke_fn("exceptionContext", {"exceptionId": exc_id})
-                rows = r.get("rows", [])
-                if rows:
-                    seed_data.append({"function": f"exceptionContext({exc_id})", "rows": rows})
-                    entity_ids.append(exc_id)
-                    for row in rows:
-                        for key in ["invoiceId", "supplierId", "poId"]:
-                            # Map from the row values to actual IDs via naming convention
-                            pass
-            except Exception:
-                pass
-        # Also add the invoices and POs tied to these exceptions
-        for inv_id in ["INV-2002", "INV-2004", "INV-2008"]:
-            if inv_id not in entity_ids:
-                entity_ids.append(inv_id)
 
     entity_ids = entity_ids[:8]
 
@@ -234,7 +207,7 @@ async def fetch_context(state: InvestigationState) -> dict[str, Any]:
 
 async def policy(state: InvestigationState) -> dict[str, Any]:
     """LLM call: label the entity and identify propagations."""
-    llm = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14")
+    llm = _get_llm()
 
     ctx = state.context_data
     prompt = f"""Investigating: {ctx.get('entity_id')} (type: {ctx.get('entity_type')})

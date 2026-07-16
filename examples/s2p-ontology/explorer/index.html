@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S2P Ontology Explorer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; overflow: hidden; }
+
+#app { display: flex; height: 100vh; }
+
+/* Graph panel */
+#graph-panel { flex: 1; position: relative; }
+#graph-panel svg { width: 100%; height: 100%; }
+
+/* Side panel */
+#side-panel {
+  width: 380px; background: #13131a; border-left: 1px solid #2a2a3a;
+  overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;
+}
+#side-panel h2 { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+#side-panel h3 { font-size: 18px; color: #fff; margin-top: 4px; }
+
+.detail-section { background: #1a1a24; border-radius: 8px; padding: 14px; }
+.detail-section h4 { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+
+.prop-list { list-style: none; }
+.prop-list li { padding: 4px 0; font-size: 13px; display: flex; justify-content: space-between; border-bottom: 1px solid #1f1f2f; }
+.prop-list li:last-child { border-bottom: none; }
+.prop-name { color: #7aa2f7; }
+.prop-type { color: #666; font-size: 12px; }
+
+.rel-item { padding: 6px 0; font-size: 13px; border-bottom: 1px solid #1f1f2f; }
+.rel-item:last-child { border-bottom: none; }
+.rel-label { color: #9ece6a; }
+.rel-target { color: #bb9af7; cursor: pointer; }
+.rel-target:hover { text-decoration: underline; }
+
+.fn-item { background: #1f1f2f; border-radius: 6px; padding: 10px; margin-bottom: 8px; cursor: pointer; transition: background 0.2s; }
+.fn-item:hover { background: #2a2a3f; }
+.fn-name { color: #e0af68; font-weight: 600; font-size: 13px; }
+.fn-desc { color: #888; font-size: 12px; margin-top: 4px; }
+.fn-params { color: #565f89; font-size: 11px; margin-top: 4px; }
+
+.fn-result { background: #1a1a24; border-radius: 6px; padding: 10px; margin-top: 8px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+.fn-result pre { white-space: pre-wrap; color: #9aa5ce; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-entity { background: #1a1b2e; color: #7aa2f7; border: 1px solid #3b4261; }
+.badge-count { background: #1a2e1a; color: #9ece6a; }
+
+/* Legend */
+#legend { position: absolute; bottom: 20px; left: 20px; background: #13131aee; border-radius: 8px; padding: 12px 16px; font-size: 12px; }
+#legend div { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+#legend .dot { width: 12px; height: 12px; border-radius: 50%; }
+
+/* Title bar */
+#title-bar { position: absolute; top: 20px; left: 20px; }
+#title-bar h1 { font-size: 20px; color: #fff; }
+#title-bar p { font-size: 13px; color: #666; margin-top: 4px; }
+
+/* Status */
+#status { position: absolute; top: 20px; right: 400px; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-up { background: #9ece6a; }
+.status-down { background: #f7768e; }
+
+/* Node styles */
+.node circle { stroke-width: 2px; cursor: pointer; transition: r 0.2s; }
+.node circle:hover { stroke-width: 3px; }
+.node text { font-size: 12px; fill: #ccc; pointer-events: none; font-weight: 500; }
+.node.selected circle { stroke-width: 3px; filter: drop-shadow(0 0 8px rgba(122, 162, 247, 0.5)); }
+
+.link { stroke-opacity: 0.4; fill: none; }
+.link-label { font-size: 10px; fill: #565f89; pointer-events: none; }
+
+/* Empty state */
+#empty-state { text-align: center; padding: 40px 20px; color: #555; }
+#empty-state p { margin-top: 8px; font-size: 13px; }
+
+/* Loading */
+.spinner { border: 3px solid #2a2a3a; border-top: 3px solid #7aa2f7; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Invoke button */
+.invoke-btn {
+  background: #1a3a1a; color: #9ece6a; border: 1px solid #2a5a2a; border-radius: 6px;
+  padding: 6px 12px; font-size: 12px; cursor: pointer; margin-top: 6px; transition: background 0.2s;
+}
+.invoke-btn:hover { background: #2a5a2a; }
+.invoke-btn:disabled { opacity: 0.5; cursor: default; }
+
+input.fn-input {
+  background: #1f1f2f; border: 1px solid #3b4261; border-radius: 4px; color: #e0e0e0;
+  padding: 4px 8px; font-size: 12px; width: 100%; margin-top: 4px;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="graph-panel">
+    <svg></svg>
+    <div id="title-bar">
+      <h1>S2P Ontology Explorer</h1>
+      <p id="subtitle">Loading...</p>
+    </div>
+    <div id="status"></div>
+    <div id="legend">
+      <div><span class="dot" style="background:#7aa2f7"></span> Entity (with data properties)</div>
+      <div><span class="dot" style="background:#9ece6a"></span> Relationship (object property)</div>
+      <div><span class="dot" style="background:#e0af68"></span> Function (governed SPARQL)</div>
+    </div>
+  </div>
+  <div id="side-panel">
+    <div id="empty-state">
+      <h3>Select an entity</h3>
+      <p>Click a node in the graph to see its properties, relationships, and available functions.</p>
+    </div>
+    <div id="detail-content" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+const API = '/api/datafabric/DefaultTenant/datafabric_/api/ontology/s2p';
+const ONT_NS = 'https://ontology.uipath.com/ont#';
+
+let ontologyData = null;
+let functionsData = null;
+let selectedNode = null;
+
+// Colors per entity
+const COLORS = {
+  Supplier: '#7aa2f7', Invoice: '#f7768e', PurchaseOrder: '#ff9e64',
+  Commodity: '#9ece6a', SpendRecord: '#bb9af7', FXRate: '#e0af68',
+  ToleranceException: '#73daca', Item: '#b4f9f8',
+  ExceptionRule: '#c0caf5', Contract: '#2ac3de', ContractScope: '#89ddff',
+  Requisition: '#c53b53', CostCenter: '#449dab', Budget: '#a9b1d6',
+};
+
+async function fetchData() {
+  try {
+    const [ontRes, fnRes, artRes] = await Promise.all([
+      fetch(API).then(r => r.json()),
+      fetch(API + '/functions').then(r => r.json()),
+      fetch(API + '/artifact/schema.ofn').then(r => r.text()),
+    ]);
+    ontologyData = ontRes;
+    functionsData = fnRes;
+    document.getElementById('status').innerHTML =
+      `<span class="status-dot status-up"></span><span style="font-size:12px;color:#9ece6a">${ontRes.state}</span>`;
+    document.getElementById('subtitle').textContent =
+      `${ontRes.displayName || ontRes.name} · ${functionsData.length} functions`;
+    return parseOWL(artRes);
+  } catch(e) {
+    document.getElementById('status').innerHTML =
+      `<span class="status-dot status-down"></span><span style="font-size:12px;color:#f7768e">Offline</span>`;
+    document.getElementById('subtitle').textContent = 'Cannot connect to ontology-runtime';
+    return null;
+  }
+}
+
+function parseOWL(ofn) {
+  const entities = [];
+  const properties = {};
+  const relationships = [];
+
+  // Parse classes
+  const classRe = /Declaration\(Class\(:(\w+)\)\)/g;
+  let m;
+  while ((m = classRe.exec(ofn)) !== null) entities.push(m[1]);
+
+  // Parse data properties with domain
+  const dpDomainRe = /DataPropertyDomain\(:(\w+)\.(\w+)\s+:(\w+)\)/g;
+  const dpRangeRe = /DataPropertyRange\(:(\w+)\.(\w+)\s+(xsd:\w+)\)/g;
+  const ranges = {};
+  while ((m = dpRangeRe.exec(ofn)) !== null) ranges[m[1]+'.'+m[2]] = m[3];
+  while ((m = dpDomainRe.exec(ofn)) !== null) {
+    const entity = m[3];
+    if (!properties[entity]) properties[entity] = [];
+    properties[entity].push({ name: m[2], type: ranges[m[1]+'.'+m[2]] || 'xsd:string' });
+  }
+
+  // Parse object properties with domain/range
+  const opDomainRe = /ObjectPropertyDomain\(:(\w+)\s+:(\w+)\)/g;
+  const opRangeRe = /ObjectPropertyRange\(:(\w+)\s+:(\w+)\)/g;
+  const opDomains = {}, opRanges = {};
+  while ((m = opDomainRe.exec(ofn)) !== null) opDomains[m[1]] = m[2];
+  // Reset regex
+  while ((m = opRangeRe.exec(ofn)) !== null) opRanges[m[1]] = m[2];
+
+  for (const [name, from] of Object.entries(opDomains)) {
+    const to = opRanges[name];
+    if (from && to) {
+      // Get label
+      const labelRe = new RegExp(`AnnotationAssertion\\(rdfs:label :${name} "([^"]+)"\\)`);
+      const lm = ofn.match(labelRe);
+      relationships.push({ name, from, to, label: lm ? lm[1] : name });
+    }
+  }
+
+  return { entities, properties, relationships };
+}
+
+function buildGraph(schema) {
+  const svg = d3.select('svg');
+  const width = svg.node().parentElement.clientWidth;
+  const height = svg.node().parentElement.clientHeight;
+
+  svg.selectAll('*').remove();
+
+  const g = svg.append('g');
+
+  // Zoom
+  svg.call(d3.zoom().scaleExtent([0.3, 3]).on('zoom', (e) => g.attr('transform', e.transform)));
+
+  // Build nodes and links
+  const nodes = schema.entities.map(e => ({
+    id: e, props: schema.properties[e] || [],
+    color: COLORS[e] || '#7aa2f7',
+    fns: functionsData.filter(f => {
+      const desc = (f.label + ' ' + (f.statement || '')).toLowerCase();
+      return desc.includes(e.toLowerCase());
+    }),
+  }));
+
+  const links = schema.relationships.map(r => ({
+    source: r.from, target: r.to, name: r.name, label: r.label,
+  }));
+
+  // Force simulation
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(180))
+    .force('charge', d3.forceManyBody().strength(-600))
+    .force('center', d3.forceCenter(width/2, height/2))
+    .force('collision', d3.forceCollide(60));
+
+  // Arrow markers
+  svg.append('defs').selectAll('marker')
+    .data(['arrow']).enter().append('marker')
+    .attr('id', 'arrow').attr('viewBox', '0 -5 10 10')
+    .attr('refX', 35).attr('refY', 0).attr('markerWidth', 6).attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#3b4261');
+
+  // Links
+  const link = g.append('g').selectAll('line')
+    .data(links).enter().append('line')
+    .attr('class', 'link')
+    .attr('stroke', '#3b4261').attr('stroke-width', 1.5)
+    .attr('marker-end', 'url(#arrow)');
+
+  // Link labels
+  const linkLabel = g.append('g').selectAll('text')
+    .data(links).enter().append('text')
+    .attr('class', 'link-label')
+    .text(d => d.label);
+
+  // Nodes
+  const node = g.append('g').selectAll('g')
+    .data(nodes).enter().append('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag', (e,d) => { d.fx=e.x; d.fy=e.y; })
+      .on('end', (e,d) => { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+    );
+
+  node.append('circle')
+    .attr('r', d => 20 + Math.min(d.props.length, 8) * 2)
+    .attr('fill', d => d.color + '22')
+    .attr('stroke', d => d.color);
+
+  node.append('text')
+    .attr('dy', d => -(24 + Math.min(d.props.length, 8) * 2))
+    .attr('text-anchor', 'middle')
+    .text(d => d.id);
+
+  // Prop count badge
+  node.append('text')
+    .attr('dy', 5).attr('text-anchor', 'middle')
+    .attr('fill', d => d.color).attr('font-size', '11px')
+    .text(d => d.props.length);
+
+  // Click handler
+  node.on('click', (e, d) => {
+    d3.selectAll('.node').classed('selected', false);
+    d3.select(e.currentTarget).classed('selected', true);
+    selectedNode = d;
+    showDetail(d, schema);
+  });
+
+  sim.on('tick', () => {
+    link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+        .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    linkLabel.attr('x',d=>(d.source.x+d.target.x)/2).attr('y',d=>(d.source.y+d.target.y)/2);
+    node.attr('transform', d=>`translate(${d.x},${d.y})`);
+  });
+}
+
+function showDetail(node, schema) {
+  document.getElementById('empty-state').style.display = 'none';
+  const el = document.getElementById('detail-content');
+  el.style.display = 'block';
+
+  const rels = schema.relationships.filter(r => r.from === node.id || r.to === node.id);
+  const fns = functionsData.filter(f => {
+    const text = (f.label + ' ' + (f.statement || '')).toLowerCase();
+    return text.includes(node.id.toLowerCase());
+  });
+
+  el.innerHTML = `
+    <div>
+      <h2>Entity</h2>
+      <h3 style="color:${node.color}">${node.id}</h3>
+    </div>
+
+    <div class="detail-section">
+      <h4>Data Properties (${node.props.length})</h4>
+      <ul class="prop-list">
+        ${node.props.map(p => `<li><span class="prop-name">${p.name}</span><span class="prop-type">${p.type.replace('xsd:','')}</span></li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="detail-section">
+      <h4>Relationships (${rels.length})</h4>
+      ${rels.map(r => {
+        const dir = r.from === node.id ? '→' : '←';
+        const other = r.from === node.id ? r.to : r.from;
+        return `<div class="rel-item"><span class="rel-label">${r.label}</span> ${dir} <span class="rel-target" onclick="selectNodeById('${other}')">${other}</span></div>`;
+      }).join('') || '<div style="color:#555;font-size:13px">No relationships</div>'}
+    </div>
+
+    <div class="detail-section">
+      <h4>Functions (${fns.length})</h4>
+      ${fns.map(f => {
+        const params = f.params || [];
+        const paramStr = params.map(p => p.name).join(', ');
+        const fnId = 'fn-' + f.name.replace(/\W/g,'');
+        return `
+          <div class="fn-item" id="${fnId}">
+            <div class="fn-name">${f.name}(${paramStr})</div>
+            <div class="fn-desc">${f.label}</div>
+            ${params.length ? `<div class="fn-params">
+              ${params.map(p => `<div style="margin-top:4px"><label>${p.name}:</label><input class="fn-input" id="input-${f.name}-${p.name}" placeholder="${p.type}" value="${getDefaultParam(p.name, node.id)}"/></div>`).join('')}
+            </div>` : ''}
+            <button class="invoke-btn" onclick="invokeFunction('${f.name}', ${JSON.stringify(params.map(p=>p.name))}, '${fnId}')">▶ Invoke</button>
+            <div id="result-${fnId}" class="fn-result" style="display:none"><pre></pre></div>
+          </div>`;
+      }).join('') || '<div style="color:#555;font-size:13px">No functions touch this entity</div>'}
+    </div>
+  `;
+}
+
+function getDefaultParam(paramName, entityId) {
+  const defaults = {
+    invoiceId: 'INV-2004', supplierId: 'SUP-001', poId: 'PO-1001',
+    exceptionId: 'EXC-001', commodityId: 'COM-110', contractId: 'CTR-001',
+    period: '2026-Q2', costCenterId: 'CC-IT-US', prId: 'PR-3001',
+    parentCommodityId: 'COM-100', commodityGroup: 'COM-110',
+  };
+  return defaults[paramName] || '';
+}
+
+async function invokeFunction(fnName, paramNames, fnId) {
+  const btn = document.querySelector(`#${fnId} .invoke-btn`);
+  const resultEl = document.getElementById('result-' + fnId);
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  resultEl.style.display = 'block';
+  resultEl.querySelector('pre').textContent = 'Executing...';
+
+  const params = {};
+  paramNames.forEach(p => {
+    const input = document.getElementById(`input-${fnName}-${p}`);
+    if (input && input.value) params[p] = input.value;
+  });
+
+  try {
+    const body = Object.keys(params).length ? { params } : {};
+    const resp = await fetch(`${API}/functions/${fnName}/invoke`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.rows) {
+      resultEl.querySelector('pre').textContent = JSON.stringify(data.rows, null, 2);
+    } else if (data.detail) {
+      resultEl.querySelector('pre').textContent = '❌ ' + data.detail;
+      resultEl.querySelector('pre').style.color = '#f7768e';
+    } else {
+      resultEl.querySelector('pre').textContent = JSON.stringify(data, null, 2);
+    }
+  } catch(e) {
+    resultEl.querySelector('pre').textContent = '❌ ' + e.message;
+    resultEl.querySelector('pre').style.color = '#f7768e';
+  }
+  btn.disabled = false;
+  btn.textContent = '▶ Invoke';
+}
+
+function selectNodeById(id) {
+  const nodes = d3.selectAll('.node').data();
+  const target = nodes.find(n => n.id === id);
+  if (target) {
+    d3.selectAll('.node').classed('selected', false);
+    d3.selectAll('.node').filter(d => d.id === id).classed('selected', true);
+    selectedNode = target;
+    showDetail(target, window._schema);
+  }
+}
+
+// Boot
+(async () => {
+  const schema = await fetchData();
+  if (schema) {
+    window._schema = schema;
+    buildGraph(schema);
+  }
+})();
+</script>
+</body>
+</html>
