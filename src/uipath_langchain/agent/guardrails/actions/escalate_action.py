@@ -72,20 +72,20 @@ class EscalateAction(GuardrailAction):
 
     def __init__(
         self,
-        app_name: str,
-        app_folder_path: str,
-        version: int,
-        recipient: AgentEscalationRecipient,
+        app_name: str | None = None,
+        app_folder_path: str | None = None,
+        version: int = 0,
+        recipient: AgentEscalationRecipient | None = None,
         model: BaseChatModel | None = None,
     ):
         """Initialize EscalateAction with escalation app configuration.
 
         Args:
-            app_name: Name of the escalation app.  Used when *model* is None
-                (static Action App path).
-            app_folder_path: Folder path where the escalation app is located.
-            version: Version of the escalation app.
-            recipient: Recipient object (StandardRecipient or AssetRecipient).
+            app_name: Name of the escalation app.  Required when *model* is None
+                (static Action App path); ignored in dynamic-schema mode.
+            app_folder_path: Folder where the escalation app or QuickForm task lives.
+            version: Version of the escalation app (static path only).
+            recipient: Recipient for the HITL task.
             model: Optional chat model injected by the agent runtime.  When set,
                 the schema for the HITL task is generated dynamically by the LLM
                 using the full conversation context at escalation time — no
