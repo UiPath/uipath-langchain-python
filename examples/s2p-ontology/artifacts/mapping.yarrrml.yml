@@ -1,10 +1,12 @@
 prefixes:
-  ont: https://ontology.uipath.com/s2p#
+  ont: https://ontology.uipath.com/ont#
 mappings:
   Supplier:
     sources:
       - access: datafabric
         table: Supplier
+        entityId: a4a5f7d7-b377-49c2-9166-cc0b749b60e6
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
         referenceFormulation: rr:SQL2008
     s: ont:Supplier/$(supplierId)
     po:
@@ -14,131 +16,18 @@ mappings:
         - $(supplierId)
       - - ont:Supplier.name
         - $(name)
-      - - ont:Supplier.taxId
-        - $(taxId)
       - - ont:Supplier.status
         - $(status)
-      - - ont:Supplier.parentSupplierId
-        - $(parentSupplierId)
       - - ont:Supplier.country
         - $(country)
       - - ont:Supplier.preferredFlag
         - $(preferredFlag)
-      - p: ont:supplier_hasParent
-        o:
-          mapping: Supplier
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(parentSupplierId)
-              - - str2
-                - $(supplierId)
-
-  Contract:
-    sources:
-      - access: datafabric
-        table: Contract
-        referenceFormulation: rr:SQL2008
-    s: ont:Contract/$(contractId)
-    po:
-      - - a
-        - ont:Contract
-      - - ont:Contract.contractId
-        - $(contractId)
-      - - ont:Contract.title
-        - $(title)
-      - - ont:Contract.startDate
-        - $(startDate)
-      - - ont:Contract.endDate
-        - $(endDate)
-      - - ont:Contract.totalValue
-        - $(totalValue)
-      - - ont:Contract.currency
-        - $(currency)
-      - - ont:Contract.status
-        - $(status)
-      - p: ont:contract_suppliedBy
-        o:
-          mapping: Supplier
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(supplierId)
-              - - str2
-                - $(supplierId)
-
-  ContractScope:
-    sources:
-      - access: datafabric
-        table: ContractScope
-        referenceFormulation: rr:SQL2008
-    s: ont:ContractScope/$(scopeId)
-    po:
-      - - a
-        - ont:ContractScope
-      - - ont:ContractScope.scopeId
-        - $(scopeId)
-      - - ont:ContractScope.contractId
-        - $(contractId)
-      - - ont:ContractScope.region
-        - $(region)
-      - - ont:ContractScope.legalEntity
-        - $(legalEntity)
-      - - ont:ContractScope.commodityGroup
-        - $(commodityGroup)
-      - - ont:ContractScope.validFrom
-        - $(validFrom)
-      - - ont:ContractScope.validTo
-        - $(validTo)
-      - - ont:ContractScope.exclusions
-        - $(exclusions)
-      - p: ont:scope_ofContract
-        o:
-          mapping: Contract
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(contractId)
-              - - str2
-                - $(contractId)
-
-  Commodity:
-    sources:
-      - access: datafabric
-        table: Commodity
-        referenceFormulation: rr:SQL2008
-    s: ont:Commodity/$(commodityId)
-    po:
-      - - a
-        - ont:Commodity
-      - - ont:Commodity.commodityId
-        - $(commodityId)
-      - - ont:Commodity.code
-        - $(code)
-      - - ont:Commodity.name
-        - $(name)
-      - - ont:Commodity.level
-        - $(level)
-      - - ont:Commodity.parentCommodityId
-        - $(parentCommodityId)
-      - p: ont:commodity_partOf
-        o:
-          mapping: Commodity
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(parentCommodityId)
-              - - str2
-                - $(commodityId)
-
   Invoice:
     sources:
       - access: datafabric
         table: Invoice
+        entityId: b2b6d32c-0872-4f8f-9406-70d26720a033
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
         referenceFormulation: rr:SQL2008
     s: ont:Invoice/$(invoiceId)
     po:
@@ -178,11 +67,12 @@ mappings:
                 - $(poId)
               - - str2
                 - $(poId)
-
   PurchaseOrder:
     sources:
       - access: datafabric
         table: PurchaseOrder
+        entityId: ecd797df-226e-4f19-a048-84d621efec7b
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
         referenceFormulation: rr:SQL2008
     s: ont:PurchaseOrder/$(poId)
     po:
@@ -210,269 +100,31 @@ mappings:
                 - $(supplierId)
               - - str2
                 - $(supplierId)
-
-  Item:
+  Commodity:
     sources:
       - access: datafabric
-        table: Item
+        table: Commodity
+        entityId: b6b7592d-714d-4f8c-b112-3c9755c9d4f6
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
         referenceFormulation: rr:SQL2008
-    s: ont:Item/$(itemId)
+    s: ont:Commodity/$(commodityId)
     po:
       - - a
-        - ont:Item
-      - - ont:Item.itemId
-        - $(itemId)
-      - - ont:Item.description
-        - $(description)
-      - - ont:Item.quantity
-        - $(quantity)
-      - - ont:Item.unitPrice
-        - $(unitPrice)
-      - - ont:Item.currency
-        - $(currency)
-      - - ont:Item.commodityId
+        - ont:Commodity
+      - - ont:Commodity.commodityId
         - $(commodityId)
-      - - ont:Item.prId
-        - $(prId)
-      - - ont:Item.poId
-        - $(poId)
-      - - ont:Item.invoiceId
-        - $(invoiceId)
-      - p: ont:item_classifiedAs
-        o:
-          mapping: Commodity
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(commodityId)
-              - - str2
-                - $(commodityId)
-      - p: ont:item_onRequisition
-        o:
-          mapping: Requisition
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(prId)
-              - - str2
-                - $(prId)
-      - p: ont:item_onPO
-        o:
-          mapping: PurchaseOrder
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(poId)
-              - - str2
-                - $(poId)
-      - p: ont:item_onInvoice
-        o:
-          mapping: Invoice
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(invoiceId)
-              - - str2
-                - $(invoiceId)
-
-  FXRate:
-    sources:
-      - access: datafabric
-        table: FXRate
-        referenceFormulation: rr:SQL2008
-    s: ont:FXRate/$(rateId)
-    po:
-      - - a
-        - ont:FXRate
-      - - ont:FXRate.rateId
-        - $(rateId)
-      - - ont:FXRate.fromCurrency
-        - $(fromCurrency)
-      - - ont:FXRate.toCurrency
-        - $(toCurrency)
-      - - ont:FXRate.rate
-        - $(rate)
-      - - ont:FXRate.effectiveDate
-        - $(effectiveDate)
-
-  Requisition:
-    sources:
-      - access: datafabric
-        table: Requisition
-        referenceFormulation: rr:SQL2008
-    s: ont:Requisition/$(prId)
-    po:
-      - - a
-        - ont:Requisition
-      - - ont:Requisition.prId
-        - $(prId)
-      - - ont:Requisition.description
-        - $(description)
-      - - ont:Requisition.requester
-        - $(requester)
-      - - ont:Requisition.location
-        - $(location)
-      - - ont:Requisition.quantity
-        - $(quantity)
-      - - ont:Requisition.costCenterId
-        - $(costCenterId)
-      - - ont:Requisition.status
-        - $(status)
-      - p: ont:pr_chargedTo
-        o:
-          mapping: CostCenter
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(costCenterId)
-              - - str2
-                - $(costCenterId)
-
-  CostCenter:
-    sources:
-      - access: datafabric
-        table: CostCenter
-        referenceFormulation: rr:SQL2008
-    s: ont:CostCenter/$(costCenterId)
-    po:
-      - - a
-        - ont:CostCenter
-      - - ont:CostCenter.costCenterId
-        - $(costCenterId)
-      - - ont:CostCenter.name
+      - - ont:Commodity.code
+        - $(code)
+      - - ont:Commodity.name
         - $(name)
-      - - ont:CostCenter.department
-        - $(department)
-      - - ont:CostCenter.region
-        - $(region)
-
-  Budget:
-    sources:
-      - access: datafabric
-        table: Budget
-        referenceFormulation: rr:SQL2008
-    s: ont:Budget/$(budgetId)
-    po:
-      - - a
-        - ont:Budget
-      - - ont:Budget.budgetId
-        - $(budgetId)
-      - - ont:Budget.costCenterId
-        - $(costCenterId)
-      - - ont:Budget.period
-        - $(period)
-      - - ont:Budget.allocatedAmount
-        - $(allocatedAmount)
-      - - ont:Budget.currency
-        - $(currency)
-      - p: ont:budget_forCostCenter
-        o:
-          mapping: CostCenter
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(costCenterId)
-              - - str2
-                - $(costCenterId)
-
-  ToleranceException:
-    sources:
-      - access: datafabric
-        table: ToleranceException
-        referenceFormulation: rr:SQL2008
-    s: ont:ToleranceException/$(exceptionId)
-    po:
-      - - a
-        - ont:ToleranceException
-      - - ont:ToleranceException.exceptionId
-        - $(exceptionId)
-      - - ont:ToleranceException.invoiceId
-        - $(invoiceId)
-      - - ont:ToleranceException.poId
-        - $(poId)
-      - - ont:ToleranceException.exceptionType
-        - $(exceptionType)
-      - - ont:ToleranceException.thresholdPct
-        - $(thresholdPct)
-      - - ont:ToleranceException.actualPct
-        - $(actualPct)
-      - - ont:ToleranceException.status
-        - $(status)
-      - p: ont:exception_onInvoice
-        o:
-          mapping: Invoice
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(invoiceId)
-              - - str2
-                - $(invoiceId)
-      - p: ont:exception_againstPO
-        o:
-          mapping: PurchaseOrder
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(poId)
-              - - str2
-                - $(poId)
-
-  ExceptionRule:
-    sources:
-      - access: datafabric
-        table: ExceptionRule
-        referenceFormulation: rr:SQL2008
-    s: ont:ExceptionRule/$(ruleId)
-    po:
-      - - a
-        - ont:ExceptionRule
-      - - ont:ExceptionRule.ruleId
-        - $(ruleId)
-      - - ont:ExceptionRule.commodityId
-        - $(commodityId)
-      - - ont:ExceptionRule.supplierId
-        - $(supplierId)
-      - - ont:ExceptionRule.condition
-        - $(condition)
-      - - ont:ExceptionRule.resolution
-        - $(resolution)
-      - - ont:ExceptionRule.approvedBy
-        - $(approvedBy)
-      - - ont:ExceptionRule.createdDate
-        - $(createdDate)
-      - p: ont:rule_appliesToCommodity
-        o:
-          mapping: Commodity
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(commodityId)
-              - - str2
-                - $(commodityId)
-      - p: ont:rule_forSupplier
-        o:
-          mapping: Supplier
-          condition:
-            function: equal
-            parameters:
-              - - str1
-                - $(supplierId)
-              - - str2
-                - $(supplierId)
-
+      - - ont:Commodity.level
+        - $(level)
   SpendRecord:
     sources:
       - access: datafabric
         table: SpendRecord
+        entityId: 4da9200a-46b9-47c0-8066-2b9fc38a737f
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
         referenceFormulation: rr:SQL2008
     s: ont:SpendRecord/$(spendId)
     po:
@@ -538,3 +190,69 @@ mappings:
                 - $(rateId)
               - - str2
                 - $(rateId)
+  FXRate:
+    sources:
+      - access: datafabric
+        table: FXRate
+        entityId: 48888528-afff-43f6-baa8-f454a77658cd
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
+        referenceFormulation: rr:SQL2008
+    s: ont:FXRate/$(rateId)
+    po:
+      - - a
+        - ont:FXRate
+      - - ont:FXRate.rateId
+        - $(rateId)
+      - - ont:FXRate.fromCurrency
+        - $(fromCurrency)
+      - - ont:FXRate.toCurrency
+        - $(toCurrency)
+      - - ont:FXRate.rate
+        - $(rate)
+      - - ont:FXRate.effectiveDate
+        - $(effectiveDate)
+  ToleranceException:
+    sources:
+      - access: datafabric
+        table: ToleranceException
+        entityId: dde1dbe6-6c91-44f4-83a5-0d1950350ef7
+        folderId: 99267945-982c-4bf6-ae19-ab8764ad8720
+        referenceFormulation: rr:SQL2008
+    s: ont:ToleranceException/$(exceptionId)
+    po:
+      - - a
+        - ont:ToleranceException
+      - - ont:ToleranceException.exceptionId
+        - $(exceptionId)
+      - - ont:ToleranceException.invoiceId
+        - $(invoiceId)
+      - - ont:ToleranceException.poId
+        - $(poId)
+      - - ont:ToleranceException.exceptionType
+        - $(exceptionType)
+      - - ont:ToleranceException.thresholdPct
+        - $(thresholdPct)
+      - - ont:ToleranceException.actualPct
+        - $(actualPct)
+      - - ont:ToleranceException.status
+        - $(status)
+      - p: ont:exception_onInvoice
+        o:
+          mapping: Invoice
+          condition:
+            function: equal
+            parameters:
+              - - str1
+                - $(invoiceId)
+              - - str2
+                - $(invoiceId)
+      - p: ont:exception_againstPO
+        o:
+          mapping: PurchaseOrder
+          condition:
+            function: equal
+            parameters:
+              - - str1
+                - $(poId)
+              - - str2
+                - $(poId)

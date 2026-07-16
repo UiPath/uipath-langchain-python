@@ -1,99 +1,30 @@
-Prefix(:=<https://ontology.uipath.com/s2p#>)
+Prefix(:=<https://ontology.uipath.com/ont#>)
 Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
 Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
 Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
 Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
 Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
 
-
-Ontology(<https://ontology.uipath.com/s2p>
-
-############################
-#   Class Declarations
-############################
+Ontology(<https://ontology.uipath.com/ont>
 
 Declaration(Class(:Supplier))
-Declaration(Class(:Contract))
-Declaration(Class(:ContractScope))
-Declaration(Class(:Commodity))
 Declaration(Class(:Invoice))
-Declaration(Class(:PurchaseOrder))
-Declaration(Class(:Item))
-Declaration(Class(:FXRate))
-Declaration(Class(:Requisition))
-Declaration(Class(:CostCenter))
-Declaration(Class(:Budget))
-Declaration(Class(:ToleranceException))
-Declaration(Class(:ExceptionRule))
+Declaration(Class(:Commodity))
 Declaration(Class(:SpendRecord))
-
-############################
-#   Object Property Declarations
-############################
-
-Declaration(ObjectProperty(:supplier_hasParent))
-Declaration(ObjectProperty(:commodity_partOf))
+Declaration(Class(:FXRate))
+Declaration(Class(:PurchaseOrder))
 Declaration(ObjectProperty(:invoice_paidTo))
 Declaration(ObjectProperty(:invoice_referencesPO))
 Declaration(ObjectProperty(:po_orderedFrom))
-Declaration(ObjectProperty(:item_classifiedAs))
-Declaration(ObjectProperty(:item_onRequisition))
-Declaration(ObjectProperty(:item_onPO))
-Declaration(ObjectProperty(:item_onInvoice))
-Declaration(ObjectProperty(:contract_suppliedBy))
-Declaration(ObjectProperty(:contract_coversCommodity))
-Declaration(ObjectProperty(:scope_ofContract))
-Declaration(ObjectProperty(:exception_onInvoice))
-Declaration(ObjectProperty(:exception_againstPO))
-Declaration(ObjectProperty(:rule_appliesToCommodity))
-Declaration(ObjectProperty(:rule_forSupplier))
 Declaration(ObjectProperty(:spend_fromInvoice))
 Declaration(ObjectProperty(:spend_withSupplier))
 Declaration(ObjectProperty(:spend_forCommodity))
 Declaration(ObjectProperty(:spend_convertedWith))
-Declaration(ObjectProperty(:pr_chargedTo))
-Declaration(ObjectProperty(:budget_forCostCenter))
-
-############################
-#   Data Property Declarations
-############################
-
-# Supplier
 Declaration(DataProperty(:Supplier.supplierId))
 Declaration(DataProperty(:Supplier.name))
-Declaration(DataProperty(:Supplier.taxId))
 Declaration(DataProperty(:Supplier.status))
-Declaration(DataProperty(:Supplier.parentSupplierId))
 Declaration(DataProperty(:Supplier.country))
 Declaration(DataProperty(:Supplier.preferredFlag))
-
-# Contract
-Declaration(DataProperty(:Contract.contractId))
-Declaration(DataProperty(:Contract.title))
-Declaration(DataProperty(:Contract.startDate))
-Declaration(DataProperty(:Contract.endDate))
-Declaration(DataProperty(:Contract.totalValue))
-Declaration(DataProperty(:Contract.currency))
-Declaration(DataProperty(:Contract.status))
-
-# ContractScope
-Declaration(DataProperty(:ContractScope.scopeId))
-Declaration(DataProperty(:ContractScope.contractId))
-Declaration(DataProperty(:ContractScope.region))
-Declaration(DataProperty(:ContractScope.legalEntity))
-Declaration(DataProperty(:ContractScope.commodityGroup))
-Declaration(DataProperty(:ContractScope.validFrom))
-Declaration(DataProperty(:ContractScope.validTo))
-Declaration(DataProperty(:ContractScope.exclusions))
-
-# Commodity
-Declaration(DataProperty(:Commodity.commodityId))
-Declaration(DataProperty(:Commodity.code))
-Declaration(DataProperty(:Commodity.name))
-Declaration(DataProperty(:Commodity.level))
-Declaration(DataProperty(:Commodity.parentCommodityId))
-
-# Invoice
 Declaration(DataProperty(:Invoice.invoiceId))
 Declaration(DataProperty(:Invoice.invoiceDate))
 Declaration(DataProperty(:Invoice.amount))
@@ -101,74 +32,16 @@ Declaration(DataProperty(:Invoice.currency))
 Declaration(DataProperty(:Invoice.status))
 Declaration(DataProperty(:Invoice.supplierId))
 Declaration(DataProperty(:Invoice.poId))
-
-# PurchaseOrder
 Declaration(DataProperty(:PurchaseOrder.poId))
 Declaration(DataProperty(:PurchaseOrder.amount))
 Declaration(DataProperty(:PurchaseOrder.currency))
 Declaration(DataProperty(:PurchaseOrder.status))
 Declaration(DataProperty(:PurchaseOrder.supplierId))
 Declaration(DataProperty(:PurchaseOrder.orderDate))
-
-# Item
-Declaration(DataProperty(:Item.itemId))
-Declaration(DataProperty(:Item.description))
-Declaration(DataProperty(:Item.quantity))
-Declaration(DataProperty(:Item.unitPrice))
-Declaration(DataProperty(:Item.currency))
-Declaration(DataProperty(:Item.commodityId))
-Declaration(DataProperty(:Item.prId))
-Declaration(DataProperty(:Item.poId))
-Declaration(DataProperty(:Item.invoiceId))
-
-# FXRate
-Declaration(DataProperty(:FXRate.rateId))
-Declaration(DataProperty(:FXRate.fromCurrency))
-Declaration(DataProperty(:FXRate.toCurrency))
-Declaration(DataProperty(:FXRate.rate))
-Declaration(DataProperty(:FXRate.effectiveDate))
-
-# Requisition
-Declaration(DataProperty(:Requisition.prId))
-Declaration(DataProperty(:Requisition.description))
-Declaration(DataProperty(:Requisition.requester))
-Declaration(DataProperty(:Requisition.location))
-Declaration(DataProperty(:Requisition.quantity))
-Declaration(DataProperty(:Requisition.costCenterId))
-Declaration(DataProperty(:Requisition.status))
-
-# CostCenter
-Declaration(DataProperty(:CostCenter.costCenterId))
-Declaration(DataProperty(:CostCenter.name))
-Declaration(DataProperty(:CostCenter.department))
-Declaration(DataProperty(:CostCenter.region))
-
-# Budget
-Declaration(DataProperty(:Budget.budgetId))
-Declaration(DataProperty(:Budget.costCenterId))
-Declaration(DataProperty(:Budget.period))
-Declaration(DataProperty(:Budget.allocatedAmount))
-Declaration(DataProperty(:Budget.currency))
-
-# ToleranceException
-Declaration(DataProperty(:ToleranceException.exceptionId))
-Declaration(DataProperty(:ToleranceException.invoiceId))
-Declaration(DataProperty(:ToleranceException.poId))
-Declaration(DataProperty(:ToleranceException.exceptionType))
-Declaration(DataProperty(:ToleranceException.thresholdPct))
-Declaration(DataProperty(:ToleranceException.actualPct))
-Declaration(DataProperty(:ToleranceException.status))
-
-# ExceptionRule
-Declaration(DataProperty(:ExceptionRule.ruleId))
-Declaration(DataProperty(:ExceptionRule.commodityId))
-Declaration(DataProperty(:ExceptionRule.supplierId))
-Declaration(DataProperty(:ExceptionRule.condition))
-Declaration(DataProperty(:ExceptionRule.resolution))
-Declaration(DataProperty(:ExceptionRule.approvedBy))
-Declaration(DataProperty(:ExceptionRule.createdDate))
-
-# SpendRecord
+Declaration(DataProperty(:Commodity.commodityId))
+Declaration(DataProperty(:Commodity.code))
+Declaration(DataProperty(:Commodity.name))
+Declaration(DataProperty(:Commodity.level))
 Declaration(DataProperty(:SpendRecord.spendId))
 Declaration(DataProperty(:SpendRecord.invoiceId))
 Declaration(DataProperty(:SpendRecord.supplierId))
@@ -179,267 +52,162 @@ Declaration(DataProperty(:SpendRecord.originalCurrency))
 Declaration(DataProperty(:SpendRecord.normalizedAmount))
 Declaration(DataProperty(:SpendRecord.period))
 Declaration(DataProperty(:SpendRecord.onContract))
+Declaration(DataProperty(:FXRate.rateId))
+Declaration(DataProperty(:FXRate.fromCurrency))
+Declaration(DataProperty(:FXRate.toCurrency))
+Declaration(DataProperty(:FXRate.rate))
+Declaration(DataProperty(:FXRate.effectiveDate))
 
-
-############################
-#   Object Properties
-############################
-
-# Supplier hierarchy
-AnnotationAssertion(rdfs:label :supplier_hasParent "has parent supplier")
-ObjectPropertyDomain(:supplier_hasParent :Supplier)
-ObjectPropertyRange(:supplier_hasParent :Supplier)
-
-# Commodity hierarchy
-AnnotationAssertion(rdfs:label :commodity_partOf "part of")
-ObjectPropertyDomain(:commodity_partOf :Commodity)
-ObjectPropertyRange(:commodity_partOf :Commodity)
-
-# Invoice → Supplier
 AnnotationAssertion(rdfs:label :invoice_paidTo "paid to")
 ObjectPropertyDomain(:invoice_paidTo :Invoice)
 ObjectPropertyRange(:invoice_paidTo :Supplier)
 
-# Invoice → PurchaseOrder
 AnnotationAssertion(rdfs:label :invoice_referencesPO "references PO")
 ObjectPropertyDomain(:invoice_referencesPO :Invoice)
 ObjectPropertyRange(:invoice_referencesPO :PurchaseOrder)
 
-# PurchaseOrder → Supplier
 AnnotationAssertion(rdfs:label :po_orderedFrom "ordered from")
 ObjectPropertyDomain(:po_orderedFrom :PurchaseOrder)
 ObjectPropertyRange(:po_orderedFrom :Supplier)
 
-# Item → Commodity
-AnnotationAssertion(rdfs:label :item_classifiedAs "classified as")
-ObjectPropertyDomain(:item_classifiedAs :Item)
-ObjectPropertyRange(:item_classifiedAs :Commodity)
-
-# Item → Requisition
-AnnotationAssertion(rdfs:label :item_onRequisition "on requisition")
-ObjectPropertyDomain(:item_onRequisition :Item)
-ObjectPropertyRange(:item_onRequisition :Requisition)
-
-# Item → PurchaseOrder
-AnnotationAssertion(rdfs:label :item_onPO "on PO")
-ObjectPropertyDomain(:item_onPO :Item)
-ObjectPropertyRange(:item_onPO :PurchaseOrder)
-
-# Item → Invoice
-AnnotationAssertion(rdfs:label :item_onInvoice "on invoice")
-ObjectPropertyDomain(:item_onInvoice :Item)
-ObjectPropertyRange(:item_onInvoice :Invoice)
-
-# Contract → Supplier
-AnnotationAssertion(rdfs:label :contract_suppliedBy "supplied by")
-ObjectPropertyDomain(:contract_suppliedBy :Contract)
-ObjectPropertyRange(:contract_suppliedBy :Supplier)
-
-# Contract → Commodity
-AnnotationAssertion(rdfs:label :contract_coversCommodity "covers commodity")
-ObjectPropertyDomain(:contract_coversCommodity :Contract)
-ObjectPropertyRange(:contract_coversCommodity :Commodity)
-
-# ContractScope → Contract
-AnnotationAssertion(rdfs:label :scope_ofContract "scope of")
-ObjectPropertyDomain(:scope_ofContract :ContractScope)
-ObjectPropertyRange(:scope_ofContract :Contract)
-
-# ToleranceException → Invoice
-AnnotationAssertion(rdfs:label :exception_onInvoice "exception on")
-ObjectPropertyDomain(:exception_onInvoice :ToleranceException)
-ObjectPropertyRange(:exception_onInvoice :Invoice)
-
-# ToleranceException → PurchaseOrder
-AnnotationAssertion(rdfs:label :exception_againstPO "exception against")
-ObjectPropertyDomain(:exception_againstPO :ToleranceException)
-ObjectPropertyRange(:exception_againstPO :PurchaseOrder)
-
-# ExceptionRule → Commodity
-AnnotationAssertion(rdfs:label :rule_appliesToCommodity "applies to commodity")
-ObjectPropertyDomain(:rule_appliesToCommodity :ExceptionRule)
-ObjectPropertyRange(:rule_appliesToCommodity :Commodity)
-
-# ExceptionRule → Supplier
-AnnotationAssertion(rdfs:label :rule_forSupplier "for supplier")
-ObjectPropertyDomain(:rule_forSupplier :ExceptionRule)
-ObjectPropertyRange(:rule_forSupplier :Supplier)
-
-# SpendRecord → Invoice
 AnnotationAssertion(rdfs:label :spend_fromInvoice "from invoice")
 ObjectPropertyDomain(:spend_fromInvoice :SpendRecord)
 ObjectPropertyRange(:spend_fromInvoice :Invoice)
 
-# SpendRecord → Supplier
 AnnotationAssertion(rdfs:label :spend_withSupplier "with supplier")
 ObjectPropertyDomain(:spend_withSupplier :SpendRecord)
 ObjectPropertyRange(:spend_withSupplier :Supplier)
 
-# SpendRecord → Commodity
 AnnotationAssertion(rdfs:label :spend_forCommodity "for commodity")
 ObjectPropertyDomain(:spend_forCommodity :SpendRecord)
 ObjectPropertyRange(:spend_forCommodity :Commodity)
 
-# SpendRecord → FXRate
 AnnotationAssertion(rdfs:label :spend_convertedWith "converted with")
 ObjectPropertyDomain(:spend_convertedWith :SpendRecord)
 ObjectPropertyRange(:spend_convertedWith :FXRate)
 
-# Requisition → CostCenter
-AnnotationAssertion(rdfs:label :pr_chargedTo "charged to")
-ObjectPropertyDomain(:pr_chargedTo :Requisition)
-ObjectPropertyRange(:pr_chargedTo :CostCenter)
+DataPropertyDomain(:Supplier.supplierId :Supplier)
+DataPropertyRange(:Supplier.supplierId xsd:string)
+DataPropertyDomain(:Supplier.name :Supplier)
+DataPropertyRange(:Supplier.name xsd:string)
+DataPropertyDomain(:Supplier.status :Supplier)
+DataPropertyRange(:Supplier.status xsd:string)
+DataPropertyDomain(:Supplier.country :Supplier)
+DataPropertyRange(:Supplier.country xsd:string)
+DataPropertyDomain(:Supplier.preferredFlag :Supplier)
+DataPropertyRange(:Supplier.preferredFlag xsd:boolean)
 
-# Budget → CostCenter
-AnnotationAssertion(rdfs:label :budget_forCostCenter "for cost center")
-ObjectPropertyDomain(:budget_forCostCenter :Budget)
-ObjectPropertyRange(:budget_forCostCenter :CostCenter)
+DataPropertyDomain(:Invoice.invoiceId :Invoice)
+DataPropertyRange(:Invoice.invoiceId xsd:string)
+DataPropertyDomain(:Invoice.invoiceDate :Invoice)
+DataPropertyRange(:Invoice.invoiceDate xsd:date)
+DataPropertyDomain(:Invoice.amount :Invoice)
+DataPropertyRange(:Invoice.amount xsd:decimal)
+DataPropertyDomain(:Invoice.currency :Invoice)
+DataPropertyRange(:Invoice.currency xsd:string)
+DataPropertyDomain(:Invoice.status :Invoice)
+DataPropertyRange(:Invoice.status xsd:string)
+DataPropertyDomain(:Invoice.supplierId :Invoice)
+DataPropertyRange(:Invoice.supplierId xsd:string)
+DataPropertyDomain(:Invoice.poId :Invoice)
+DataPropertyRange(:Invoice.poId xsd:string)
 
+DataPropertyDomain(:PurchaseOrder.poId :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.poId xsd:string)
+DataPropertyDomain(:PurchaseOrder.amount :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.amount xsd:decimal)
+DataPropertyDomain(:PurchaseOrder.currency :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.currency xsd:string)
+DataPropertyDomain(:PurchaseOrder.status :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.status xsd:string)
+DataPropertyDomain(:PurchaseOrder.supplierId :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.supplierId xsd:string)
+DataPropertyDomain(:PurchaseOrder.orderDate :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.orderDate xsd:date)
 
-############################
-#   Data Properties (domains + ranges)
-############################
+DataPropertyDomain(:Commodity.commodityId :Commodity)
+DataPropertyRange(:Commodity.commodityId xsd:string)
+DataPropertyDomain(:Commodity.code :Commodity)
+DataPropertyRange(:Commodity.code xsd:string)
+DataPropertyDomain(:Commodity.name :Commodity)
+DataPropertyRange(:Commodity.name xsd:string)
+DataPropertyDomain(:Commodity.level :Commodity)
+DataPropertyRange(:Commodity.level xsd:integer)
 
-# Supplier
-DataPropertyDomain(:Supplier.supplierId :Supplier)  DataPropertyRange(:Supplier.supplierId xsd:string)
-DataPropertyDomain(:Supplier.name :Supplier)         DataPropertyRange(:Supplier.name xsd:string)
-DataPropertyDomain(:Supplier.taxId :Supplier)         DataPropertyRange(:Supplier.taxId xsd:string)
-DataPropertyDomain(:Supplier.status :Supplier)        DataPropertyRange(:Supplier.status xsd:string)
-DataPropertyDomain(:Supplier.parentSupplierId :Supplier) DataPropertyRange(:Supplier.parentSupplierId xsd:string)
-DataPropertyDomain(:Supplier.country :Supplier)       DataPropertyRange(:Supplier.country xsd:string)
-DataPropertyDomain(:Supplier.preferredFlag :Supplier) DataPropertyRange(:Supplier.preferredFlag xsd:boolean)
+DataPropertyDomain(:SpendRecord.spendId :SpendRecord)
+DataPropertyRange(:SpendRecord.spendId xsd:string)
+DataPropertyDomain(:SpendRecord.invoiceId :SpendRecord)
+DataPropertyRange(:SpendRecord.invoiceId xsd:string)
+DataPropertyDomain(:SpendRecord.supplierId :SpendRecord)
+DataPropertyRange(:SpendRecord.supplierId xsd:string)
+DataPropertyDomain(:SpendRecord.commodityId :SpendRecord)
+DataPropertyRange(:SpendRecord.commodityId xsd:string)
+DataPropertyDomain(:SpendRecord.rateId :SpendRecord)
+DataPropertyRange(:SpendRecord.rateId xsd:string)
+DataPropertyDomain(:SpendRecord.originalAmount :SpendRecord)
+DataPropertyRange(:SpendRecord.originalAmount xsd:decimal)
+DataPropertyDomain(:SpendRecord.originalCurrency :SpendRecord)
+DataPropertyRange(:SpendRecord.originalCurrency xsd:string)
+DataPropertyDomain(:SpendRecord.normalizedAmount :SpendRecord)
+DataPropertyRange(:SpendRecord.normalizedAmount xsd:decimal)
+DataPropertyDomain(:SpendRecord.period :SpendRecord)
+DataPropertyRange(:SpendRecord.period xsd:string)
+DataPropertyDomain(:SpendRecord.onContract :SpendRecord)
+DataPropertyRange(:SpendRecord.onContract xsd:boolean)
 
-# Contract
-DataPropertyDomain(:Contract.contractId :Contract)  DataPropertyRange(:Contract.contractId xsd:string)
-DataPropertyDomain(:Contract.title :Contract)        DataPropertyRange(:Contract.title xsd:string)
-DataPropertyDomain(:Contract.startDate :Contract)    DataPropertyRange(:Contract.startDate xsd:date)
-DataPropertyDomain(:Contract.endDate :Contract)      DataPropertyRange(:Contract.endDate xsd:date)
-DataPropertyDomain(:Contract.totalValue :Contract)   DataPropertyRange(:Contract.totalValue xsd:decimal)
-DataPropertyDomain(:Contract.currency :Contract)     DataPropertyRange(:Contract.currency xsd:string)
-DataPropertyDomain(:Contract.status :Contract)       DataPropertyRange(:Contract.status xsd:string)
-
-# ContractScope
-DataPropertyDomain(:ContractScope.scopeId :ContractScope)       DataPropertyRange(:ContractScope.scopeId xsd:string)
-DataPropertyDomain(:ContractScope.contractId :ContractScope)    DataPropertyRange(:ContractScope.contractId xsd:string)
-DataPropertyDomain(:ContractScope.region :ContractScope)        DataPropertyRange(:ContractScope.region xsd:string)
-DataPropertyDomain(:ContractScope.legalEntity :ContractScope)   DataPropertyRange(:ContractScope.legalEntity xsd:string)
-DataPropertyDomain(:ContractScope.commodityGroup :ContractScope) DataPropertyRange(:ContractScope.commodityGroup xsd:string)
-DataPropertyDomain(:ContractScope.validFrom :ContractScope)     DataPropertyRange(:ContractScope.validFrom xsd:date)
-DataPropertyDomain(:ContractScope.validTo :ContractScope)       DataPropertyRange(:ContractScope.validTo xsd:date)
-DataPropertyDomain(:ContractScope.exclusions :ContractScope)    DataPropertyRange(:ContractScope.exclusions xsd:string)
-
-# Commodity
-DataPropertyDomain(:Commodity.commodityId :Commodity)       DataPropertyRange(:Commodity.commodityId xsd:string)
-DataPropertyDomain(:Commodity.code :Commodity)               DataPropertyRange(:Commodity.code xsd:string)
-DataPropertyDomain(:Commodity.name :Commodity)               DataPropertyRange(:Commodity.name xsd:string)
-DataPropertyDomain(:Commodity.level :Commodity)              DataPropertyRange(:Commodity.level xsd:integer)
-DataPropertyDomain(:Commodity.parentCommodityId :Commodity) DataPropertyRange(:Commodity.parentCommodityId xsd:string)
-
-# Invoice
-DataPropertyDomain(:Invoice.invoiceId :Invoice)    DataPropertyRange(:Invoice.invoiceId xsd:string)
-DataPropertyDomain(:Invoice.invoiceDate :Invoice)  DataPropertyRange(:Invoice.invoiceDate xsd:date)
-DataPropertyDomain(:Invoice.amount :Invoice)        DataPropertyRange(:Invoice.amount xsd:decimal)
-DataPropertyDomain(:Invoice.currency :Invoice)      DataPropertyRange(:Invoice.currency xsd:string)
-DataPropertyDomain(:Invoice.status :Invoice)        DataPropertyRange(:Invoice.status xsd:string)
-DataPropertyDomain(:Invoice.supplierId :Invoice)    DataPropertyRange(:Invoice.supplierId xsd:string)
-DataPropertyDomain(:Invoice.poId :Invoice)          DataPropertyRange(:Invoice.poId xsd:string)
-
-# PurchaseOrder
-DataPropertyDomain(:PurchaseOrder.poId :PurchaseOrder)       DataPropertyRange(:PurchaseOrder.poId xsd:string)
-DataPropertyDomain(:PurchaseOrder.amount :PurchaseOrder)      DataPropertyRange(:PurchaseOrder.amount xsd:decimal)
-DataPropertyDomain(:PurchaseOrder.currency :PurchaseOrder)    DataPropertyRange(:PurchaseOrder.currency xsd:string)
-DataPropertyDomain(:PurchaseOrder.status :PurchaseOrder)      DataPropertyRange(:PurchaseOrder.status xsd:string)
-DataPropertyDomain(:PurchaseOrder.supplierId :PurchaseOrder)  DataPropertyRange(:PurchaseOrder.supplierId xsd:string)
-DataPropertyDomain(:PurchaseOrder.orderDate :PurchaseOrder)   DataPropertyRange(:PurchaseOrder.orderDate xsd:date)
-
-# Item
-DataPropertyDomain(:Item.itemId :Item)          DataPropertyRange(:Item.itemId xsd:string)
-DataPropertyDomain(:Item.description :Item)      DataPropertyRange(:Item.description xsd:string)
-DataPropertyDomain(:Item.quantity :Item)          DataPropertyRange(:Item.quantity xsd:decimal)
-DataPropertyDomain(:Item.unitPrice :Item)        DataPropertyRange(:Item.unitPrice xsd:decimal)
-DataPropertyDomain(:Item.currency :Item)          DataPropertyRange(:Item.currency xsd:string)
-DataPropertyDomain(:Item.commodityId :Item)      DataPropertyRange(:Item.commodityId xsd:string)
-DataPropertyDomain(:Item.prId :Item)              DataPropertyRange(:Item.prId xsd:string)
-DataPropertyDomain(:Item.poId :Item)              DataPropertyRange(:Item.poId xsd:string)
-DataPropertyDomain(:Item.invoiceId :Item)        DataPropertyRange(:Item.invoiceId xsd:string)
-
-# FXRate
-DataPropertyDomain(:FXRate.rateId :FXRate)            DataPropertyRange(:FXRate.rateId xsd:string)
-DataPropertyDomain(:FXRate.fromCurrency :FXRate)      DataPropertyRange(:FXRate.fromCurrency xsd:string)
-DataPropertyDomain(:FXRate.toCurrency :FXRate)        DataPropertyRange(:FXRate.toCurrency xsd:string)
-DataPropertyDomain(:FXRate.rate :FXRate)              DataPropertyRange(:FXRate.rate xsd:decimal)
-DataPropertyDomain(:FXRate.effectiveDate :FXRate)     DataPropertyRange(:FXRate.effectiveDate xsd:date)
-
-# Requisition
-DataPropertyDomain(:Requisition.prId :Requisition)          DataPropertyRange(:Requisition.prId xsd:string)
-DataPropertyDomain(:Requisition.description :Requisition)    DataPropertyRange(:Requisition.description xsd:string)
-DataPropertyDomain(:Requisition.requester :Requisition)      DataPropertyRange(:Requisition.requester xsd:string)
-DataPropertyDomain(:Requisition.location :Requisition)       DataPropertyRange(:Requisition.location xsd:string)
-DataPropertyDomain(:Requisition.quantity :Requisition)        DataPropertyRange(:Requisition.quantity xsd:integer)
-DataPropertyDomain(:Requisition.costCenterId :Requisition)   DataPropertyRange(:Requisition.costCenterId xsd:string)
-DataPropertyDomain(:Requisition.status :Requisition)         DataPropertyRange(:Requisition.status xsd:string)
-
-# CostCenter
-DataPropertyDomain(:CostCenter.costCenterId :CostCenter)  DataPropertyRange(:CostCenter.costCenterId xsd:string)
-DataPropertyDomain(:CostCenter.name :CostCenter)           DataPropertyRange(:CostCenter.name xsd:string)
-DataPropertyDomain(:CostCenter.department :CostCenter)     DataPropertyRange(:CostCenter.department xsd:string)
-DataPropertyDomain(:CostCenter.region :CostCenter)         DataPropertyRange(:CostCenter.region xsd:string)
-
-# Budget
-DataPropertyDomain(:Budget.budgetId :Budget)          DataPropertyRange(:Budget.budgetId xsd:string)
-DataPropertyDomain(:Budget.costCenterId :Budget)      DataPropertyRange(:Budget.costCenterId xsd:string)
-DataPropertyDomain(:Budget.period :Budget)             DataPropertyRange(:Budget.period xsd:string)
-DataPropertyDomain(:Budget.allocatedAmount :Budget)   DataPropertyRange(:Budget.allocatedAmount xsd:decimal)
-DataPropertyDomain(:Budget.currency :Budget)           DataPropertyRange(:Budget.currency xsd:string)
-
-# ToleranceException
-DataPropertyDomain(:ToleranceException.exceptionId :ToleranceException)  DataPropertyRange(:ToleranceException.exceptionId xsd:string)
-DataPropertyDomain(:ToleranceException.invoiceId :ToleranceException)    DataPropertyRange(:ToleranceException.invoiceId xsd:string)
-DataPropertyDomain(:ToleranceException.poId :ToleranceException)          DataPropertyRange(:ToleranceException.poId xsd:string)
-DataPropertyDomain(:ToleranceException.exceptionType :ToleranceException) DataPropertyRange(:ToleranceException.exceptionType xsd:string)
-DataPropertyDomain(:ToleranceException.thresholdPct :ToleranceException) DataPropertyRange(:ToleranceException.thresholdPct xsd:decimal)
-DataPropertyDomain(:ToleranceException.actualPct :ToleranceException)    DataPropertyRange(:ToleranceException.actualPct xsd:decimal)
-DataPropertyDomain(:ToleranceException.status :ToleranceException)       DataPropertyRange(:ToleranceException.status xsd:string)
-
-# ExceptionRule
-DataPropertyDomain(:ExceptionRule.ruleId :ExceptionRule)       DataPropertyRange(:ExceptionRule.ruleId xsd:string)
-DataPropertyDomain(:ExceptionRule.commodityId :ExceptionRule)  DataPropertyRange(:ExceptionRule.commodityId xsd:string)
-DataPropertyDomain(:ExceptionRule.supplierId :ExceptionRule)   DataPropertyRange(:ExceptionRule.supplierId xsd:string)
-DataPropertyDomain(:ExceptionRule.condition :ExceptionRule)     DataPropertyRange(:ExceptionRule.condition xsd:string)
-DataPropertyDomain(:ExceptionRule.resolution :ExceptionRule)   DataPropertyRange(:ExceptionRule.resolution xsd:string)
-DataPropertyDomain(:ExceptionRule.approvedBy :ExceptionRule)   DataPropertyRange(:ExceptionRule.approvedBy xsd:string)
-DataPropertyDomain(:ExceptionRule.createdDate :ExceptionRule)  DataPropertyRange(:ExceptionRule.createdDate xsd:date)
-
-# SpendRecord
-DataPropertyDomain(:SpendRecord.spendId :SpendRecord)            DataPropertyRange(:SpendRecord.spendId xsd:string)
-DataPropertyDomain(:SpendRecord.invoiceId :SpendRecord)          DataPropertyRange(:SpendRecord.invoiceId xsd:string)
-DataPropertyDomain(:SpendRecord.supplierId :SpendRecord)         DataPropertyRange(:SpendRecord.supplierId xsd:string)
-DataPropertyDomain(:SpendRecord.commodityId :SpendRecord)        DataPropertyRange(:SpendRecord.commodityId xsd:string)
-DataPropertyDomain(:SpendRecord.rateId :SpendRecord)             DataPropertyRange(:SpendRecord.rateId xsd:string)
-DataPropertyDomain(:SpendRecord.originalAmount :SpendRecord)     DataPropertyRange(:SpendRecord.originalAmount xsd:decimal)
-DataPropertyDomain(:SpendRecord.originalCurrency :SpendRecord)   DataPropertyRange(:SpendRecord.originalCurrency xsd:string)
-DataPropertyDomain(:SpendRecord.normalizedAmount :SpendRecord)   DataPropertyRange(:SpendRecord.normalizedAmount xsd:decimal)
-DataPropertyDomain(:SpendRecord.period :SpendRecord)             DataPropertyRange(:SpendRecord.period xsd:string)
-DataPropertyDomain(:SpendRecord.onContract :SpendRecord)         DataPropertyRange(:SpendRecord.onContract xsd:boolean)
-
-
-############################
-#   Class Annotations
-############################
+DataPropertyDomain(:FXRate.rateId :FXRate)
+DataPropertyRange(:FXRate.rateId xsd:string)
+DataPropertyDomain(:FXRate.fromCurrency :FXRate)
+DataPropertyRange(:FXRate.fromCurrency xsd:string)
+DataPropertyDomain(:FXRate.toCurrency :FXRate)
+DataPropertyRange(:FXRate.toCurrency xsd:string)
+DataPropertyDomain(:FXRate.rate :FXRate)
+DataPropertyRange(:FXRate.rate xsd:decimal)
+DataPropertyDomain(:FXRate.effectiveDate :FXRate)
+DataPropertyRange(:FXRate.effectiveDate xsd:date)
 
 AnnotationAssertion(rdfs:label :Supplier "Supplier")
-AnnotationAssertion(rdfs:label :Contract "Contract")
-AnnotationAssertion(rdfs:label :ContractScope "Contract Scope")
-AnnotationAssertion(rdfs:label :Commodity "Commodity")
 AnnotationAssertion(rdfs:label :Invoice "Invoice")
-AnnotationAssertion(rdfs:label :PurchaseOrder "Purchase Order")
-AnnotationAssertion(rdfs:label :Item "Line Item")
-AnnotationAssertion(rdfs:label :FXRate "FX Rate")
-AnnotationAssertion(rdfs:label :Requisition "Purchase Requisition")
-AnnotationAssertion(rdfs:label :CostCenter "Cost Center")
-AnnotationAssertion(rdfs:label :Budget "Budget")
-AnnotationAssertion(rdfs:label :ToleranceException "Tolerance Exception")
-AnnotationAssertion(rdfs:label :ExceptionRule "Exception Rule")
+AnnotationAssertion(rdfs:label :Commodity "Commodity")
 AnnotationAssertion(rdfs:label :SpendRecord "Spend Record")
+AnnotationAssertion(rdfs:label :FXRate "FX Rate")
+AnnotationAssertion(rdfs:label :PurchaseOrder "Purchase Order")
+
+
+Declaration(Class(:ToleranceException))
+Declaration(ObjectProperty(:exception_onInvoice))
+Declaration(ObjectProperty(:exception_againstPO))
+Declaration(DataProperty(:ToleranceException.exceptionId))
+Declaration(DataProperty(:ToleranceException.invoiceId))
+Declaration(DataProperty(:ToleranceException.poId))
+Declaration(DataProperty(:ToleranceException.exceptionType))
+Declaration(DataProperty(:ToleranceException.thresholdPct))
+Declaration(DataProperty(:ToleranceException.actualPct))
+Declaration(DataProperty(:ToleranceException.status))
+
+AnnotationAssertion(rdfs:label :exception_onInvoice "exception on")
+ObjectPropertyDomain(:exception_onInvoice :ToleranceException)
+ObjectPropertyRange(:exception_onInvoice :Invoice)
+
+AnnotationAssertion(rdfs:label :exception_againstPO "exception against")
+ObjectPropertyDomain(:exception_againstPO :ToleranceException)
+ObjectPropertyRange(:exception_againstPO :PurchaseOrder)
+
+DataPropertyDomain(:ToleranceException.exceptionId :ToleranceException)
+DataPropertyRange(:ToleranceException.exceptionId xsd:string)
+DataPropertyDomain(:ToleranceException.invoiceId :ToleranceException)
+DataPropertyRange(:ToleranceException.invoiceId xsd:string)
+DataPropertyDomain(:ToleranceException.poId :ToleranceException)
+DataPropertyRange(:ToleranceException.poId xsd:string)
+DataPropertyDomain(:ToleranceException.exceptionType :ToleranceException)
+DataPropertyRange(:ToleranceException.exceptionType xsd:string)
+DataPropertyDomain(:ToleranceException.thresholdPct :ToleranceException)
+DataPropertyRange(:ToleranceException.thresholdPct xsd:decimal)
+DataPropertyDomain(:ToleranceException.actualPct :ToleranceException)
+DataPropertyRange(:ToleranceException.actualPct xsd:decimal)
+DataPropertyDomain(:ToleranceException.status :ToleranceException)
+DataPropertyRange(:ToleranceException.status xsd:string)
+
+AnnotationAssertion(rdfs:label :ToleranceException "Tolerance Exception")
 
 )
