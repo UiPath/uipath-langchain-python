@@ -465,3 +465,31 @@ class TestGetChatModelTemperatureGating:
 
         _, kwargs = mock_cls.call_args
         assert kwargs.get("temperature") == 0.5
+
+
+class TestDefaultMaxRetriesForwarding:
+    """Pins ``DEFAULT_MAX_RETRIES`` to 5 (parity with the legacy in-repo
+    retryers) and asserts the default reaches the ``uipath_langchain_client``
+    factory on the new-clients path, so the old default cannot be silently
+    reintroduced."""
+
+    def test_default_max_retries_is_5(self):
+        from uipath_langchain.chat.chat_model_factory import DEFAULT_MAX_RETRIES
+
+        assert DEFAULT_MAX_RETRIES == 5
+
+    def test_default_max_retries_forwarded_to_new_client_factory(self, mocker):
+        from uipath_langchain.chat import chat_model_factory as outer_factory
+
+        mock_factory = mocker.patch(
+            "uipath_langchain.chat.chat_model_factory.get_chat_model_factory"
+        )
+
+        outer_factory.get_chat_model(
+            "gpt-test",
+            agenthub_config="cfg",
+            use_new_llm_clients=True,
+        )
+
+        _, kwargs = mock_factory.call_args
+        assert kwargs["max_retries"] == 5
