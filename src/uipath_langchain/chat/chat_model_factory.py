@@ -59,8 +59,8 @@ _UNSET: Final[Any] = object()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 895.0
 DEFAULT_MAX_TOKENS: Final[int] = 1000
 DEFAULT_TEMPERATURE: Final[float] = 0.0
-# 5 attempts for parity with the legacy in-repo retryers (BedrockRetryer /
-# VertexRetryer) and the uipath-llm-client transport defaults.
+# 5 total attempts (initial request + up to 4 retries) for parity with the
+# legacy in-repo retryers (BedrockRetryer / VertexRetryer) and uipath-llm-client defaults.
 DEFAULT_MAX_RETRIES: Final[int] = 5
 
 
