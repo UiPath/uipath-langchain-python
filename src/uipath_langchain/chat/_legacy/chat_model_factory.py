@@ -234,7 +234,9 @@ def _get_model_info(
         matching_models = [m for m in matching_models if m.get("byomDetails") is None]
 
     if not matching_models:
-        raise ValueError(
+        from uipath.llm_client.utils.exceptions import ModelNotFoundError
+
+        raise ModelNotFoundError(
             f"model='{model}' and byo_connection_id={byo_connection_id}"
             + " is not available. It was not returned by the discovery API."
         )
