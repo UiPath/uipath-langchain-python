@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
 from uipath._utils._ssl_context import get_httpx_client_kwargs
+
+from .graph_topology import OntologyGraph, parse_ofn
 
 
 class OntologyClient:
@@ -100,6 +103,48 @@ class OntologyClient:
             resp = await client.post(url, json=body)
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
+
+    async def fetch_artifact(self, ontology: str, filename: str) -> str:
+        """Download a raw artifact file (OWL, SHACL, YARRRML, etc.).
+
+        Args:
+            ontology: Name or ID of the deployed ontology.
+            filename: Artifact filename (e.g., ``schema.ofn``).
+
+        Returns:
+            Raw text content of the artifact.
+        """
+        url = (
+            f"{self._api_base}/ontology/{ontology}"
+            f"/artifact/{filename}"
+        )
+        async with self._make_client() as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.text
+
+    async def fetch_graph(self, ontology: str) -> OntologyGraph:
+        """Fetch and parse the ontology's entity-relationship graph.
+
+        Downloads the OWL schema artifact, parses it into an
+        ``OntologyGraph`` with nodes (entities), edges (relationships),
+        and adjacency indexes. Also fetches function definitions and
+        maps them to entities.
+
+        Args:
+            ontology: Name or ID of the deployed ontology.
+
+        Returns:
+            Parsed ``OntologyGraph`` ready for EoG traversal.
+        """
+        ofn_text, functions = await asyncio.gather(
+            self.fetch_artifact(ontology, "schema.ofn"),
+            self.list_functions(ontology),
+        )
+        graph = parse_ofn(ofn_text)
+        graph.functions = functions
+        graph._build_adjacency()
+        return graph
 
     async def sparql(self, ontology: str, query: str) -> dict[str, Any]:
         """Execute a SPARQL query against an ontology.

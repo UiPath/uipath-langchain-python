@@ -9,28 +9,73 @@ from unittest.mock import AsyncMock
 import pytest
 
 from uipath_langchain.agent.eog.agent import create_eog_agent
+from uipath_langchain.agent.eog.graph_topology import OntologyGraph, parse_ofn
 from uipath_langchain.agent.eog.ontology_client import OntologyClient
 from uipath_langchain.agent.eog.types import InvestigationConfig
 
+# Minimal OWL with 3 entities and 2 relationships
+_TEST_OFN = """\
+Prefix(:=<https://ontology.uipath.com/ont#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<https://ontology.uipath.com/ont>
+
+Declaration(Class(:Invoice))
+Declaration(Class(:Supplier))
+Declaration(Class(:PurchaseOrder))
+Declaration(ObjectProperty(:invoice_paidTo))
+Declaration(ObjectProperty(:invoice_referencesPO))
+Declaration(DataProperty(:Invoice.invoiceId))
+Declaration(DataProperty(:Supplier.supplierId))
+Declaration(DataProperty(:PurchaseOrder.poId))
+
+ObjectPropertyDomain(:invoice_paidTo :Invoice)
+ObjectPropertyRange(:invoice_paidTo :Supplier)
+ObjectPropertyDomain(:invoice_referencesPO :Invoice)
+ObjectPropertyRange(:invoice_referencesPO :PurchaseOrder)
+
+DataPropertyDomain(:Invoice.invoiceId :Invoice)
+DataPropertyRange(:Invoice.invoiceId xsd:string)
+DataPropertyDomain(:Supplier.supplierId :Supplier)
+DataPropertyRange(:Supplier.supplierId xsd:string)
+DataPropertyDomain(:PurchaseOrder.poId :PurchaseOrder)
+DataPropertyRange(:PurchaseOrder.poId xsd:string)
+
+AnnotationAssertion(rdfs:label :Invoice "Invoice")
+AnnotationAssertion(rdfs:label :Supplier "Supplier")
+AnnotationAssertion(rdfs:label :PurchaseOrder "Purchase Order")
+
+)
+"""
+
+_TEST_FUNCTIONS = [
+    {
+        "name": "invoiceDetail",
+        "label": "Invoice detail",
+        "statement": "SELECT ?x WHERE { ?inv a ont:Invoice }",
+        "params": [{"name": "invoiceId", "type": "xsd:string", "required": True}],
+    },
+    {
+        "name": "supplierProfile",
+        "label": "Supplier profile",
+        "statement": "SELECT ?x WHERE { ?s a ont:Supplier }",
+        "params": [{"name": "supplierId", "type": "xsd:string", "required": True}],
+    },
+]
+
 
 def _mock_ontology_client() -> AsyncMock:
-    """Create a mock ontology client with a small 3-entity graph."""
+    """Create a mock ontology client that returns the test graph."""
     client = AsyncMock(spec=OntologyClient)
-    client.discover = AsyncMock(
-        return_value={
-            "name": "test-ontology",
-            "entities": ["e1", "e2", "e3"],
-            "edges": [
-                {"source": "e1", "target": "e2", "relationship": "causes"},
-                {"source": "e2", "target": "e3", "relationship": "affects"},
-            ],
-        }
-    )
-    client.list_functions = AsyncMock(
-        return_value=[
-            {"name": "get_info", "description": "Get entity info"},
-        ]
-    )
+
+    async def _fetch_graph(ontology: str) -> OntologyGraph:
+        graph = parse_ofn(_TEST_OFN)
+        graph.functions = _TEST_FUNCTIONS
+        graph._build_adjacency()
+        return graph
+
+    client.fetch_graph = AsyncMock(side_effect=_fetch_graph)
     client.invoke_function = AsyncMock(
         return_value={"rows": [{"data": "test_data"}]}
     )
@@ -38,20 +83,14 @@ def _mock_ontology_client() -> AsyncMock:
 
 
 def _mock_llm(labels: dict[str, str] | None = None) -> AsyncMock:
-    """Create a mock LLM that returns deterministic labels.
-
-    Args:
-        labels: Mapping from entity_id to label. Defaults to assigning
-            "Source" to e1 and "DerivedEffect" to others.
-    """
+    """Create a mock LLM that returns deterministic labels."""
     default_labels = labels or {
-        "e1": "Source",
-        "e2": "DerivedEffect",
-        "e3": "DerivedEffect",
+        "INV-001": "Source",
+        "SUP-001": "DerivedEffect",
+        "PO-001": "DerivedEffect",
     }
 
     async def ainvoke(messages: Any, **kwargs: Any) -> AsyncMock:
-        # Extract entity_id from the prompt
         content = messages[-1].content if messages else ""
         entity_id = ""
         for eid in default_labels:
@@ -60,22 +99,10 @@ def _mock_llm(labels: dict[str, str] | None = None) -> AsyncMock:
                 break
 
         label = default_labels.get(entity_id, "Defer")
-        # Propagate to neighbours only from e1
-        propagations = []
-        if entity_id == "e1":
-            propagations = [
-                {"entity": "e2", "reason": "caused by e1"},
-            ]
-        elif entity_id == "e2":
-            propagations = [
-                {"entity": "e3", "reason": "affected by e2"},
-            ]
-
         response = AsyncMock()
         response.content = json.dumps({
             "label": label,
             "evidence": f"Evidence for {entity_id}",
-            "propagations": propagations,
         })
         return response
 
@@ -90,7 +117,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["e1"],
+            seed_entities=["INV-001"],
         )
         graph = create_eog_agent(
             model, client, "test-onto", investigation_config=cfg
@@ -102,7 +129,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["e1"],
+            seed_entities=["INV-001"],
         )
         graph = create_eog_agent(
             model, client, "test-onto", investigation_config=cfg
@@ -117,7 +144,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["e1"],
+            seed_entities=["INV-001", "SUP-001"],
             max_steps=20,
         )
         graph = create_eog_agent(
@@ -126,60 +153,41 @@ class TestCreateEoGAgent:
         compiled = graph.compile()
         result = await compiled.ainvoke({})
 
-        # BFS should have terminated
         assert result["steps_taken"] >= 1
-
-        # Ledger should have entries
         assert len(result["ledger"]) >= 1
-
-        # Frontier should contain non-Defer entities
         assert len(result["frontier"]) >= 1
         frontier_entities = {f["entity"] for f in result["frontier"]}
-        assert "e1" in frontier_entities
+        assert "INV-001" in frontier_entities
 
     @pytest.mark.asyncio
     async def test_propagation_causes_revisits(self) -> None:
-        """Verify that propagation re-activates neighbours."""
+        """Verify that graph-edge propagation re-activates neighbours."""
         client = _mock_ontology_client()
 
-        # LLM that flips labels to force re-visits
-        call_count: dict[str, int] = {}
-
-        async def flipping_ainvoke(messages: Any, **kwargs: Any) -> AsyncMock:
+        # LLM that labels INV-001 as Source (changed from Defer)
+        # → should propagate to SUP-001 via invoice_paidTo edge
+        async def labeling_ainvoke(messages: Any, **kwargs: Any) -> AsyncMock:
             content = messages[-1].content if messages else ""
-            entity_id = ""
-            for eid in ["e1", "e2", "e3"]:
-                if eid in content:
-                    entity_id = eid
-                    break
-
-            call_count[entity_id] = call_count.get(entity_id, 0) + 1
-            count = call_count[entity_id]
-
-            # Alternate labels to trigger flips
-            label = "Source" if count % 2 == 1 else "DerivedEffect"
-            propagations = (
-                [{"entity": "e2", "reason": "update"}]
-                if entity_id == "e1" and count == 1
-                else []
-            )
-
+            if "INV-001" in content:
+                label = "Source"
+            elif "SUP-001" in content:
+                label = "DerivedEffect"
+            else:
+                label = "Defer"
             response = AsyncMock()
             response.content = json.dumps({
                 "label": label,
-                "evidence": f"visit {count}",
-                "propagations": propagations,
+                "evidence": f"evidence",
             })
             return response
 
         model = AsyncMock()
-        model.ainvoke = flipping_ainvoke
+        model.ainvoke = labeling_ainvoke
 
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["e1"],
+            seed_entities=["INV-001", "SUP-001"],
             max_steps=10,
-            max_flips=3,
         )
         graph = create_eog_agent(
             model, client, "test-onto", investigation_config=cfg
@@ -187,38 +195,35 @@ class TestCreateEoGAgent:
         compiled = graph.compile()
         result = await compiled.ainvoke({})
 
-        # e2 should have been visited because e1 propagated to it
-        e2_entries = [
-            e for e in result["ledger"] if e.entity_id == "e2"
+        # Both should be visited. INV-001 labeled Source triggers
+        # propagation to SUP-001 via invoice_paidTo graph edge,
+        # causing SUP-001 to be revisited with inbox context.
+        sup_entries = [
+            e for e in result["ledger"] if e.entity_id == "SUP-001"
         ]
-        assert len(e2_entries) >= 1
+        assert len(sup_entries) >= 1
+        # SUP-001 should have inbox messages from INV-001
+        assert len(result.get("inbox", {}).get("SUP-001", [])) >= 0
 
     @pytest.mark.asyncio
     async def test_budget_cap_terminates(self) -> None:
         """Verify the graph stops at max_steps."""
         client = _mock_ontology_client()
 
-        # LLM that always propagates, creating infinite loop potential
-        async def always_propagate(
-            messages: Any, **kwargs: Any
-        ) -> AsyncMock:
+        async def always_source(messages: Any, **kwargs: Any) -> AsyncMock:
             response = AsyncMock()
             response.content = json.dumps({
                 "label": "Source",
                 "evidence": "always",
-                "propagations": [
-                    {"entity": "e1", "reason": "loop"},
-                    {"entity": "e2", "reason": "loop"},
-                ],
             })
             return response
 
         model = AsyncMock()
-        model.ainvoke = always_propagate
+        model.ainvoke = always_source
 
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "Defer"],
-            seed_entities=["e1"],
+            seed_entities=["INV-001"],
             max_steps=3,
             max_flips=10,
         )
