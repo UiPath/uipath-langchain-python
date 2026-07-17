@@ -59,7 +59,9 @@ _UNSET: Final[Any] = object()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 895.0
 DEFAULT_MAX_TOKENS: Final[int] = 1000
 DEFAULT_TEMPERATURE: Final[float] = 0.0
-DEFAULT_MAX_RETRIES: Final[int] = 3
+# 5 attempts for parity with the legacy in-repo retryers (BedrockRetryer /
+# VertexRetryer) and the uipath-llm-client transport defaults.
+DEFAULT_MAX_RETRIES: Final[int] = 5
 
 
 def get_chat_model(
@@ -99,7 +101,7 @@ def get_chat_model(
             forward an explicit unset value (lets the underlying client apply
             its own default or use no limit).
         timeout: Request timeout in seconds. Defaults to 895 seconds.
-        max_retries: Max retry count. Defaults to 3.
+        max_retries: Max retry count. Defaults to 5.
         callbacks: LangChain callbacks (handlers or a manager) attached to the
             returned chat model. Accepts ``list[BaseCallbackHandler]`` or a
             ``BaseCallbackManager``. Forwarded only when explicitly set.
