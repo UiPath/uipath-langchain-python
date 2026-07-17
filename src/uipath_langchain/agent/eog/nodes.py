@@ -149,8 +149,10 @@ def _make_fetch_context(
                 fn_name = fn.get("name", "")
                 params = fn.get("params", [])
 
-                # Build params: match function param names to entity ID
-                call_params = _bind_params(params, entity_id, entity_type)
+                # Build params using YARRRML key property mapping
+                call_params = _bind_params(
+                    params, entity_id, entity_type, graph.key_properties,
+                )
                 if call_params is None and params:
                     # Function has required params we can't bind — skip
                     continue
@@ -187,35 +189,36 @@ def _bind_params(
     params: list[dict[str, Any]],
     entity_id: str,
     entity_type: str,
+    key_properties: dict[str, str] | None = None,
 ) -> dict[str, str] | None:
     """Bind function params to the current entity ID.
 
-    Maps param names to the entity ID using naming conventions:
-    - ``invoiceId`` for entity type ``Invoice`` with ID ``INV-2004``
-    - ``supplierId`` for entity type ``Supplier`` with ID ``SUP-001``
+    Uses the key property name from YARRRML (e.g., ``exceptionId`` for
+    ``ToleranceException``) to match function params. Falls back to
+    naming conventions if YARRRML key is unavailable.
 
     Returns None if a required param can't be bound.
     """
     if not params:
         return None
 
+    # The authoritative key property name from YARRRML subject template
+    yarrrml_key = (key_properties or {}).get(entity_type)
+
     bound: dict[str, str] = {}
     for param in params:
         pname = param.get("name", "")
         required = param.get("required", False)
 
-        # Try: paramName matches entityType + "Id" pattern
-        expected_key = entity_type[0].lower() + entity_type[1:] + "Id"
-        alt_key = entity_type.lower() + "Id"
-        parent_key = "parent" + entity_type + "Id"
-
-        if pname == expected_key or pname == alt_key or pname == parent_key:
+        # 1. Match against YARRRML key property (authoritative)
+        if yarrrml_key and pname == yarrrml_key:
+            bound[pname] = entity_id
+        # 2. Fallback: naming convention (entityType + "Id")
+        elif pname == entity_type[0].lower() + entity_type[1:] + "Id":
             bound[pname] = entity_id
         elif pname.endswith("Id") and pname[:-2].lower() == entity_type.lower():
             bound[pname] = entity_id
         elif required:
-            # Required param we can't bind — this function doesn't
-            # apply to a single instance of this entity type
             return None
 
     return bound if bound else None

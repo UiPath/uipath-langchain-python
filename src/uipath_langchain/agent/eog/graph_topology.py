@@ -1,9 +1,25 @@
 """Parse OWL Functional Notation into an in-memory graph topology.
 
-The ontology-runtime stores schemas as OWL 2 Functional Notation (``.ofn``).
-This module extracts the entity-relationship graph from the OWL text so the
-EoG controller can traverse it deterministically — without relying on the LLM
-to decide what to explore next.
+.. warning:: **POC only — not for production.**
+
+   This module uses regex to parse OWL Functional Notation client-side.
+   It works for the POC because the ontology-runtime produces clean, simple
+   OFN, but it will break on non-trivial OWL (nested axioms, imports,
+   complex class expressions).
+
+   The production implementation should fetch the resolved graph directly
+   from the ontology-runtime via a dedicated discovery endpoint (e.g.,
+   ``GET /ontology/{name}/graph``) that returns the graph as JSON with:
+
+   - Entities (Object Types) with their data properties and bindings
+   - Relationships (Link Types) with domain, range, join keys, cardinality
+   - Constraints (SHACL shapes) per entity
+   - Functions with their ``touches`` declarations and parameter schemas
+   - Neighbor adjacency pre-computed server-side
+
+   The server already has all of this in ``OntologySnapshot`` — it's one
+   serialization step. The ``OntologyGraph`` dataclass below remains the
+   client-side representation; only the parsing/fetching changes.
 
 The parsed graph is a lightweight adjacency structure:
 - Nodes = OWL classes (entity types)
@@ -61,6 +77,9 @@ class OntologyGraph:
     nodes: dict[str, OntologyNode] = field(default_factory=dict)
     edges: list[OntologyEdge] = field(default_factory=list)
     functions: list[dict[str, Any]] = field(default_factory=list)
+    key_properties: dict[str, str] = field(default_factory=dict)
+    """Entity name → key property name from YARRRML subject template.
+    E.g. ``{"Supplier": "supplierId", "ToleranceException": "exceptionId"}``."""
 
     # Pre-built adjacency (call _build_adjacency after construction)
     _outgoing: dict[str, list[OntologyEdge]] = field(default_factory=dict)
@@ -154,6 +173,7 @@ class OntologyGraph:
                 for e in self.edges
             ],
             "functions": self.functions,
+            "key_properties": self.key_properties,
         }
 
     @classmethod
@@ -185,6 +205,7 @@ class OntologyGraph:
             nodes=nodes,
             edges=edges,
             functions=data.get("functions", []),
+            key_properties=data.get("key_properties", {}),
         )
         graph._build_adjacency()
         return graph
@@ -318,6 +339,41 @@ def _infer_touched_entities(
 
 
 # ── ID prefix convention ────────────────────────────────────────────
+
+def parse_yarrrml_keys(yarrrml_text: str) -> dict[str, str]:
+    """Extract entity key property names from YARRRML subject templates.
+
+    Parses ``s: ont:EntityName/$(keyProp)`` to build a mapping of
+    entity name → key property name.
+
+    Args:
+        yarrrml_text: The YARRRML mapping file content.
+
+    Returns:
+        Dict mapping entity name to its key property name,
+        e.g. ``{"Supplier": "supplierId", "ToleranceException": "exceptionId"}``.
+    """
+    key_map: dict[str, str] = {}
+    current_entity: str | None = None
+    in_mappings = False
+    for line in yarrrml_text.split("\n"):
+        # Track when we're inside the mappings block
+        if line.rstrip() == "mappings:":
+            in_mappings = True
+            continue
+        if not in_mappings:
+            continue
+        # Entity name: exactly 2-space indent, ends with ":"
+        # e.g. "  Supplier:" but NOT "    sources:" or "      - access:"
+        if re.match(r"^  [A-Z]\w*:$", line):
+            current_entity = line.strip()[:-1]
+        # Subject template: "    s: ont:EntityName/$(keyProp)"
+        if current_entity and line.strip().startswith("s:"):
+            m = re.search(r"\$\((\w+)\)", line)
+            if m:
+                key_map[current_entity] = m.group(1)
+    return key_map
+
 
 _ID_PREFIXES: dict[str, str] = {
     "INV-": "Invoice",

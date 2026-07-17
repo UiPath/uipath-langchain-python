@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
-from .graph_topology import OntologyGraph, parse_ofn
+from .graph_topology import OntologyGraph, parse_ofn, parse_yarrrml_keys
 
 
 class OntologyClient:
@@ -137,12 +137,14 @@ class OntologyClient:
         Returns:
             Parsed ``OntologyGraph`` ready for EoG traversal.
         """
-        ofn_text, functions = await asyncio.gather(
+        ofn_text, yarrrml_text, functions = await asyncio.gather(
             self.fetch_artifact(ontology, "schema.ofn"),
+            self.fetch_artifact(ontology, "mapping.yarrrml.yml"),
             self.list_functions(ontology),
         )
         graph = parse_ofn(ofn_text)
         graph.functions = functions
+        graph.key_properties = parse_yarrrml_keys(yarrrml_text)
         graph._build_adjacency()
         return graph
 
