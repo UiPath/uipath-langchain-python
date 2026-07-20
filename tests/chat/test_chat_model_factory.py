@@ -499,7 +499,9 @@ class TestGetChatModelModelNotFound:
     """The dispatcher get_chat_model maps a discovery-miss to AgentStartupError."""
 
     @pytest.mark.parametrize("byo_connection_id", [None, "conn-1"])
-    def test_maps_model_not_found_to_agent_startup_error(self, mocker, byo_connection_id):
+    def test_maps_model_not_found_to_agent_startup_error(
+        self, mocker, byo_connection_id
+    ):
         from uipath.llm_client.utils.exceptions import ModelNotFoundError
         from uipath.runtime.errors import UiPathErrorCategory
 
