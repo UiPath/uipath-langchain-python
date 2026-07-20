@@ -530,6 +530,57 @@ class TestGetJobAttachments:
         assert str(result[0].id) == valid_uuid
         assert result[0].full_name == "model-dump.pdf"
 
+    def test_accepts_attachment_field_as_nested_model_instance(self):
+        """Regression: at runtime tool args are coerced into the generated input
+        model, so an attachment arrives as a model instance whose ``Metadata``
+        object is a nested sub-model (``DynamicType_*``), not a dict. This must
+        not raise (previously failed with "Input should be a valid dictionary").
+        """
+        schema = {
+            "type": "object",
+            "properties": {"newArgument": {"$ref": "#/definitions/job-attachment"}},
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "x-uipath-resource-kind": "JobAttachment",
+                    "required": ["ID"],
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                        "Metadata": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+        valid_uuid = "550e8400-e29b-41d4-a716-446655440500"
+
+        # Coerce raw input through the generated model exactly as the runtime
+        # does, then pass it inside kwargs (a dict holding a model instance) as
+        # process_tool_fn does. Metadata is now a nested model, not a dict.
+        validated: Any = model.model_validate(
+            {
+                "newArgument": {
+                    "ID": valid_uuid,
+                    "FullName": "workbook.xlsx",
+                    "MimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "Metadata": {"size": "38472"},
+                }
+            }
+        )
+        assert isinstance(validated.newArgument.Metadata, BaseModel)
+        kwargs = {"newArgument": validated.newArgument}
+
+        result = get_job_attachments(model, kwargs)
+
+        assert len(result) == 1
+        assert str(result[0].id) == valid_uuid
+        assert result[0].metadata == {"size": "38472"}
+
     def test_raises_system_error_with_field_on_invalid_attachment_shape(self):
         """A valid-UUID attachment missing a required field fails loud as SYSTEM,
         naming the offending field in a human-readable message."""
