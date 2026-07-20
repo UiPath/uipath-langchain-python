@@ -6,6 +6,7 @@ from uipath_langchain.chat._legacy.chat_model_factory import (
     _API_FLAVOR_TO_PROVIDER,
     _DEFAULT_API_FLAVOR,
     _compute_vendor_and_api_flavor,
+    _get_model_info,
     get_chat_model,
 )
 from uipath_langchain.chat._legacy.types import APIFlavor, LLMProvider
@@ -493,3 +494,39 @@ class TestDefaultMaxRetriesForwarding:
 
         _, kwargs = mock_factory.call_args
         assert kwargs["max_retries"] == 5
+
+
+class TestGetModelInfo:
+    """Test cases for _get_model_info discovery lookups."""
+
+    def test_raises_model_not_found_when_absent_from_discovery(self, mocker):
+        """A model missing from discovery raises the typed ModelNotFoundError."""
+        from uipath.llm_client.utils.exceptions import ModelNotFoundError
+
+        mocker.patch(
+            "uipath_langchain.chat._legacy.chat_model_factory._fetch_discovery",
+            return_value=[{"modelName": "gpt-4o"}],
+        )
+
+        with pytest.raises(ModelNotFoundError) as exc_info:
+            _get_model_info("does-not-exist", "agentsruntime", None)
+
+        assert isinstance(exc_info.value, ValueError)
+        assert "does-not-exist" in str(exc_info.value)
+
+    def test_raises_model_not_found_when_byo_connection_mismatch(self, mocker):
+        """A model present but under a different BYO connection is not a match."""
+        from uipath.llm_client.utils.exceptions import ModelNotFoundError
+
+        mocker.patch(
+            "uipath_langchain.chat._legacy.chat_model_factory._fetch_discovery",
+            return_value=[
+                {
+                    "modelName": "gpt-4o",
+                    "byomDetails": {"integrationServiceConnectionId": "conn-a"},
+                }
+            ],
+        )
+
+        with pytest.raises(ModelNotFoundError):
+            _get_model_info("gpt-4o", "agentsruntime", "conn-b")
