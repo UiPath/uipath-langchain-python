@@ -14,6 +14,7 @@ from typing import Any, Final
 
 from langchain_core.callbacks import BaseCallbackHandler, Callbacks
 from langchain_core.language_models import BaseChatModel
+from uipath.llm_client.utils.exceptions import ModelNotFoundError
 from uipath.llm_client.utils.headers import (
     get_dynamic_request_headers,
     set_dynamic_request_headers,
@@ -125,40 +126,69 @@ def get_chat_model(
     # keeps the wiring consistent.
     callbacks = _ensure_trace_context_callback(callbacks)
 
-    if not use_new_llm_clients:
-        return _legacy_chat_model(
+    try:
+        if not use_new_llm_clients:
+            return _legacy_chat_model(
+                model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                agenthub_config=agenthub_config,
+                byo_connection_id=byo_connection_id,
+                **kwargs,
+            )
+
+        optional_kwargs = {
+            k: v
+            for k, v in {
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+                "max_retries": max_retries,
+                "callbacks": callbacks,
+            }.items()
+            if v is not _UNSET
+        }
+
+        return get_chat_model_factory(
             model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            client_settings=client_settings,
+            routing_mode=routing_mode,
+            vendor_type=vendor_type,
+            api_flavor=api_flavor,
+            custom_class=custom_class,
+            agenthub_config=agenthub_config,
+            **optional_kwargs,
             **kwargs,
         )
+    except ModelNotFoundError as e:
+        from uipath.runtime.errors import UiPathErrorCategory
 
-    optional_kwargs = {
-        k: v
-        for k, v in {
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "timeout": timeout,
-            "max_retries": max_retries,
-            "callbacks": callbacks,
-        }.items()
-        if v is not _UNSET
-    }
+        from uipath_langchain.agent.exceptions import (
+            AgentStartupError,
+            AgentStartupErrorCode,
+        )
 
-    return get_chat_model_factory(
-        model,
-        byo_connection_id=byo_connection_id,
-        client_settings=client_settings,
-        routing_mode=routing_mode,
-        vendor_type=vendor_type,
-        api_flavor=api_flavor,
-        custom_class=custom_class,
-        agenthub_config=agenthub_config,
-        **optional_kwargs,
-        **kwargs,
-    )
+        if byo_connection_id:
+            detail = (
+                f"The model '{model}' is not available for connection "
+                f"'{byo_connection_id}'. Check that the bring-your-own-model "
+                "configuration for this connection is correct and that the "
+                "connection exposes this model."
+            )
+        else:
+            detail = (
+                f"The model '{model}' is not available. Verify the model name in "
+                "the agent configuration is correct and that the model is enabled "
+                "for this tenant. If the error persists, contact your administrator."
+            )
+
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.LLM_INVALID_MODEL,
+            title="LLM model not available",
+            detail=detail,
+            category=UiPathErrorCategory.DEPLOYMENT,
+        ) from e
 
 
 def _ensure_trace_context_callback(callbacks: Callbacks) -> list[BaseCallbackHandler]:
