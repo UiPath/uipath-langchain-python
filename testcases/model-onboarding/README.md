@@ -97,13 +97,13 @@ leg is prod.
 > is not rolled out to the prod tenant yet — a provisioning signal, not a test
 > bug.
 
-## Mechanism C — push/PR gate (the committed `input.json`)
+## Not run on push/PR
 
-`.github/workflows/integration_tests.yml` auto-discovers this directory (the
-hyphen in `model-onboarding` is required) and runs it — using the **committed**
-`input.json` — across `alpha`, `staging`, and `cloud` on every push/PR, as one
-leg of the full integration matrix. This is the regression gate; use
-Mechanism B for ad-hoc model runs.
+This testcase is **deliberately excluded** from the push/PR integration matrix
+(`integration_tests.yml` filters `model-onboarding` out of its discovery). It
+runs **only on demand** via Mechanism A (local) or Mechanism B (the
+`model_onboarding.yml` dispatch workflow). The committed `input.json` is just a
+default/example spec — dispatch inputs override it at runtime.
 
 Optional enhancement (not wired): add a `workflow_dispatch:` trigger with a
 `model_spec` input so a run can be launched without a commit.
