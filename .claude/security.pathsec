@@ -1,0 +1,8 @@
+# PathSec (built by the Product Security Team) security bootstrap lock
+# Auto-generated — do not edit manually
+# For any issues with the plugin security@uipath-claude-marketplace or
+# security-guidance@claude-plugins-official reach out to tiberiu.baron@uipath.com
+# You can always uninstall the plugins (for now), but don't modify this file — it will be reinstalled automatically.
+version=1
+hash=891091f10768c9c2e971dac6d0e43cf632d37cd11295bb08bcf18fb2d4694a9c
+timestamp=2026-07-17T13:14:04Z
