@@ -171,10 +171,8 @@ def get_chat_model(
 
         if byo_connection_id:
             detail = (
-                f"The model '{model}' is not available for connection "
-                f"'{byo_connection_id}'. Check that the bring-your-own-model "
-                "configuration for this connection is correct and that the "
-                "connection exposes this model."
+                f"The model '{model}' is not available. Check that your custom "
+                "Model Configuration is available on this tenant."
             )
         else:
             detail = (
