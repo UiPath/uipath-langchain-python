@@ -8,6 +8,7 @@ from uipath_langchain.agent.eog.types import (
     Belief,
     EoGState,
     ExplanatoryEdge,
+    FunctionSpec,
     InvestigationConfig,
     LedgerEntry,
 )
@@ -33,6 +34,38 @@ class TestBelief:
         assert data == {"label": "Source", "evidence": "test", "flip_count": 0}
         restored = Belief.model_validate(data)
         assert restored == b
+
+
+class TestFunctionSpec:
+    def test_required_params(self) -> None:
+        fn = FunctionSpec(
+            name="exceptionContext",
+            params=[
+                {"name": "exceptionId", "type": "xsd:string", "required": True},
+            ],
+            outputs=[
+                {"name": "invoiceId", "type": "xsd:string"},
+                {"name": "poAmount", "type": "xsd:decimal"},
+            ],
+            touches=["ToleranceException", "Invoice", "PurchaseOrder"],
+        )
+        assert fn.required_params == ["exceptionId"]
+        assert fn.param_names == {"exceptionId"}
+        assert fn.output_names == {"invoiceId", "poAmount"}
+
+    def test_no_params(self) -> None:
+        fn = FunctionSpec(name="openExceptions")
+        assert fn.required_params == []
+        assert fn.param_names == set()
+        assert fn.output_names == set()
+
+    def test_touches_list(self) -> None:
+        fn = FunctionSpec(
+            name="invoiceDetail",
+            touches=["Invoice", "Supplier", "PurchaseOrder"],
+        )
+        assert "Invoice" in fn.touches
+        assert len(fn.touches) == 3
 
 
 class TestLedgerEntry:
@@ -86,6 +119,8 @@ class TestEoGState:
         assert state.ledger == []
         assert state.steps_taken == 0
         assert state.investigation_config is None
+        assert state.function_cache == {}
+        assert state.discovered_entities == {}
 
     def test_beliefs_merge_dicts_reducer(self) -> None:
         left = {"e1": Belief(label="A")}
@@ -111,6 +146,16 @@ class TestEoGState:
         )
         result = operator.add([entry1], [entry2])
         assert len(result) == 2
+
+    def test_state_with_function_cache(self) -> None:
+        state = EoGState(
+            function_cache={
+                "Invoice": [{"name": "invoiceDetail", "touches": ["Invoice"]}],
+            },
+            discovered_entities={"INV-2004": "Invoice"},
+        )
+        assert "Invoice" in state.function_cache
+        assert state.discovered_entities["INV-2004"] == "Invoice"
 
     def test_state_with_config(self) -> None:
         cfg = InvestigationConfig(label_vocabulary=["X"])

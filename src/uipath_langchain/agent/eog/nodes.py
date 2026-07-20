@@ -1,14 +1,11 @@
-"""Node functions for the EoG (Explanations over Graphs) agent graph.
+"""Node functions for the EoG (Explanations over Graphs) agent.
 
-Implements the EoG algorithm from arXiv:2601.17915:
-- Bootstrap: fetch graph topology, seed entities, initialize beliefs
-- Pop: BFS dequeue from active set
-- Fetch context (Context Contract): bounded per-entity evidence via
-  graph-aware function dispatch + 1-hop neighbor beliefs + inbox
-- Policy (Abductive Policy π_abd): stateless LLM labels one entity
-- Update: write belief to immutable ledger, track flips, apply damping
-- Propagate: broadcast along GRAPH EDGES (not LLM suggestions)
-- Frontier: compute minimal explanatory set (irreducible origins)
+Redesigned algorithm — no upfront graph fetch. Function definitions are
+the navigation contract: ``touches`` = adjacency, ``outputs`` = evidence
+schema, ``params`` = what you need to get there.
+
+Flow: seed → pop → discover → gather → label → update → propagate → pop
+      └─ synthesize (when active_set empty or budget exhausted)
 """
 
 from __future__ import annotations
@@ -22,214 +19,536 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .graph_topology import OntologyGraph
 from .ontology_client import OntologyClient
-from .types import Belief, EoGState, ExplanatoryEdge, InvestigationConfig, LedgerEntry
+from .types import (
+    Belief,
+    EoGState,
+    ExplanatoryEdge,
+    FunctionSpec,
+    InvestigationConfig,
+    LedgerEntry,
+)
 
 _NodeFn = Callable[[EoGState], Coroutine[Any, Any, dict[str, Any]]]
 
 logger = logging.getLogger(__name__)
 
-_POLICY_PROMPT_TEMPLATE = """\
-You are investigating entity "{entity_id}" (type: {entity_type}) in an \
-ontology-based investigation.
+# ── ID prefix → entity type mapping ──────────────────────────────
 
-Available labels: {label_vocabulary}
-
-Entity data (from ontology functions):
-{function_data}
-
-Graph neighbors and their current beliefs:
-{neighbor_context}
-
-Messages received from neighbors (belief propagation):
-{inbox_messages}
-
-Based on the evidence, assign ONE label from the vocabulary.
-Explain your reasoning concisely.
-
-Respond in valid JSON only:
-{{"label": "...", "evidence": "..."}}"""
+_ID_PREFIXES: dict[str, str] = {
+    "INV-": "Invoice",
+    "SUP-": "Supplier",
+    "PO-": "PurchaseOrder",
+    "EXC-": "ToleranceException",
+    "COM-": "Commodity",
+    "RULE-": "ExceptionRule",
+    "CTR-": "Contract",
+    "PR-": "Requisition",
+    "SPD-": "SpendRecord",
+    "FX-": "FXRate",
+    "SCP-": "ContractScope",
+    "CC-": "CostCenter",
+    "BUD-": "Budget",
+    "ITM-": "Item",
+}
 
 
-# ── Bootstrap ──────────────────────────────────────────────────────
+def resolve_entity_type(entity_id: str) -> str | None:
+    """Resolve an entity ID to its type via prefix convention."""
+    for prefix, entity_type in _ID_PREFIXES.items():
+        if entity_id.startswith(prefix):
+            return entity_type
+    return None
 
-def _make_bootstrap(
-    client: OntologyClient,
-    ontology: str,
-    config: InvestigationConfig | None,
-) -> _NodeFn:
-    """Create bootstrap node: fetch graph topology, seed beliefs."""
 
-    async def _bootstrap(state: EoGState) -> dict[str, Any]:
+# ── Seed ──────────────────────────────────────────────────────────
+
+def _make_seed(config: InvestigationConfig | None) -> _NodeFn:
+    """Create seed node: initialize beliefs, no graph fetch."""
+
+    async def _seed(state: EoGState) -> dict[str, Any]:
         cfg = config or state.investigation_config or InvestigationConfig(
             label_vocabulary=["Defer"]
         )
 
-        # Fetch the ACTUAL graph topology from OWL + functions
-        graph = await client.fetch_graph(ontology)
-
         beliefs: dict[str, Belief] = {}
+        discovered: dict[str, str] = {}
         for entity_id in cfg.seed_entities:
             beliefs[entity_id] = Belief(
                 label=cfg.default_label,
                 evidence="Initial seed entity.",
             )
+            entity_type = resolve_entity_type(entity_id)
+            if entity_type:
+                discovered[entity_id] = entity_type
 
         return {
-            "ontology_graph": graph.to_dict(),
             "beliefs": beliefs,
+            "discovered_entities": discovered,
             "active_set": list(cfg.seed_entities),
             "steps_taken": 0,
             "investigation_config": cfg,
         }
 
-    return _bootstrap
+    return _seed
 
 
-# ── Pop ────────────────────────────────────────────────────────────
+# ── Pop ───────────────────────────────────────────────────────────
 
 async def pop_node(state: EoGState) -> dict[str, Any]:
-    """Dequeue next entity from active_set (FIFO BFS order)."""
+    """Dequeue next entity from active_set using priority ordering.
+
+    Priority: entities with non-default labels (Source, PolicyViolation)
+    are visited before Defer entities. Within the same priority,
+    FIFO order is preserved.
+    """
     active = list(state.active_set)
-    entity = active.pop(0) if active else ""
+    if not active:
+        return {"current_entity": "", "active_set": []}
+
+    cfg = state.investigation_config
+    default_label = cfg.default_label if cfg else "Defer"
+
+    # Sort: non-default labels first (they have evidence worth propagating),
+    # then entities with inbox messages, then the rest
+    def _priority(eid: str) -> int:
+        belief = state.beliefs.get(eid)
+        if not belief:
+            return 2  # unknown — low priority
+        if belief.label != default_label:
+            return 0  # active finding — high priority
+        if state.inbox.get(eid):
+            return 1  # has inbox messages — medium
+        return 2  # default label, no messages — low
+
+    active.sort(key=_priority)
+    entity = active.pop(0)
     return {"current_entity": entity, "active_set": active}
 
 
 def should_continue(state: EoGState) -> str:
-    """Route: continue traversal or compute frontier."""
+    """Route: continue traversal or synthesize.
+
+    Stops when any of:
+    - active_set is empty (no more entities to visit)
+    - step budget exhausted
+    - token budget exhausted
+    - convergence: N consecutive visits with no belief change
+    """
+    if not state.current_entity:
+        return "synthesize"
+
     cfg = state.investigation_config
     max_steps = cfg.max_steps if cfg else 50
+    max_tokens = cfg.max_tokens if cfg else 0
+    convergence_window = cfg.convergence_window if cfg else 5
 
-    if state.current_entity and state.steps_taken < max_steps:
-        return "fetch_context"
-    return "frontier"
+    # Step budget
+    if state.steps_taken >= max_steps:
+        logger.info("Budget: step limit %d reached", max_steps)
+        return "synthesize"
+
+    # Token budget
+    total_tokens = state.total_input_tokens + state.total_output_tokens
+    if max_tokens > 0 and total_tokens >= max_tokens:
+        logger.info("Budget: token limit %d reached (%d used)", max_tokens, total_tokens)
+        return "synthesize"
+
+    # Convergence: no belief changes in last N visits
+    if convergence_window > 0 and state.consecutive_no_change >= convergence_window:
+        logger.info(
+            "Converged: %d consecutive visits with no belief change",
+            state.consecutive_no_change,
+        )
+        return "synthesize"
+
+    return "discover"
 
 
-# ── Context Contract (CxC) ─────────────────────────────────────────
+# ── Discover ──────────────────────────────────────────────────────
 
-def _make_fetch_context(
+def _make_discover(
     client: OntologyClient,
     ontology: str,
 ) -> _NodeFn:
-    """Create fetch_context node: graph-aware bounded evidence per entity."""
+    """Create discover node: fetch functions touching this entity type.
 
-    async def _fetch_context(state: EoGState) -> dict[str, Any]:
+    Results are cached in ``function_cache`` per entity type so
+    subsequent visits to the same type skip the network call.
+    """
+
+    async def _discover(state: EoGState) -> dict[str, Any]:
         entity_id = state.current_entity
+        entity_type = (
+            state.discovered_entities.get(entity_id)
+            or resolve_entity_type(entity_id)
+        )
+
+        if not entity_type:
+            return {"context_packet": {"entity_id": entity_id, "entity_type": "Unknown", "functions": [], "evidence": []}}
+
+        # Cache hit — skip network call
+        if entity_type in state.function_cache:
+            fn_dicts = state.function_cache[entity_type]
+        else:
+            fn_dicts = await client.list_functions(
+                ontology, touches=entity_type,
+            )
+
+        return {
+            "function_cache": {entity_type: fn_dicts},
+            "context_packet": {
+                "entity_id": entity_id,
+                "entity_type": entity_type,
+                "functions": fn_dicts,
+                "evidence": [],
+            },
+        }
+
+    return _discover
+
+
+# ── Gather ────────────────────────────────────────────────────────
+
+def _make_gather(
+    client: OntologyClient,
+    ontology: str,
+) -> _NodeFn:
+    """Create gather node: invoke functions, chain params from results.
+
+    Two-phase binding:
+    1. Primary: bind params matching the current entity's key.
+    2. Secondary: bind params from values discovered in primary results.
+    """
+
+    async def _gather(state: EoGState) -> dict[str, Any]:
+        ctx = state.context_packet
+        entity_id = ctx.get("entity_id", state.current_entity)
+        entity_type = ctx.get("entity_type", "Unknown")
+        fn_dicts = ctx.get("functions", [])
         cfg = state.investigation_config
         max_results = cfg.max_results_per_function if cfg else 50
 
-        # Reconstruct graph from state
-        graph = OntologyGraph.from_dict(state.ontology_graph)
-        entity_type = graph.entity_for_id(entity_id)
+        functions = [FunctionSpec(**fd) for fd in fn_dicts]
 
-        # 1. Topological context: 1-hop neighbors from the GRAPH
+        # Phase 1: invoke functions whose key param matches entity ID
+        primary_results: list[dict[str, Any]] = []
+        deferred: list[FunctionSpec] = []
+        discovered_values: dict[str, str] = {}  # param_name → value
+
+        for fn in functions:
+            bound = _bind_primary(fn, entity_id, entity_type)
+            if bound is not None:
+                result = await _safe_invoke(
+                    client, ontology, fn.name, bound, max_results,
+                )
+                if result:
+                    primary_results.append(result)
+                    # Extract values for secondary binding
+                    _extract_values(result, fn, discovered_values)
+            elif fn.required_params:
+                deferred.append(fn)
+            else:
+                # No params required — invoke directly
+                result = await _safe_invoke(
+                    client, ontology, fn.name, None, max_results,
+                )
+                if result:
+                    primary_results.append(result)
+                    _extract_values(result, fn, discovered_values)
+
+        # Phase 2: invoke deferred functions using discovered values
+        secondary_results: list[dict[str, Any]] = []
+        for fn in deferred:
+            bound = _bind_secondary(fn, discovered_values)
+            if bound is not None:
+                result = await _safe_invoke(
+                    client, ontology, fn.name, bound, max_results,
+                )
+                if result:
+                    secondary_results.append(result)
+                    _extract_values(result, fn, discovered_values)
+
+        all_results = primary_results + secondary_results
+
+        # Discover new entity instances from result values
+        new_entities: dict[str, str] = {}
+        for param_name, value in discovered_values.items():
+            if not value or value == entity_id:
+                continue
+            discovered_type = _type_from_param_name(param_name)
+            if discovered_type and value not in state.beliefs:
+                new_entities[value] = discovered_type
+
+        # Build neighbor beliefs from existing beliefs
         neighbor_beliefs: dict[str, dict[str, Any]] = {}
-        if entity_type:
-            for edge in graph.edges_of(entity_type):
-                # Find instance-level neighbors from beliefs
-                other_type = edge.target if edge.source == entity_type else edge.source
-                for eid, belief in state.beliefs.items():
-                    if eid != entity_id and graph.entity_for_id(eid) == other_type:
-                        neighbor_beliefs[eid] = {
-                            "label": belief.label,
-                            "evidence": belief.evidence,
-                            "entity_type": other_type,
-                            "relationship": edge.label,
-                        }
+        for eid, belief in state.beliefs.items():
+            if eid != entity_id and eid in new_entities:
+                neighbor_beliefs[eid] = {
+                    "label": belief.label,
+                    "evidence": belief.evidence,
+                    "entity_type": new_entities.get(eid, "Unknown"),
+                }
+        # Also include already-known neighbors
+        for eid, belief in state.beliefs.items():
+            if eid != entity_id and eid not in neighbor_beliefs:
+                eid_type = state.discovered_entities.get(eid)
+                if eid_type and eid_type in {
+                    t for fn in functions for t in fn.touches
+                }:
+                    neighbor_beliefs[eid] = {
+                        "label": belief.label,
+                        "evidence": belief.evidence,
+                        "entity_type": eid_type,
+                    }
 
-        # 2. Inbox messages (from belief propagation)
         inbox_messages = state.inbox.get(entity_id, [])
 
-        # 3. Invoke relevant functions using graph-aware matching
-        function_results: list[dict[str, Any]] = []
-        if entity_type:
-            fns = graph.functions_for(entity_type)
-            for fn in fns:
-                fn_name = fn.get("name", "")
-                params = fn.get("params", [])
-
-                # Build params using YARRRML key property mapping
-                call_params = _bind_params(
-                    params, entity_id, entity_type, graph.key_properties,
+        # Initialize beliefs for newly discovered entities
+        new_beliefs: dict[str, Belief] = {}
+        default_label = cfg.default_label if cfg else "Defer"
+        for eid, etype in new_entities.items():
+            if eid not in state.beliefs:
+                new_beliefs[eid] = Belief(
+                    label=default_label,
+                    evidence=f"Discovered from {entity_id} via function results.",
                 )
-                if call_params is None and params:
-                    # Function has required params we can't bind — skip
-                    continue
 
-                try:
-                    result = await client.invoke_function(
-                        ontology, fn_name, call_params
-                    )
-                    rows = result.get("rows", [])
-                    function_results.append({
-                        "function": fn_name,
-                        "rows": rows[:max_results],
-                        "row_count": len(rows),
-                    })
-                except Exception:
-                    logger.debug(
-                        "Function %s failed for %s", fn_name, entity_id,
-                        exc_info=True,
-                    )
-
-        context_packet: dict[str, Any] = {
-            "entity_id": entity_id,
-            "entity_type": entity_type or "Unknown",
-            "function_results": function_results,
-            "neighbor_beliefs": neighbor_beliefs,
-            "inbox_messages": inbox_messages,
+        return {
+            "context_packet": {
+                "entity_id": entity_id,
+                "entity_type": entity_type,
+                "evidence": all_results,
+                "neighbor_beliefs": neighbor_beliefs,
+                "inbox_messages": inbox_messages,
+                "discovered_values": discovered_values,
+            },
+            "beliefs": new_beliefs,
+            "discovered_entities": new_entities,
         }
-        return {"context_packet": context_packet}
 
-    return _fetch_context
+    return _gather
 
 
-def _bind_params(
-    params: list[dict[str, Any]],
+def _bind_primary(
+    fn: FunctionSpec,
     entity_id: str,
     entity_type: str,
-    key_properties: dict[str, str] | None = None,
 ) -> dict[str, str] | None:
-    """Bind function params to the current entity ID.
+    """Bind function params from the current entity's key.
 
-    Uses the key property name from YARRRML (e.g., ``exceptionId`` for
-    ``ToleranceException``) to match function params. Falls back to
-    naming conventions if YARRRML key is unavailable.
-
-    Returns None if a required param can't be bound.
+    Matches param names against the entity type's conventional key:
+    e.g., entity_type="ToleranceException" → key param "exceptionId".
     """
-    if not params:
+    if not fn.params:
         return None
 
-    # The authoritative key property name from YARRRML subject template
-    yarrrml_key = (key_properties or {}).get(entity_type)
-
     bound: dict[str, str] = {}
-    for param in params:
-        pname = param.get("name", "")
-        required = param.get("required", False)
+    for p in fn.params:
+        pname = p.get("name", "")
+        required = p.get("required", False)
 
-        # 1. Match against YARRRML key property (authoritative)
-        if yarrrml_key and pname == yarrrml_key:
+        if _param_matches_entity(pname, entity_type):
             bound[pname] = entity_id
-        # 2. Fallback: naming convention (entityType + "Id")
-        elif pname == entity_type[0].lower() + entity_type[1:] + "Id":
-            bound[pname] = entity_id
-        elif pname.endswith("Id") and pname[:-2].lower() == entity_type.lower():
-            bound[pname] = entity_id
+        elif required:
+            return None  # Can't bind a required param
+
+    return bound if bound else None
+
+
+def _bind_secondary(
+    fn: FunctionSpec,
+    discovered_values: dict[str, str],
+) -> dict[str, str] | None:
+    """Bind function params from values discovered in prior results."""
+    bound: dict[str, str] = {}
+    for p in fn.params:
+        pname = p.get("name", "")
+        required = p.get("required", False)
+
+        if pname in discovered_values:
+            bound[pname] = discovered_values[pname]
         elif required:
             return None
 
     return bound if bound else None
 
 
-# ── Abductive Policy (π_abd) ───────────────────────────────────────
+def _param_matches_entity(param_name: str, entity_type: str) -> bool:
+    """Check if a param name corresponds to an entity type's key."""
+    # exceptionId → ToleranceException? No direct match.
+    # Use the prefix mapping in reverse.
+    expected_type = _type_from_param_name(param_name)
+    return expected_type == entity_type if expected_type else False
 
-def _make_policy(model: BaseChatModel) -> _NodeFn:
-    """Create policy node: stateless LLM labels one entity."""
 
-    async def _policy(state: EoGState) -> dict[str, Any]:
+def _type_from_param_name(param_name: str) -> str | None:
+    """Infer entity type from a parameter/column name.
+
+    Convention: param names like ``invoiceId``, ``supplierId``, ``poId``
+    map to entity types via a known suffix table.
+    """
+    name_lower = param_name.lower()
+    for entity_type in _PARAM_TO_TYPE:
+        if name_lower == _PARAM_TO_TYPE[entity_type]:
+            return entity_type
+    return None
+
+
+_PARAM_TO_TYPE: dict[str, str] = {
+    "Invoice": "invoiceid",
+    "Supplier": "supplierid",
+    "PurchaseOrder": "poid",
+    "ToleranceException": "exceptionid",
+    "Commodity": "commodityid",
+    "ExceptionRule": "ruleid",
+    "Contract": "contractid",
+    "Requisition": "prid",
+    "SpendRecord": "spendid",
+    "FXRate": "rateid",
+    "ContractScope": "scopeid",
+    "CostCenter": "costcenterid",
+    "Budget": "budgetid",
+    "Item": "itemid",
+}
+
+
+def _extract_values(
+    result: dict[str, Any],
+    fn: FunctionSpec,
+    discovered: dict[str, str],
+) -> None:
+    """Extract entity ID values from function results.
+
+    Scans the first row's columns for names that look like entity keys
+    (ending in ``Id``) and records their values for secondary binding.
+    """
+    rows = result.get("rows", [])
+    if not rows:
+        return
+    first_row = rows[0]
+    for col_name, value in first_row.items():
+        if not isinstance(value, str):
+            continue
+        # Only extract columns whose names map to known entity types
+        if _type_from_param_name(col_name) is not None:
+            if col_name not in discovered:
+                discovered[col_name] = value
+
+
+async def _safe_invoke(
+    client: OntologyClient,
+    ontology: str,
+    fn_name: str,
+    params: dict[str, str] | None,
+    max_results: int,
+) -> dict[str, Any] | None:
+    """Invoke a function, returning None on failure."""
+    try:
+        result = await client.invoke_function(ontology, fn_name, params)
+        rows = result.get("rows", [])
+        return {
+            "function": fn_name,
+            "params": params,
+            "rows": rows[:max_results],
+            "row_count": len(rows),
+        }
+    except Exception:
+        logger.debug(
+            "Function %s failed with params %s",
+            fn_name, params, exc_info=True,
+        )
+        return None
+
+
+# ── Label (Abductive Policy π_abd) ───────────────────────────────
+
+_POLICY_PROMPT = """\
+You are investigating entity "{entity_id}" (type: {entity_type}) in an \
+ontology-based investigation.
+
+Available labels: {label_vocabulary}
+
+Evidence gathered from ontology functions:
+{evidence}
+
+Neighbor entities and their current beliefs:
+{neighbor_context}
+
+Messages received from neighbors (belief propagation):
+{inbox_messages}
+
+Investigation findings so far (from prior entity visits):
+{ledger_summary}
+
+Based on ALL available evidence — this entity's function results, \
+neighbor beliefs, inbox messages, AND the accumulated investigation \
+findings — assign ONE label from the vocabulary. Consider cross-entity \
+patterns: are multiple entities affected by the same root cause? Is this \
+entity part of a systemic issue or an isolated incident?
+
+Explain your reasoning concisely.
+
+Respond in valid JSON only:
+{{"label": "...", "evidence": "..."}}"""
+
+
+def _build_ledger_summary(state: EoGState) -> str:
+    """Summarize accumulated investigation findings from the ledger.
+
+    Groups by entity type, highlights label changes, and surfaces
+    cross-entity patterns for the policy to reason about.
+    """
+    cfg = state.investigation_config
+    default_label = cfg.default_label if cfg else "Defer"
+
+    # Current beliefs (non-default only — these are findings)
+    findings: list[str] = []
+    by_label: dict[str, list[str]] = {}
+    for eid, belief in state.beliefs.items():
+        if belief.label != default_label:
+            etype = state.discovered_entities.get(eid, "?")
+            entry = f"{eid} ({etype}): {belief.label}"
+            findings.append(entry)
+            by_label.setdefault(belief.label, []).append(f"{eid} ({etype})")
+
+    if not findings:
+        return "(No findings yet — this is an early visit)"
+
+    lines = [f"Entities labeled so far: {len(findings)} of {len(state.beliefs)} visited"]
+    for label, entities in sorted(by_label.items()):
+        lines.append(f"  {label}: {', '.join(entities)}")
+
+    # Surface label flips (oscillation patterns)
+    flipped = [
+        f"{eid} (flipped {b.flip_count}x)"
+        for eid, b in state.beliefs.items()
+        if b.flip_count > 0
+    ]
+    if flipped:
+        lines.append(f"Oscillating entities: {', '.join(flipped)}")
+
+    # Surface damped entities
+    max_flips = cfg.max_flips if cfg else 3
+    damped = [
+        eid for eid, b in state.beliefs.items()
+        if b.flip_count > max_flips
+    ]
+    if damped:
+        lines.append(f"Damped (absorbed): {', '.join(damped)}")
+
+    return "\n".join(lines)
+
+
+def _make_label(model: BaseChatModel) -> _NodeFn:
+    """Create label node: ledger-aware LLM labels one entity.
+
+    The prompt includes accumulated findings from prior visits so the
+    LLM can identify cross-entity patterns (e.g., multiple exceptions
+    against the same contract = systemic issue).
+    """
+
+    async def _label(state: EoGState) -> dict[str, Any]:
         cfg = state.investigation_config
         label_vocab = cfg.label_vocabulary if cfg else ["Defer"]
 
@@ -237,12 +556,12 @@ def _make_policy(model: BaseChatModel) -> _NodeFn:
         entity_id = ctx.get("entity_id", state.current_entity)
         entity_type = ctx.get("entity_type", "Unknown")
 
-        function_data = json.dumps(
-            ctx.get("function_results", []),
+        evidence_str = json.dumps(
+            ctx.get("evidence", []),
             indent=2, default=str,
-        )[:3000]  # Bounded context
+        )[:4000]
 
-        neighbor_ctx = json.dumps(
+        neighbor_str = json.dumps(
             ctx.get("neighbor_beliefs", {}),
             indent=2, default=str,
         )[:1000]
@@ -252,13 +571,16 @@ def _make_policy(model: BaseChatModel) -> _NodeFn:
             indent=2, default=str,
         )[:1000]
 
-        prompt = _POLICY_PROMPT_TEMPLATE.format(
+        ledger_summary = _build_ledger_summary(state)
+
+        prompt = _POLICY_PROMPT.format(
             entity_id=entity_id,
             entity_type=entity_type,
             label_vocabulary=", ".join(label_vocab),
-            function_data=function_data,
-            neighbor_context=neighbor_ctx,
+            evidence=evidence_str,
+            neighbor_context=neighbor_str,
             inbox_messages=inbox_str,
+            ledger_summary=ledger_summary,
         )
 
         messages = [
@@ -268,12 +590,17 @@ def _make_policy(model: BaseChatModel) -> _NodeFn:
 
         try:
             response = await model.ainvoke(messages)
-            content = (
-                response.content
-                if isinstance(response.content, str)
-                else str(response.content)
-            )
-            # Strip markdown fences if present
+            raw = response.content
+            if isinstance(raw, str):
+                content = raw
+            elif isinstance(raw, list):
+                # Structured content blocks (e.g., UiPath LLM Gateway)
+                content = " ".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in raw
+                )
+            else:
+                content = str(raw)
             content = content.strip()
             if content.startswith("```"):
                 content = "\n".join(content.split("\n")[1:])
@@ -282,16 +609,21 @@ def _make_policy(model: BaseChatModel) -> _NodeFn:
                 content = content.strip()
             parsed = json.loads(content)
 
-            # Enforce label vocabulary
             label = parsed.get("label", "Defer")
             if label not in label_vocab:
                 label = "Defer"
             parsed["label"] = label
 
+            # Capture token usage for budget tracking
+            usage = getattr(response, "usage_metadata", None)
+            if usage and isinstance(usage, dict):
+                parsed["_input_tokens"] = usage.get("input_tokens", 0)
+                parsed["_output_tokens"] = usage.get("output_tokens", 0)
+            elif usage and hasattr(usage, "input_tokens"):
+                parsed["_input_tokens"] = getattr(usage, "input_tokens", 0)
+                parsed["_output_tokens"] = getattr(usage, "output_tokens", 0)
         except Exception:
-            logger.warning(
-                "Policy: LLM parse failed for %s", entity_id,
-            )
+            logger.warning("Label: LLM parse failed for %s", entity_id)
             parsed = {
                 "label": "Defer",
                 "evidence": "LLM output could not be parsed",
@@ -299,17 +631,13 @@ def _make_policy(model: BaseChatModel) -> _NodeFn:
 
         return {"policy_result": parsed}
 
-    return _policy
+    return _label
 
 
-# ── Update (Ledger + Damping) ──────────────────────────────────────
+# ── Update (Ledger + Damping) ────────────────────────────────────
 
 async def update_node(state: EoGState) -> dict[str, Any]:
-    """Write belief to ledger, track flips, apply damping.
-
-    Damping: if flip_count exceeds max_flips, force label to Defer
-    (absorbing state) to prevent oscillation.
-    """
+    """Write belief to ledger, track flips, apply damping, update budget counters."""
     entity_id = state.current_entity
     cfg = state.investigation_config
     max_flips = cfg.max_flips if cfg else 3
@@ -325,10 +653,17 @@ async def update_node(state: EoGState) -> dict[str, Any]:
     if old_label is not None and old_label != new_label:
         flip_count += 1
 
-    # Damping: force Defer if oscillating too much
+    # Damping: absorb if oscillating too much
     if flip_count > max_flips:
-        new_label = cfg.default_label if cfg else "Defer"
-        evidence = f"Damped after {flip_count} flips (was: {new_label})"
+        damped_label = cfg.default_label if cfg else "Defer"
+        logger.info(
+            "Damping %s: %d flips, forcing %s (was %s)",
+            entity_id, flip_count, damped_label, new_label,
+        )
+        new_label = damped_label
+        evidence = f"Damped after {flip_count} flips"
+
+    belief_changed = old_label is not None and old_label != new_label
 
     updated_belief = Belief(
         label=new_label,
@@ -344,23 +679,34 @@ async def update_node(state: EoGState) -> dict[str, Any]:
         evidence=evidence,
     )
 
+    # Token tracking from policy_result (set by label node)
+    input_tokens = state.policy_result.get("_input_tokens", 0)
+    output_tokens = state.policy_result.get("_output_tokens", 0)
+    if not isinstance(input_tokens, int):
+        input_tokens = 0
+    if not isinstance(output_tokens, int):
+        output_tokens = 0
+
+    # Convergence tracking
+    consecutive = 0 if belief_changed else state.consecutive_no_change + 1
+
     return {
         "beliefs": {entity_id: updated_belief},
         "ledger": [entry],
         "steps_taken": state.steps_taken + 1,
+        "total_input_tokens": state.total_input_tokens + input_tokens,
+        "total_output_tokens": state.total_output_tokens + output_tokens,
+        "consecutive_no_change": consecutive,
     }
 
 
-# ── Propagate (follows GRAPH EDGES, not LLM) ──────────────────────
+# ── Propagate ────────────────────────────────────────────────────
 
 async def propagate_node(state: EoGState) -> dict[str, Any]:
-    """Broadcast belief change to graph neighbors.
+    """Broadcast belief change to discovered neighbors.
 
-    Key difference from the broken version: propagation follows the
-    ontology's relationship edges, NOT the LLM's suggestions. The
-    controller decides who to re-examine based on graph topology.
-
-    Only re-activates neighbors when the current entity's label CHANGED.
+    Propagation follows entity instances discovered in gather results,
+    NOT a pre-loaded graph. Only re-activates when belief CHANGED.
     """
     cfg = state.investigation_config
     max_flips = cfg.max_flips if cfg else 3
@@ -375,66 +721,65 @@ async def propagate_node(state: EoGState) -> dict[str, Any]:
             old_label = entry.old_label
             break
 
-    belief_changed = (old_label is not None and old_label != current_belief.label) \
-        if current_belief else False
+    belief_changed = (
+        old_label is not None and current_belief is not None
+        and old_label != current_belief.label
+    )
 
     if not belief_changed:
         return {}
 
-    # Reconstruct graph to find neighbors
-    graph = OntologyGraph.from_dict(state.ontology_graph)
-    entity_type = graph.entity_for_id(entity_id)
+    entity_type = state.discovered_entities.get(entity_id, "Unknown")
+
+    # Find neighbors: all discovered entities that share a function's touches
+    ctx = state.context_packet
+    discovered_values = ctx.get("discovered_values", {})
 
     updated_inbox: dict[str, list[dict[str, Any]]] = {}
     new_active: list[str] = []
     explanatory_edges: list[ExplanatoryEdge] = []
 
-    if entity_type:
-        # Find all instance-level neighbors via graph edges
-        neighbor_types: set[str] = set()
-        edge_map: dict[str, str] = {}  # neighbor_type → relationship label
-        for edge in graph.edges_of(entity_type):
-            other = edge.target if edge.source == entity_type else edge.source
-            neighbor_types.add(other)
-            edge_map[other] = edge.label
+    for param_name, neighbor_id in discovered_values.items():
+        if not neighbor_id or neighbor_id == entity_id:
+            continue
+        if not isinstance(neighbor_id, str):
+            continue
 
-        # Match neighbor types to actual entity instances in beliefs
-        for neighbor_id, neighbor_belief in state.beliefs.items():
-            if neighbor_id == entity_id:
-                continue
-            neighbor_type = graph.entity_for_id(neighbor_id)
-            if neighbor_type not in neighbor_types:
-                continue
+        neighbor_type = _type_from_param_name(param_name)
+        if not neighbor_type:
+            continue
 
-            rel_label = edge_map.get(neighbor_type, "related")
+        neighbor_belief = state.beliefs.get(neighbor_id)
+        if not neighbor_belief:
+            continue
 
-            # Send message to neighbor
-            message: dict[str, Any] = {
-                "from": entity_id,
-                "from_type": entity_type,
-                "label": current_belief.label,
-                "evidence": current_belief.evidence[:200],
-                "relationship": rel_label,
-            }
+        # Send inbox message
+        message: dict[str, Any] = {
+            "from": entity_id,
+            "from_type": entity_type,
+            "label": current_belief.label,
+            "evidence": current_belief.evidence[:200],
+            "via": param_name,
+        }
 
-            existing_messages = list(state.inbox.get(neighbor_id, []))
-            existing_messages.append(message)
-            updated_inbox[neighbor_id] = existing_messages
+        existing_messages = list(state.inbox.get(neighbor_id, []))
+        existing_messages.append(message)
+        updated_inbox[neighbor_id] = existing_messages
 
-            # Re-activate if under flip limit
-            if (
-                neighbor_belief.flip_count < max_flips
-                and neighbor_id not in state.active_set
-                and neighbor_id not in new_active
-            ):
-                new_active.append(neighbor_id)
+        # Re-activate if under flip limit and not already queued
+        if (
+            neighbor_belief.flip_count < max_flips
+            and neighbor_id not in state.active_set
+            and neighbor_id not in new_active
+        ):
+            new_active.append(neighbor_id)
 
-            explanatory_edges.append(ExplanatoryEdge(
-                source=entity_id,
-                target=neighbor_id,
-                relationship=rel_label,
-                evidence=current_belief.evidence[:100],
-            ))
+        explanatory_edges.append(ExplanatoryEdge(
+            source=entity_id,
+            target=neighbor_id,
+            relationship=param_name,
+            evidence=current_belief.evidence[:100],
+        ))
 
     return {
         "inbox": updated_inbox,
@@ -443,48 +788,42 @@ async def propagate_node(state: EoGState) -> dict[str, Any]:
     }
 
 
-# ── Frontier (minimal explanatory set) ─────────────────────────────
+# ── Synthesize ───────────────────────────────────────────────────
 
-async def frontier_node(state: EoGState) -> dict[str, Any]:
+async def synthesize_node(state: EoGState) -> dict[str, Any]:
     """Compute the minimal explanatory frontier.
 
-    The frontier is the set of entities whose label is NOT the default,
-    filtered for irreducibility: if entity A (Source) has an explanatory
-    edge to entity B (also Source), and A explains B, then B is removed
-    from the frontier (it's explained by A).
-
-    This implements F = {v ∈ V_S : L_v ≠ Defer ∧ ¬∃u (L_u is Source ∧ u→v)}
-    from the paper.
+    Frontier = non-default beliefs minus entities explained by another
+    entity with a Source label.
     """
     cfg = state.investigation_config
     default_label = cfg.default_label if cfg else "Defer"
 
-    # All non-default beliefs
     findings: dict[str, dict[str, Any]] = {}
     for entity_id, belief in state.beliefs.items():
         if belief.label != default_label:
-            graph = OntologyGraph.from_dict(state.ontology_graph)
             findings[entity_id] = {
                 "entity": entity_id,
-                "entity_type": graph.entity_for_id(entity_id) or "Unknown",
+                "entity_type": state.discovered_entities.get(
+                    entity_id, "Unknown"
+                ),
                 "label": belief.label,
                 "evidence": belief.evidence,
                 "flip_count": belief.flip_count,
             }
 
-    # Compute irreducibility: remove entities explained by another
-    # entity via an explanatory edge
+    # Compute irreducibility
     explained: set[str] = set()
     for edge in state.explanatory_edges:
         src_belief = state.beliefs.get(edge.source)
         tgt_belief = state.beliefs.get(edge.target)
         if src_belief and tgt_belief:
-            # If source is a "Source" and target is "DerivedEffect",
-            # the target is explained by the source
-            if src_belief.label == "Source" and tgt_belief.label == "DerivedEffect":
+            if (
+                src_belief.label == "Source"
+                and tgt_belief.label == "DerivedEffect"
+            ):
                 explained.add(edge.target)
 
-    # Frontier = findings minus explained entities
     frontier_list = [
         item for eid, item in findings.items()
         if eid not in explained

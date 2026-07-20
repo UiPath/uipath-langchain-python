@@ -9,75 +9,57 @@ from unittest.mock import AsyncMock
 import pytest
 
 from uipath_langchain.agent.eog.agent import create_eog_agent
-from uipath_langchain.agent.eog.graph_topology import OntologyGraph, parse_ofn
 from uipath_langchain.agent.eog.ontology_client import OntologyClient
 from uipath_langchain.agent.eog.types import InvestigationConfig
 
-# Minimal OWL with 3 entities and 2 relationships
-_TEST_OFN = """\
-Prefix(:=<https://ontology.uipath.com/ont#>)
-Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
-Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
 
-Ontology(<https://ontology.uipath.com/ont>
+# ── Test fixtures ─────────────────────────────────────────────────
 
-Declaration(Class(:Invoice))
-Declaration(Class(:Supplier))
-Declaration(Class(:PurchaseOrder))
-Declaration(ObjectProperty(:invoice_paidTo))
-Declaration(ObjectProperty(:invoice_referencesPO))
-Declaration(DataProperty(:Invoice.invoiceId))
-Declaration(DataProperty(:Supplier.supplierId))
-Declaration(DataProperty(:PurchaseOrder.poId))
-
-ObjectPropertyDomain(:invoice_paidTo :Invoice)
-ObjectPropertyRange(:invoice_paidTo :Supplier)
-ObjectPropertyDomain(:invoice_referencesPO :Invoice)
-ObjectPropertyRange(:invoice_referencesPO :PurchaseOrder)
-
-DataPropertyDomain(:Invoice.invoiceId :Invoice)
-DataPropertyRange(:Invoice.invoiceId xsd:string)
-DataPropertyDomain(:Supplier.supplierId :Supplier)
-DataPropertyRange(:Supplier.supplierId xsd:string)
-DataPropertyDomain(:PurchaseOrder.poId :PurchaseOrder)
-DataPropertyRange(:PurchaseOrder.poId xsd:string)
-
-AnnotationAssertion(rdfs:label :Invoice "Invoice")
-AnnotationAssertion(rdfs:label :Supplier "Supplier")
-AnnotationAssertion(rdfs:label :PurchaseOrder "Purchase Order")
-
-)
-"""
-
-_TEST_FUNCTIONS = [
+_INVOICE_FUNCTIONS = [
     {
         "name": "invoiceDetail",
         "label": "Invoice detail",
-        "statement": "SELECT ?x WHERE { ?inv a ont:Invoice }",
+        "description": "Retrieve invoice with supplier and PO",
         "params": [{"name": "invoiceId", "type": "xsd:string", "required": True}],
+        "outputs": [
+            {"name": "supplierId", "type": "xsd:string"},
+            {"name": "poId", "type": "xsd:string"},
+            {"name": "amount", "type": "xsd:decimal"},
+        ],
+        "touches": ["Invoice", "Supplier", "PurchaseOrder"],
     },
+]
+
+_SUPPLIER_FUNCTIONS = [
     {
         "name": "supplierProfile",
         "label": "Supplier profile",
-        "statement": "SELECT ?x WHERE { ?s a ont:Supplier }",
+        "description": "Supplier details",
         "params": [{"name": "supplierId", "type": "xsd:string", "required": True}],
+        "outputs": [{"name": "name", "type": "xsd:string"}],
+        "touches": ["Supplier"],
     },
 ]
 
 
 def _mock_ontology_client() -> AsyncMock:
-    """Create a mock ontology client that returns the test graph."""
+    """Create a mock ontology client with lazy function discovery."""
     client = AsyncMock(spec=OntologyClient)
 
-    async def _fetch_graph(ontology: str) -> OntologyGraph:
-        graph = parse_ofn(_TEST_OFN)
-        graph.functions = _TEST_FUNCTIONS
-        graph._build_adjacency()
-        return graph
+    async def _list_functions(
+        ontology: str, *, touches: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if touches == "Invoice":
+            return _INVOICE_FUNCTIONS
+        if touches == "Supplier":
+            return _SUPPLIER_FUNCTIONS
+        return _INVOICE_FUNCTIONS + _SUPPLIER_FUNCTIONS
 
-    client.fetch_graph = AsyncMock(side_effect=_fetch_graph)
+    client.list_functions = AsyncMock(side_effect=_list_functions)
     client.invoke_function = AsyncMock(
-        return_value={"rows": [{"data": "test_data"}]}
+        return_value={
+            "rows": [{"supplierId": "SUP-001", "poId": "PO-001", "amount": 16224.0}],
+        }
     )
     return client
 
@@ -110,6 +92,8 @@ def _mock_llm(labels: dict[str, str] | None = None) -> AsyncMock:
     model.ainvoke = ainvoke
     return model
 
+
+# ── Tests ─────────────────────────────────────────────────────────
 
 class TestCreateEoGAgent:
     def test_returns_state_graph(self) -> None:
@@ -144,7 +128,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001", "SUP-001"],
+            seed_entities=["INV-001"],
             max_steps=20,
         )
         graph = create_eog_agent(
@@ -155,38 +139,36 @@ class TestCreateEoGAgent:
 
         assert result["steps_taken"] >= 1
         assert len(result["ledger"]) >= 1
-        assert len(result["frontier"]) >= 1
-        frontier_entities = {f["entity"] for f in result["frontier"]}
-        assert "INV-001" in frontier_entities
+        # INV-001 should be labeled Source
+        assert result["beliefs"]["INV-001"].label == "Source"
 
     @pytest.mark.asyncio
-    async def test_propagation_causes_revisits(self) -> None:
-        """Verify that graph-edge propagation re-activates neighbours."""
+    async def test_lazy_discovery(self) -> None:
+        """Verify functions are fetched per entity type, not upfront."""
         client = _mock_ontology_client()
-
-        # LLM that labels INV-001 as Source (changed from Defer)
-        # → should propagate to SUP-001 via invoice_paidTo edge
-        async def labeling_ainvoke(messages: Any, **kwargs: Any) -> AsyncMock:
-            content = messages[-1].content if messages else ""
-            if "INV-001" in content:
-                label = "Source"
-            elif "SUP-001" in content:
-                label = "DerivedEffect"
-            else:
-                label = "Defer"
-            response = AsyncMock()
-            response.content = json.dumps({
-                "label": label,
-                "evidence": f"evidence",
-            })
-            return response
-
-        model = AsyncMock()
-        model.ainvoke = labeling_ainvoke
-
+        model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001", "SUP-001"],
+            seed_entities=["INV-001"],
+            max_steps=5,
+        )
+        graph = create_eog_agent(
+            model, client, "test-onto", investigation_config=cfg
+        )
+        compiled = graph.compile()
+        result = await compiled.ainvoke({})
+
+        # Should have cached functions for Invoice (the seed type)
+        assert "Invoice" in result["function_cache"]
+
+    @pytest.mark.asyncio
+    async def test_entity_discovery_from_results(self) -> None:
+        """Verify new entities are discovered from function results."""
+        client = _mock_ontology_client()
+        model = _mock_llm()
+        cfg = InvestigationConfig(
+            label_vocabulary=["Source", "DerivedEffect", "Defer"],
+            seed_entities=["INV-001"],
             max_steps=10,
         )
         graph = create_eog_agent(
@@ -195,15 +177,10 @@ class TestCreateEoGAgent:
         compiled = graph.compile()
         result = await compiled.ainvoke({})
 
-        # Both should be visited. INV-001 labeled Source triggers
-        # propagation to SUP-001 via invoice_paidTo graph edge,
-        # causing SUP-001 to be revisited with inbox context.
-        sup_entries = [
-            e for e in result["ledger"] if e.entity_id == "SUP-001"
-        ]
-        assert len(sup_entries) >= 1
-        # SUP-001 should have inbox messages from INV-001
-        assert len(result.get("inbox", {}).get("SUP-001", [])) >= 0
+        # invoiceDetail returns supplierId=SUP-001 and poId=PO-001
+        # These should be discovered as new entities
+        assert "SUP-001" in result["discovered_entities"]
+        assert "PO-001" in result["discovered_entities"]
 
     @pytest.mark.asyncio
     async def test_budget_cap_terminates(self) -> None:

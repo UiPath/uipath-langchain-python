@@ -79,6 +79,19 @@ class TestListFunctions:
         result = await client.list_functions("test-onto")
         assert result == expected
 
+    @pytest.mark.asyncio
+    async def test_list_functions_with_touches_filter(
+        self,
+        client: OntologyClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        expected = [{"name": "fn1", "touches": ["Invoice"]}]
+        captured: list[httpx.Request] = []
+        _patch_client(monkeypatch, expected, captured=captured)
+        result = await client.list_functions("test-onto", touches="Invoice")
+        assert result == expected
+        assert "touches=Invoice" in str(captured[0].url)
+
 
 class TestInvokeFunction:
     @pytest.mark.asyncio

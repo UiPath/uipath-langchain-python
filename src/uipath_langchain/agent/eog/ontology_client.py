@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import httpx
 from uipath._utils._ssl_context import get_httpx_client_kwargs
-
-from .graph_topology import OntologyGraph, parse_ofn, parse_yarrrml_keys
 
 
 class OntologyClient:
@@ -49,32 +46,36 @@ class OntologyClient:
         return httpx.AsyncClient(**kwargs)
 
     async def discover(self, ontology: str) -> dict[str, Any]:
-        """Retrieve ontology metadata.
-
-        Args:
-            ontology: Name or ID of the deployed ontology.
-
-        Returns:
-            JSON response with ontology metadata.
-        """
+        """Retrieve ontology metadata."""
         url = f"{self._api_base}/ontology/{ontology}"
         async with self._make_client() as client:
             resp = await client.get(url)
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
 
-    async def list_functions(self, ontology: str) -> list[dict[str, Any]]:
-        """List function definitions for an ontology.
+    async def list_functions(
+        self,
+        ontology: str,
+        *,
+        touches: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List function definitions, optionally filtered by entity type.
 
         Args:
             ontology: Name or ID of the deployed ontology.
+            touches: If provided, only return functions whose ``touches``
+                list includes this entity type.
 
         Returns:
-            List of function definition dicts.
+            List of function definition dicts with ``name``, ``label``,
+            ``description``, ``params``, ``outputs``, ``touches``.
         """
         url = f"{self._api_base}/ontology/{ontology}/functions"
+        params: dict[str, str] = {}
+        if touches:
+            params["touches"] = touches
         async with self._make_client() as client:
-            resp = await client.get(url)
+            resp = await client.get(url, params=params)
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
 
@@ -104,60 +105,8 @@ class OntologyClient:
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
 
-    async def fetch_artifact(self, ontology: str, filename: str) -> str:
-        """Download a raw artifact file (OWL, SHACL, YARRRML, etc.).
-
-        Args:
-            ontology: Name or ID of the deployed ontology.
-            filename: Artifact filename (e.g., ``schema.ofn``).
-
-        Returns:
-            Raw text content of the artifact.
-        """
-        url = (
-            f"{self._api_base}/ontology/{ontology}"
-            f"/artifact/{filename}"
-        )
-        async with self._make_client() as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.text
-
-    async def fetch_graph(self, ontology: str) -> OntologyGraph:
-        """Fetch and parse the ontology's entity-relationship graph.
-
-        Downloads the OWL schema artifact, parses it into an
-        ``OntologyGraph`` with nodes (entities), edges (relationships),
-        and adjacency indexes. Also fetches function definitions and
-        maps them to entities.
-
-        Args:
-            ontology: Name or ID of the deployed ontology.
-
-        Returns:
-            Parsed ``OntologyGraph`` ready for EoG traversal.
-        """
-        ofn_text, yarrrml_text, functions = await asyncio.gather(
-            self.fetch_artifact(ontology, "schema.ofn"),
-            self.fetch_artifact(ontology, "mapping.yarrrml.yml"),
-            self.list_functions(ontology),
-        )
-        graph = parse_ofn(ofn_text)
-        graph.functions = functions
-        graph.key_properties = parse_yarrrml_keys(yarrrml_text)
-        graph._build_adjacency()
-        return graph
-
     async def sparql(self, ontology: str, query: str) -> dict[str, Any]:
-        """Execute a SPARQL query against an ontology.
-
-        Args:
-            ontology: Name or ID of the deployed ontology.
-            query: Raw SPARQL query text.
-
-        Returns:
-            JSON response with query results.
-        """
+        """Execute a SPARQL query against an ontology."""
         url = f"{self._api_base}/ontology/{ontology}/sparql"
         async with self._make_client() as client:
             resp = await client.post(
