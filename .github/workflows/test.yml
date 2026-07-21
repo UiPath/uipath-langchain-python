@@ -12,6 +12,9 @@ on:
       SONAR_TOKEN:
         required: false
 
+env:
+  SAFE_CHAIN_MINIMUM_PACKAGE_AGE_EXCLUSIONS: uipath,uipath-core,uipath-dev,uipath-langchain,uipath-langchain-client,uipath-llm-client,uipath-platform,uipath-robot,uipath-runtime,jsonschema-pydantic-converter
+
 jobs:
   test:
     name: Test
