@@ -71,6 +71,14 @@ def get_job_attachments(
     for att in job_attachments:
         if not att:
             continue
+        # Tool arguments are coerced into a generated input model, so an
+        # extracted attachment (and its nested fields, e.g. Metadata) may be a
+        # Pydantic model instance rather than plain data. model_validate with
+        # from_attributes does not recursively coerce nested models to dicts, so
+        # a valid Metadata map arriving as a sub-model would be rejected as "not
+        # a dictionary". Materialize the model to plain data first.
+        if isinstance(att, BaseModel):
+            att = att.model_dump(by_alias=True)
         try:
             attachment = Attachment.model_validate(att, from_attributes=True)
         except ValidationError as e:
