@@ -25,7 +25,12 @@ jobs:
       id: discover
       run: |
         # Find all testcase folders (excluding common folders like README, etc.)
-        testcase_dirs=$(find testcases -maxdepth 1 -type d -name "*-*" | sed 's|testcases/||' | sort)
+        # model-onboarding is intentionally excluded: it is run on demand via
+        # the dedicated model_onboarding.yml workflow, not on every push/PR.
+        testcase_dirs=$(find testcases -maxdepth 1 -type d -name "*-*" \
+          | sed 's|testcases/||' \
+          | grep -vx 'model-onboarding' \
+          | sort)
 
         echo "Found testcase directories:"
         echo "$testcase_dirs"
