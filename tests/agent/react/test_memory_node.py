@@ -359,6 +359,11 @@ def _field_values(request: Any) -> dict[tuple[str, ...], str]:
     return {tuple(f.key_path): f.value for f in request.fields}
 
 
+def _search_request(search: AsyncMock) -> Any:
+    assert search.await_args is not None
+    return search.await_args.kwargs["request"]
+
+
 class TestMemoryRecallFileAnalysis:
     """Query-side file-key analysis: derive ephemeral text and search on it."""
 
@@ -410,7 +415,7 @@ class TestMemoryRecallFileAnalysis:
         state = self._state()
         result = await self._node(config, model)(state)
 
-        request = search.await_args.kwargs["request"]
+        request = _search_request(search)
         values = _field_values(request)
         assert values[("agent-input", "invoiceDocument")] == "INVOICE SUMMARY"
         assert values[("agent-input", "vendorName")] == "Acme"
@@ -487,7 +492,7 @@ class TestMemoryRecallFileAnalysis:
 
         model.ainvoke.assert_not_awaited()
         resolve.assert_not_awaited()
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         # falls back to today's behavior: the raw attachment ref is searched
         assert (
             "11111111-1111-1111-1111-111111111111"
@@ -519,7 +524,7 @@ class TestMemoryRecallFileAnalysis:
 
         model.ainvoke.assert_not_awaited()
         resolve.assert_not_awaited()
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         assert (
             "11111111-1111-1111-1111-111111111111"
             in values[("agent-input", "invoiceDocument")]
@@ -557,7 +562,7 @@ class TestMemoryRecallFileAnalysis:
 
         await self._node(config, model)(self._state())
 
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         # enabled file field with no usable text is dropped, never sent as raw ref
         assert ("agent-input", "invoiceDocument") not in values
         assert values[("agent-input", "vendorName")] == "Acme"
@@ -586,7 +591,7 @@ class TestMemoryRecallFileAnalysis:
 
         result = await self._node(config, model)(self._state())
 
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         assert ("agent-input", "invoiceDocument") not in values
         assert values[("agent-input", "vendorName")] == "Acme"
         # node still returns the recall injection despite the per-field failure
@@ -618,7 +623,7 @@ class TestMemoryRecallFileAnalysis:
 
         # no files means no LLM call and the field is dropped, not sent as raw ref
         model.ainvoke.assert_not_awaited()
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         assert ("agent-input", "invoiceDocument") not in values
         assert values[("agent-input", "vendorName")] == "Acme"
 
@@ -666,7 +671,7 @@ class TestMemoryRecallFileAnalysis:
         )
         pinned.ainvoke.assert_awaited_once()
         agent_model.ainvoke.assert_not_awaited()
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         assert values[("agent-input", "invoiceDocument")] == "PINNED TEXT"
 
     @pytest.mark.asyncio
@@ -705,7 +710,7 @@ class TestMemoryRecallFileAnalysis:
         await self._node(config, agent_model)(self._state())
 
         agent_model.ainvoke.assert_awaited_once()
-        values = _field_values(search.await_args.kwargs["request"])
+        values = _field_values(_search_request(search))
         assert values[("agent-input", "invoiceDocument")] == "AGENT TEXT"
 
     @pytest.mark.asyncio
