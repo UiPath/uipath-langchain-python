@@ -15,7 +15,7 @@ loop and the analyze-files tool still receive the full attachment.
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -46,8 +46,11 @@ logger = logging.getLogger(__name__)
 _ANALYSIS_FIELD_TYPE = "agent-input"
 # Cap the derived query text so a large document can't blow up the search request.
 _FILE_TEXT_MAX_CHARS = 8000
-
-_UNSET = object()
+# Bound the recall-time analysis LLM call. It runs before the agent's first step,
+# so an unbounded call (get_chat_model defaults to 895s x 5 attempts) could stall
+# the whole run. On timeout the field soft-fails and is skipped, not fatal.
+_ANALYSIS_TIMEOUT_SECONDS = 120.0
+_ANALYSIS_MAX_RETRIES = 2
 
 
 @contextmanager
@@ -88,24 +91,6 @@ def create_memory_recall_node(
         An async callable suitable for ``builder.add_node()``.
     """
 
-    # Per-run caches on the node closure (fetched at most once).
-    _settings_cache: list[Any] = [_UNSET]
-    _analysis_model_cache: list[Any] = [_UNSET]
-
-    async def _get_settings() -> dict[str, Any] | None:
-        if _settings_cache[0] is _UNSET:
-            _settings_cache[0] = await _fetch_space_settings(
-                memory_config.memory_space_id
-            )
-        return _settings_cache[0]
-
-    def _get_analysis_model(settings: dict[str, Any]) -> BaseChatModel:
-        if _analysis_model_cache[0] is _UNSET:
-            _analysis_model_cache[0] = _build_analysis_model(
-                model, settings.get("analysisModel")
-            )
-        return _analysis_model_cache[0]
-
     async def memory_recall_node(state: Any) -> dict[str, Any]:
         input_model = input_schema if input_schema is not None else BaseModel
         input_arguments = extract_input_data_from_state(state, input_model)
@@ -117,17 +102,27 @@ def create_memory_recall_node(
 
         # File-key analysis pre-step (query-side, ephemeral). Soft-fails to the
         # text-only behavior on any error. Never mutates state/input — only the
-        # local search arguments are substituted.
+        # local search arguments are substituted. Settings are fetched live so an
+        # edit to the space's analysis prompt takes effect on the next run.
         search_arguments = input_arguments
         if model is not None:
-            settings = await _get_settings()
+            # Only agents that declare attachment fields can carry file keys.
+            # Compute that from the schema first (pure, no I/O) and skip the
+            # settings GET entirely for text-only agents, so their recall stays
+            # byte-identical to the pre-file-analysis behavior (no extra HTTP call).
+            attachment_fields = _top_level_attachment_fields(input_model)
+            settings = (
+                await _fetch_space_settings(memory_config.memory_space_id)
+                if attachment_fields
+                else None
+            )
             if settings:
                 analyzed, skipped = await _analyze_file_fields_for_search(
                     input_arguments=input_arguments,
-                    input_model=input_model,
+                    attachment_fields=attachment_fields,
                     settings=settings,
                     field_weights=memory_config.field_weights or None,
-                    build_analysis_model=lambda: _get_analysis_model(settings),
+                    agent_model=model,
                     tracer=tracer,
                 )
                 if analyzed or skipped:
@@ -312,7 +307,11 @@ def _build_analysis_model(
     """
     if analysis_model_name:
         try:
-            fresh = get_chat_model(analysis_model_name)
+            fresh = get_chat_model(
+                analysis_model_name,
+                timeout=_ANALYSIS_TIMEOUT_SECONDS,
+                max_retries=_ANALYSIS_MAX_RETRIES,
+            )
             return fresh.model_copy(update={"disable_streaming": True})
         except Exception as e:
             logger.warning(
@@ -403,10 +402,10 @@ def _render_analysis_prompt(prompt: str, agent_prompt_reference: str | None) -> 
 async def _analyze_file_fields_for_search(
     *,
     input_arguments: dict[str, Any],
-    input_model: type[BaseModel],
+    attachment_fields: set[str],
     settings: dict[str, Any],
     field_weights: dict[str, float] | None,
-    build_analysis_model: Callable[[], BaseChatModel],
+    agent_model: BaseChatModel,
     tracer: Any,
 ) -> tuple[dict[str, str], set[str]]:
     """Derive ephemeral query text for key-included attachment fields.
@@ -415,12 +414,14 @@ async def _analyze_file_fields_for_search(
     derived text and ``skipped`` is the set of enabled file fields that produced
     no usable text (and must be dropped from the search entirely). Each field is
     soft-failed independently — an error on one never aborts the others.
+
+    ``attachment_fields`` is the set of top-level attachment field names in the
+    agent's input schema, computed once by the caller.
     """
     enabled_prompts = _enabled_file_prompts(settings, field_weights)
     if not enabled_prompts:
         return {}, set()
 
-    attachment_fields = _top_level_attachment_fields(input_model)
     candidates = {
         field: prompt
         for field, prompt in enabled_prompts.items()
@@ -429,7 +430,7 @@ async def _analyze_file_fields_for_search(
     if not candidates:
         return {}, set()
 
-    analysis_model = build_analysis_model()
+    analysis_model = _build_analysis_model(agent_model, settings.get("analysisModel"))
     agent_prompt_reference = settings.get("agentPromptReference")
 
     analyzed: dict[str, str] = {}

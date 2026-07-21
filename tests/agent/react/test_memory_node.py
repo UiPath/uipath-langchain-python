@@ -14,9 +14,12 @@ from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.react.agent import create_agent
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.memory_node import (
+    _ANALYSIS_MAX_RETRIES,
+    _ANALYSIS_TIMEOUT_SECONDS,
     _build_analysis_model,
     _build_search_fields,
     _enabled_file_prompts,
+    _fetch_space_settings,
     _normalize_attachment_items,
     _render_analysis_prompt,
     _top_level_attachment_field,
@@ -316,7 +319,11 @@ class TestBuildAnalysisModel:
         agent_model = MagicMock(spec=BaseChatModel)
 
         assert _build_analysis_model(agent_model, "gpt-4o") == "pinned"
-        get_chat_model.assert_called_once_with("gpt-4o")
+        get_chat_model.assert_called_once_with(
+            "gpt-4o",
+            timeout=_ANALYSIS_TIMEOUT_SECONDS,
+            max_retries=_ANALYSIS_MAX_RETRIES,
+        )
         agent_model.model_copy.assert_not_called()
 
     @patch("uipath_langchain.agent.react.memory_node.get_chat_model")
@@ -586,6 +593,36 @@ class TestMemoryRecallFileAnalysis:
         assert result["inner_state"]["memory_injection"] == "INJECTION"
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    @patch(
+        "uipath_langchain.agent.react.memory_node.resolve_attachments_to_file_infos",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.react.memory_node._fetch_space_settings",
+        new_callable=AsyncMock,
+    )
+    async def test_unresolvable_attachment_skips_field(
+        self,
+        fetch: AsyncMock,
+        resolve: AsyncMock,
+        uipath_cls: MagicMock,
+        config: MemoryConfig,
+    ) -> None:
+        fetch.return_value = _file_settings()
+        resolve.return_value = []  # nothing resolvable → no file to analyze
+        search = _mock_search(uipath_cls)
+        model = _make_analysis_model("SHOULD NOT RUN")
+
+        await self._node(config, model)(self._state())
+
+        # no files means no LLM call and the field is dropped, not sent as raw ref
+        model.ainvoke.assert_not_awaited()
+        values = _field_values(search.await_args.kwargs["request"])
+        assert ("agent-input", "invoiceDocument") not in values
+        assert values[("agent-input", "vendorName")] == "Acme"
+
+    @pytest.mark.asyncio
     @patch("uipath_langchain.agent.react.memory_node.get_chat_model")
     @patch("uipath_langchain.agent.react.memory_node.UiPath")
     @patch(
@@ -622,7 +659,11 @@ class TestMemoryRecallFileAnalysis:
 
         await self._node(config, agent_model)(self._state())
 
-        get_chat_model.assert_called_once_with("gpt-4o")
+        get_chat_model.assert_called_once_with(
+            "gpt-4o",
+            timeout=_ANALYSIS_TIMEOUT_SECONDS,
+            max_retries=_ANALYSIS_MAX_RETRIES,
+        )
         pinned.ainvoke.assert_awaited_once()
         agent_model.ainvoke.assert_not_awaited()
         values = _field_values(search.await_args.kwargs["request"])
@@ -694,3 +735,80 @@ class TestMemoryRecallFileAnalysis:
 
         fetch.assert_not_awaited()
         resolve.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    @patch(
+        "uipath_langchain.agent.react.memory_node._fetch_space_settings",
+        new_callable=AsyncMock,
+    )
+    async def test_text_only_agent_skips_settings_fetch(
+        self,
+        fetch: AsyncMock,
+        uipath_cls: MagicMock,
+    ) -> None:
+        # An agent whose input schema declares no attachment fields must not pay
+        # the settings GET, even with a model available — recall stays
+        # byte-identical to the pre-file-analysis behavior.
+        _mock_search(uipath_cls)
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
+        node = create_memory_recall_node(
+            config, input_schema=_TopicInput, model=_make_analysis_model("x")
+        )
+
+        result = await node(_make_state(topic="python"))
+
+        fetch.assert_not_awaited()
+        assert result["inner_state"]["memory_injection"] == "INJECTION"
+
+
+class TestFetchSpaceSettings:
+    """Direct coverage of the settings GET soft-fail paths."""
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_success_returns_json(self, uipath_cls: MagicMock) -> None:
+        sdk = MagicMock()
+        response = MagicMock()
+        response.json.return_value = {"memorySpaceId": "space-123"}
+        sdk.api_client.request_async = AsyncMock(return_value=response)
+        uipath_cls.return_value = sdk
+
+        result = await _fetch_space_settings("space-123")
+
+        assert result == {"memorySpaceId": "space-123"}
+        args, kwargs = sdk.api_client.request_async.await_args
+        assert args[0] == "GET"
+        assert args[1] == "/llmopstenant_/api/Memory/space-123/settings"
+        assert kwargs["include_folder_headers"] is True
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_http_error_returns_none(self, uipath_cls: MagicMock) -> None:
+        sdk = MagicMock()
+        response = MagicMock()
+        response.raise_for_status.side_effect = RuntimeError("500 server error")
+        sdk.api_client.request_async = AsyncMock(return_value=response)
+        uipath_cls.return_value = sdk
+
+        assert await _fetch_space_settings("space-123") is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_malformed_json_returns_none(self, uipath_cls: MagicMock) -> None:
+        sdk = MagicMock()
+        response = MagicMock()
+        response.json.side_effect = ValueError("not json")
+        sdk.api_client.request_async = AsyncMock(return_value=response)
+        uipath_cls.return_value = sdk
+
+        assert await _fetch_space_settings("space-123") is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_request_exception_returns_none(self, uipath_cls: MagicMock) -> None:
+        sdk = MagicMock()
+        sdk.api_client.request_async = AsyncMock(side_effect=RuntimeError("boom"))
+        uipath_cls.return_value = sdk
+
+        assert await _fetch_space_settings("space-123") is None
