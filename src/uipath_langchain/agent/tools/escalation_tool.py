@@ -211,6 +211,10 @@ async def create_task_for_channel(
     data: dict[str, Any],
     recipient: TaskRecipient | None,
     folder_path: str | None,
+    app_project_key: str | None = None,
+    app_type: str | None = None,
+    is_debug: bool = False,
+    action_schema: Any = None,
 ) -> Task:
     """Create the human task backing an escalation channel."""
     if isinstance(channel, AgentQuickFormEscalationChannel):
@@ -227,6 +231,7 @@ async def create_task_for_channel(
             labels=channel.labels,
             is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
             actionable_message_metadata=channel.properties.actionable_message_meta_data,
+            solution_id=channel.properties.solution_id,
         )
     return await client.tasks.create_async(
         title=title,
@@ -238,6 +243,11 @@ async def create_task_for_channel(
         labels=channel.labels,
         is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
         actionable_message_metadata=channel.properties.actionable_message_meta_data,
+        app_project_key=app_project_key,
+        app_type=app_type,
+        is_debug=is_debug,
+        action_schema=action_schema,
+        solution_id=channel.properties.solution_id,
     )
 
 
@@ -310,8 +320,10 @@ def create_escalation_tool(
                 if channel.recipients
                 else None
             )
-        is_debug = UiPathConfig.is_rooted_to_debug_job()
-        jit_project_key = channel.properties.project_key
+        is_debug = True
+        print('Mock debug', is_debug, 'folder path', folder_path)
+        app_project_key = channel.properties.project_key
+        app_version = channel.properties.app_version
         action_schema = channel.properties.action_schema
 
         task_title = "Escalation Task"
@@ -339,7 +351,7 @@ def create_escalation_tool(
                     "outcome": cached_result.outcome,
                 }
 
-        if is_debug and not jit_project_key:
+        if is_debug and app_version == 0 and not app_project_key:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.ESCALATION_JIT_DEBUG_MISSING_PROJECT_KEY,
                 title="Unable to create the action task in debug mode",
@@ -368,7 +380,7 @@ def create_escalation_tool(
                     data=serialized_data,
                     recipient=recipient,
                     folder_path=folder_path,
-                    app_project_key=jit_project_key,
+                    app_project_key=app_project_key,
                     app_type=channel.properties.app_type,
                     is_debug=is_debug,
                     action_schema=action_schema,
