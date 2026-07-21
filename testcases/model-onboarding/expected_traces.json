@@ -1,0 +1,23 @@
+{
+  "description": "Model-onboarding trace assertions - the node ran and at least one LLM span was emitted by one of the reachable client classes.",
+  "required_spans": [
+    {
+      "name": "run_model_onboarding",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": [
+        "UiPathAzureChatOpenAI",
+        "UiPathChatGoogleGenerativeAI",
+        "UiPathChatBedrockConverse",
+        "UiPathChatBedrock",
+        "UiPathChatAnthropicBedrock"
+      ],
+      "attributes": {
+        "openinference.span.kind": "LLM"
+      }
+    }
+  ]
+}

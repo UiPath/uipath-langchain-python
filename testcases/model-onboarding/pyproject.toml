@@ -1,0 +1,16 @@
+[project]
+name = "model-onboarding"
+version = "0.0.1"
+description = "Onboard a runtime-specified LLM model across get_chat_model code paths"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "langgraph>=0.2.70",
+    "langchain-core>=0.3.34",
+    "langgraph-checkpoint-sqlite>=2.0.3",
+    "uipath-langchain[vertex,bedrock]",
+    "pydantic>=2.10.6",
+]
+requires-python = ">=3.11"
+
+[tool.uv.sources]
+uipath-langchain = { path = "../../", editable = true }
