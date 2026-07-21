@@ -20,6 +20,7 @@ from uipath.llm_client.utils.headers import (
     set_dynamic_request_headers,
 )
 from uipath.platform.chat.llm_trace_context import build_trace_context_headers
+from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain_client.base_client import UiPathBaseChatModel
 from uipath_langchain_client.factory import get_chat_model as get_chat_model_factory
 from uipath_langchain_client.settings import (
@@ -27,6 +28,11 @@ from uipath_langchain_client.settings import (
     RoutingMode,
     UiPathBaseSettings,
     VendorType,
+)
+
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
 )
 
 
@@ -162,13 +168,6 @@ def get_chat_model(
             **kwargs,
         )
     except ModelNotFoundError as e:
-        from uipath.runtime.errors import UiPathErrorCategory
-
-        from uipath_langchain.agent.exceptions import (
-            AgentStartupError,
-            AgentStartupErrorCode,
-        )
-
         if byo_connection_id:
             detail = (
                 f"The model '{model}' is not available. Check that your custom "
