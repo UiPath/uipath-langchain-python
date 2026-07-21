@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
@@ -1025,6 +1026,28 @@ class TestIntegrationToolErrorHandling:
 
         with pytest.raises(EnrichedException):
             await tool.ainvoke({"query": "test"})
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_timeout_raises_agent_runtime_error_with_system_category(
+        self, mock_uipath_cls, resource
+    ):
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=httpx.ReadTimeout("")
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+        assert "test_tool" in exc_info.value.error_info.detail
+        assert isinstance(exc_info.value.__cause__, httpx.ReadTimeout)
 
 
 class TestRemoveAsteriskFromProperties:
