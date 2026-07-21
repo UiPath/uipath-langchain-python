@@ -19,7 +19,7 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import Task, TaskRecipient
-from uipath.platform.common import WaitEscalation
+from uipath.platform.common import UiPathConfig, WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import (
@@ -310,6 +310,9 @@ def create_escalation_tool(
                 if channel.recipients
                 else None
             )
+        is_debug = UiPathConfig.is_rooted_to_debug_job()
+        jit_project_key = channel.properties.project_key
+        action_schema = channel.properties.action_schema
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
@@ -336,6 +339,17 @@ def create_escalation_tool(
                     "outcome": cached_result.outcome,
                 }
 
+        if is_debug and not jit_project_key:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ESCALATION_JIT_DEBUG_MISSING_PROJECT_KEY,
+                title="Unable to create the action task in debug mode",
+                detail=(
+                    "The app project key is missing from the escalation resource "
+                    "configuration, so the app cannot be resolved."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
+
         @mockable(
             name=tool_name.lower(),
             description=resource.description,
@@ -354,6 +368,10 @@ def create_escalation_tool(
                     data=serialized_data,
                     recipient=recipient,
                     folder_path=folder_path,
+                    app_project_key=jit_project_key,
+                    app_type=channel.properties.app_type,
+                    is_debug=is_debug,
+                    action_schema=action_schema,
                 )
 
                 if created_task.id is not None:

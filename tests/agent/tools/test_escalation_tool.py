@@ -16,6 +16,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.tools.escalation_memory import (
     EscalationMemoryCachedResult,
 )
@@ -212,6 +213,88 @@ class TestEscalationToolMetadata:
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] is None
+
+    @pytest.fixture
+    def escalation_resource_jit(self):
+        """Escalation resource carrying JIT (debug) project key and app type."""
+        return AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                        project_key="proj-key-abc",
+                        app_type="Custom",
+                    ),
+                    recipients=[
+                        StandardRecipient(
+                            type=AgentEscalationRecipientType.USER_EMAIL,
+                            value="user@example.com",
+                        )
+                    ],
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_PROJECT_ID": "proj-1"})
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_passes_jit_fields_in_debug(
+        self, mock_interrupt, mock_uipath_class, escalation_resource_jit
+    ):
+        """In a debug (studio) run, the project key, app type and is_debug flag are forwarded."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource_jit)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        kwargs = mock_client.tasks.create_async.call_args.kwargs
+        assert kwargs["app_project_key"] == "proj-key-abc"
+        assert kwargs["app_type"] == "Custom"
+        assert kwargs["is_debug"] is True
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_PROJECT_ID": "proj-1"})
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_raises_in_debug_without_project_key(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """In a debug run the task cannot be created without a project key for the undeployed app."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        mock_client.tasks.create_async.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
