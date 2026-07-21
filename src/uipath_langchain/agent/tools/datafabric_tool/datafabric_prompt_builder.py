@@ -164,95 +164,96 @@ def build_sql_context(
     )
 
 
+def _format_section(heading: str, body: str | None) -> list[str]:
+    """Render a heading followed by its body, or nothing when body is empty."""
+    if not body:
+        return []
+    return [heading, "", body, ""]
+
+
+def _format_relationships(entity: EntitySchema, entity_tables: set[str]) -> list[str]:
+    """Render the Relationships subsection for one entity.
+
+    Relationship fields store the related record's Id; the join is spelled out
+    so the model doesn't compare the FK column to a human-readable value. Only
+    relationships whose target entity is in this set (and thus queryable) are
+    surfaced — a dangling reference would produce an unusable join.
+    """
+    relationships = [
+        field
+        for field in entity.fields
+        if field.is_relationship and field.ref_entity_table in entity_tables
+    ]
+    if not relationships:
+        return []
+
+    lines = [
+        f"**Relationships for {entity.entity_name}:**",
+        f"_Join on the related entity's Id. Use LEFT JOIN to keep all {entity.entity_name} "
+        "rows (relationship may be unset); INNER JOIN when the related record must exist or "
+        "you filter on it. Project the specific related column you need — not `*`._",
+        "",
+    ]
+    for field in relationships:
+        join = (
+            f"LEFT JOIN {field.ref_entity_table} "
+            f"ON {field.ref_entity_table}.{field.ref_join_key} = {entity.entity_name}.{field.name}"
+        )
+        repr_hint = (
+            f", representative field `{field.ref_entity_table}.{field.ref_field_name}`"
+            if field.ref_field_name
+            else ""
+        )
+        lines.append(
+            f"- `{entity.entity_name}.{field.name}` → `{field.ref_entity_table}` "
+            f"(`{join}`{repr_hint})"
+        )
+    lines.append("")
+    return lines
+
+
+def _format_entity(entity_ctx: EntitySQLContext, entity_tables: set[str]) -> list[str]:
+    """Render one entity's schema table, relationships, and query patterns."""
+    entity = entity_ctx.entity_schema
+    lines = [f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"]
+    if entity.description:
+        lines.append(f"_{entity.description}_")
+    lines.append("")
+    lines.append("| Field | Type | Description |")
+    lines.append("|-------|------|-------------|")
+    for field in entity.fields:
+        desc = (field.description or "").replace("|", r"\|").replace("\n", " ")
+        lines.append(f"| {field.name} | {field.display_type} | {desc} |")
+    lines.append("")
+
+    lines.extend(_format_relationships(entity, entity_tables))
+
+    lines.append(f"**Query Patterns for {entity.entity_name}:**")
+    lines.append("")
+    lines.append("| User Intent | SQL Pattern |")
+    lines.append("|-------------|-------------|")
+    for p in entity_ctx.query_patterns:
+        lines.append(f"| '{p.intent}' | `{p.sql}` |")
+    lines.append("")
+    return lines
+
+
 def format_sql_context(ctx: SQLContext) -> str:
     """Format a SQLContext as text for system prompt injection."""
     lines: list[str] = []
-
-    if ctx.base_system_prompt:
-        lines.append("## Agent Instructions")
-        lines.append("")
-        lines.append(ctx.base_system_prompt)
-        lines.append("")
-
-    if ctx.sql_expert_system_prompt:
-        lines.append("## SQL Query Generation Guidelines")
-        lines.append("")
-        lines.append(ctx.sql_expert_system_prompt)
-        lines.append("")
-
-    if ctx.constraints:
-        lines.append("## SQL Constraints")
-        lines.append("")
-        lines.append(ctx.constraints)
-        lines.append("")
-
-    if ctx.resource_description:
-        lines.append("## Entity set description")
-        lines.append("")
-        lines.append(ctx.resource_description)
-        lines.append("")
+    lines += _format_section("## Agent Instructions", ctx.base_system_prompt)
+    lines += _format_section(
+        "## SQL Query Generation Guidelines", ctx.sql_expert_system_prompt
+    )
+    lines += _format_section("## SQL Constraints", ctx.constraints)
+    lines += _format_section("## Entity set description", ctx.resource_description)
 
     lines.append("## All available Data Fabric Entities")
     lines.append("")
 
     entity_tables = {ec.entity_schema.entity_name for ec in ctx.entity_contexts}
-
     for entity_ctx in ctx.entity_contexts:
-        entity = entity_ctx.entity_schema
-        lines.append(
-            f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"
-        )
-        if entity.description:
-            lines.append(f"_{entity.description}_")
-        lines.append("")
-        lines.append("| Field | Type | Description |")
-        lines.append("|-------|------|-------------|")
-        for field in entity.fields:
-            desc = (field.description or "").replace("|", r"\|").replace("\n", " ")
-            lines.append(f"| {field.name} | {field.display_type} | {desc} |")
-
-        lines.append("")
-
-        # Relationship fields store the related record's Id; spell out the join
-        # so the model doesn't compare the FK column to a human-readable value.
-        # Only surface relationships whose target entity is in this set (and thus
-        # queryable) — a dangling reference would produce an unusable join.
-        relationships = [
-            field
-            for field in entity.fields
-            if field.is_relationship and field.ref_entity_table in entity_tables
-        ]
-        if relationships:
-            lines.append(f"**Relationships for {entity.entity_name}:**")
-            lines.append(
-                f"_Join on the related entity's Id. Use LEFT JOIN to keep all {entity.entity_name} "
-                "rows (relationship may be unset); INNER JOIN when the related record must exist or "
-                "you filter on it. Project the specific related column you need — not `*`._"
-            )
-            lines.append("")
-            for field in relationships:
-                join = (
-                    f"LEFT JOIN {field.ref_entity_table} "
-                    f"ON {field.ref_entity_table}.{field.ref_join_key} = {entity.entity_name}.{field.name}"
-                )
-                repr_hint = (
-                    f", representative field `{field.ref_entity_table}.{field.ref_field_name}`"
-                    if field.ref_field_name
-                    else ""
-                )
-                lines.append(
-                    f"- `{entity.entity_name}.{field.name}` → `{field.ref_entity_table}` "
-                    f"(`{join}`{repr_hint})"
-                )
-            lines.append("")
-
-        lines.append(f"**Query Patterns for {entity.entity_name}:**")
-        lines.append("")
-        lines.append("| User Intent | SQL Pattern |")
-        lines.append("|-------------|-------------|")
-        for p in entity_ctx.query_patterns:
-            lines.append(f"| '{p.intent}' | `{p.sql}` |")
-        lines.append("")
+        lines.extend(_format_entity(entity_ctx, entity_tables))
 
     return "\n".join(lines)
 
