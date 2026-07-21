@@ -4,6 +4,7 @@ import copy
 import re
 from typing import Any
 
+import httpx
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -19,6 +20,8 @@ from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
     AgentStartupError,
     AgentStartupErrorCode,
     raise_for_enriched,
@@ -339,6 +342,18 @@ def create_integration_tool(
                 tool=resource.name,
             )
             raise
+        except httpx.TimeoutException as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.HTTP_ERROR,
+                title=f"Tool '{resource.name}' timed out",
+                detail=(
+                    f"The Integration Service request for tool '{resource.name}' "
+                    "did not complete in time. This is usually a transient issue; "
+                    "please retry the run later."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+                should_wrap=False,
+            ) from e
 
         return result
 
