@@ -41,6 +41,7 @@ from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
+from uipath_langchain.agent.tools.static_args import wrap_tools_with_static_args
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     ToolWrapperReturnType,
@@ -409,7 +410,7 @@ def create_a2a_tools_and_clients(
         tools.append(tool)
         clients.append(a2a_client)
 
-    return tools, clients
+    return wrap_tools_with_static_args(tools), clients
 
 
 @asynccontextmanager
