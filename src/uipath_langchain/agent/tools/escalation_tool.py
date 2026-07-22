@@ -283,7 +283,6 @@ async def create_task_for_channel(
         actionable_message_metadata=channel.properties.actionable_message_meta_data,
         app_project_key=app_project_key,
         app_type=app_type,
-        is_debug=is_debug,
         action_schema=action_schema,
         solution_id=channel.properties.solution_id,
     )
@@ -358,11 +357,26 @@ def create_escalation_tool(
                 if channel.recipients
                 else None
             )
-        is_debug = await _resolve_is_debug_run()
+
+        is_debug = UiPathConfig.is_rooted_to_debug_job
+        if not is_debug:
+            is_debug = await _resolve_is_debug_run()
         print('Resolved debug run', is_debug)
-        app_project_key = channel.properties.project_key
+        if is_debug:
+            app_project_key = channel.properties.project_key
         app_version = channel.properties.app_version
         action_schema = channel.properties.action_schema
+
+        if is_debug and app_version == 0 and not app_project_key:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ESCALATION_JIT_DEBUG_MISSING_PROJECT_KEY,
+                title="Unable to create the escalation task in debug mode",
+                detail=(
+                    "The app project key is missing from the escalation resource "
+                    "configuration, so the app cannot be resolved in debug mode."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
@@ -388,17 +402,6 @@ def create_escalation_tool(
                     "output": cached_result.output,
                     "outcome": cached_result.outcome,
                 }
-
-        if is_debug and app_version == 0 and not app_project_key:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.ESCALATION_JIT_DEBUG_MISSING_PROJECT_KEY,
-                title="Unable to create the action task in debug mode",
-                detail=(
-                    "The app project key is missing from the escalation resource "
-                    "configuration, so the app cannot be resolved."
-                ),
-                category=UiPathErrorCategory.USER,
-            )
 
         @mockable(
             name=tool_name.lower(),
