@@ -172,7 +172,9 @@ def create_agent(
         )
 
     if memory:
-        memory_recall = create_memory_recall_node(memory, input_schema=input_schema)
+        memory_recall = create_memory_recall_node(
+            memory, input_schema=input_schema, model=model
+        )
         builder.add_node(AgentGraphNode.MEMORY_RECALL, memory_recall)
         builder.add_edge(START, AgentGraphNode.MEMORY_RECALL)
         builder.add_edge(AgentGraphNode.MEMORY_RECALL, AgentGraphNode.INIT)
