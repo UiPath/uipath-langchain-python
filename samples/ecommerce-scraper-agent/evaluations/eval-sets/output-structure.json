@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "id": "output-structure",
+  "name": "Output Structure Validation",
+  "description": "Validates that scraped products have the expected fields and data quality",
+  "evaluatorRefs": ["LLMJudgeOutputEvaluator"],
+  "evaluations": [
+    {
+      "id": "test-1-product-fields-present",
+      "name": "Products contain required fields (name, price, url, currency)",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products?page=1"
+      },
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "products": "A list of product objects where each product has at minimum: 'url' (a valid URL to the product page), 'name' (non-empty product name), 'price' (a numeric price value), and 'currency' (ISO 4217 code like EUR). Products may also have description, availability, developer, platform, and type fields.",
+            "total_products": "A positive integer greater than 0 representing the number of unique products scraped",
+            "urls_scraped": "A positive integer representing the total number of URLs visited during scraping"
+          }
+        }
+      }
+    },
+    {
+      "id": "test-2-currency-resolved",
+      "name": "Currency symbols are resolved to ISO 4217 codes",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products?page=2"
+      },
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "products": "Products should have a 'currency' field containing a valid ISO 4217 three-letter code (e.g. 'EUR', 'USD', 'GBP') rather than a raw currency symbol (e.g. not '€' or '$'). The price field should be a numeric string without currency symbols."
+          }
+        }
+      }
+    },
+    {
+      "id": "test-3-no-duplicate-products",
+      "name": "No duplicate products in output",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products?page=3"
+      },
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "products": "Each product in the list should have a unique URL. There should be no two products with the same 'url' field. The total_products count should match the length of the products list.",
+            "total_products": "Should exactly match the number of items in the products array"
+          }
+        }
+      }
+    }
+  ]
+}

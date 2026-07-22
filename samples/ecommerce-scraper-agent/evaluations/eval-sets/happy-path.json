@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "id": "happy-path",
+  "name": "Happy Path Scenarios",
+  "description": "Tests for normal scraping operations with the oxylabs sandbox site",
+  "evaluatorRefs": ["JsonSimilarityEvaluator", "TrajectoryEvaluator"],
+  "evaluations": [
+    {
+      "id": "test-1-default-url-products-found",
+      "name": "Scrape default URL returns products with expected fields",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products"
+      },
+      "evaluationCriterias": {
+        "JsonSimilarityEvaluator": {
+          "expectedOutput": {
+            "total_products": 2993,
+            "urls_scraped": 3301
+          }
+        },
+        "TrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should: 1) Start at the coordinator node which seeds the start URL. 2) Dispatch URLs to parallel scraper sub-agents. 3) Scrapers fetch pages, call the LLM to analyze page type (listing vs product), and extract product links from listing pages and product data from product pages. 4) Return discovered URLs to coordinator for further rounds. 5) Continue until no new URLs remain. 6) Finalize by deduplicating products and resolving currency symbols. The agent should scrape approximately 3000 products across multiple rounds of coordinator-scraper cycles."
+        }
+      }
+    },
+    {
+      "id": "test-2-category-page",
+      "name": "Scrape a specific category page discovers products",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products/category/nintendo"
+      },
+      "evaluationCriterias": {
+        "TrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should: 1) Start at the coordinator with the Nintendo category URL. 2) Dispatch to scrapers which classify the page as a listing page. 3) Extract product links and pagination links from the category listing. 4) Visit individual product pages to extract product data (name, price, description, etc.). 5) Follow pagination to discover all products in the category. 6) Finalize with deduplicated products, all having currency resolved to ISO codes. The total products should be fewer than the full site (~1000 or less for a single category)."
+        }
+      }
+    }
+  ]
+}
