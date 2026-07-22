@@ -21,6 +21,7 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
     AgentStartupError,
+    AgentStartupErrorCode,
 )
 from uipath_langchain.agent.tools.integration_tool import (
     _is_param_name_to_jsonpath,
@@ -888,6 +889,32 @@ class TestCreateIntegrationToolWithArgumentProperties:
 
         assert isinstance(tool, StructuredToolWithArgumentProperties)
         assert tool.argument_properties == {}
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    @pytest.mark.parametrize("tool_path", ["", " \t\n"])
+    def test_empty_tool_path_fails_before_sdk_construction(
+        self, mock_uipath_cls, resource_factory, tool_path
+    ):
+        resource = resource_factory(tool_path=tool_path)
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            create_integration_tool(resource)
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
+        assert resource.name in exc_info.value.error_info.detail
+        assert "toolPath" in exc_info.value.error_info.detail
+        mock_uipath_cls.assert_not_called()
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    def test_non_empty_tool_path_is_accepted(self, mock_uipath_cls, resource_factory):
+        resource = resource_factory(tool_path="/api/test")
+
+        tool = create_integration_tool(resource)
+
+        assert isinstance(tool, StructuredToolWithArgumentProperties)
+        mock_uipath_cls.assert_called_once_with()
 
 
 class TestParseIsParamName:
