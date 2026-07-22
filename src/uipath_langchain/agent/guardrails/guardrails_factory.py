@@ -565,17 +565,25 @@ def build_guardrails_with_actions(
                 )
             )
         elif isinstance(action, AgentGuardrailEscalateAction):
-            result.append(
-                (
-                    converted_guardrail,
-                    EscalateAction(
-                        app_name=action.app.name,
-                        app_folder_path=action.app.folder_name,
-                        version=action.app.version,
-                        recipient=action.recipient,
-                    ),
+            if action.app is not None:
+                result.append(
+                    (
+                        converted_guardrail,
+                        EscalateAction(
+                            app_name=action.app.name,
+                            app_folder_path=action.app.folder_name,
+                            version=action.app.version,
+                            recipient=action.recipient,
+                        ),
+                    )
                 )
-            )
+            else:
+                result.append(
+                    (
+                        converted_guardrail,
+                        EscalateAction(recipient=action.recipient),
+                    )
+                )
         elif isinstance(action, AgentGuardrailFilterAction):
             result.append((converted_guardrail, FilterAction(fields=action.fields)))
     return result
