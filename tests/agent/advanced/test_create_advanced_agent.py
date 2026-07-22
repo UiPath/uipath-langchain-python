@@ -69,3 +69,27 @@ class TestCreateAdvancedAgent:
             _, kwargs = mock_upstream.call_args
             assert isinstance(kwargs["tools"], list)
             assert isinstance(kwargs["subagents"], list)
+
+    def test_advanced_agent_forwards_skills(self, mock_model: MagicMock) -> None:
+        """Non-empty skills are forwarded to the upstream builder as a list."""
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent"
+        ) as mock_upstream:
+            mock_upstream.return_value = MagicMock(spec=CompiledStateGraph)
+            create_advanced_agent(
+                mock_model, system_prompt="test", skills=("/skills/",)
+            )
+            _, kwargs = mock_upstream.call_args
+            assert kwargs["skills"] == ["/skills/"]
+
+    def test_advanced_agent_empty_skills_becomes_none(
+        self, mock_model: MagicMock
+    ) -> None:
+        """An empty skills sequence collapses to None (disables the middleware)."""
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent"
+        ) as mock_upstream:
+            mock_upstream.return_value = MagicMock(spec=CompiledStateGraph)
+            create_advanced_agent(mock_model, system_prompt="test")
+            _, kwargs = mock_upstream.call_args
+            assert kwargs["skills"] is None
