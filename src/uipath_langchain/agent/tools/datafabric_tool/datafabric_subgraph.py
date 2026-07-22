@@ -55,8 +55,11 @@ class QueryExecutor:
     async def __call__(self, sql_query: str) -> dict[str, Any]:
         logger.debug("execute_sql called with SQL: %s", sql_query)
         try:
+            # Relationship (FK) fields are typed as their scalar id so the SQL the
+            # agent writes can join on `relationshipField = Other.Id`.
             records = await self._entities.query_entity_records_async(
                 sql_query=sql_query,
+                relationships_as_scalar=True,
             )
             return {
                 "records": records,
