@@ -80,7 +80,7 @@ _EXCEPTION_RESULT = {
 def _make_config(**overrides: Any) -> InvestigationConfig:
     defaults = {
         "label_vocabulary": ["Source", "DerivedEffect", "PolicyViolation", "Defer"],
-        "seed_entities": ["EXC-002"],
+        "seed_records": ["EXC-002"],
         "max_steps": 50,
     }
     defaults.update(overrides)
@@ -171,11 +171,11 @@ class TestSeed:
         assert "EXC-002" in result["beliefs"]
         assert result["beliefs"]["EXC-002"].label == "Defer"
         assert result["active_set"] == ["EXC-002"]
-        assert result["discovered_entities"]["EXC-002"] == "ToleranceException"
+        assert result["discovered_records"]["EXC-002"] == "ToleranceException"
 
     @pytest.mark.asyncio
     async def test_seed_multiple_entities(self) -> None:
-        cfg = _make_config(seed_entities=["EXC-001", "EXC-002"])
+        cfg = _make_config(seed_records=["EXC-001", "EXC-002"])
         seed = _make_seed(cfg)
         result = await seed(EoGState())
 
@@ -190,14 +190,14 @@ class TestPop:
     async def test_pop_dequeues_fifo(self) -> None:
         state = EoGState(active_set=["a", "b", "c"])
         result = await pop_node(state)
-        assert result["current_entity"] == "a"
+        assert result["current_record"] == "a"
         assert result["active_set"] == ["b", "c"]
 
     @pytest.mark.asyncio
     async def test_pop_empty(self) -> None:
         state = EoGState(active_set=[])
         result = await pop_node(state)
-        assert result["current_entity"] == ""
+        assert result["current_record"] == ""
 
 
 # ── should_continue ──────────────────────────────────────────────
@@ -205,7 +205,7 @@ class TestPop:
 class TestShouldContinue:
     def test_continue_when_entity_and_budget(self) -> None:
         state = EoGState(
-            current_entity="EXC-002",
+            current_record="EXC-002",
             steps_taken=0,
             investigation_config=_make_config(),
         )
@@ -213,14 +213,14 @@ class TestShouldContinue:
 
     def test_synthesize_when_empty(self) -> None:
         state = EoGState(
-            current_entity="",
+            current_record="",
             investigation_config=_make_config(),
         )
         assert should_continue(state) == "synthesize"
 
     def test_synthesize_when_budget_exhausted(self) -> None:
         state = EoGState(
-            current_entity="EXC-002",
+            current_record="EXC-002",
             steps_taken=50,
             investigation_config=_make_config(max_steps=50),
         )
@@ -237,8 +237,8 @@ class TestDiscover:
 
         discover = _make_discover(mock_client, "s2p")
         state = EoGState(
-            current_entity="EXC-002",
-            discovered_entities={"EXC-002": "ToleranceException"},
+            current_record="EXC-002",
+            discovered_records={"EXC-002": "ToleranceException"},
         )
         result = await discover(state)
 
@@ -254,8 +254,8 @@ class TestDiscover:
 
         discover = _make_discover(mock_client, "s2p")
         state = EoGState(
-            current_entity="EXC-002",
-            discovered_entities={"EXC-002": "ToleranceException"},
+            current_record="EXC-002",
+            discovered_records={"EXC-002": "ToleranceException"},
             function_cache={"ToleranceException": _TEST_FUNCTIONS},
         )
         result = await discover(state)
@@ -278,8 +278,8 @@ class TestGather:
 
         gather = _make_gather(mock_client, "s2p")
         state = EoGState(
-            current_entity="EXC-002",
-            discovered_entities={"EXC-002": "ToleranceException"},
+            current_record="EXC-002",
+            discovered_records={"EXC-002": "ToleranceException"},
             investigation_config=_make_config(),
             context_packet={
                 "entity_id": "EXC-002",
@@ -295,7 +295,7 @@ class TestGather:
         assert len(evidence) >= 2
 
         # Should discover new entities from results
-        discovered = result["discovered_entities"]
+        discovered = result["discovered_records"]
         assert "INV-2004" in discovered
         assert discovered["INV-2004"] == "Invoice"
 
@@ -310,7 +310,7 @@ class TestUpdate:
     @pytest.mark.asyncio
     async def test_update_writes_belief(self) -> None:
         state = EoGState(
-            current_entity="EXC-002",
+            current_record="EXC-002",
             beliefs={"EXC-002": Belief(label="Defer")},
             policy_result={"label": "Source", "evidence": "price variance"},
             investigation_config=_make_config(),
@@ -326,7 +326,7 @@ class TestUpdate:
     @pytest.mark.asyncio
     async def test_update_damping(self) -> None:
         state = EoGState(
-            current_entity="EXC-002",
+            current_record="EXC-002",
             beliefs={"EXC-002": Belief(label="A", flip_count=4)},
             policy_result={"label": "B", "evidence": "oscillating"},
             investigation_config=_make_config(max_flips=3),
@@ -341,12 +341,12 @@ class TestPropagate:
     @pytest.mark.asyncio
     async def test_propagate_on_change(self) -> None:
         state = EoGState(
-            current_entity="EXC-002",
+            current_record="EXC-002",
             beliefs={
                 "EXC-002": Belief(label="Source", evidence="test"),
                 "INV-2004": Belief(label="Defer"),
             },
-            discovered_entities={
+            discovered_records={
                 "EXC-002": "ToleranceException",
                 "INV-2004": "Invoice",
             },
@@ -371,7 +371,7 @@ class TestPropagate:
     @pytest.mark.asyncio
     async def test_no_propagate_when_no_change(self) -> None:
         state = EoGState(
-            current_entity="EXC-002",
+            current_record="EXC-002",
             beliefs={"EXC-002": Belief(label="Defer")},
             ledger=[
                 LedgerEntry(
@@ -397,7 +397,7 @@ class TestSynthesize:
                 "INV-2004": Belief(label="DerivedEffect", evidence="flagged"),
                 "PO-1004": Belief(label="Defer"),
             },
-            discovered_entities={
+            discovered_records={
                 "EXC-002": "ToleranceException",
                 "INV-2004": "Invoice",
                 "PO-1004": "PurchaseOrder",
@@ -422,7 +422,7 @@ class TestSynthesize:
                 "EXC-002": Belief(label="Source"),
                 "INV-2004": Belief(label="DerivedEffect"),
             },
-            discovered_entities={
+            discovered_records={
                 "EXC-002": "ToleranceException",
                 "INV-2004": "Invoice",
             },

@@ -91,7 +91,7 @@ class TestExplanatoryEdge:
 class TestInvestigationConfig:
     def test_defaults(self) -> None:
         cfg = InvestigationConfig(label_vocabulary=["Source", "Defer"])
-        assert cfg.seed_entities == []
+        assert cfg.seed_records == []
         assert cfg.max_steps == 50
         assert cfg.max_flips == 3
         assert cfg.default_label == "Defer"
@@ -100,27 +100,27 @@ class TestInvestigationConfig:
     def test_custom_values(self) -> None:
         cfg = InvestigationConfig(
             label_vocabulary=["A", "B"],
-            seed_entities=["e1", "e2"],
+            seed_records=["e1", "e2"],
             max_steps=10,
             max_flips=1,
             default_label="Unknown",
             max_results_per_function=5,
         )
         assert cfg.max_steps == 10
-        assert len(cfg.seed_entities) == 2
+        assert len(cfg.seed_records) == 2
 
 
 class TestEoGState:
     def test_default_state(self) -> None:
         state = EoGState()
         assert state.active_set == []
-        assert state.current_entity == ""
+        assert state.current_record == ""
         assert state.beliefs == {}
         assert state.ledger == []
         assert state.steps_taken == 0
         assert state.investigation_config is None
         assert state.function_cache == {}
-        assert state.discovered_entities == {}
+        assert state.discovered_records == {}
 
     def test_beliefs_merge_dicts_reducer(self) -> None:
         left = {"e1": Belief(label="A")}
@@ -152,10 +152,10 @@ class TestEoGState:
             function_cache={
                 "Invoice": [{"name": "invoiceDetail", "touches": ["Invoice"]}],
             },
-            discovered_entities={"INV-2004": "Invoice"},
+            discovered_records={"INV-2004": "Invoice"},
         )
         assert "Invoice" in state.function_cache
-        assert state.discovered_entities["INV-2004"] == "Invoice"
+        assert state.discovered_records["INV-2004"] == "Invoice"
 
     def test_state_with_config(self) -> None:
         cfg = InvestigationConfig(label_vocabulary=["X"])
