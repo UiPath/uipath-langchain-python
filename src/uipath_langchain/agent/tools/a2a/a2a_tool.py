@@ -78,9 +78,9 @@ class A2aClient:
     pool when done.
     """
 
-    def __init__(self, agent_card: AgentCard, slug: str) -> None:
+    def __init__(self, agent_card: AgentCard, resource_name: str) -> None:
         self._agent_card = agent_card
-        self._slug = slug
+        self._resource_name = resource_name
         self._lock = asyncio.Lock()
         self._client: Client | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -96,11 +96,12 @@ class A2aClient:
                     sdk = UiPath()
                     folder_path = get_execution_folder_path()
                     agent = await sdk.remote_a2a.retrieve_async(
-                        slug=self._slug, folder_path=folder_path
+                        name=self._resource_name,
+                        folder_path=folder_path,
                     )
                     if not agent.a2a_url:
                         raise ValueError(
-                            f"Remote A2A agent '{self._slug}' has no a2a_url configured"
+                            f"Remote A2A agent '{self._resource_name}' has no a2a_url configured"
                         )
                     self._agent_card.url = agent.a2a_url
 
@@ -404,7 +405,7 @@ def create_a2a_tools_and_clients(
                 default_output_modes=["text/plain"],
             )
 
-        a2a_client = A2aClient(agent_card, resource.slug)
+        a2a_client = A2aClient(agent_card, resource.name)
         tool = _create_a2a_tool(resource, a2a_client, agent_card)
         tools.append(tool)
         clients.append(a2a_client)

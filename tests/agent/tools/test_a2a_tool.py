@@ -84,8 +84,7 @@ def test_create_tools_builds_one_client_per_enabled_resource() -> None:
 
     assert len(tools) == 1
     assert len(clients) == 1
-    # The client carries the slug used to resolve the proxy URL at runtime.
-    assert clients[0]._slug == "remote-agent-slug"
+    assert clients[0]._resource_name == "remote-agent"
     # The card is built from the cached card; the URL is not yet resolved.
     assert clients[0]._agent_card.name == "Remote Agent"
 
@@ -96,7 +95,7 @@ def test_create_tools_builds_default_card_without_cached_card() -> None:
     tools, clients = create_a2a_tools_and_clients([resource])
 
     assert len(tools) == 1
-    assert clients[0]._slug == "remote-agent-slug"
+    assert clients[0]._resource_name == "remote-agent"
     assert clients[0]._agent_card.name == "remote-agent"
 
 
@@ -114,8 +113,13 @@ class _FakeRemoteA2aService:
         self._a2a_url = a2a_url
         self.calls: list[tuple[str, str | None]] = []
 
-    async def retrieve_async(self, *, slug: str, folder_path: str | None):
-        self.calls.append((slug, folder_path))
+    async def retrieve_async(
+        self,
+        *,
+        name: str,
+        folder_path: str | None,
+    ):
+        self.calls.append((name, folder_path))
         return SimpleNamespace(a2a_url=self._a2a_url)
 
 
@@ -125,7 +129,7 @@ class _FakeSdk:
         self._config = SimpleNamespace(secret="token")
 
 
-def _patch_runtime(monkeypatch: pytest.MonkeyPatch, sdk: _FakeSdk) -> dict[str, Any]:
+def _patch_runtime(monkeypatch: pytest.MonkeyPatch, sdk: Any) -> dict[str, Any]:
     """Patch the SDK, folder-path resolver, and A2A client factory."""
     import uipath.platform as uipath_platform
     from a2a.client import ClientFactory
@@ -158,14 +162,14 @@ async def test_client_resolves_proxy_url_via_retrieve(
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
     )
-    client = A2aClient(card, slug="remote-agent-slug")
+    client = A2aClient(card, resource_name="Remote Agent")
 
     result = await client.get()
 
     assert result is handles["connected"]
     # URL resolved from the retrieved agent's a2a_url, not the cached card URL.
     assert card.url == PROXY_URL
-    assert sdk.remote_a2a.calls == [("remote-agent-slug", "Shared")]
+    assert sdk.remote_a2a.calls == [("Remote Agent", "Shared")]
 
     await client.dispose()
 
@@ -186,7 +190,7 @@ async def test_client_raises_when_agent_has_no_proxy_url(
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
     )
-    client = A2aClient(card, slug="remote-agent-slug")
+    client = A2aClient(card, resource_name="Remote Agent")
 
     with pytest.raises(ValueError, match="has no a2a_url"):
         await client.get()
