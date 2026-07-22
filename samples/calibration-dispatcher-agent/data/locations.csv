@@ -1,0 +1,21 @@
+Clinic ID,Clinic Name,Address,City,Postal Code,Latitude,Longitude,Contact Person,Contact Email,Contact Phone,SLA Hours
+CLI001,Regional Hospital No 1,ul. Arkońska 4,Szczecin,71-455,53.4285,14.5528,Anna Kowalski,contact@clinic001.example,+48914343434,24
+CLI002,Health Center North,ul. Grunwaldzka 182,Poznan,60-166,52.4064,16.9252,Tom Nowak,contact@clinic002.example,+48618888888,48
+CLI003,Central Medical Center,al. Jerozolimskie 123,Warsaw,02-017,52.2297,21.0122,Maria Smith,contact@clinic003.example,+48225551234,24
+CLI004,Audio Clinic West,ul. Piłsudskiego 12,Wroclaw,50-044,51.1079,17.0385,Jan Johnson,contact@clinic004.example,+48713334455,48
+CLI005,Children's Hospital,ul. Szpitalna 27,Poznan,60-572,52.4012,16.8856,Kate Brown,contact@clinic005.example,+48617776666,24
+CLI006,Medica Clinic,ul. Monte Cassino 40,Szczecin,70-466,53.4395,14.5481,Peter Davis,contact@clinic006.example,+48914567890,72
+CLI007,Hearing Center Pro,ul. Nowy Świat 33,Warsaw,00-029,52.2350,21.0177,Amy Wilson,contact@clinic007.example,+48226667788,48
+CLI008,ENT Clinic,ul. Świdnicka 50,Wroclaw,50-030,51.1054,17.0262,Mark Miller,contact@clinic008.example,+48719998877,72
+CLI009,University Hospital,ul. Przybyszewskiego 49,Poznan,60-355,52.4199,16.9016,Eve Moore,contact@clinic009.example,+48611112233,24
+CLI010,ProMed Clinic,ul. Ku Słońcu 67,Szczecin,71-080,53.4525,14.5003,Bob Taylor,contact@clinic010.example,+48914445566,72
+CLI011,Diagnostic Center,ul. Pulawska 455,Warsaw,02-844,52.1621,21.0305,Lisa Anderson,contact@clinic011.example,+48223334455,48
+CLI012,ENT Clinic South,ul. Borowska 213,Wroclaw,50-556,51.0826,17.0048,Andy Thomas,contact@clinic012.example,+48717778899,72
+CLI013,Family Clinic,ul. Słowackiego 12,Poznan,60-823,52.4321,16.9104,Jane Jackson,contact@clinic013.example,+48619990011,72
+CLI014,City Hospital,ul. Unii Lubelskiej 1,Szczecin,71-252,53.4150,14.5306,Mark White,contact@clinic014.example,+48911112233,24
+CLI015,Health Center East,ul. Marszałkowska 140,Warsaw,00-061,52.2293,21.0149,Donna Harris,contact@clinic015.example,+48224445566,48
+CLI016,Audio Clinic East,ul. Legnicka 40,Wroclaw,53-671,51.1389,16.9737,Chris Martin,contact@clinic016.example,+48715556677,72
+CLI017,MediCare Clinic,ul. Hetmańska 90,Poznan,60-251,52.4510,16.9342,Maggie Garcia,contact@clinic017.example,+48616667788,48
+CLI018,Clinical Hospital Central,ul. Banacha 1a,Warsaw,02-097,52.2107,20.9826,Greg Martinez,contact@clinic018.example,+48227778899,24
+CLI019,Medical Center North,ul. Niepodległości 30,Szczecin,70-404,53.4308,14.5420,Isabel Rodriguez,contact@clinic019.example,+48918889900,48
+CLI020,ENT Clinic West,ul. Traugutta 57,Wroclaw,50-417,51.1144,17.0211,Adam Lee,contact@clinic020.example,+48719991122,48
