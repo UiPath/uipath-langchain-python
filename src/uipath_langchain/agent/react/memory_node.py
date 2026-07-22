@@ -20,7 +20,7 @@ from uipath.platform.memory import (
     SearchSettings,
 )
 
-from .types import MemoryConfig
+from .types import AgentGraphState, MemoryConfig
 from .utils import extract_input_data_from_state
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ def create_memory_recall_node(
         An async callable suitable for ``builder.add_node()``.
     """
 
-    async def memory_recall_node(state: Any) -> dict[str, Any]:
+    async def memory_recall_node(state: AgentGraphState) -> dict[str, Any]:
         input_model = input_schema if input_schema is not None else BaseModel
         input_arguments = extract_input_data_from_state(state, input_model)
         if not input_arguments:

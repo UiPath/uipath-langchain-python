@@ -17,8 +17,10 @@ from uipath_langchain.agent.react.memory_node import (
 )
 from uipath_langchain.agent.react.types import (
     AgentGraphNode,
+    AgentGraphState,
     MemoryConfig,
 )
+from uipath_langchain.agent.react.utils import create_state_with_input
 
 
 class _TopicInput(BaseModel):
@@ -34,9 +36,12 @@ class _TopicLevelInput(BaseModel):
     level: str = Field(default="")
 
 
-def _make_state(**user_fields: Any) -> dict[str, Any]:
-    """Create a state dict with standard internal fields + user fields."""
-    return {"messages": [], "inner_state": {}, **user_fields}
+def _make_state(**user_fields: Any) -> AgentGraphState:
+    """Create a graph state with standard internal fields and user fields."""
+    state_model = create_state_with_input(_TopicInput)
+    return state_model.model_validate(
+        {"messages": [], "inner_state": {}, **user_fields}
+    )
 
 
 class TestBuildSearchFields:
