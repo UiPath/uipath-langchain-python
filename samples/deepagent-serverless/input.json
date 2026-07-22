@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "type": "human",
+      "content": "Research the best practices for benchmarking sorting algorithms in Python. Then write a script that compares bubble sort, merge sort, and Python's built-in timsort on random lists of 10000 elements, and execute it."
+    }
+  ]
+}
