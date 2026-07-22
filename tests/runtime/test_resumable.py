@@ -1,11 +1,13 @@
 import os
 import tempfile
+from datetime import datetime, timedelta, timezone
 from typing import Any, TypedDict
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
+from pydantic import BaseModel, ConfigDict, Field
 from uipath.core.errors import ErrorCategory, UiPathPendingTriggerError
 from uipath.core.triggers import (
     UiPathResumeTrigger,
@@ -92,6 +94,94 @@ class ParallelTriggerHandler:
         assert trigger.payload is not None
         branch_name = trigger.payload.get("message", "unknown")
         return f"Response for {branch_name}"
+
+
+class WaitUntilLikeInterrupt(BaseModel):
+    """Timer-shaped model used to verify typed interrupt pass-through."""
+
+    resume_time: datetime = Field(alias="resumeTime")
+
+    model_config = ConfigDict(validate_by_name=True)
+
+
+class CapturingTimerTriggerHandler:
+    """Mock implementation that captures typed time trigger interrupt values."""
+
+    def __init__(self):
+        self.suspend_values: list[WaitUntilLikeInterrupt] = []
+
+    async def create_trigger(self, suspend_value: Any) -> UiPathResumeTrigger:
+        """Create a timer trigger from the typed suspend value."""
+        assert isinstance(suspend_value, WaitUntilLikeInterrupt)
+        self.suspend_values.append(suspend_value)
+        return UiPathResumeTrigger(
+            trigger_type=UiPathResumeTriggerType.TIMER,
+            trigger_name=UiPathResumeTriggerName.TIMER,
+            payload=suspend_value.model_dump(by_alias=True),
+        )
+
+    async def read_trigger(self, trigger: UiPathResumeTrigger) -> Any:
+        """Timer triggers are resumed externally and remain pending locally."""
+        raise UiPathPendingTriggerError(
+            ErrorCategory.SYSTEM, "Time trigger is still pending"
+        )
+
+
+@pytest.mark.asyncio
+async def test_typed_time_interrupt_is_forwarded_to_trigger_handler():
+    """LangGraph interrupt values are passed through for timer-shaped models."""
+    resume_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    class State(TypedDict, total=False):
+        message: str | None
+
+    def wait_for_time(state: State) -> State:
+        result = interrupt(
+            WaitUntilLikeInterrupt(
+                resume_time=resume_at,
+            )
+        )
+        return {"message": f"resumed with: {result}"}
+
+    graph = StateGraph(State)
+    graph.add_node("wait_for_time", wait_for_time)
+    graph.add_edge(START, "wait_for_time")
+    graph.add_edge("wait_for_time", END)
+
+    temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    temp_db.close()
+
+    try:
+        async with AsyncSqliteSaver.from_conn_string(temp_db.name) as memory:
+            compiled_graph = graph.compile(checkpointer=memory)
+            base_runtime = UiPathLangGraphRuntime(
+                graph=compiled_graph,
+                runtime_id="time-trigger-pass-through-test",
+                entrypoint="test",
+            )
+            storage = SqliteResumableStorage(memory)
+            trigger_handler = CapturingTimerTriggerHandler()
+            runtime = UiPathResumableRuntime(
+                delegate=base_runtime,
+                storage=storage,
+                trigger_manager=trigger_handler,
+                runtime_id="time-trigger-pass-through-test",
+            )
+
+            result = await runtime.execute(
+                input={"message": None},
+                options=UiPathExecuteOptions(resume=False),
+            )
+
+            assert result.status == UiPathRuntimeStatus.SUSPENDED
+            assert len(trigger_handler.suspend_values) == 1
+            suspend_value = trigger_handler.suspend_values[0]
+            assert suspend_value.resume_time == resume_at
+            assert result.triggers is not None
+            assert result.triggers[0].trigger_type == UiPathResumeTriggerType.TIMER
+            assert result.triggers[0].payload == {"resumeTime": resume_at}
+    finally:
+        os.unlink(temp_db.name)
 
 
 @pytest.mark.asyncio

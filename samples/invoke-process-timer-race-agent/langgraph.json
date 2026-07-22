@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "timer-race-parent-agent": "./graph.py:parent_graph"
+  },
+  "env": ".env"
+}

@@ -13,6 +13,7 @@ from uipath.core.triggers import (
     UiPathResumeTriggerType,
 )
 
+from uipath_langchain.runtime import storage as storage_module
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 
@@ -166,6 +167,53 @@ class TestTriggerStorage:
         # Verify trigger no longer exists
         triggers = await storage.get_triggers("runtime1")
         assert triggers is None
+
+    @pytest.mark.asyncio
+    async def test_save_triggers_rolls_back_on_insert_failure(
+        self, storage: SqliteResumableStorage, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Test that trigger replacement is all-or-nothing."""
+        existing_trigger = UiPathResumeTrigger(
+            interrupt_id="existing",
+            trigger_type=UiPathResumeTriggerType.API,
+            trigger_name=UiPathResumeTriggerName.API,
+            payload="existing payload",
+        )
+        await storage.save_triggers("runtime1", [existing_trigger])
+
+        new_trigger1 = UiPathResumeTrigger(
+            interrupt_id="new1",
+            trigger_type=UiPathResumeTriggerType.JOB,
+            trigger_name=UiPathResumeTriggerName.JOB,
+            payload="new payload 1",
+        )
+        new_trigger2 = UiPathResumeTrigger(
+            interrupt_id="new2",
+            trigger_type=UiPathResumeTriggerType.TIMER,
+            trigger_name=UiPathResumeTriggerName.TIMER,
+            payload="new payload 2",
+        )
+
+        original_serialize_json = storage_module.serialize_json
+        call_count = 0
+
+        def fail_on_second_trigger(value: Any) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("serialization failed")
+            return original_serialize_json(value)
+
+        monkeypatch.setattr(storage_module, "serialize_json", fail_on_second_trigger)
+
+        with pytest.raises(RuntimeError, match="serialization failed"):
+            await storage.save_triggers("runtime1", [new_trigger1, new_trigger2])
+
+        triggers = await storage.get_triggers("runtime1")
+        assert triggers is not None
+        assert len(triggers) == 1
+        assert triggers[0].interrupt_id == "existing"
+        assert triggers[0].payload == "existing payload"
 
     @pytest.mark.asyncio
     async def test_delete_trigger(self, storage: SqliteResumableStorage):

@@ -617,6 +617,60 @@ For a practical implementation, refer to the [email-triage-agent sample](https:/
 
 ---
 
+## Time triggers
+
+### WaitUntil
+
+Suspends the agent until an Orchestrator timer fires. The SDK stores the resume timestamp as part of the resume condition, and Orchestrator resumes the suspended job when that time is reached.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `resume_time` | `datetime` | Absolute time when Orchestrator should resume the suspended job. Use a timezone-aware `datetime`; it is normalized to UTC before the trigger is created. |
+
+```python
+from langgraph.types import interrupt
+from uipath.platform.common import WaitUntil
+from datetime import datetime, timedelta, timezone
+
+resume_payload = interrupt(
+    WaitUntil(
+        resume_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+)
+```
+
+This is intended for deployed jobs where Orchestrator owns the scheduler. In a local run there is no scheduler to fire the time trigger, so resume the interrupt explicitly when testing locally.
+
+---
+
+## Racing Multiple Resume Conditions
+
+Pass a list of interrupt models to suspend on multiple resume conditions at once. The SDK creates sibling triggers for the same interrupt; whichever trigger fires first resumes the agent, and Orchestrator removes the remaining sibling triggers for that interrupt.
+
+```python
+from datetime import datetime, timedelta, timezone
+
+from langgraph.types import interrupt
+from uipath.platform.common import InvokeProcess, WaitUntil
+
+result = interrupt(
+    [
+        InvokeProcess(
+            name="long-running-agent",
+            input_arguments={"message": "start"},
+        ),
+        WaitUntil(
+            resume_time=datetime.now(timezone.utc) + timedelta(minutes=10),
+        ),
+    ]
+)
+
+if isinstance(result, dict) and "resumeTime" in result:
+    raise TimeoutError("Process did not finish before the timer fired.")
+```
+
+---
+
 ## Resuming with a plain value (API trigger)
 
 All the models above are typed interrupts that tie the agent's wait state to a specific UiPath operation. When you call `interrupt(...)` with a value that is **not** one of those models, most commonly a plain string but any JSON-serializable value works, the SDK creates an **API resume trigger**. The agent suspends and waits to be resumed by an explicit external API call rather than by polling a UiPath operation.

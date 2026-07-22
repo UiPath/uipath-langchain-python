@@ -74,33 +74,38 @@ class SqliteResumableStorage:
         await self._ensure_table()
 
         async with self.memory.lock, self.memory.conn.cursor() as cur:
-            # Delete all existing triggers for this runtime_id
-            await cur.execute(
-                f"""
-                DELETE FROM {self.rs_table_name}
-                WHERE runtime_id = ?
-                """,
-                (runtime_id,),
-            )
-
-            for trigger in triggers:
-                trigger_data = trigger.model_dump()
-                trigger_data["payload"] = trigger.payload
-                trigger_data["trigger_name"] = trigger.trigger_name
-
+            try:
+                await cur.execute("BEGIN IMMEDIATE")
+                # Delete all existing triggers for this runtime_id
                 await cur.execute(
                     f"""
-                    INSERT INTO {self.rs_table_name}
-                        (runtime_id, interrupt_id, data)
-                    VALUES (?, ?, ?)
+                    DELETE FROM {self.rs_table_name}
+                    WHERE runtime_id = ?
                     """,
-                    (
-                        runtime_id,
-                        trigger.interrupt_id,
-                        serialize_json(trigger_data),
-                    ),
+                    (runtime_id,),
                 )
-            await self.memory.conn.commit()
+
+                for trigger in triggers:
+                    trigger_data = trigger.model_dump()
+                    trigger_data["payload"] = trigger.payload
+                    trigger_data["trigger_name"] = trigger.trigger_name
+
+                    await cur.execute(
+                        f"""
+                        INSERT INTO {self.rs_table_name}
+                            (runtime_id, interrupt_id, data)
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            runtime_id,
+                            trigger.interrupt_id,
+                            serialize_json(trigger_data),
+                        ),
+                    )
+                await self.memory.conn.commit()
+            except Exception:
+                await self.memory.conn.rollback()
+                raise
 
     async def get_triggers(self, runtime_id: str) -> list[UiPathResumeTrigger] | None:
         """Get all triggers for runtime_id from database."""
