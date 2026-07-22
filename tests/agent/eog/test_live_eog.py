@@ -146,7 +146,7 @@ async def run_eog_investigation() -> dict:
 
     config = InvestigationConfig(
         label_vocabulary=["Source", "DerivedEffect", "PolicyViolation", "Defer"],
-        seed_entities=["EXC-002"],
+        seed_records=["EXC-002"],
         max_steps=1000,
         max_flips=3,
         convergence_window=5,
@@ -218,14 +218,14 @@ async def main() -> None:
     print(f"INVESTIGATION REPORT")
     print(f"{'='*60}")
     print(f"Steps taken: {result['steps_taken']}")
-    print(f"Entities discovered: {len(result['discovered_entities'])}")
+    print(f"Records discovered: {len(result['discovered_records'])}")
     print(f"Consecutive no-change (at exit): {result.get('consecutive_no_change', '?')}")
     print(f"Token usage (from state): input={result.get('total_input_tokens', 0)}, output={result.get('total_output_tokens', 0)}")
     stop_reason = "budget" if result['steps_taken'] >= 1000 else "convergence" if result.get('consecutive_no_change', 0) >= 5 else "active_set empty"
     print(f"Stop reason: {stop_reason}")
 
     print(f"\nBeliefs:")
-    for eid, etype in sorted(result["discovered_entities"].items()):
+    for eid, etype in sorted(result["discovered_records"].items()):
         belief = result["beliefs"].get(eid)
         label = belief.label if belief else "?"
         evidence = belief.evidence[:80] if belief else ""

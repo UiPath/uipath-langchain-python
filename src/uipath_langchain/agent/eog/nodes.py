@@ -73,10 +73,10 @@ def _make_seed(config: InvestigationConfig | None) -> _NodeFn:
 
         beliefs: dict[str, Belief] = {}
         discovered: dict[str, str] = {}
-        for entity_id in cfg.seed_entities:
+        for entity_id in cfg.seed_records:
             beliefs[entity_id] = Belief(
                 label=cfg.default_label,
-                evidence="Initial seed entity.",
+                evidence="Initial seed record.",
             )
             entity_type = resolve_entity_type(entity_id)
             if entity_type:
@@ -84,8 +84,8 @@ def _make_seed(config: InvestigationConfig | None) -> _NodeFn:
 
         return {
             "beliefs": beliefs,
-            "discovered_entities": discovered,
-            "active_set": list(cfg.seed_entities),
+            "discovered_records": discovered,
+            "active_set": list(cfg.seed_records),
             "steps_taken": 0,
             "investigation_config": cfg,
         }
@@ -96,21 +96,21 @@ def _make_seed(config: InvestigationConfig | None) -> _NodeFn:
 # ── Pop ───────────────────────────────────────────────────────────
 
 async def pop_node(state: EoGState) -> dict[str, Any]:
-    """Dequeue next entity from active_set using priority ordering.
+    """Dequeue next record from active_set using priority ordering.
 
-    Priority: entities with non-default labels (Source, PolicyViolation)
-    are visited before Defer entities. Within the same priority,
+    Priority: records with non-default labels (Source, PolicyViolation)
+    are visited before Defer records. Within the same priority,
     FIFO order is preserved.
     """
     active = list(state.active_set)
     if not active:
-        return {"current_entity": "", "active_set": []}
+        return {"current_record": "", "active_set": []}
 
     cfg = state.investigation_config
     default_label = cfg.default_label if cfg else "Defer"
 
     # Sort: non-default labels first (they have evidence worth propagating),
-    # then entities with inbox messages, then the rest
+    # then records with inbox messages, then the rest
     def _priority(eid: str) -> int:
         belief = state.beliefs.get(eid)
         if not belief:
@@ -123,19 +123,19 @@ async def pop_node(state: EoGState) -> dict[str, Any]:
 
     active.sort(key=_priority)
     entity = active.pop(0)
-    return {"current_entity": entity, "active_set": active}
+    return {"current_record": entity, "active_set": active}
 
 
 def should_continue(state: EoGState) -> str:
     """Route: continue traversal or synthesize.
 
     Stops when any of:
-    - active_set is empty (no more entities to visit)
+    - active_set is empty (no more records to visit)
     - step budget exhausted
     - token budget exhausted
     - convergence: N consecutive visits with no belief change
     """
-    if not state.current_entity:
+    if not state.current_record:
         return "synthesize"
 
     cfg = state.investigation_config
@@ -178,9 +178,9 @@ def _make_discover(
     """
 
     async def _discover(state: EoGState) -> dict[str, Any]:
-        entity_id = state.current_entity
+        entity_id = state.current_record
         entity_type = (
-            state.discovered_entities.get(entity_id)
+            state.discovered_records.get(entity_id)
             or resolve_entity_type(entity_id)
         )
 
@@ -217,13 +217,13 @@ def _make_gather(
     """Create gather node: invoke functions, chain params from results.
 
     Two-phase binding:
-    1. Primary: bind params matching the current entity's key.
+    1. Primary: bind params matching the current record's key.
     2. Secondary: bind params from values discovered in primary results.
     """
 
     async def _gather(state: EoGState) -> dict[str, Any]:
         ctx = state.context_packet
-        entity_id = ctx.get("entity_id", state.current_entity)
+        entity_id = ctx.get("entity_id", state.current_record)
         entity_type = ctx.get("entity_type", "Unknown")
         fn_dicts = ctx.get("functions", [])
         cfg = state.investigation_config
@@ -271,28 +271,28 @@ def _make_gather(
 
         all_results = primary_results + secondary_results
 
-        # Discover new entity instances from result values
-        new_entities: dict[str, str] = {}
+        # Discover new records from result values
+        new_records: dict[str, str] = {}
         for param_name, value in discovered_values.items():
             if not value or value == entity_id:
                 continue
             discovered_type = _type_from_param_name(param_name)
             if discovered_type and value not in state.beliefs:
-                new_entities[value] = discovered_type
+                new_records[value] = discovered_type
 
         # Build neighbor beliefs from existing beliefs
         neighbor_beliefs: dict[str, dict[str, Any]] = {}
         for eid, belief in state.beliefs.items():
-            if eid != entity_id and eid in new_entities:
+            if eid != entity_id and eid in new_records:
                 neighbor_beliefs[eid] = {
                     "label": belief.label,
                     "evidence": belief.evidence,
-                    "entity_type": new_entities.get(eid, "Unknown"),
+                    "entity_type": new_records.get(eid, "Unknown"),
                 }
         # Also include already-known neighbors
         for eid, belief in state.beliefs.items():
             if eid != entity_id and eid not in neighbor_beliefs:
-                eid_type = state.discovered_entities.get(eid)
+                eid_type = state.discovered_records.get(eid)
                 if eid_type and eid_type in {
                     t for fn in functions for t in fn.touches
                 }:
@@ -304,10 +304,10 @@ def _make_gather(
 
         inbox_messages = state.inbox.get(entity_id, [])
 
-        # Initialize beliefs for newly discovered entities
+        # Initialize beliefs for newly discovered records
         new_beliefs: dict[str, Belief] = {}
         default_label = cfg.default_label if cfg else "Defer"
-        for eid, etype in new_entities.items():
+        for eid, etype in new_records.items():
             if eid not in state.beliefs:
                 new_beliefs[eid] = Belief(
                     label=default_label,
@@ -324,7 +324,7 @@ def _make_gather(
                 "discovered_values": discovered_values,
             },
             "beliefs": new_beliefs,
-            "discovered_entities": new_entities,
+            "discovered_records": new_records,
         }
 
     return _gather
@@ -507,7 +507,7 @@ def _build_ledger_summary(state: EoGState) -> str:
     by_label: dict[str, list[str]] = {}
     for eid, belief in state.beliefs.items():
         if belief.label != default_label:
-            etype = state.discovered_entities.get(eid, "?")
+            etype = state.discovered_records.get(eid, "?")
             entry = f"{eid} ({etype}): {belief.label}"
             findings.append(entry)
             by_label.setdefault(belief.label, []).append(f"{eid} ({etype})")
@@ -515,7 +515,7 @@ def _build_ledger_summary(state: EoGState) -> str:
     if not findings:
         return "(No findings yet — this is an early visit)"
 
-    lines = [f"Entities labeled so far: {len(findings)} of {len(state.beliefs)} visited"]
+    lines = [f"Records labeled so far: {len(findings)} of {len(state.beliefs)} visited"]
     for label, entities in sorted(by_label.items()):
         lines.append(f"  {label}: {', '.join(entities)}")
 
@@ -541,7 +541,7 @@ def _build_ledger_summary(state: EoGState) -> str:
 
 
 def _make_label(model: BaseChatModel) -> _NodeFn:
-    """Create label node: ledger-aware LLM labels one entity.
+    """Create label node: ledger-aware LLM labels one record.
 
     The prompt includes accumulated findings from prior visits so the
     LLM can identify cross-entity patterns (e.g., multiple exceptions
@@ -553,7 +553,7 @@ def _make_label(model: BaseChatModel) -> _NodeFn:
         label_vocab = cfg.label_vocabulary if cfg else ["Defer"]
 
         ctx = state.context_packet
-        entity_id = ctx.get("entity_id", state.current_entity)
+        entity_id = ctx.get("entity_id", state.current_record)
         entity_type = ctx.get("entity_type", "Unknown")
 
         evidence_str = json.dumps(
@@ -638,7 +638,7 @@ def _make_label(model: BaseChatModel) -> _NodeFn:
 
 async def update_node(state: EoGState) -> dict[str, Any]:
     """Write belief to ledger, track flips, apply damping, update budget counters."""
-    entity_id = state.current_entity
+    entity_id = state.current_record
     cfg = state.investigation_config
     max_flips = cfg.max_flips if cfg else 3
 
@@ -705,13 +705,13 @@ async def update_node(state: EoGState) -> dict[str, Any]:
 async def propagate_node(state: EoGState) -> dict[str, Any]:
     """Broadcast belief change to discovered neighbors.
 
-    Propagation follows entity instances discovered in gather results,
+    Propagation follows records discovered in gather results,
     NOT a pre-loaded graph. Only re-activates when belief CHANGED.
     """
     cfg = state.investigation_config
     max_flips = cfg.max_flips if cfg else 3
 
-    entity_id = state.current_entity
+    entity_id = state.current_record
     current_belief = state.beliefs.get(entity_id)
 
     # Check if belief actually changed
@@ -729,7 +729,7 @@ async def propagate_node(state: EoGState) -> dict[str, Any]:
     if not belief_changed:
         return {}
 
-    entity_type = state.discovered_entities.get(entity_id, "Unknown")
+    entity_type = state.discovered_records.get(entity_id, "Unknown")
 
     # Find neighbors: all discovered entities that share a function's touches
     ctx = state.context_packet
@@ -804,7 +804,7 @@ async def synthesize_node(state: EoGState) -> dict[str, Any]:
         if belief.label != default_label:
             findings[entity_id] = {
                 "entity": entity_id,
-                "entity_type": state.discovered_entities.get(
+                "entity_type": state.discovered_records.get(
                     entity_id, "Unknown"
                 ),
                 "label": belief.label,

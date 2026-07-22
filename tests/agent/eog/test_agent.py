@@ -101,7 +101,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001"],
+            seed_records=["INV-001"],
         )
         graph = create_eog_agent(
             model, client, "test-onto", investigation_config=cfg
@@ -113,7 +113,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001"],
+            seed_records=["INV-001"],
         )
         graph = create_eog_agent(
             model, client, "test-onto", investigation_config=cfg
@@ -128,7 +128,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001"],
+            seed_records=["INV-001"],
             max_steps=20,
         )
         graph = create_eog_agent(
@@ -149,7 +149,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001"],
+            seed_records=["INV-001"],
             max_steps=5,
         )
         graph = create_eog_agent(
@@ -168,7 +168,7 @@ class TestCreateEoGAgent:
         model = _mock_llm()
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "DerivedEffect", "Defer"],
-            seed_entities=["INV-001"],
+            seed_records=["INV-001"],
             max_steps=10,
         )
         graph = create_eog_agent(
@@ -179,8 +179,8 @@ class TestCreateEoGAgent:
 
         # invoiceDetail returns supplierId=SUP-001 and poId=PO-001
         # These should be discovered as new entities
-        assert "SUP-001" in result["discovered_entities"]
-        assert "PO-001" in result["discovered_entities"]
+        assert "SUP-001" in result["discovered_records"]
+        assert "PO-001" in result["discovered_records"]
 
     @pytest.mark.asyncio
     async def test_budget_cap_terminates(self) -> None:
@@ -200,7 +200,7 @@ class TestCreateEoGAgent:
 
         cfg = InvestigationConfig(
             label_vocabulary=["Source", "Defer"],
-            seed_entities=["INV-001"],
+            seed_records=["INV-001"],
             max_steps=3,
             max_flips=10,
         )

@@ -17,7 +17,7 @@ from uipath_langchain.agent.react.reducers import merge_dicts
 
 
 class Belief(BaseModel):
-    """A belief about an entity instance's role in the investigation."""
+    """A belief about a record's role in the investigation."""
 
     label: str
     evidence: str = ""
@@ -36,7 +36,7 @@ class LedgerEntry(BaseModel):
 
 
 class ExplanatoryEdge(BaseModel):
-    """An edge connecting two entity instances in the explanation graph."""
+    """An edge connecting two records in the explanation graph."""
 
     source: str
     target: str
@@ -117,9 +117,9 @@ class InvestigationConfig(BaseModel):
 
     Args:
         label_vocabulary: Allowed labels, e.g. ["Source", "DerivedEffect"].
-        seed_entities: Starting entity IDs for the traversal.
-        max_steps: Hard cap on entity visits.
-        max_flips: Damping threshold — entities that flip more than this
+        seed_records: Starting record IDs for the traversal.
+        max_steps: Hard cap on record visits.
+        max_flips: Damping threshold — records that flip more than this
             are no longer re-activated by neighbours.
         default_label: Label assigned before investigation.
         max_results_per_function: Upper bound on rows per function call.
@@ -130,7 +130,7 @@ class InvestigationConfig(BaseModel):
     """
 
     label_vocabulary: list[str]
-    seed_entities: list[str] = Field(default_factory=list)
+    seed_records: list[str] = Field(default_factory=list)
     max_steps: int = 50
     max_flips: int = 3
     default_label: str = "Defer"
@@ -144,11 +144,11 @@ class EoGState(BaseModel):
 
     No full ontology graph in state. Instead:
     - ``function_cache``: entity_type → list of FunctionSpec dicts (lazy, per-type)
-    - ``discovered_entities``: entity_id → entity_type (grows as functions return results)
+    - ``discovered_records``: entity_id → entity_type (grows as functions return results)
     """
 
     active_set: list[str] = Field(default_factory=list)
-    current_entity: str = ""
+    current_record: str = ""
     beliefs: Annotated[dict[str, Belief], merge_dicts] = Field(
         default_factory=dict
     )
@@ -171,7 +171,7 @@ class EoGState(BaseModel):
     function_cache: Annotated[
         dict[str, list[dict[str, Any]]], merge_dicts
     ] = Field(default_factory=dict)
-    discovered_entities: Annotated[dict[str, str], merge_dicts] = Field(
+    discovered_records: Annotated[dict[str, str], merge_dicts] = Field(
         default_factory=dict
     )
 

@@ -36,7 +36,7 @@ def create_eog_agent(
 
     The graph discovers the ontology lazily via function definitions:
     each entity type's functions are fetched on first visit (cached),
-    and entity instances are discovered from function results.
+    and records are discovered from function results.
 
     Args:
         model: LLM for the abductive label node.

@@ -44,7 +44,7 @@ class TokenProfiler(BaseCallbackHandler):
         self._ts: dict[str, float] = {}
         self._pbar: Any = None
         self._total_tokens: int = 0
-        self._entities_seen: set[str] = set()
+        self._records_seen: set[str] = set()
 
     def attach_pbar(self, pbar: Any) -> None:
         self._pbar = pbar
@@ -53,11 +53,11 @@ class TokenProfiler(BaseCallbackHandler):
         if not self._pbar:
             return
         if entity:
-            self._entities_seen.add(entity)
+            self._records_seen.add(entity)
         n = len(self.calls)
         self._pbar.n = n
         self._pbar.set_description(
-            f"  Investigating ({len(self._entities_seen)} entities, {self._total_tokens:,} tok)"
+            f"  Investigating ({len(self._records_seen)} records, {self._total_tokens:,} tok)"
         )
         self._pbar.refresh()
 
@@ -237,7 +237,7 @@ async def run_investigation() -> dict:
 
     config = InvestigationConfig(
         label_vocabulary=LABEL_VOCAB,
-        seed_entities=SEED,
+        seed_records=SEED,
         max_steps=MAX_STEPS,
         max_flips=3,
         convergence_window=CONVERGENCE_WINDOW,
@@ -254,9 +254,10 @@ async def run_investigation() -> dict:
     ) as pbar:
         _profiler.attach_pbar(pbar)
         result = await graph.compile().ainvoke({})
-        entities = len(result.get("discovered_entities", {}))
+        records = len(result.get("discovered_records", {}))
         tokens = result.get("total_input_tokens", 0) + result.get("total_output_tokens", 0)
-        pbar.set_description(f"  Done: {entities} entities, {tokens:,} tokens")
+        entity_types = len(set(result.get("discovered_records", {}).values()))
+        pbar.set_description(f"  Done: {records} records discovered across {entity_types} entity types, {tokens:,} tokens")
         pbar.n = result.get("steps_taken", len(_profiler.calls))
         pbar.refresh()
 
@@ -299,17 +300,17 @@ def print_starting_state(r: dict):
     _phase(2, "STARTING STATE")
 
     _narrate(
-        "The agent begins with a single seed entity and one label "
-        "vocabulary. Every entity starts as Defer (unknown). The "
-        "investigation will assign each entity one of these labels:"
+        "The agent begins with a single seed record and one label "
+        "vocabulary. Every record starts as Defer (unknown). The "
+        "investigation will assign each record one of these labels:"
     )
 
     print()
     print("  Label Vocabulary:")
     print("  -----------------")
-    print("  Source           = root cause or originating entity")
+    print("  Source           = root cause or originating record")
     print("  DerivedEffect    = downstream consequence, not the cause")
-    print("  PolicyViolation  = entity that violates a business rule")
+    print("  PolicyViolation  = record that violates a business rule")
     print("  Defer            = insufficient evidence (default)")
     print()
 
@@ -355,9 +356,9 @@ def print_exploration(r: dict):
             entities_after_1.add(e.target)
 
     if entities_after_1:
-        print(f"    -> Discovered {len(entities_after_1)} new entities from results:")
+        print(f"    -> Discovered {len(entities_after_1)} new records from results:")
         for eid in sorted(entities_after_1):
-            etype = r["discovered_entities"].get(eid, "?")
+            etype = r["discovered_records"].get(eid, "?")
             print(f"       {eid} ({etype})")
 
     print()
@@ -432,9 +433,9 @@ def print_abductive_reasoning(r: dict):
     print("  1. LEDGER-AWARE LABELING")
     print("     The LLM prompt includes all prior findings.")
     print("     By step 8, the prompt says:")
-    print('     "Entities labeled: PolicyViolation: EXC-002, EXC-001,')
+    print('     "Records labeled: PolicyViolation: EXC-002, EXC-001,')
     print('      INV-2002, PO-1002, CTR-002..."')
-    print("     A new entity is labeled in context of the full picture,")
+    print("     A new record is labeled in context of the full picture,")
     print("     not in isolation.")
     print()
 
@@ -451,24 +452,24 @@ def print_abductive_reasoning(r: dict):
     print("  2. LABEL DIFFERENTIATION")
     if derived:
         for eid, b in derived:
-            etype = r["discovered_entities"].get(eid, "?")
+            etype = r["discovered_records"].get(eid, "?")
             print(f"     {eid} ({etype}) was labeled DerivedEffect, not PolicyViolation.")
             print(f'     Reason: "{b.evidence[:65]}"')
             print("     The LLM distinguished downstream effect from root cause")
             print("     because the ledger showed the primary violations.")
     else:
-        print("     All entities converged to the same label in this run.")
+        print("     All records converged to the same label in this run.")
         print("     In runs with mixed evidence, the LLM differentiates:")
         print("     FX rates as DerivedEffect (downstream), exceptions as Source.")
     print()
 
     print("  3. BELIEF PROPAGATION")
     _narrate(
-        "When an entity's label changes, its neighbors are re-queued "
+        "When a record's label changes, its neighbors are re-queued "
         "with an inbox message: 'Your neighbor EXC-002 was just labeled "
         "PolicyViolation.' This triggers re-evaluation with new context. "
         "The graph structure determines WHO gets re-evaluated -- only "
-        "entities connected through ontology relationships."
+        "records connected through ontology relationships."
     )
 
     print()
@@ -494,7 +495,7 @@ def print_abductive_reasoning(r: dict):
         )
     elif steps < MAX_STEPS:
         _narrate(
-            "The active set drained naturally -- every discovered entity "
+            "The active set drained naturally -- every discovered record "
             "was visited and labeled. No convergence cutoff needed."
         )
 
@@ -507,10 +508,10 @@ def print_report(r: dict, portfolio: dict[str, Any]):
     _phase(5, "INVESTIGATION REPORT")
 
     # Beliefs table
-    print("  ENTITY BELIEFS")
-    print(f"  {'Entity':<14s} {'Type':<20s} {'Label':<18s} Evidence")
+    print("  RECORD BELIEFS")
+    print(f"  {'Record':<14s} {'Entity Type':<20s} {'Label':<18s} Evidence")
     print(f"  {'-'*14} {'-'*20} {'-'*18} {'-'*24}")
-    for eid, etype in sorted(r["discovered_entities"].items()):
+    for eid, etype in sorted(r["discovered_records"].items()):
         b = r["beliefs"].get(eid)
         label = b.label if b else "?"
         ev = b.evidence[:40] + "..." if b and len(b.evidence) > 40 else (b.evidence if b else "")
@@ -518,7 +519,7 @@ def print_report(r: dict, portfolio: dict[str, Any]):
 
     # Explanatory graph
     print()
-    print("  CAUSAL GRAPH (why was each entity flagged?)")
+    print("  CAUSAL GRAPH (why was each record flagged?)")
     edges = r["explanatory_edges"]
     by_src: dict[str, list[str]] = {}
     for e in edges:
@@ -602,7 +603,7 @@ def print_tokens(r: dict):
     tt = sum(c["total"] for c in calls)
     tm = sum(c["ms"] for c in calls)
     steps = r["steps_taken"]
-    entities = len(r["discovered_entities"])
+    entities = len(r["discovered_records"])
 
     print(f"  LLM calls:        {len(calls)}")
     print(f"  Total tokens:     {tt:,} ({ti:,} in + {to:,} out)")
