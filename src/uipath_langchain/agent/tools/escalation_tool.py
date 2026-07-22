@@ -19,7 +19,7 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import Task, TaskRecipient
-from uipath.platform.common import WaitEscalation
+from uipath.platform.common import UiPathConfig, WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import (
@@ -203,6 +203,44 @@ def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
     )
 
 
+async def _resolve_is_debug_run() -> bool:
+    """Determine whether the current run is a debug run.
+
+    Reads the running job key (``UIPATH_JOB_KEY``) from the runtime environment
+    via ``UiPathConfig``, then retrieves the job from Orchestrator (the SDK
+    builds the ``Jobs/...GetByKey`` URL and injects the ``x-uipath-folderkey``
+    header from ``UIPATH_FOLDER_KEY`` on every request from its HTTP client).
+
+    The job's ``ParentContext`` field is a JSON string such as
+    ``{"IsDebug": true}``; when ``IsDebug`` is truthy the run is a debug run.
+
+    Returns:
+        True when the current job is a debug run, False otherwise (including
+        when the job key is unavailable or the parent context cannot be read).
+    """
+    job_key = UiPathConfig.job_key
+    if not job_key:
+        return False
+
+    client = UiPath()
+    job = await client.jobs.retrieve_async(job_key=job_key)
+
+    parent_context_raw = job.parent_context
+    if not parent_context_raw:
+        return False
+
+    try:
+        parent_context = json.loads(parent_context_raw)
+    except json.JSONDecodeError:
+        _escalation_logger.warning(
+            "Unable to parse job ParentContext to determine debug run: %r",
+            parent_context_raw,
+        )
+        return False
+
+    return bool(parent_context.get("IsDebug"))
+
+
 async def create_task_for_channel(
     client: UiPath,
     channel: EscalationChannel,
@@ -211,6 +249,10 @@ async def create_task_for_channel(
     data: dict[str, Any],
     recipient: TaskRecipient | None,
     folder_path: str | None,
+    app_project_key: str | None = None,
+    app_type: str | None = None,
+    is_debug: bool = False,
+    action_schema: Any = None,
 ) -> Task:
     """Create the human task backing an escalation channel."""
     if isinstance(channel, AgentQuickFormEscalationChannel):
@@ -227,6 +269,7 @@ async def create_task_for_channel(
             labels=channel.labels,
             is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
             actionable_message_metadata=channel.properties.actionable_message_meta_data,
+            solution_id=channel.properties.solution_id,
         )
     return await client.tasks.create_async(
         title=title,
@@ -238,6 +281,10 @@ async def create_task_for_channel(
         labels=channel.labels,
         is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
         actionable_message_metadata=channel.properties.actionable_message_meta_data,
+        app_project_key=app_project_key,
+        app_type=app_type,
+        action_schema=action_schema,
+        solution_id=channel.properties.solution_id,
     )
 
 
@@ -311,6 +358,26 @@ def create_escalation_tool(
                 else None
             )
 
+        is_debug = UiPathConfig.is_rooted_to_debug_job
+        if not is_debug:
+            is_debug = await _resolve_is_debug_run()
+        print('Resolved debug run', is_debug)
+        if is_debug:
+            app_project_key = channel.properties.project_key
+        app_version = channel.properties.app_version
+        action_schema = channel.properties.action_schema
+
+        if is_debug and app_version == 0 and not app_project_key:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ESCALATION_JIT_DEBUG_MISSING_PROJECT_KEY,
+                title="Unable to create the escalation task in debug mode",
+                detail=(
+                    "The app project key is missing from the escalation resource "
+                    "configuration, so the app cannot be resolved in debug mode."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
+
         task_title = "Escalation Task"
         if tool.metadata is not None:
             # Recipient requires runtime resolution, store in metadata after resolving
@@ -354,6 +421,10 @@ def create_escalation_tool(
                     data=serialized_data,
                     recipient=recipient,
                     folder_path=folder_path,
+                    app_project_key=app_project_key,
+                    app_type=channel.properties.app_type,
+                    is_debug=is_debug,
+                    action_schema=action_schema,
                 )
 
                 if created_task.id is not None:
