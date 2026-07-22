@@ -1,5 +1,6 @@
 """Tests for integration_tool.py module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -1014,7 +1015,43 @@ class TestIntegrationToolErrorHandling:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
-    async def test_non_400_enriched_exception_propagates(
+    async def test_422_raises_agent_runtime_error_with_user_category_and_detail(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        provider_message = (
+            "errorCode - INVALID_DATA, message - The data is invalid due to "
+            "validation restrictions, errors - [{fieldName=/contactId, "
+            "errorType=invalid, errorMessage=}]"
+        )
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=make_enriched_exception(
+                422,
+                json.dumps(
+                    {
+                        "providerErrorCode": "INVALID_DATA",
+                        "providerMessage": provider_message,
+                    }
+                ),
+                "https://cloud.uipath.com/test/elements_/v3/element/instances/1/create_ticket",
+            )
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+        assert exc_info.value.error_info.status == 422
+        assert provider_message in exc_info.value.error_info.detail
+        assert "/contactId" in exc_info.value.error_info.detail
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_500_enriched_exception_propagates(
         self, mock_uipath_cls, resource, make_enriched_exception
     ):
         original = make_enriched_exception(500, "Internal Server Error")
@@ -1024,8 +1061,34 @@ class TestIntegrationToolErrorHandling:
 
         tool = create_integration_tool(resource)
 
-        with pytest.raises(EnrichedException):
+        with pytest.raises(EnrichedException) as exc_info:
             await tool.ainvoke({"query": "test"})
+        assert exc_info.value is original
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_non_validation_422_enriched_exception_propagates(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        original = make_enriched_exception(
+            422,
+            json.dumps(
+                {
+                    "providerErrorCode": "CONNECTOR_ERROR",
+                    "providerMessage": "The connector could not process the request.",
+                }
+            ),
+            "https://cloud.uipath.com/test/elements_/v3/element/instances/1/action",
+        )
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(side_effect=original)
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(EnrichedException) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value is original
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.integration_tool.UiPath")

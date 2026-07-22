@@ -42,6 +42,10 @@ _INTEGRATION_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory
         "Integration service returned an error for tool '{tool}': {message}",
         UiPathErrorCategory.USER,
     ),
+    (422, "INVALID_DATA"): (
+        "Integration service returned an error for tool '{tool}': {message}",
+        UiPathErrorCategory.USER,
+    ),
 }
 
 
