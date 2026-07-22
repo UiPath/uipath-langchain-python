@@ -110,7 +110,11 @@ def create_memory_recall_node(
             # Compute that from the schema first (pure, no I/O) and skip the
             # settings GET entirely for text-only agents, so their recall stays
             # byte-identical to the pre-file-analysis behavior (no extra HTTP call).
+            # Fields excluded from the memory key (not in field_weights) can never
+            # be analyzed either, so they don't justify the fetch.
             attachment_fields = _top_level_attachment_fields(input_model)
+            if memory_config.field_weights:
+                attachment_fields &= set(memory_config.field_weights)
             settings = (
                 await _fetch_space_settings(memory_config.memory_space_id)
                 if attachment_fields
@@ -316,8 +320,8 @@ def _build_analysis_model(
         except Exception as e:
             logger.warning(
                 "Memory file-analysis: could not build analysis model '%s' (%s); "
-                "falling back to the agent model. "
-                "TODO(POC): honor settings.analysisModel for symmetry.",
+                "falling back to a non-streaming copy of the agent model — "
+                "ingest/query key symmetry is degraded for this run.",
                 analysis_model_name,
                 repr(e),
             )

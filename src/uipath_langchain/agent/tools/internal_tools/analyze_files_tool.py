@@ -401,7 +401,7 @@ async def resolve_attachments_to_file_infos(
     Returns:
         List of FileInfo objects with blob URIs for each attachment
     """
-    client = UiPath()
+    client: UiPath | None = None
     file_infos: list[FileInfo] = []
 
     for attachment in attachments:
@@ -410,6 +410,9 @@ async def resolve_attachments_to_file_infos(
         attachment_id_value = _attachment_field(attachment, "ID")
         if attachment_id_value is None:
             continue
+        # Construct the platform client only once a resolvable attachment exists —
+        # memory recall may call this per field, often with nothing to resolve.
+        client = client or UiPath()
         attachment_name = _attachment_field(attachment, "FullName") or "<unknown>"
 
         try:

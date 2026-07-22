@@ -385,6 +385,31 @@ class TestMemoryRecallFileAnalysis:
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.react.memory_node.UiPath")
     @patch(
+        "uipath_langchain.agent.react.memory_node._fetch_space_settings",
+        new_callable=AsyncMock,
+    )
+    async def test_settings_fetch_skipped_when_attachment_not_in_key(
+        self,
+        fetch: AsyncMock,
+        uipath_cls: MagicMock,
+    ) -> None:
+        # The attachment field is excluded from the memory key (field_weights),
+        # so it can never be analyzed — the settings GET must not fire at all.
+        config = MemoryConfig(
+            memory_space_id="space-123",
+            field_weights={"vendorName": 1.0},
+        )
+        _mock_search(uipath_cls)
+        model = _make_analysis_model("TEXT")
+
+        await self._node(config, model)(self._state())
+
+        fetch.assert_not_awaited()
+        model.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    @patch(
         "uipath_langchain.agent.react.memory_node.add_files_to_message",
         new_callable=AsyncMock,
     )
