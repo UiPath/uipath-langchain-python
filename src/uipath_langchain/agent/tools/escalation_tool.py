@@ -203,6 +203,44 @@ def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
     )
 
 
+async def _resolve_is_debug_run() -> bool:
+    """Determine whether the current run is a debug run.
+
+    Reads the running job key (``UIPATH_JOB_KEY``) from the runtime environment
+    via ``UiPathConfig``, then retrieves the job from Orchestrator (the SDK
+    builds the ``Jobs/...GetByKey`` URL and injects the ``x-uipath-folderkey``
+    header from ``UIPATH_FOLDER_KEY`` on every request from its HTTP client).
+
+    The job's ``ParentContext`` field is a JSON string such as
+    ``{"IsDebug": true}``; when ``IsDebug`` is truthy the run is a debug run.
+
+    Returns:
+        True when the current job is a debug run, False otherwise (including
+        when the job key is unavailable or the parent context cannot be read).
+    """
+    job_key = UiPathConfig.job_key
+    if not job_key:
+        return False
+
+    client = UiPath()
+    job = await client.jobs.retrieve_async(job_key=job_key)
+
+    parent_context_raw = job.parent_context
+    if not parent_context_raw:
+        return False
+
+    try:
+        parent_context = json.loads(parent_context_raw)
+    except json.JSONDecodeError:
+        _escalation_logger.warning(
+            "Unable to parse job ParentContext to determine debug run: %r",
+            parent_context_raw,
+        )
+        return False
+
+    return bool(parent_context.get("IsDebug"))
+
+
 async def create_task_for_channel(
     client: UiPath,
     channel: EscalationChannel,
@@ -320,8 +358,8 @@ def create_escalation_tool(
                 if channel.recipients
                 else None
             )
-        is_debug = True
-        print('Mock debug', is_debug, 'folder path', folder_path)
+        is_debug = await _resolve_is_debug_run()
+        print('Resolved debug run', is_debug)
         app_project_key = channel.properties.project_key
         app_version = channel.properties.app_version
         action_schema = channel.properties.action_schema
