@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "type": "human",
+      "content": "Create a pilot launch plan for Invoice Exception Copilot for accounts payable operations managers at three enterprise customers. The security review must complete before external rollout, the deadline is six weeks away, and the support team needs enablement material."
+    }
+  ]
+}

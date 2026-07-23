@@ -1,6 +1,10 @@
 import asyncio
+import hashlib
 import os
-from typing import Any, AsyncContextManager
+import shutil
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any, AsyncContextManager, Protocol
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -11,20 +15,28 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from uipath.core.adapters import EvaluatorProtocol
+from uipath.core.feature_flags import FeatureFlags
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
+from uipath.platform import UiPath
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
 )
 from uipath.runtime import (
+    HydrationPolicy,
+    HydrationRuntime,
     UiPathResumableRuntime,
     UiPathRuntimeContext,
     UiPathRuntimeFactorySettings,
     UiPathRuntimeProtocol,
     UiPathRuntimeStorageProtocol,
+    Workspace,
+    WorkspaceHydrator,
+    WorkspaceRegistryStore,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain.deepagents.metadata import requires_managed_workspace
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -34,6 +46,33 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 _AGENT_TYPE_CODED = "uipath_coded"
 _AGENT_FRAMEWORK = "langchain"
+_MANAGED_WORKSPACE_HYDRATION_FEATURE_FLAG = "DeepAgentsWorkspaceHydration"
+
+
+class _AsyncClosable(Protocol):
+    """Public cleanup contract implemented by hydration platform services."""
+
+    async def aclose(self) -> None: ...
+
+
+class _UiPathHydrationRuntime(HydrationRuntime):
+    """Hydration runtime that owns the platform services it lazily creates."""
+
+    def __init__(
+        self,
+        *,
+        dispose_platform_services: Callable[[], Awaitable[None]],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._dispose_platform_services = dispose_platform_services
+
+    async def dispose(self) -> None:
+        """Dispose the delegate, workspace, and owned platform services."""
+        try:
+            await super().dispose()
+        finally:
+            await self._dispose_platform_services()
 
 
 class UiPathLangGraphRuntimeFactory:
@@ -195,8 +234,9 @@ class UiPathLangGraphRuntimeFactory:
             The compiled StateGraph
         """
         builder = graph.builder if isinstance(graph, CompiledStateGraph) else graph
-
-        return builder.compile(checkpointer=memory)
+        compiled = builder.compile(checkpointer=memory)
+        bound_config = getattr(graph, "config", None)
+        return compiled.with_config(bound_config) if bound_config else compiled
 
     async def _resolve_and_compile_graph(
         self, entrypoint: str, memory: AsyncSqliteSaver, **kwargs
@@ -220,7 +260,6 @@ class UiPathLangGraphRuntimeFactory:
                 return self._graph_cache[entrypoint]
 
             loaded_graph = await self._load_graph(entrypoint, **kwargs)
-
             compiled_graph = await self._compile_graph(loaded_graph, memory)
 
             self._graph_cache[entrypoint] = compiled_graph
@@ -300,20 +339,92 @@ class UiPathLangGraphRuntimeFactory:
             else None
         )
 
+        workspace = (
+            await self._create_managed_workspace(runtime_id)
+            if self._uses_managed_workspace(compiled_graph)
+            else None
+        )
+
         base_runtime = UiPathLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
             callbacks=callbacks,
             storage=storage,
+            workspace_path=workspace.path if workspace is not None else None,
         )
 
-        return UiPathResumableRuntime(
+        resumable_runtime: UiPathRuntimeProtocol = UiPathResumableRuntime(
             delegate=base_runtime,
             storage=storage,
             trigger_manager=trigger_manager,
             runtime_id=runtime_id,
         )
+
+        if workspace is None:
+            return resumable_runtime
+
+        platform_services: tuple[_AsyncClosable, ...] | None = None
+
+        def create_hydrator() -> WorkspaceHydrator:
+            nonlocal platform_services
+            sdk = UiPath()
+            attachments = sdk.attachments
+            jobs = sdk.jobs
+            platform_services = (attachments, jobs)
+            return WorkspaceHydrator(
+                workspace_path=workspace.path,
+                attachments=attachments,
+                jobs=jobs,
+                current_job_key=self.context.job_id,
+                folder_key=self.context.folder_key,
+            )
+
+        async def dispose_platform_services() -> None:
+            if platform_services is not None:
+                await asyncio.gather(
+                    *(service.aclose() for service in platform_services)
+                )
+
+        return _UiPathHydrationRuntime(
+            delegate=resumable_runtime,
+            workspace=workspace,
+            hydrator_factory=create_hydrator,
+            registry_store=WorkspaceRegistryStore(
+                storage,
+                runtime_id,
+            ),
+            policy=self._select_deep_agent_hydration_policy(),
+            dispose_platform_services=dispose_platform_services,
+        )
+
+    @staticmethod
+    def _uses_managed_workspace(
+        compiled_graph: CompiledStateGraph[Any, Any, Any, Any],
+    ) -> bool:
+        """Return whether enabled runtime capabilities require a workspace."""
+        return FeatureFlags.is_flag_enabled(
+            _MANAGED_WORKSPACE_HYDRATION_FEATURE_FLAG,
+            default=False,
+        ) and requires_managed_workspace(compiled_graph)
+
+    def _select_deep_agent_hydration_policy(self) -> HydrationPolicy:
+        """Select the UiPath-owned hydration lifecycle for this execution mode."""
+        return HydrationPolicy.SUSPEND_OR_SUCCESS
+
+    async def _create_managed_workspace(
+        self,
+        runtime_id: str,
+    ) -> Workspace:
+        """Create a clean, path-safe workspace for one runtime instance."""
+        base_dir = (
+            Path(self.context.runtime_dir or "__uipath") / "workspaces"
+        ).resolve()
+        workspace_id = hashlib.sha256(runtime_id.encode("utf-8")).hexdigest()
+        workspace_path = base_dir / workspace_id
+        if workspace_path.exists():
+            await asyncio.to_thread(shutil.rmtree, workspace_path)
+        return Workspace.create(workspace_path, cleanup=True)
 
     async def new_runtime(
         self,

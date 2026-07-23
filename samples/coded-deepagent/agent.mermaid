@@ -1,0 +1,15 @@
+flowchart TB
+  __start__(__start__)
+  deep_agent(deep_agent)
+  tools([agent tools])
+  risk_reviewer([risk_reviewer subagent])
+  workspace[(runtime workspace)]
+  structured_output(structured output)
+  __end__(__end__)
+
+  __start__ --> deep_agent
+  deep_agent <--> tools
+  deep_agent -. delegates review .-> risk_reviewer
+  deep_agent -. writes files .-> workspace
+  deep_agent --> structured_output
+  structured_output --> __end__

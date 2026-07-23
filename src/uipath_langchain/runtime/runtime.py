@@ -2,6 +2,7 @@ import contextvars
 import logging
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
@@ -42,6 +43,7 @@ from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
 
 from ._serialize import serialize_output
+from ._workspace import create_graph_configurable
 
 # Guarded import: ReferenceContext was added to uipath.tracing in a later release.
 # Older installed packages lack it; the noop shim keeps the runtime loadable while
@@ -91,6 +93,7 @@ class UiPathLangGraphRuntime:
         entrypoint: str | None = None,
         callbacks: list[BaseCallbackHandler] | None = None,
         storage: UiPathRuntimeStorageProtocol | None = None,
+        workspace_path: Path | None = None,
     ):
         """
         Initialize the runtime.
@@ -99,11 +102,15 @@ class UiPathLangGraphRuntime:
             graph: The CompiledStateGraph to execute
             runtime_id: Unique identifier for this runtime instance
             entrypoint: Optional entrypoint name (for schema generation)
+            callbacks: Optional callbacks passed to graph execution
+            storage: Optional runtime storage used by the chat mapper
+            workspace_path: Optional runtime-managed physical workspace
         """
         self.graph: CompiledStateGraph[Any, Any, Any, Any] = graph
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
+        self.workspace_path: Path | None = workspace_path
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self.chat.tools_requiring_confirmation = self._get_tool_confirmation_info()
         self.chat.client_side_tools = self._get_client_side_tools()
@@ -349,7 +356,10 @@ class UiPathLangGraphRuntime:
     def _get_graph_config(self) -> RunnableConfig:
         """Build graph execution configuration."""
         graph_config: RunnableConfig = {
-            "configurable": {"thread_id": self.runtime_id},
+            "configurable": create_graph_configurable(
+                thread_id=self.runtime_id,
+                workspace_path=self.workspace_path,
+            ),
             "callbacks": self.callbacks,
         }
 
