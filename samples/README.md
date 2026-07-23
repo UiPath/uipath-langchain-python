@@ -6,6 +6,9 @@ This sample demonstrates a simple LangGraph agent that performs basic arithmetic
 ## [Chat agent](chat-agent)
 This sample shows how to build an AI assistant using LangGraph and Tavily search for movie research and recommendations.
 
+## [Coded DeepAgent](coded-deepagent)
+This sample demonstrates a task-mode coded DeepAgent using the UiPath runtime workspace contract, structured output, a tool, and a review subagent.
+
 ## [Company research agent](company-research-agent)
 This sample demonstrates how to create an agent that researches companies and develops outreach strategies using web search capabilities.
 
@@ -44,3 +47,7 @@ This sample demonstrates automatic classification of support tickets into catego
 
 ## [Wait until timeout agent](wait-until-timeout-agent)
 This sample demonstrates waiting for whichever happens first: a child UiPath process completes, or a timer expires.
+## [Coded DeepAgent Node](coded-deepagent-node)
+
+[`coded-deepagent-node`](coded-deepagent-node/) demonstrates a parent LangGraph
+workflow that passes a structured request to an embedded coded DeepAgent node.

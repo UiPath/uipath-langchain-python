@@ -1,0 +1,14 @@
+[project]
+name = "coded-deepagent"
+version = "0.0.1"
+description = "Task-mode coded DeepAgent using the UiPath runtime workspace contract"
+authors = [{ name = "UiPath", email = "support@uipath.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath-langchain>=0.15.0, <0.16.0",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]
