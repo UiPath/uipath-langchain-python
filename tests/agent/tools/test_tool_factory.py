@@ -432,7 +432,9 @@ class TestCreateToolsFromResources:
             )
             tool = await _build_tool_for_resource(flow_resource, mock_llm)
 
-        mock_create_process_tool.assert_called_once_with(flow_resource, run_as_me=False)
+        mock_create_process_tool.assert_called_once_with(
+            flow_resource, conversational_run_as_me=False
+        )
         assert tool is not None
 
     async def test_quick_form_resource_routes_through_escalation_tool_path(
@@ -467,9 +469,65 @@ class TestCreateToolsFromResources:
             tool = await _build_tool_for_resource(function_resource, mock_llm)
 
         mock_create_process_tool.assert_called_once_with(
-            function_resource, run_as_me=False
+            function_resource, conversational_run_as_me=False
         )
         assert tool is not None
+
+    async def test_conversational_run_as_me_forwarded_to_process_tool(
+        self, process_resource, mock_uipath_sdk
+    ):
+        """The dispatcher forwards conversational_run_as_me unchanged.
+
+        The per-type suppression rule (RPA / PROCESS ignores RunAsMe) lives
+        inside ``create_process_tool``; see ``test_process_tool.py``.
+        """
+        process_resource.is_enabled = True
+        agent = LowCodeAgentDefinition(
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            messages=[],
+            settings=Mock(spec=AgentSettings),
+            resources=[process_resource],
+        )
+        mock_llm = AsyncMock(spec=BaseChatModel)
+        with patch(
+            "uipath_langchain.agent.tools.tool_factory.create_process_tool"
+        ) as mock_create_process_tool:
+            mock_create_process_tool.return_value = MagicMock(
+                spec=BaseUiPathStructuredTool
+            )
+            await create_tools_from_resources(
+                agent, mock_llm, conversational_run_as_me=True
+            )
+
+        mock_create_process_tool.assert_called_once_with(
+            process_resource, conversational_run_as_me=True
+        )
+
+    async def test_conversational_run_as_me_defaults_false_when_not_provided(
+        self, process_resource, mock_uipath_sdk
+    ):
+        """conversational_run_as_me defaults to False when omitted (non-conversational agents)."""
+        process_resource.is_enabled = True
+        agent = LowCodeAgentDefinition(
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            messages=[],
+            settings=Mock(spec=AgentSettings),
+            resources=[process_resource],
+        )
+        mock_llm = AsyncMock(spec=BaseChatModel)
+        with patch(
+            "uipath_langchain.agent.tools.tool_factory.create_process_tool"
+        ) as mock_create_process_tool:
+            mock_create_process_tool.return_value = MagicMock(
+                spec=BaseUiPathStructuredTool
+            )
+            await create_tools_from_resources(agent, mock_llm)
+
+        mock_create_process_tool.assert_called_once_with(
+            process_resource, conversational_run_as_me=False
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
