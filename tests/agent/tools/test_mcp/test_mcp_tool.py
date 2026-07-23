@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
-from mcp.types import ListToolsResult, Tool
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData, ListToolsResult, Tool
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
@@ -16,7 +17,12 @@ from uipath.agent.models.agent import (
     DynamicToolsConfig,
     ToolsConfiguration,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.mcp import McpClient
 from uipath_langchain.agent.tools.mcp.mcp_tool import (
     _schema_change_message,
@@ -667,6 +673,68 @@ class TestMcpToolResultSerialization:
         result = await tool_fn()
 
         assert result == "plain string"
+
+
+class TestMcpToolErrorHandling:
+    """Test that protocol-level McpErrors are mapped to categorized AgentRuntimeErrors."""
+
+    @pytest.fixture
+    def mcp_tool(self):
+        return AgentMcpTool(
+            name="test_tool",
+            description="Test tool",
+            input_schema={"type": "object", "properties": {}},
+        )
+
+    def _mock_client(self, error: McpError) -> MagicMock:
+        client = MagicMock(spec=McpClient)
+        client.server_slug = "my-mcp-server"
+        client.call_tool = AsyncMock(side_effect=error)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_session_terminated_raises_system_error_with_retry_hint(
+        self, mcp_tool
+    ):
+        error = McpError(ErrorData(code=32600, message="Session terminated"))
+        client = self._mock_client(error)
+
+        tool_fn = build_mcp_tool(mcp_tool, client)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool_fn()
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+        assert "my-mcp-server" in exc_info.value.error_info.detail
+        assert "terminated" in exc_info.value.error_info.detail
+        assert "retry" in exc_info.value.error_info.detail
+        assert exc_info.value.__cause__ is error
+
+    @pytest.mark.asyncio
+    async def test_non_session_mcp_error_includes_server_message(self, mcp_tool):
+        error = McpError(ErrorData(code=-32601, message="Method not found"))
+        client = self._mock_client(error)
+
+        tool_fn = build_mcp_tool(mcp_tool, client)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool_fn()
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert "Method not found" in exc_info.value.error_info.detail
+        assert "test_tool" in exc_info.value.error_info.detail
+
+    @pytest.mark.asyncio
+    async def test_non_mcp_error_propagates_unchanged(self, mcp_tool):
+        client = MagicMock(spec=McpClient)
+        client.server_slug = "my-mcp-server"
+        client.call_tool = AsyncMock(side_effect=RuntimeError("boom"))
+
+        tool_fn = build_mcp_tool(mcp_tool, client)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await tool_fn()
 
 
 class TestMcpToolNameSanitization:

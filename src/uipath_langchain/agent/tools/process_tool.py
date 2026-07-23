@@ -16,7 +16,10 @@ from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.exceptions import raise_for_enriched
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -52,7 +55,7 @@ def create_process_tool(
     folder_path = get_execution_folder_path()
 
     input_model: Any = create_model(resource.input_schema)
-    output_model: Any = create_model(resource.output_schema)
+    output_model: Any = create_output_model(resource.output_schema, resource.name)
 
     # For conversational-agents running with RunAsMe=true, propagate RunAsMe=true
     # to the process tool job as well. RPA Workflows remain unattended until

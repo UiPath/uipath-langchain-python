@@ -4,6 +4,7 @@ import copy
 import re
 from typing import Any
 
+import httpx
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -19,11 +20,16 @@ from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
     AgentStartupError,
     AgentStartupErrorCode,
     raise_for_enriched,
 )
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 
 from .schema_editing import strip_enum
 from .structured_tool_with_argument_properties import (
@@ -301,7 +307,9 @@ def create_integration_tool(
     input_model = create_model(cleaned_input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
     output_model: Any = (
-        create_model(remove_asterisk_from_properties(resource.output_schema))
+        create_output_model(
+            remove_asterisk_from_properties(resource.output_schema), resource.name
+        )
         if resource.output_schema
         else create_model({"type": "object", "properties": {}})
     )
@@ -334,6 +342,18 @@ def create_integration_tool(
                 tool=resource.name,
             )
             raise
+        except httpx.TimeoutException as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.HTTP_ERROR,
+                title=f"Tool '{resource.name}' timed out",
+                detail=(
+                    f"The Integration Service request for tool '{resource.name}' "
+                    "did not complete in time. This is usually a transient issue; "
+                    "please retry the run later."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+                should_wrap=False,
+            ) from e
 
         return result
 

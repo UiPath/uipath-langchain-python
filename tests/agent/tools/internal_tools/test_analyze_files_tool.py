@@ -30,6 +30,7 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     _is_pii_scope_for_files,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
+    resolve_attachments_to_file_infos,
 )
 
 
@@ -628,6 +629,40 @@ class TestResolveJobAttachmentArguments:
         assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
         assert "permissions" in exc_info.value.error_info.detail
         assert "document.pdf" in exc_info.value.error_info.detail
+
+    async def test_resolve_accepts_dict_shaped_attachments(self, mock_uipath_client):
+        """The memory file-key path passes plain dicts (model_dump output)."""
+        attachment_id = uuid.uuid4()
+        attachment = {
+            "ID": str(attachment_id),
+            "FullName": "invoice.pdf",
+            "MimeType": "application/pdf",
+        }
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(
+                uri="https://blob.storage.com/files/invoice.pdf", name="invoice.pdf"
+            )
+        )
+
+        result = await resolve_attachments_to_file_infos([attachment])
+
+        assert len(result) == 1
+        assert result[0].url == "https://blob.storage.com/files/invoice.pdf"
+        assert result[0].mime_type == "application/pdf"
+        mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_called_once_with(
+            key=attachment_id
+        )
+
+    async def test_resolve_dict_without_id_skips(self, mock_uipath_client):
+        """A dict attachment missing the ID key is skipped, not errored."""
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock()
+
+        result = await resolve_attachments_to_file_infos(
+            [{"FullName": "x.pdf", "MimeType": "application/pdf"}]
+        )
+
+        assert result == []
+        mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_not_called()
 
     async def test_resolve_attachments_mixed_valid_and_invalid(
         self, mock_uipath_client

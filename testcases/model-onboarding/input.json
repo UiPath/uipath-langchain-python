@@ -1,0 +1,9 @@
+{
+    "prompt": "Describe the content of this file in one sentence.",
+    "model_spec": {
+        "model_name": "gpt-5.2-2025-12-11",
+        "paths": ["azure_responses", "azure_chat_completions"],
+        "agenthub_config": "agentsplayground",
+        "files": ["image", "pdf"]
+    }
+}

@@ -39,7 +39,10 @@ from uipath_langchain.agent.multimodal import (
     build_file_content_blocks_for,
 )
 from uipath_langchain.agent.react.job_attachments import raise_for_job_attachment_error
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 from uipath_langchain.agent.tools.internal_tools.pii_masker import (
     PiiMasker,
     masked_name_for,
@@ -247,7 +250,7 @@ def create_analyze_file_tool(
 
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model(resource.input_schema)
-    output_model = create_model(resource.output_schema)
+    output_model = create_output_model(resource.output_schema, resource.name)
 
     # Explicitly disable streaming - for conversational, no streaming is needed as this
     # internal tool-call does not produce streamed conversation events.
@@ -371,27 +374,46 @@ def create_analyze_file_tool(
     return tool
 
 
-async def _resolve_job_attachment_arguments(
+def _attachment_field(attachment: Any, name: str) -> Any:
+    """Read an attachment field by its canonical name (``ID``/``FullName``/``MimeType``).
+
+    Supports both mapping-shaped attachments (plain dicts with those keys, as
+    produced by ``model_dump`` on the generated input model) and attribute-shaped
+    objects (the coerced input-model instances the analyze-files tool receives, or
+    a ``SimpleNamespace``). This lets the analyze-files tool and the memory
+    file-key recall path share one resolver.
+    """
+    if isinstance(attachment, dict):
+        return attachment.get(name)
+    return getattr(attachment, name, None)
+
+
+async def resolve_attachments_to_file_infos(
     attachments: list[Any],
 ) -> list[FileInfo]:
     """Resolve job attachments to FileInfo objects.
 
     Args:
-        attachments: List of job attachment objects (dynamically typed from schema)
+        attachments: List of job attachments, each either a mapping with
+            ``ID``/``FullName``/``MimeType`` keys or an object exposing those as
+            attributes.
 
     Returns:
         List of FileInfo objects with blob URIs for each attachment
     """
-    client = UiPath()
+    client: UiPath | None = None
     file_infos: list[FileInfo] = []
 
     for attachment in attachments:
-        # Access using Pydantic field aliases (ID, FullName, MimeType)
-        # These are dynamically created from the JSON schema
-        attachment_id_value = getattr(attachment, "ID", None)
+        # Access using the Pydantic field aliases (ID, FullName, MimeType) that
+        # are dynamically created from the JSON schema, or the equivalent dict keys.
+        attachment_id_value = _attachment_field(attachment, "ID")
         if attachment_id_value is None:
             continue
-        attachment_name = getattr(attachment, "FullName", None) or "<unknown>"
+        # Construct the platform client only once a resolvable attachment exists —
+        # memory recall may call this per field, often with nothing to resolve.
+        client = client or UiPath()
+        attachment_name = _attachment_field(attachment, "FullName") or "<unknown>"
 
         try:
             attachment_id = uuid.UUID(attachment_id_value)
@@ -417,7 +439,7 @@ async def _resolve_job_attachment_arguments(
             )
             raise
 
-        input_mime_type = getattr(attachment, "MimeType", None)
+        input_mime_type = _attachment_field(attachment, "MimeType")
         mime_type = (
             input_mime_type
             if input_mime_type
@@ -433,6 +455,13 @@ async def _resolve_job_attachment_arguments(
         file_infos.append(file_info)
 
     return file_infos
+
+
+async def _resolve_job_attachment_arguments(
+    attachments: list[Any],
+) -> list[FileInfo]:
+    """Backwards-compatible wrapper around :func:`resolve_attachments_to_file_infos`."""
+    return await resolve_attachments_to_file_infos(attachments)
 
 
 async def add_files_to_message(

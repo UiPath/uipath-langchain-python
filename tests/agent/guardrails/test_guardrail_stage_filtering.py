@@ -78,3 +78,44 @@ class TestGuardrailStageFiltering:
         )
         assert len(post_filtered) == 1
         assert post_filtered[0][0] == judge_guardrail
+
+    def test_filter_by_stage_byog_sentinel_runs_in_all_stages(self):
+        """BYOG built-in validators ("byo" sentinel) run in every stage."""
+        byog_guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        byog_guardrail.validator_type = "byo"
+        byog_guardrail.name = "BYOG-Databricks-PII"
+
+        action = MagicMock(spec=GuardrailAction)
+        guardrails = [(byog_guardrail, action)]
+
+        pre_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+            guardrails, ExecutionStage.PRE_EXECUTION
+        )
+        assert len(pre_filtered) == 1
+        assert pre_filtered[0][0] == byog_guardrail
+
+        post_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+            guardrails, ExecutionStage.POST_EXECUTION
+        )
+        assert len(post_filtered) == 1
+        assert post_filtered[0][0] == byog_guardrail
+
+    def test_filter_by_stage_byog_alongside_restricted_ootb_validator(self):
+        """A stage-restricted OOTB validator is dropped in the unsupported stage while
+        a co-located BYOG validator is preserved."""
+        pi_guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        pi_guardrail.validator_type = "prompt_injection"
+        pi_guardrail.name = "Prompt-Injection"
+
+        byog_guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        byog_guardrail.validator_type = "byo"
+        byog_guardrail.name = "BYOG-Acme"
+
+        action = MagicMock(spec=GuardrailAction)
+        guardrails = [(pi_guardrail, action), (byog_guardrail, action)]
+
+        post_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+            guardrails, ExecutionStage.POST_EXECUTION
+        )
+        assert len(post_filtered) == 1
+        assert post_filtered[0][0] == byog_guardrail

@@ -26,7 +26,10 @@ from uipath_langchain._utils.durable_interrupt import (
     durable_interrupt,
 )
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     add_query_field_to_schema,
 )
@@ -85,7 +88,7 @@ def create_deeprag_tool(
         )
 
     input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+    output_model = create_output_model(resource.output_schema, resource.name)
 
     async def deeprag_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query

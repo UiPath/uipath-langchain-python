@@ -123,6 +123,11 @@ class McpClient(UiPathDisposableProtocol):
         self._session: ClientSession | None = None
         self._client_initialized: bool = False
 
+    @property
+    def server_slug(self) -> str:
+        """Slug of the configured MCP server."""
+        return self._config.slug
+
     async def get_session_id(self) -> str | None:
         """Get the current session ID from the SessionInfo."""
         if self._session_info is None:
