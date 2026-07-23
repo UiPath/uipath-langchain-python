@@ -299,7 +299,7 @@ def create_integration_tool(
             title="Invalid integration tool path",
             detail=(
                 f"Generated Integration tool '{resource.name}' has an empty "
-                "'toolPath'. Try to remove and add the tool again. If the issue persists contact you Administrator."
+                "'toolPath'. Try to remove and add the tool again. If the issue persists contact your Administrator."
             ),
             category=UiPathErrorCategory.SYSTEM,
         )
