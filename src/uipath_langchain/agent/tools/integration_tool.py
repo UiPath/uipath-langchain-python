@@ -42,6 +42,10 @@ _INTEGRATION_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory
         "Integration service returned an error for tool '{tool}': {message}",
         UiPathErrorCategory.USER,
     ),
+    (422, "INVALID_DATA"): (
+        "Integration service returned an error for tool '{tool}': {message}",
+        UiPathErrorCategory.USER,
+    ),
 }
 
 
@@ -289,6 +293,17 @@ def create_integration_tool(
     resource: AgentIntegrationToolResourceConfig,
 ) -> StructuredTool:
     """Creates a StructuredTool for invoking an Integration Service connector activity."""
+    if not resource.properties.tool_path.strip():
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Invalid integration tool path",
+            detail=(
+                f"Generated Integration tool '{resource.name}' has an empty "
+                "'toolPath'. Try to remove and add the tool again. If the issue persists contact your Administrator."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
     tool_name: str = sanitize_tool_name(resource.name)
     if resource.properties.connection.id is None:
         raise AgentStartupError(
