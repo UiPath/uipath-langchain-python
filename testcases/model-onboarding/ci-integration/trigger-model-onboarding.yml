@@ -1,0 +1,151 @@
+# =============================================================================
+# Belongs in the UiPath/llm-gateway-config repo, at:
+#   .github/workflows/trigger-model-onboarding.yml
+#
+# It is stored here in uipath-langchain-python only as a reviewable artifact —
+# copy it into llm-gateway-config to activate it. (This repo cannot run it.)
+#
+# What it does
+# ------------
+# When a model is ADDED to the agents Model Hub config
+# (environments/first-party-service/model-hub-configuration/agents/{alp,stg}/…
+# values.yaml, as a new key under MODEL_HUB_CONFIGURATION.agents.BaseRules.<GEO>),
+# it triggers the `model_onboarding.yml` workflow in
+# UiPath/uipath-langchain-python for the alpha + staging environments, once per
+# newly added model.
+#
+# Prerequisites (provisioned by you / infra)
+# ------------------------------------------
+#   * Secret ONBOARDING_DISPATCH_TOKEN in this repo: a PAT (or app token) with
+#     `actions: write` on UiPath/uipath-langchain-python.
+# =============================================================================
+name: Trigger model onboarding
+
+on:
+  pull_request:
+    paths:
+      - environments/first-party-service/model-hub-configuration/agents/alp/**/values.yaml
+      - environments/first-party-service/model-hub-configuration/agents/stg/**/values.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  detect-added-models:
+    name: detect added models
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.diff.outputs.models }}
+      count: ${{ steps.diff.outputs.count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Install yq
+        run: |
+          sudo wget --secure-protocol=auto https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64 \
+            -O /usr/bin/yq --read-timeout=20 --timeout=15 -t 40
+          sudo chmod +x /usr/bin/yq
+
+      - name: Diff agents Model Hub config for added model keys
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # The agents alpha + staging config files. Both environments share the
+          # same model set in practice, so we union the added models across them
+          # and dedup, then run onboarding once per model against alpha+staging.
+          FILES=(
+            environments/first-party-service/model-hub-configuration/agents/alp/defaults/values.yaml
+            environments/first-party-service/model-hub-configuration/agents/stg/defaults/values.yaml
+          )
+
+          # Extract the set of model keys (the leaf under BaseRules.<GEO>) from a
+          # file at a given git ref. Missing file/ref -> empty set.
+          model_keys_at() {
+            local ref="$1" path="$2"
+            git show "${ref}:${path}" 2>/dev/null \
+              | yq -r '.MODEL_HUB_CONFIGURATION.agents.BaseRules // {} | to_entries[] | .value | keys[]' 2>/dev/null \
+              | sort -u || true
+          }
+
+          added_all=""
+          for f in "${FILES[@]}"; do
+            before="$(model_keys_at "$BASE_SHA" "$f")"
+            after="$(model_keys_at "$HEAD_SHA" "$f")"
+            # Keys present in AFTER but not BEFORE = newly added models.
+            added="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") || true)"
+            if [ -n "$added" ]; then
+              echo "Added in $f:"; echo "$added" | sed 's/^/  + /'
+              added_all="${added_all}"$'\n'"${added}"
+            fi
+          done
+
+          # Dedup across both files; drop blanks.
+          added_unique="$(printf '%s\n' "$added_all" | sed '/^$/d' | sort -u)"
+
+          count="$(printf '%s\n' "$added_unique" | sed '/^$/d' | wc -l | tr -d ' ')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+          # Emit as a JSON array for the downstream matrix.
+          models_json="$(printf '%s\n' "$added_unique" | sed '/^$/d' | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+          echo "models=$models_json" >> "$GITHUB_OUTPUT"
+          echo "Newly added models ($count): $models_json"
+
+  onboard:
+    name: onboard ${{ matrix.model }}
+    needs: [detect-added-models]
+    if: ${{ needs.detect-added-models.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJson(needs.detect-added-models.outputs.models) }}
+    steps:
+      - name: Derive get_chat_model paths from the model id
+        id: paths
+        env:
+          MODEL: ${{ matrix.model }}
+        run: |
+          set -euo pipefail
+          # Map the model-name prefix to the code paths that model ships on.
+          # Extend as new vendor prefixes appear in the Model Hub config.
+          case "$MODEL" in
+            anthropic.*)                 paths="bedrock_converse,bedrock_invoke,anthropic_sdk" ;;
+            gpt-*|o1-*|o3-*|o4-*)        paths="azure_responses,azure_chat_completions" ;;
+            gemini-*)                    paths="vertex" ;;
+            claude-*@*|claude-opus-*|claude-sonnet-*|claude-haiku-*|claude-fable-*)
+                                         paths="vertex" ;;  # bare claude-* = Vertex Anthropic ids
+            *)                           paths="" ;;
+          esac
+
+          if [ -z "$paths" ]; then
+            echo "::warning::No path mapping for model '$MODEL'; skipping onboarding for it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "paths=$paths" >> "$GITHUB_OUTPUT"
+            echo "Model '$MODEL' -> paths '$paths'"
+          fi
+
+      - name: Trigger model_onboarding.yml in uipath-langchain-python
+        if: ${{ steps.paths.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.ONBOARDING_DISPATCH_TOKEN }}
+          MODEL: ${{ matrix.model }}
+          PATHS: ${{ steps.paths.outputs.paths }}
+        run: |
+          set -euo pipefail
+          gh workflow run model_onboarding.yml \
+            --repo UiPath/uipath-langchain-python \
+            --ref main \
+            -f model_name="$MODEL" \
+            -f paths="$PATHS" \
+            -f files="image,pdf" \
+            -f environments="alpha,staging"
+          echo "Dispatched onboarding for '$MODEL' (paths: $PATHS) on alpha,staging."
