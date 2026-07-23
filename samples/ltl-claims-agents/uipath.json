@@ -1,0 +1,258 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "main.py",
+            "uniqueId": "712293e0-401e-436e-a1a6-24736c23719b",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "claim_id": {
+                        "type": "string"
+                    },
+                    "claim_type": {
+                        "type": "string"
+                    },
+                    "claim_amount": {
+                        "type": "number"
+                    },
+                    "shipment_id": {
+                        "type": "string"
+                    },
+                    "carrier": {
+                        "type": "string"
+                    },
+                    "customer_name": {
+                        "type": "string"
+                    },
+                    "customer_email": {
+                        "type": "string"
+                    },
+                    "customer_phone": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "submission_source": {
+                        "type": "string"
+                    },
+                    "submitted_at": {
+                        "type": "string"
+                    },
+                    "shipping_documents": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "damage_evidence": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "transaction_key": {
+                        "type": "string"
+                    },
+                    "processing_priority": {
+                        "type": "string"
+                    },
+                    "plan": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "current_step": {
+                        "type": "integer"
+                    },
+                    "completed_steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "observations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "data_fabric_validated": {
+                        "type": "boolean"
+                    },
+                    "validation_errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "downloaded_documents": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "extracted_data": {
+                        "type": "object"
+                    },
+                    "extraction_confidence": {
+                        "type": "object"
+                    },
+                    "risk_score": {
+                        "type": "number"
+                    },
+                    "risk_level": {
+                        "type": "string"
+                    },
+                    "risk_factors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "policy_compliant": {
+                        "type": "boolean"
+                    },
+                    "policy_violations": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "decision": {
+                        "type": "string"
+                    },
+                    "confidence": {
+                        "type": "number"
+                    },
+                    "reasoning": {
+                        "type": "string"
+                    },
+                    "reasoning_steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "requires_human_review": {
+                        "type": "boolean"
+                    },
+                    "human_review_reason": {
+                        "type": "string"
+                    },
+                    "action_center_task_id": {
+                        "type": "string"
+                    },
+                    "human_decision": {
+                        "type": "string"
+                    },
+                    "historical_context": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "similar_claims_count": {
+                        "type": "integer"
+                    },
+                    "decision_patterns": {
+                        "type": "object"
+                    },
+                    "tools_used": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "start_time": {
+                        "type": "object"
+                    },
+                    "end_time": {
+                        "type": "object"
+                    }
+                },
+                "required": []
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "claim_id": {
+                        "type": "string"
+                    },
+                    "decision": {
+                        "type": "string"
+                    },
+                    "confidence": {
+                        "type": "number"
+                    },
+                    "reasoning": {
+                        "type": "string"
+                    },
+                    "reasoning_steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "tools_used": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "human_review_required": {
+                        "type": "boolean"
+                    },
+                    "action_center_task_id": {
+                        "type": "string"
+                    },
+                    "processing_duration_seconds": {
+                        "type": "number"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "error": {
+                        "type": "string"
+                    },
+                    "risk_level": {
+                        "type": "string"
+                    },
+                    "policy_compliant": {
+                        "type": "boolean"
+                    },
+                    "data_fabric_updated": {
+                        "type": "boolean"
+                    },
+                    "queue_updated": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "success",
+                    "claim_id",
+                    "decision",
+                    "confidence",
+                    "reasoning",
+                    "human_review_required",
+                    "timestamp"
+                ]
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
