@@ -15,6 +15,12 @@ This sample shows how to automate Outlook inbox organization with AI-powered rul
 ## [HITL inbox server](hitl-inbox-server)
 This sample demonstrates a FastAPI server for managing human-in-the-loop workflows with job submissions and inbox message approvals.
 
+## [Joke agent](joke-agent)
+This sample demonstrates a LangGraph agent that generates family-friendly jokes on a given topic, showcasing a middleware-based guardrails stack for PII detection, prompt injection prevention, and content validation, with human-in-the-loop escalation when PII is detected in the input.
+
+## [Joke agent (decorator-based guardrails)](joke-agent-decorator)
+This sample shows how to use the unified `@guardrail` decorator to apply guardrails to LLM factories, tools, agent factories, graph nodes, and plain Python functions — without a middleware stack.
+
 ## [Multi agent supervisor, researcher, coder](multi-agent-supervisor-researcher-coder)
 This sample showcases a multi-agent system, involving a supervisor, a researcher, and a coder working in coordination to tackle complex tasks.
 
