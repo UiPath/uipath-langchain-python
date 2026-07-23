@@ -34,10 +34,18 @@ logger = getLogger(__name__)
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition,
     llm: BaseChatModel,
-    run_as_me: bool = False,
+    conversational_run_as_me: bool = False,
 ) -> list[BaseTool]:
+    """
+    Create tools for the agent. conversational_run_as_me is true when the tools are for 
+    a conversational agent running as the user-identity (the agent was started with RunAsMe=true).
+    """
     tools: list[BaseTool] = []
-    logger.info("Creating tools for agent '%s' (run_as_me=%s)", agent.name, run_as_me)
+    logger.info(
+        "Creating tools for agent '%s' (conversational_run_as_me=%s)",
+        agent.name,
+        conversational_run_as_me,
+    )
 
     for resource in agent.resources:
         if not resource.is_enabled:
@@ -54,7 +62,10 @@ async def create_tools_from_resources(
             type(resource).__name__,
         )
         tool = await _build_tool_for_resource(
-            resource, llm, agent=agent, run_as_me=run_as_me
+            resource,
+            llm,
+            agent=agent,
+            conversational_run_as_me=conversational_run_as_me,
         )
         if tool is not None:
             if isinstance(tool, list):
@@ -78,10 +89,12 @@ async def _build_tool_for_resource(
     resource: BaseAgentResourceConfig,
     llm: BaseChatModel,
     agent: LowCodeAgentDefinition | None = None,
-    run_as_me: bool = False,
+    conversational_run_as_me: bool = False,
 ) -> BaseTool | list[BaseTool] | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
-        return create_process_tool(resource, run_as_me=run_as_me)
+        return create_process_tool(
+            resource, conversational_run_as_me=conversational_run_as_me
+        )
 
     elif isinstance(resource, AgentContextResourceConfig):
         return create_context_tool(resource, llm=llm, agent=agent)

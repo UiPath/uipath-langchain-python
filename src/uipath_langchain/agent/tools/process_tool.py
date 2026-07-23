@@ -41,7 +41,7 @@ _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]
 
 def create_process_tool(
     resource: AgentProcessToolResourceConfig,
-    run_as_me: bool = False,
+    conversational_run_as_me: bool = False,
 ) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until process completes (handled by runtime)."""
     # Import here to avoid circular dependency
@@ -53,6 +53,11 @@ def create_process_tool(
 
     input_model: Any = create_model(resource.input_schema)
     output_model: Any = create_model(resource.output_schema)
+
+    # For conversational-agents running with RunAsMe=true, propagate RunAsMe=true
+    # to the process tool job as well. RPA Workflows remain unattended until
+    # attended local robot execution on the user's desktop is implemented.
+    run_as_me = conversational_run_as_me and resource.type != AgentToolType.PROCESS
 
     _span_context: dict[str, Any] = {}
     _bts_context: dict[str, Any] = {}

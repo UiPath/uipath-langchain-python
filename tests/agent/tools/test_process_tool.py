@@ -394,18 +394,18 @@ class TestProcessToolSpanContext:
 
 
 class TestProcessToolRunAsMe:
-    """Test RunAsMe propagation passed top-down from tool factory."""
+    """RunAsMe propagation: honored for non-RPA types, suppressed for PROCESS (RPA)."""
 
     @pytest.mark.asyncio
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
-    async def test_run_as_me_true_passed_to_invoke(
+    async def test_conversational_run_as_me_true_forwards_for_non_rpa(
         self,
         mock_uipath_class,
         mock_interrupt,
-        process_resource,
+        flow_resource,
     ):
-        """Test RunAsMe=True is forwarded to invoke_async when set."""
+        """conversational_run_as_me=True is forwarded to invoke_async for non-RPA types."""
         mock_job = MagicMock(spec=Job)
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
@@ -420,7 +420,7 @@ class TestProcessToolRunAsMe:
 
         mock_interrupt.return_value = mock_resumed_job
 
-        tool = create_process_tool(process_resource, run_as_me=True)
+        tool = create_process_tool(flow_resource, conversational_run_as_me=True)
         await tool.ainvoke({})
 
         call_kwargs = mock_client.processes.invoke_async.call_args[1]
@@ -429,13 +429,13 @@ class TestProcessToolRunAsMe:
     @pytest.mark.asyncio
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
-    async def test_run_as_me_false_sends_none(
+    async def test_conversational_run_as_me_true_suppressed_for_rpa_process(
         self,
         mock_uipath_class,
         mock_interrupt,
         process_resource,
     ):
-        """Test RunAsMe=None when run_as_me=False (default)."""
+        """RPA (PROCESS) suppresses RunAsMe even when the caller sets it."""
         mock_job = MagicMock(spec=Job)
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
@@ -450,7 +450,7 @@ class TestProcessToolRunAsMe:
 
         mock_interrupt.return_value = mock_resumed_job
 
-        tool = create_process_tool(process_resource, run_as_me=False)
+        tool = create_process_tool(process_resource, conversational_run_as_me=True)
         await tool.ainvoke({})
 
         call_kwargs = mock_client.processes.invoke_async.call_args[1]
@@ -459,13 +459,43 @@ class TestProcessToolRunAsMe:
     @pytest.mark.asyncio
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
-    async def test_run_as_me_default_sends_none(
+    async def test_conversational_run_as_me_false_sends_none(
         self,
         mock_uipath_class,
         mock_interrupt,
         process_resource,
     ):
-        """Test RunAsMe=None when run_as_me not specified (default)."""
+        """RunAsMe=None when conversational_run_as_me=False."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource, conversational_run_as_me=False)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["run_as_me"] is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_conversational_run_as_me_default_sends_none(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource,
+    ):
+        """RunAsMe=None when conversational_run_as_me not specified (default)."""
         mock_job = MagicMock(spec=Job)
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
