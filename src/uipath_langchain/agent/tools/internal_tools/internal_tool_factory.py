@@ -6,6 +6,9 @@ file analysis, data processing, or other utilities that don't require external i
 
 Supported Internal Tools:
     - ANALYZE_FILES: Tool for analyzing file contents and extracting information
+    - DEEP_RAG: Tool for deep retrieval-augmented generation over documents
+    - BATCH_TRANSFORM: Tool for batch transformation of document data
+    - HTTP_REQUEST: Tool for issuing outbound HTTP requests to a given URL
 
 Example:
     >>> from uipath.agent.models.agent import AgentInternalToolResourceConfig
@@ -29,6 +32,7 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 from .analyze_files_tool import create_analyze_file_tool
 from .batch_transform_tool import create_batch_transform_tool
 from .deeprag_tool import create_deeprag_tool
+from .http_request_tool import create_http_request_tool
 
 _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType,
@@ -37,6 +41,7 @@ _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType.ANALYZE_FILES: create_analyze_file_tool,
     AgentInternalToolType.DEEP_RAG: create_deeprag_tool,
     AgentInternalToolType.BATCH_TRANSFORM: create_batch_transform_tool,
+    AgentInternalToolType.HTTP_REQUEST: create_http_request_tool,
 }
 
 
