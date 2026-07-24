@@ -1,0 +1,66 @@
+{
+  "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+  "$id": "entry-points.json",
+  "entryPoints": [
+    {
+      "filePath": "/content/agent.json",
+      "uniqueId": "8b69f376-8da7-4380-825c-e2074874a07f",
+      "type": "agent",
+      "input": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The task or question to answer about the attached file."
+          },
+          "fileIn": {
+            "$ref": "#/definitions/job-attachment"
+          }
+        },
+        "required": [
+          "prompt",
+          "fileIn"
+        ],
+        "definitions": {
+          "job-attachment": {
+            "type": "object",
+            "properties": {
+              "ID": {
+                "type": "string",
+                "description": "Orchestrator attachment key"
+              },
+              "FullName": {
+                "type": "string",
+                "description": "File name"
+              },
+              "MimeType": {
+                "type": "string",
+                "description": "MIME type, e.g. \"application/pdf\", \"image/png\""
+              },
+              "Metadata": {
+                "type": "object",
+                "description": "Dictionary<string, string> of metadata",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "ID"
+            ],
+            "x-uipath-resource-kind": "JobAttachment"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The agent's analysis of the attached file."
+          }
+        }
+      }
+    }
+  ]
+}

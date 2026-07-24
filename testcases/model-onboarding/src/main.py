@@ -56,6 +56,18 @@ from uipath_langchain.agent.multimodal.invoke import llm_call_with_files
 from uipath_langchain.agent.multimodal.types import FileInfo
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 
+# main.py is loaded as a top-level module (./src/main.py:graph), so `agents`
+# is a sibling top-level package on sys.path. Fall back to loading it by path
+# if the loader did not put src/ on sys.path.
+try:
+    from agents import AGENT_REGISTRY
+except ModuleNotFoundError:  # pragma: no cover - defensive for alt loaders
+    import os
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from agents import AGENT_REGISTRY
+
 logger = logging.getLogger(__name__)
 
 
@@ -252,13 +264,13 @@ async def _run_tools(model: BaseChatModel) -> str:
 async def _run_file(
     model: BaseChatModel, prompt: str, file_info: FileInfo
 ) -> str:
-    """File-processing payload: invoke with one attached file."""
-    response = await llm_call_with_files(
-        [HumanMessage(content=prompt)], [file_info], model
-    )
-    if response.content and str(response.content).strip():
-        return "✓"
-    return "✗ empty response"
+    """File-processing payload: delegate to the coded file_processing agent.
+
+    The agent is the coded equivalent of the low-code FileProcessingAgent; it
+    receives the built model (already configured for the target path/flavor),
+    the task prompt, and the single file to attach.
+    """
+    return await AGENT_REGISTRY["file_processing"](model, prompt, [file_info])
 
 
 async def run_model_onboarding(state: GraphState) -> dict:

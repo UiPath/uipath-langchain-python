@@ -1,0 +1,79 @@
+{
+  "$resourceType": "tool",
+  "id": "abc1b835-8dbc-4dad-bb63-16052b00157d",
+  "referenceKey": null,
+  "name": "Analyze Files",
+  "type": "internal",
+  "description": "Analyze one or more files with an LLM to extract, synthesize, or answer queries about their content.",
+  "isEnabled": true,
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "attachments": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/job-attachment"
+        },
+        "description": "Array of files, documents, images, or other attachments to process"
+      },
+      "analysisTask": {
+        "type": "string",
+        "description": "The task, question, or instruction for processing the files"
+      }
+    },
+    "required": [
+      "attachments",
+      "analysisTask"
+    ],
+    "definitions": {
+      "job-attachment": {
+        "type": "object",
+        "properties": {
+          "ID": {
+            "type": "string",
+            "description": "Orchestrator attachment key"
+          },
+          "FullName": {
+            "type": "string",
+            "description": "File name"
+          },
+          "MimeType": {
+            "type": "string",
+            "description": "MIME type, e.g. \"application/pdf\", \"image/png\""
+          },
+          "Metadata": {
+            "type": "object",
+            "description": "Dictionary<string, string> of metadata",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ID"
+        ],
+        "x-uipath-resource-kind": "JobAttachment"
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "analysis": {
+        "type": "string",
+        "description": "Analysis result of the attachments"
+      }
+    },
+    "required": [
+      "analysis"
+    ]
+  },
+  "settings": {},
+  "guardrail": {
+    "policies": []
+  },
+  "argumentProperties": {},
+  "properties": {
+    "toolType": "analyze-attachments"
+  }
+}
