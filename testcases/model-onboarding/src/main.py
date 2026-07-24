@@ -181,17 +181,12 @@ class IsToolsSpec(BaseModel):
     """Configuration for the IS-tools payload (agents/is_tools).
 
     The agent is the Studio Web coded copy of the low-code IsToolsAgent: the
-    model under test drives real Integration Service Activity tools (Slack
-    Send Message to Channel, Outlook 365 Send Email). Running it performs
-    real communication actions, so the payload only runs when connection ids
-    are configured.
+    model under test is bound to real Integration Service Activity tools
+    (Slack Send Message to Channel, Outlook 365 Send Email) and must produce
+    a well-formed tool call. Call-only — the tools are never executed, so no
+    connections are needed and nothing is actually sent.
     """
 
-    connections: dict[str, str] = Field(
-        default_factory=dict,
-        description="IS connection ids by tool key ('slack', 'outlook'). "
-        "Empty => payload skipped (no is_tools cell).",
-    )
     prompt: str = Field(
         default=(
             "Send a Slack message saying 'model onboarding connectivity "
@@ -199,8 +194,8 @@ class IsToolsSpec(BaseModel):
             "email with subject 'model onboarding connectivity test' and "
             "the same body to model-onboarding-tests@uipath.com."
         ),
-        description="The communication action the model must perform via "
-        "the Activity tools.",
+        description="The communication request the model must translate "
+        "into Activity tool calls.",
     )
 
 
@@ -369,20 +364,17 @@ async def run_model_onboarding(state: GraphState) -> dict:
                 cell_results[label] = f"✗ {str(e)[:60]}"
             logger.info(f"    {label}: {cell_results[label]}")
 
-        # 4. IS Activity tools — the model drives real Slack/Outlook tools
-        # (Studio Web coded copy). Skipped when no connections are wired,
-        # because a run performs real communication actions.
-        if any(spec.is_tools.connections.values()):
-            logger.info("  is_tools...")
-            try:
-                cell_results["is_tools"] = await run_is_tools(
-                    model, spec.is_tools.connections, spec.is_tools.prompt
-                )
-            except Exception as e:
-                cell_results["is_tools"] = f"✗ {str(e)[:60]}"
-            logger.info(f"    is_tools: {cell_results['is_tools']}")
-        else:
-            logger.info("  is_tools: skipped (no connections configured)")
+        # 4. IS Activity tools — call-only: the model is bound to the real
+        # Slack/Outlook Activity tools (Studio Web coded copy) and must
+        # produce a well-formed tool call. Nothing is executed or sent.
+        logger.info("  is_tools...")
+        try:
+            cell_results["is_tools"] = await run_is_tools(
+                model, spec.is_tools.prompt
+            )
+        except Exception as e:
+            cell_results["is_tools"] = f"✗ {str(e)[:60]}"
+        logger.info(f"    is_tools: {cell_results['is_tools']}")
 
         model_results[path] = cell_results
 

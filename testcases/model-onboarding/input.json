@@ -5,8 +5,6 @@
         "paths": ["azure_responses", "azure_chat_completions"],
         "agenthub_config": "agentsplayground",
         "files": ["image", "pdf"],
-        "is_tools": {
-            "connections": {}
-        }
+        "is_tools": {}
     }
 }

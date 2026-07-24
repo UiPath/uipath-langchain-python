@@ -30,20 +30,20 @@ generated graph. Cells: `files/<name>`, one per selected file.
 
 ## `is_tools`
 
-Tests that the model under test can drive **real Integration Service
-Activity tools** — Slack *Send Message to Channel* and Outlook 365 *Send
-Email* — via `create_integration_tool` + `AgentIntegrationToolResourceConfig`
-exactly as generated. Cell: `is_tools` (one per path).
+Tests that the model under test **produces a well-formed tool call** against
+the real Integration Service Activity tools — Slack *Send Message to
+Channel* and Outlook 365 *Send Email* — built via `create_integration_tool`
++ `AgentIntegrationToolResourceConfig` exactly as generated. Cell:
+`is_tools` (one per path), reporting the called tools, e.g.
+`✓ (Send Message to Channel, Send Email)`.
 
-Configuration via `model_spec.is_tools` in `input.json`:
+**Call-only:** the tools are bound to the model but never executed — no IS
+connections are needed and nothing is actually sent, so the cell runs on
+every onboarding pass. Asserts ≥1 tool call with the right name and required
+args (`channel` + `messageToSend`; `message.toRecipients`).
 
-- `connections` — IS connection ids by tool key (`slack`, `outlook`).
-  **Empty ⇒ the cell is skipped**, because a run performs real communication
-  actions (it actually sends the Slack message / email).
-- `prompt` — the action the model must perform.
-
-Create the Slack / Outlook 365 connections in Integration Service (or pick
-them on the low-code twin in Studio Web), then put their ids in
-`connections` to enable the cell. Note `create_integration_tool` requires
-UiPath auth (`uipath auth` / `UIPATH_URL`) at tool-creation time — locally
-unauthenticated runs fail legibly in the cell.
+`model_spec.is_tools.prompt` overrides the communication request. For a full
+executed run (real Slack/email side effects), `build_graph(llm, connections)`
+remains — wire real connection ids and invoke it deliberately; the testcase
+never does. Note `create_integration_tool` requires UiPath auth at
+tool-creation time — locally unauthenticated runs fail legibly in the cell.
