@@ -49,6 +49,7 @@ from uipath_langchain_client.clients.bedrock.chat_models import (
 from uipath_langchain_client.settings import (
     ApiFlavor,
     UiPathBaseSettings,
+    VendorType,
 )
 
 from uipath_langchain.agent.multimodal.invoke import llm_call_with_files
@@ -84,10 +85,14 @@ PATH_REGISTRY: dict[str, PathBuilder] = {
         temperature=0.0,
         max_tokens=200,
     ),
-    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI
+    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI.
+    # vendor_type + api_flavor are pinned explicitly so this path deterministically
+    # exercises the GENERATE_CONTENT flavor rather than relying on autodetection.
     "vertex": lambda model, settings: get_chat_model(
         model=model,
         client_settings=settings,
+        vendor_type=VendorType.VERTEXAI,
+        api_flavor=ApiFlavor.GENERATE_CONTENT,
         temperature=0.0,
         max_tokens=200,
     ),
