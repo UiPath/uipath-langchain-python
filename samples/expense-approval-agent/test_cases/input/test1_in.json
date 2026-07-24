@@ -1,0 +1,11 @@
+{
+  "employee_id": "EMP001",
+  "employee_name": "John Smith",
+  "department": "engineering",
+  "expense_amount": 45.50,
+  "expense_category": "meals",
+  "expense_description": "Client lunch meeting at downtown restaurant",
+  "receipt_attached": true,
+  "expense_date": "2025-09-25",
+  "manager_email": "manager@company.com"
+}

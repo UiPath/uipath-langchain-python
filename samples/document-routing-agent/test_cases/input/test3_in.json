@@ -1,0 +1,10 @@
+{
+    "document_id": "DOC-2025-003",
+    "document_type": "contract",
+    "title": "Service Agreement Amendment - Client ABC Corp",
+    "content": "This amendment modifies the existing service agreement with ABC Corporation. Changes include updated compliance requirements, new payment terms, and revised service levels. Legal review required before execution. Agreement effective date: February 1, 2025.",
+    "sender_email": "contracts@abccorp.com",
+    "sender_department": null,
+    "urgency_level": "critical",
+    "tags": ["contract", "amendment", "client", "urgent"]
+}

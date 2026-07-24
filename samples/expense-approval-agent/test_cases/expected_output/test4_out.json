@@ -1,0 +1,13 @@
+{
+  "expense_id": "EXP-20251001-40A4FD5E",
+  "status": "approved",
+  "approval_level": "manager",
+  "final_amount": 125,
+  "processing_notes": [
+    "Expense report EXP-20251001-40A4FD5E created at 2025-10-01T10:00:00.000000",
+    "Expense is 153 days old (>90 day policy)",
+    "Approved on 2025-10-01 10:05",
+    "Reimbursement by 2025-10-06"
+  ],
+  "reimbursement_eta": "2025-10-06"
+}
