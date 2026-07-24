@@ -1,0 +1,111 @@
+from datetime import (
+    datetime,
+    timezone
+)
+from langchain_core.messages import (
+    HumanMessage,
+    SystemMessage
+)
+from pydantic import (
+    BaseModel,
+    Field
+)
+from pydantic import (
+    ConfigDict
+)
+from typing import (
+    Sequence
+)
+from uipath.agent.models.agent import (
+    AgentIntegrationToolResourceConfig
+)
+from uipath.agent.react import (
+    AGENT_SYSTEM_PROMPT_TEMPLATE
+)
+from uipath_langchain.agent.react import (
+    create_agent
+)
+from uipath_langchain.agent.tools import (
+    create_integration_tool
+)
+from uipath_langchain.chat.chat_model_factory import (
+    get_chat_model
+)
+from utils import (
+    interpolate_legacy_message
+)
+
+
+
+# LLM Model Configuration
+llm = get_chat_model(
+    model='gpt-5.4',
+    temperature=0.0,
+    max_tokens=128000,
+    agenthub_config="agentsruntime",
+)
+    
+# Integration Tool send_message_to_channel
+send_message_to_channel_config = AgentIntegrationToolResourceConfig(
+    name='Send Message to Channel',
+    description='Create a(n) send_message_to_channel',
+    type='Integration',
+    input_schema={'type': 'object', 'properties': {'channel': {'type': 'string', 'title': 'Channel name/ID', 'description': 'Channel name/ID'}, 'messageToSend': {'type': 'string', 'title': 'Message', 'description': "This is the main text that people will see in the message. It's also used for notifications and in places where rich formatting isn't supported."}}, 'required': ['channel', 'messageToSend']},
+    output_schema={'type': 'object', 'properties': {'app_id': {'type': 'string', 'title': 'App ID', 'description': ''}, 'blocks': {'type': 'array', 'title': 'blocks[*]', 'items': {'$ref': '#/definitions/blocks'}}, 'channel': {'type': 'string', 'title': 'Channel name/ID', 'description': 'Channel name/ID'}, 'icons.emoji': {'type': 'string', 'title': 'Icons emoji', 'description': ''}, 'message.app_id': {'type': 'string', 'title': 'Message app ID', 'description': ''}, 'message.attachments': {'type': 'array', 'title': 'message.attachments[*]', 'items': {'$ref': '#/definitions/message.attachments'}}, 'message.blocks': {'type': 'array', 'title': 'message.blocks[*]', 'items': {'$ref': '#/definitions/message.blocks'}}, 'message.bot_id': {'type': 'string', 'title': 'Bot Id', 'description': ''}, 'message.bot_profile.app_id': {'type': 'string', 'title': 'Application Id', 'description': ''}, 'message.bot_profile.deleted': {'type': 'boolean', 'title': 'Deleted', 'description': ''}, 'message.bot_profile.icons.image_36': {'type': 'string', 'title': 'Image 3 6', 'description': ''}, 'message.bot_profile.icons.image_48': {'type': 'string', 'title': 'Image 4 8', 'description': ''}, 'message.bot_profile.icons.image_72': {'type': 'string', 'title': 'Image 7 2', 'description': ''}, 'message.bot_profile.id': {'type': 'string', 'title': 'Message bot profile ID', 'description': ''}, 'message.bot_profile.name': {'type': 'string', 'title': 'Message bot profile name', 'description': ''}, 'message.bot_profile.team_id': {'type': 'string', 'title': 'Team Id', 'description': ''}, 'message.bot_profile.updated': {'type': 'integer', 'title': 'Updated', 'description': ''}, 'message.icons.emoji': {'type': 'string', 'title': 'Message icons emoji', 'description': ''}, 'message.metadata.event_payload.id': {'type': 'string', 'title': 'Message metadata event payload ID', 'description': ''}, 'message.metadata.event_payload.title': {'type': 'string', 'title': 'Message metadata event payload title', 'description': ''}, 'message.metadata.event_type': {'type': 'string', 'title': 'Message metadata event type', 'description': ''}, 'message.root.app_id': {'type': 'string', 'title': 'Message root app ID', 'description': ''}, 'message.root.blocks': {'type': 'array', 'title': 'message.root.blocks[*]', 'items': {'$ref': '#/definitions/message.root.blocks'}}, 'message.root.bot_id': {'type': 'string', 'title': 'Message root bot ID', 'description': ''}, 'message.root.icons.emoji': {'type': 'string', 'title': 'Message root icons emoji', 'description': ''}, 'message.root.is_locked': {'type': 'boolean', 'title': 'Message root is locked', 'description': ''}, 'message.root.latest_reply': {'type': 'string', 'title': 'Message root latest reply', 'description': ''}, 'message.root.metadata.event_type': {'type': 'string', 'title': 'Message root metadata event type', 'description': ''}, 'message.root.reply_count': {'type': 'integer', 'title': 'Message root reply count', 'description': ''}, 'message.root.reply_users': {'type': 'string', 'title': 'Message root reply users', 'description': ''}, 'message.root.reply_users_count': {'type': 'integer', 'title': 'Message root reply users count', 'description': ''}, 'message.root.subscribed': {'type': 'boolean', 'title': 'Message root subscribed', 'description': ''}, 'message.root.subtype': {'type': 'string', 'title': 'Message root subtype', 'description': ''}, 'message.root.text': {'type': 'string', 'title': 'Message root text', 'description': ''}, 'message.root.thread_ts': {'type': 'string', 'title': 'Message root thread ts', 'description': ''}, 'message.root.ts': {'type': 'string', 'title': 'Message root ts', 'description': ''}, 'message.root.type': {'type': 'string', 'title': 'Message root type', 'description': ''}, 'message.root.username': {'type': 'string', 'title': 'Message root username', 'description': ''}, 'message.subtype': {'type': 'string', 'title': 'Message subtype', 'description': ''}, 'message.team': {'type': 'string', 'title': 'Team', 'description': ''}, 'message.text': {'type': 'string', 'title': 'Message text', 'description': ''}, 'message.thread_ts': {'type': 'string', 'title': 'Message thread ts', 'description': ''}, 'message.ts': {'type': 'string', 'title': 'Message ts', 'description': ''}, 'message.type': {'type': 'string', 'title': 'Message type', 'description': ''}, 'message.user': {'type': 'string', 'title': 'User', 'description': ''}, 'message.username': {'type': 'string', 'title': 'Message username', 'description': ''}, 'metadata.event_payload.id': {'type': 'string', 'title': 'Metadata event payload ID', 'description': ''}, 'metadata.event_payload.title': {'type': 'string', 'title': 'Metadata event payload title', 'description': ''}, 'metadata.event_type': {'type': 'string', 'title': 'Metadata event type', 'description': ''}, 'ok': {'type': 'boolean', 'title': 'Ok', 'description': ''}, 'response_metadata.warnings': {'type': 'string', 'title': 'Response metadata warnings', 'description': ''}, 'root.app_id': {'type': 'string', 'title': 'Root app ID', 'description': ''}, 'root.blocks': {'type': 'array', 'title': 'root.blocks[*]', 'items': {'$ref': '#/definitions/root.blocks'}}, 'root.bot_id': {'type': 'string', 'title': 'Root bot ID', 'description': ''}, 'root.icons.emoji': {'type': 'string', 'title': 'Root icons emoji', 'description': ''}, 'root.is_locked': {'type': 'boolean', 'title': 'Root is locked', 'description': ''}, 'root.latest_reply': {'type': 'string', 'title': 'Root latest reply', 'description': ''}, 'root.metadata.event_type': {'type': 'string', 'title': 'Root metadata event type', 'description': ''}, 'root.reply_count': {'type': 'integer', 'title': 'Root reply count', 'description': ''}, 'root.reply_users': {'type': 'string', 'title': 'Root reply users', 'description': ''}, 'root.reply_users_count': {'type': 'integer', 'title': 'Root reply users count', 'description': ''}, 'root.subscribed': {'type': 'boolean', 'title': 'Root subscribed', 'description': ''}, 'root.subtype': {'type': 'string', 'title': 'Root subtype', 'description': ''}, 'root.text': {'type': 'string', 'title': 'Root text', 'description': ''}, 'root.thread_ts': {'type': 'string', 'title': 'Root thread ts', 'description': ''}, 'root.ts': {'type': 'string', 'title': 'Root ts', 'description': ''}, 'root.type': {'type': 'string', 'title': 'Root type', 'description': ''}, 'root.username': {'type': 'string', 'title': 'Root username', 'description': ''}, 'subtype': {'type': 'string', 'title': 'Subtype', 'description': ''}, 'thread_ts': {'type': 'string', 'title': 'Message timestamp', 'description': 'The ID (timestamp) of the message sent'}, 'ts': {'type': 'string', 'title': 'Message timestamp', 'description': 'The ID (timestamp) of the message sent'}, 'username': {'type': 'string', 'title': 'Bot name', 'description': 'Bot name'}}, 'definitions': {'blocks': {'type': 'object', 'properties': {'block_id': {'type': 'string', 'title': 'Blocks block ID', 'description': ''}, 'text.emoji': {'type': 'boolean', 'title': 'Blocks text emoji', 'description': ''}, 'text.text': {'type': 'string', 'title': 'Blocks text text', 'description': ''}, 'text.type': {'type': 'string', 'title': 'Type', 'description': ''}, 'type': {'type': 'string', 'title': 'Blocks type', 'description': ''}}}, 'message.attachments': {'type': 'object', 'properties': {'actions.confirm.dismiss_text': {'type': 'string', 'title': 'Dismiss Text', 'description': ''}, 'actions.confirm.ok_text': {'type': 'string', 'title': 'Ok Text', 'description': ''}, 'actions.confirm.text': {'type': 'string', 'title': 'Message attachments actions confirm text', 'description': ''}, 'actions.confirm.title': {'type': 'string', 'title': 'Title', 'description': ''}, 'actions.id': {'type': 'string', 'title': 'Message attachments actions ID', 'description': ''}, 'actions.name': {'type': 'string', 'title': 'Name', 'description': ''}, 'actions.style': {'type': 'string', 'title': 'Style', 'description': ''}, 'actions.text': {'type': 'string', 'title': 'Message attachments actions text', 'description': ''}, 'actions.type': {'type': 'string', 'title': 'Message attachments actions type', 'description': ''}, 'actions.value': {'type': 'string', 'title': 'Value', 'description': ''}, 'callback_id': {'type': 'string', 'title': 'Call Back Id', 'description': ''}, 'color': {'type': 'string', 'title': 'Color', 'description': ''}, 'fallback': {'type': 'string', 'title': 'Fall Back', 'description': ''}, 'id': {'type': 'integer', 'title': 'Id', 'description': ''}, 'text': {'type': 'string', 'title': 'Message attachments text', 'description': ''}}}, 'message.blocks': {'type': 'object', 'properties': {'block_id': {'type': 'string', 'title': 'Message blocks block ID', 'description': ''}, 'text.emoji': {'type': 'boolean', 'title': 'Message blocks text emoji', 'description': ''}, 'text.text': {'type': 'string', 'title': 'Message blocks text', 'description': ''}, 'text.type': {'type': 'string', 'title': 'Message blocks text type', 'description': ''}, 'type': {'type': 'string', 'title': 'Message blocks type', 'description': ''}}}, 'message.root.blocks': {'type': 'object', 'properties': {'block_id': {'type': 'string', 'title': 'Message root blocks block ID', 'description': ''}, 'elements.elements.text': {'type': 'string', 'title': 'Message root blocks elements text', 'description': ''}, 'elements.elements.type': {'type': 'string', 'title': 'Message root blocks elements elements type', 'description': ''}, 'elements.type': {'type': 'string', 'title': 'Message root blocks elements type', 'description': ''}, 'type': {'type': 'string', 'title': 'Message root blocks type', 'description': ''}}}, 'root.blocks': {'type': 'object', 'properties': {'block_id': {'type': 'string', 'title': 'Root blocks block ID', 'description': ''}, 'elements.elements.text': {'type': 'string', 'title': 'Root blocks elements text', 'description': ''}, 'elements.elements.type': {'type': 'string', 'title': 'Root blocks elements elements type', 'description': ''}, 'elements.type': {'type': 'string', 'title': 'Root blocks elements type', 'description': ''}, 'type': {'type': 'string', 'title': 'Root blocks type', 'description': ''}}}}},
+    properties={'toolPath': '/send_message_to_channel_v2', 'objectName': 'send_message_to_channel_v2', 'toolDisplayName': 'Send Message to Channel', 'toolDescription': 'Create a(n) send_message_to_channel', 'method': 'POST', 'connection': {'id': '', 'name': '', 'state': 'changed', 'apiBaseUri': '', 'elementInstanceId': 0, 'connector': {'key': 'uipath-salesforce-slack', 'name': 'Slack', 'image': 'https://alpha.uipath.com/llm_gateway_automated_testing/DefaultTenant/elements_/v3/element/elements/uipath-salesforce-slack/image', 'enabled': True}, 'isDefault': False, 'folder': {'key': '00000000-0000-0000-0000-000000000000', 'path': ''}, 'solutionProperties': {'resourceKey': '0554f0a1-40ff-4e1d-8edc-9bdc857e9fa7'}}, 'parameters': [{'name': 'send_as', 'type': 'string', 'value': 'bot', 'fieldLocation': 'query', 'displayName': 'Send as', 'description': 'Whether to send the message as the App bot i.e. using Bot token or yourself i.e. using User token?', 'position': 'primary', 'fieldVariant': 'static', 'dynamic': False, 'isCascading': False, 'sortOrder': 1, 'required': True, 'dynamicBehavior': []}, {'name': 'channel', 'type': 'string', 'value': '{{prompt}}', 'fieldLocation': 'body', 'displayName': 'Channel name/ID', 'description': 'Channel name/ID', 'position': 'primary', 'fieldVariant': 'dynamic', 'dynamic': True, 'isCascading': False, 'sortOrder': 2, 'required': True, 'dynamicBehavior': []}, {'name': 'messageToSend', 'type': 'string', 'value': '{{prompt}}', 'fieldLocation': 'body', 'displayName': 'Message', 'description': "This is the main text that people will see in the message. It's also used for notifications and in places where rich formatting isn't supported.", 'position': 'primary', 'fieldVariant': 'dynamic', 'dynamic': True, 'isCascading': False, 'sortOrder': 3, 'required': True, 'dynamicBehavior': []}], 'bodyStructure': {'contentType': 'json'}},
+    settings={}
+)
+send_message_to_channel_tool = create_integration_tool(send_message_to_channel_config)
+
+# Integration Tool send_email
+send_email_config = AgentIntegrationToolResourceConfig(
+    name='Send Email',
+    description='Send the message specified in the request body using either JSON.',
+    type='Integration',
+    input_schema={'type': 'object', 'properties': {'message': {'type': 'object', 'properties': {'toRecipients': {'type': 'string', 'title': 'To', 'description': 'The main recipients of the email, separated by comma(,)'}, 'subject': {'type': 'string', 'title': 'Subject', 'description': 'The subject of the email'}, 'body': {'type': 'object', 'properties': {'content': {'type': 'string', 'title': 'Body', 'description': 'The body of the email'}}}}}}, 'required': ['message']},
+    output_schema={'type': 'object', 'properties': {'status': {'type': 'string', 'title': 'Status', 'description': ''}, 'id': {'type': 'string', 'title': 'Message ID', 'description': 'A unique identifier for the sent email or saved draft.'}, 'conversationId': {'type': 'string', 'title': 'Conversation Id', 'description': 'Unique identifier for the email conversation thread. Use this with the List Emails / Get Newest Email Conversation ID filter to track incoming replies.'}, 'internetMessageId': {'type': 'string', 'title': 'Internet message Id', 'description': 'A unique identifier for the email message on the internet.'}}},
+    properties={'toolPath': '/hubs/productivity/send-mail-v2', 'objectName': 'send-mail-v2', 'toolDisplayName': 'Send Email', 'toolDescription': 'Send the message specified in the request body using either JSON.', 'method': 'POST', 'connection': {'id': '', 'name': '', 'state': 'changed', 'apiBaseUri': '', 'elementInstanceId': 0, 'connector': {'key': 'uipath-microsoft-outlook365', 'name': 'Microsoft Outlook 365', 'image': 'https://alpha.uipath.com/llm_gateway_automated_testing/DefaultTenant/elements_/v3/element/elements/uipath-microsoft-outlook365/image', 'enabled': True}, 'isDefault': False, 'folder': {'key': '00000000-0000-0000-0000-000000000000', 'path': ''}, 'solutionProperties': {'resourceKey': 'c74d4a3a-257e-4752-8646-3c59663efdb8'}}, 'parameters': [{'name': 'message.toRecipients', 'type': 'string', 'value': '{{prompt}}', 'fieldLocation': 'body', 'displayName': 'To', 'description': 'The main recipients of the email, separated by comma(,)', 'position': 'primary', 'fieldVariant': 'dynamic', 'dynamic': True, 'isCascading': False, 'sortOrder': 1, 'required': True, 'dynamicBehavior': []}, {'name': 'message.subject', 'type': 'string', 'value': '{{prompt}}', 'fieldLocation': 'body', 'displayName': 'Subject', 'description': 'The subject of the email', 'position': 'secondary', 'fieldVariant': 'dynamic', 'dynamic': True, 'isCascading': False, 'sortOrder': 2, 'required': False, 'dynamicBehavior': []}, {'name': 'message.body.content', 'type': 'string', 'value': '{{prompt}}', 'fieldLocation': 'body', 'displayName': 'Body', 'description': 'The body of the email', 'position': 'secondary', 'fieldVariant': 'dynamic', 'dynamic': True, 'isCascading': False, 'sortOrder': 3, 'required': False, 'dynamicBehavior': []}], 'bodyStructure': {'contentType': 'json'}},
+    settings={}
+)
+send_email_tool = create_integration_tool(send_email_config)
+
+
+# Collect all tools
+tools = []
+tools.append(send_message_to_channel_tool)
+tools.append(send_email_tool)
+
+
+# Input/Output Models
+class AgentInput(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    prompt: str = Field(..., description="The question to ask through the Integration Service LLM gateway tools.")
+
+
+class AgentOutput(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    content: str | None = Field(None, description="The answer assembled from the gateway tool responses.")
+
+# Agent Messages Function
+def create_messages(state: AgentInput) -> Sequence[SystemMessage | HumanMessage]:
+    # Extract values safely from state
+    prompt = getattr(state, 'prompt', '')
+
+    # Apply system prompt template
+    current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    system_prompt_content = """You are an assistant that performs communication actions using the available Integration Service tools. Send Slack messages with the 'Send Message to Channel' tool and emails with the 'Send Email' tool, filling each tool's parameters from the user's request. After acting, report the outcome of every action you took. If a tool fails, report its error plainly."""
+    system_prompt_content = interpolate_legacy_message(system_prompt_content, state.model_dump())
+    enhanced_system_prompt = (
+        AGENT_SYSTEM_PROMPT_TEMPLATE
+        .replace('{{systemPrompt}}', system_prompt_content)
+        .replace('{{currentDate}}', current_date)
+        .replace('{{agentName}}', 'Mr Assistant')
+    )
+
+    return [
+        SystemMessage(content=enhanced_system_prompt),
+        HumanMessage(content=interpolate_legacy_message("""{{prompt}}""", state.model_dump())),
+    ]
+
+# Create agent graph
+graph = create_agent(model=llm, messages=create_messages, tools=tools, input_schema=AgentInput, output_schema=AgentOutput)

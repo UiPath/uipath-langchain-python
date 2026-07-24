@@ -61,14 +61,14 @@ from uipath_langchain.chat.chat_model_factory import get_chat_model
 # if the loader did not put src/ on sys.path.
 try:
     from agents import AGENT_REGISTRY
-    from agents.is_tools.agent import run_flavor as run_is_flavor
+    from agents.is_tools.agent import run as run_is_tools
 except ModuleNotFoundError:  # pragma: no cover - defensive for alt loaders
     import os
     import sys
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from agents import AGENT_REGISTRY
-    from agents.is_tools.agent import run_flavor as run_is_flavor
+    from agents.is_tools.agent import run as run_is_tools
 
 logger = logging.getLogger(__name__)
 
@@ -180,24 +180,27 @@ TOOL_ANSWER_TOKEN = "22"
 class IsToolsSpec(BaseModel):
     """Configuration for the IS-tools payload (agents/is_tools).
 
-    Each flavor binds an Integration Service activity tool to the model under
-    test and runs a full round trip through the tenant's IS connection.
+    The agent is the Studio Web coded copy of the low-code IsToolsAgent: the
+    model under test drives real Integration Service Activity tools (Slack
+    Send Message to Channel, Outlook 365 Send Email). Running it performs
+    real communication actions, so the payload only runs when connection ids
+    are configured.
     """
 
-    flavors: list[str] = Field(
-        default_factory=list,
-        description="IS activity flavors to exercise; keys of "
-        "agents.is_tools.agent.FLAVOR_REGISTRY. Empty => payload skipped.",
-    )
     connections: dict[str, str] = Field(
         default_factory=dict,
-        description="Per-flavor IS connection id overrides; defaults target "
-        "the llm_gateway_automated_testing alpha tenant.",
+        description="IS connection ids by tool key ('slack', 'outlook'). "
+        "Empty => payload skipped (no is_tools cell).",
     )
-    models: dict[str, str] = Field(
-        default_factory=dict,
-        description="Per-flavor vendor model/deployment overrides for the "
-        "activity payload (NOT the model under test).",
+    prompt: str = Field(
+        default=(
+            "Send a Slack message saying 'model onboarding connectivity "
+            "test' to the channel #model-onboarding-tests, then send an "
+            "email with subject 'model onboarding connectivity test' and "
+            "the same body to model-onboarding-tests@uipath.com."
+        ),
+        description="The communication action the model must perform via "
+        "the Activity tools.",
     )
 
 
@@ -366,21 +369,20 @@ async def run_model_onboarding(state: GraphState) -> dict:
                 cell_results[label] = f"✗ {str(e)[:60]}"
             logger.info(f"    {label}: {cell_results[label]}")
 
-        # 4. IS activity tools — one cell per selected flavor (model-driven
-        # round trip through a real Integration Service connection).
-        for flavor in spec.is_tools.flavors:
-            label = f"is_tools/{flavor}"
-            logger.info(f"  {label}...")
+        # 4. IS Activity tools — the model drives real Slack/Outlook tools
+        # (Studio Web coded copy). Skipped when no connections are wired,
+        # because a run performs real communication actions.
+        if any(spec.is_tools.connections.values()):
+            logger.info("  is_tools...")
             try:
-                cell_results[label] = await run_is_flavor(
-                    model,
-                    flavor,
-                    connection_id=spec.is_tools.connections.get(flavor),
-                    is_model=spec.is_tools.models.get(flavor),
+                cell_results["is_tools"] = await run_is_tools(
+                    model, spec.is_tools.connections, spec.is_tools.prompt
                 )
             except Exception as e:
-                cell_results[label] = f"✗ {str(e)[:60]}"
-            logger.info(f"    {label}: {cell_results[label]}")
+                cell_results["is_tools"] = f"✗ {str(e)[:60]}"
+            logger.info(f"    is_tools: {cell_results['is_tools']}")
+        else:
+            logger.info("  is_tools: skipped (no connections configured)")
 
         model_results[path] = cell_results
 
