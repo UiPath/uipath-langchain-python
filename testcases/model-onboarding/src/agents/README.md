@@ -14,6 +14,31 @@ onboarding grid.
 2. Register it in `__init__.py`'s `AGENT_REGISTRY`.
 3. Wire it into `main.py` where the payload should run.
 
+## `is_tools`
+
+Tests that the model under test can drive an **Integration Service activity
+tool** end to end, across the BYO LLM vendor connector flavors: per selected
+flavor it binds one tool wired to that flavor's IS activity, forces a call,
+executes it through a real IS connection, feeds the result back, and requires
+a non-empty final answer. Cells appear as `is_tools/<flavor>`.
+
+Flavors (verified against the live tenant with `uip is resources describe`):
+`azure_openai`, `openai`, `openai_v1`, `bedrock_converse`, `vertex`,
+`anthropic`. Bedrock's IS connector exposes only a converse activity, so
+there is no separate invoke flavor on the IS side.
+
+Configuration comes from `model_spec.is_tools` in `input.json` — `flavors`
+(which cells run), `connections` (per-flavor IS connection id overrides), and
+`models` (per-flavor vendor model/deployment for the activity payload). The
+defaults in [`is_tools/agent.py`](is_tools/agent.py) target the
+`llm_gateway_automated_testing` alpha tenant; **running against another org
+requires overriding `connections`** or the cells fail legibly.
+
+Note: this agent's runner is `run_flavor(model, flavor, connection_id,
+is_model)` — it needs flavor config, so it does not fit the
+`(model, prompt, files)` `AGENT_REGISTRY` signature and is imported directly
+by `main.py`.
+
 ## `file_processing`
 
 Reads a single PDF or image and answers a task about it. This is the **coded

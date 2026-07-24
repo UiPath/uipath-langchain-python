@@ -61,12 +61,14 @@ from uipath_langchain.chat.chat_model_factory import get_chat_model
 # if the loader did not put src/ on sys.path.
 try:
     from agents import AGENT_REGISTRY
+    from agents.is_tools.agent import run_flavor as run_is_flavor
 except ModuleNotFoundError:  # pragma: no cover - defensive for alt loaders
     import os
     import sys
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from agents import AGENT_REGISTRY
+    from agents.is_tools.agent import run_flavor as run_is_flavor
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +177,30 @@ TOOL_PROMPT = "What is the weather in Paris? Use the get_weather tool."
 TOOL_ANSWER_TOKEN = "22"
 
 
+class IsToolsSpec(BaseModel):
+    """Configuration for the IS-tools payload (agents/is_tools).
+
+    Each flavor binds an Integration Service activity tool to the model under
+    test and runs a full round trip through the tenant's IS connection.
+    """
+
+    flavors: list[str] = Field(
+        default_factory=list,
+        description="IS activity flavors to exercise; keys of "
+        "agents.is_tools.agent.FLAVOR_REGISTRY. Empty => payload skipped.",
+    )
+    connections: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-flavor IS connection id overrides; defaults target "
+        "the llm_gateway_automated_testing alpha tenant.",
+    )
+    models: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-flavor vendor model/deployment overrides for the "
+        "activity payload (NOT the model under test).",
+    )
+
+
 class ModelSpec(BaseModel):
     """Runtime specification for the model under test."""
 
@@ -190,6 +216,11 @@ class ModelSpec(BaseModel):
         default_factory=list,
         description="File attachments for the 'files' payload; keys of "
         "FILE_REGISTRY. Empty => only simple + tools payloads run.",
+    )
+    is_tools: IsToolsSpec = Field(
+        default_factory=IsToolsSpec,
+        description="IS activity-tool payload configuration; empty flavors "
+        "list => no is_tools cells.",
     )
 
 
@@ -330,6 +361,22 @@ async def run_model_onboarding(state: GraphState) -> dict:
             try:
                 cell_results[label] = await _run_file(
                     model, state["prompt"], FILE_REGISTRY[file_name]
+                )
+            except Exception as e:
+                cell_results[label] = f"✗ {str(e)[:60]}"
+            logger.info(f"    {label}: {cell_results[label]}")
+
+        # 4. IS activity tools — one cell per selected flavor (model-driven
+        # round trip through a real Integration Service connection).
+        for flavor in spec.is_tools.flavors:
+            label = f"is_tools/{flavor}"
+            logger.info(f"  {label}...")
+            try:
+                cell_results[label] = await run_is_flavor(
+                    model,
+                    flavor,
+                    connection_id=spec.is_tools.connections.get(flavor),
+                    is_model=spec.is_tools.models.get(flavor),
                 )
             except Exception as e:
                 cell_results[label] = f"✗ {str(e)[:60]}"

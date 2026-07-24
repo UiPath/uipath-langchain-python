@@ -4,6 +4,16 @@
         "model_name": "gpt-5.2-2025-12-11",
         "paths": ["azure_responses", "azure_chat_completions"],
         "agenthub_config": "agentsplayground",
-        "files": ["image", "pdf"]
+        "files": ["image", "pdf"],
+        "is_tools": {
+            "flavors": [
+                "azure_openai",
+                "openai",
+                "openai_v1",
+                "bedrock_converse",
+                "vertex",
+                "anthropic"
+            ]
+        }
     }
 }
