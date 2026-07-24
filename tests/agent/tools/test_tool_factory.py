@@ -432,7 +432,7 @@ class TestCreateToolsFromResources:
             )
             tool = await _build_tool_for_resource(flow_resource, mock_llm)
 
-        mock_create_process_tool.assert_called_once_with(flow_resource, run_as_me=False)
+        mock_create_process_tool.assert_called_once_with(flow_resource)
         assert tool is not None
 
     async def test_quick_form_resource_routes_through_escalation_tool_path(
@@ -466,9 +466,7 @@ class TestCreateToolsFromResources:
             )
             tool = await _build_tool_for_resource(function_resource, mock_llm)
 
-        mock_create_process_tool.assert_called_once_with(
-            function_resource, run_as_me=False
-        )
+        mock_create_process_tool.assert_called_once_with(function_resource)
         assert tool is not None
 
     @pytest.mark.asyncio
