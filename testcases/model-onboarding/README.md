@@ -1,9 +1,17 @@
 # model-onboarding testcase
 
 Exercises **one runtime-specified model** across the distinct `get_chat_model`
-code paths it is expected to support, plus optional file attachments. Rolls
-every `path × file` cell up into a single `success` boolean and asserts on both
-the output and the emitted traces.
+code paths it is expected to support. For **every path** it runs three
+capability payloads:
+
+- **`simple`** — a plain text call; asserts a non-empty completion.
+- **`tools`** — a full tool-calling **round trip**: bind a tool, let the model
+  request it, execute the tool, feed the result back, and assert the final
+  answer uses it.
+- **`files/<name>`** — one cell per selected file attachment (multimodal).
+
+Every `path × payload` cell rolls up into a single `success` boolean, asserted
+alongside the emitted traces.
 
 Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 **input**. To onboard a model, edit `input.json` — no code change.
@@ -31,9 +39,11 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
   (and misleading) failure.
 - **`agenthub_config`** — AgentHub config header value; must exist in the tenant
   behind your `BASE_URL`. Defaults to `agentsplayground`.
-- **`files`** — file attachments to test. Valid keys: `image`, `pdf`. Use `[]`
-  for a **text-only** model — an empty list runs a plain reachability check via
-  `ainvoke` instead of a multimodal call.
+- **`files`** — file attachments for the `files/*` payload. Valid keys:
+  `image`, `pdf`. Use `[]` for a **text-only** model — the `simple` and `tools`
+  payloads still run; only the per-file cells are skipped.
+- **`prompt`** — used by the `simple` and `files/*` payloads. The `tools`
+  payload uses its own fixed weather prompt.
 
 ## Prerequisites (external to the repo)
 
