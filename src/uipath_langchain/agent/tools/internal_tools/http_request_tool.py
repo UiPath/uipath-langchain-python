@@ -14,14 +14,17 @@ including redirect hops.
 
 import asyncio
 import ipaddress
+import json
 import re
 import socket
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import StructuredTool
+from pydantic import BaseModel
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentInternalToolResourceConfig
 from uipath.eval.mocks import mockable
@@ -39,15 +42,12 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
-# HTTP methods the http-request tool supports.
 HTTP_REQUEST_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
-# Default per-request timeout (seconds) applied when neither the configured
-# argument properties nor the LLM provide one.
 HTTP_REQUEST_DEFAULT_TIMEOUT_SECONDS = 30.0
 
-# Fixed output schema for the http-request tool.
 HTTP_REQUEST_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -68,8 +68,6 @@ HTTP_REQUEST_OUTPUT_SCHEMA: dict[str, Any] = {
     "required": ["statusCode", "headers", "body"],
 }
 
-# Maximum number of redirects to follow. Each hop is re-validated by the SSRF
-# guard, so this only bounds how long a redirect chain may run.
 _MAX_REDIRECTS = 5
 
 # Matches a leading URI scheme (e.g. ``https://``, ``ftp://``). Used to detect
@@ -91,6 +89,71 @@ def _normalize_url(url: str) -> str:
     if not _SCHEME_RE.match(url):
         return f"https://{url}"
     return url
+
+
+def _has_header(headers: dict[str, str] | None, name: str) -> bool:
+    """Case-insensitive check for whether a header is already present."""
+    if not headers:
+        return False
+    lowered = name.lower()
+    return any(key.lower() == lowered for key in headers)
+
+
+def _is_json_object_body(text: str) -> bool:
+    """Whether a string body is a JSON object or array (not a bare scalar).
+
+    Restricting to object/array avoids mislabeling plain-text bodies that happen
+    to be valid JSON scalars (e.g. ``"123"`` or ``"true"``) as JSON.
+    """
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(parsed, (dict, list))
+
+
+def _pairs_to_dict(pairs: list[Any]) -> dict[str, Any]:
+    """Fold a list of ``{name, value}`` items into a dict.
+
+    Headers and query params are modeled as arrays of name/value pairs rather
+    than an open map, so the generated tool schema stays compatible with
+    providers that reject ``additionalProperties`` (notably Gemini, which would
+    otherwise see a property-less object). Each item may be a dict or a pydantic
+    model (the validated form); later duplicate names win.
+    """
+    result: dict[str, Any] = {}
+    for item in pairs:
+        if isinstance(item, BaseModel):
+            item = item.model_dump()
+        if isinstance(item, dict) and item.get("name") is not None:
+            result[str(item["name"])] = item.get("value")
+    return result
+
+
+def _stringify_mapping(mapping: Any) -> dict[str, str] | None:
+    """Coerce a header/param argument to a ``dict[str, str]`` for httpx.
+
+    Accepts the validated forms the argument can take — a list of
+    ``{name, value}`` pairs (the canonical, provider-portable shape), a pydantic
+    model, or a plain dict — and returns string-valued entries (httpx headers
+    must be strings; query params are cleanest as strings). Booleans render as
+    lowercase ``true``/``false``. Returns ``None`` for an empty/missing value.
+    """
+    if isinstance(mapping, BaseModel):
+        mapping = mapping.model_dump()
+    if isinstance(mapping, list):
+        mapping = _pairs_to_dict(mapping)
+    if not mapping or not isinstance(mapping, dict):
+        return None
+    result: dict[str, str] = {}
+    for key, value in mapping.items():
+        if isinstance(value, bool):
+            result[str(key)] = "true" if value else "false"
+        elif isinstance(value, str):
+            result[str(key)] = value
+        else:
+            result[str(key)] = str(value)
+    return result or None
 
 
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -134,7 +197,6 @@ async def _assert_public_url(url: str) -> None:
     if not host:
         raise _blocked_host_error(f"URL {url!r} has no host.")
 
-    # A bare IP literal in the URL still needs checking.
     try:
         literal_ip = ipaddress.ip_address(host)
     except ValueError:
@@ -167,6 +229,128 @@ async def _validate_request_hook(request: httpx.Request) -> None:
     await _assert_public_url(str(request.url))
 
 
+@dataclass
+class _HttpRequestParameters:
+    """Validated, normalized inputs for a single outbound HTTP request."""
+
+    url: str
+    method: str
+    headers: dict[str, str] | None
+    params: dict[str, str] | None
+    timeout: float
+    request_kwargs: dict[str, Any]
+
+
+def _validate_url(kwargs: dict[str, Any]) -> str:
+    """Return the required, https-normalized url; raise on missing/non-string."""
+    url = kwargs.get("url")
+    if not url:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
+            title="Missing required argument",
+            detail="Argument 'url' is required.",
+            category=UiPathErrorCategory.USER,
+        )
+    if not isinstance(url, str):
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
+            title="Invalid url",
+            detail=f"Argument 'url' must be a string; got {type(url).__name__}.",
+            category=UiPathErrorCategory.USER,
+        )
+    return _normalize_url(url)
+
+
+def _validate_method(kwargs: dict[str, Any]) -> str:
+    """Return the upper-cased method (default GET); raise on unsupported."""
+    method = (kwargs.get("method") or "GET").upper()
+    if method not in HTTP_REQUEST_METHODS:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
+            title="Unsupported HTTP method",
+            detail=(
+                f"Unsupported HTTP method {method!r}; expected one of "
+                f"{', '.join(HTTP_REQUEST_METHODS)}."
+            ),
+            category=UiPathErrorCategory.USER,
+        )
+    return method
+
+
+def _validate_timeout(kwargs: dict[str, Any]) -> float:
+    """Return the timeout (default applied); raise on non-positive/non-numeric."""
+    timeout = kwargs.get("timeout")
+    if timeout is None:
+        return HTTP_REQUEST_DEFAULT_TIMEOUT_SECONDS
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or timeout <= 0
+    ):
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
+            title="Invalid timeout",
+            detail=(
+                "Argument 'timeout' must be a positive number of seconds; "
+                f"got {timeout!r}."
+            ),
+            category=UiPathErrorCategory.USER,
+        )
+    return timeout
+
+
+def _build_body(
+    kwargs: dict[str, Any], headers: dict[str, str] | None
+) -> tuple[dict[str, Any], dict[str, str] | None]:
+    """Build httpx body kwargs and default Content-Type for JSON string bodies.
+
+    Returns the ``json``/``content`` request kwargs and the (possibly updated)
+    headers. A validated object body arrives as a pydantic model, not a dict.
+    """
+    request_kwargs: dict[str, Any] = {}
+    body = kwargs.get("body")
+    if isinstance(body, BaseModel):
+        body = body.model_dump()
+    if body is None:
+        return request_kwargs, headers
+    if isinstance(body, (dict, list)):
+        request_kwargs["json"] = body
+    elif isinstance(body, (str, bytes)):
+        request_kwargs["content"] = body
+        if (
+            isinstance(body, str)
+            and _is_json_object_body(body)
+            and not _has_header(headers, "content-type")
+        ):
+            headers = {**(headers or {}), "Content-Type": "application/json"}
+    else:
+        request_kwargs["content"] = str(body)
+    return request_kwargs, headers
+
+
+def _build_request_parameters(kwargs: dict[str, Any]) -> _HttpRequestParameters:
+    """Validate and normalize the tool's input arguments into a request spec.
+
+    Raises:
+        AgentRuntimeError: If any argument is missing or invalid (USER category).
+    """
+    url = _validate_url(kwargs)
+    method = _validate_method(kwargs)
+    timeout = _validate_timeout(kwargs)
+    headers = _stringify_mapping(kwargs.get("headers"))
+    params = _stringify_mapping(kwargs.get("params"))
+    request_kwargs, headers = _build_body(kwargs, headers)
+
+    return _HttpRequestParameters(
+        url=url,
+        method=method,
+        headers=headers,
+        params=params,
+        timeout=timeout,
+        request_kwargs=request_kwargs,
+    )
+
+
 def create_http_request_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
@@ -187,46 +371,7 @@ def create_http_request_tool(
         example_calls=[],  # Examples cannot be provided for internal tools
     )
     async def http_request_tool_fn(**kwargs: Any) -> dict[str, Any]:
-        url = kwargs.get("url")
-        if not url:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
-                title="Missing required argument",
-                detail="Argument 'url' is required.",
-                category=UiPathErrorCategory.USER,
-            )
-        # Default to https when no scheme is given (e.g. "google.com").
-        url = _normalize_url(url)
-
-        method = (kwargs.get("method") or "GET").upper()
-        if method not in HTTP_REQUEST_METHODS:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
-                title="Unsupported HTTP method",
-                detail=(
-                    f"Unsupported HTTP method {method!r}; expected one of "
-                    f"{', '.join(HTTP_REQUEST_METHODS)}."
-                ),
-                category=UiPathErrorCategory.USER,
-            )
-
-        headers = kwargs.get("headers") or None
-        params = kwargs.get("params") or None
-
-        timeout = kwargs.get("timeout")
-        if timeout is None:
-            timeout = HTTP_REQUEST_DEFAULT_TIMEOUT_SECONDS
-
-        # A dict/list body is sent as JSON; anything else is sent as raw content.
-        request_kwargs: dict[str, Any] = {}
-        body = kwargs.get("body")
-        if body is not None:
-            if isinstance(body, (dict, list)):
-                request_kwargs["json"] = body
-            elif isinstance(body, (str, bytes)):
-                request_kwargs["content"] = body
-            else:
-                request_kwargs["content"] = str(body)
+        request_parameters = _build_request_parameters(kwargs)
 
         # Build from get_httpx_client_kwargs() (enforced SSL/proxy config), but
         # drop the merged UiPath platform headers so internal licensing context
@@ -241,12 +386,12 @@ def create_http_request_tool(
                 **client_kwargs,
             ) as client:
                 response = await client.request(
-                    method,
-                    url,
-                    headers=headers,
-                    params=params,
-                    timeout=timeout,
-                    **request_kwargs,
+                    request_parameters.method,
+                    request_parameters.url,
+                    headers=request_parameters.headers,
+                    params=request_parameters.params,
+                    timeout=request_parameters.timeout,
+                    **request_parameters.request_kwargs,
                 )
         except AgentRuntimeError:
             raise
@@ -254,14 +399,17 @@ def create_http_request_tool(
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.HTTP_ERROR,
                 title="HTTP request timed out",
-                detail=f"Request to {url!r} timed out after {timeout}s: {e}",
+                detail=(
+                    f"Request to {request_parameters.url!r} timed out after "
+                    f"{request_parameters.timeout}s: {e}"
+                ),
                 category=UiPathErrorCategory.USER,
             ) from e
         except httpx.HTTPError as e:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.HTTP_ERROR,
                 title="HTTP request failed",
-                detail=f"Request to {url!r} failed: {e}",
+                detail=f"Request to {request_parameters.url!r} failed: {e}",
                 category=UiPathErrorCategory.USER,
             ) from e
 
@@ -269,12 +417,9 @@ def create_http_request_tool(
         # can react to the status code.
         return {
             "statusCode": response.status_code,
-            "headers": {k: v for k, v in response.headers.items()},
+            "headers": dict(response.headers),
             "body": response.text,
         }
-
-    # Import here to avoid circular dependency
-    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
