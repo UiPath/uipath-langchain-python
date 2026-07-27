@@ -38,11 +38,19 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 
 - **`model_name`** — the vendor-qualified model ID. Note a single logical model
   may need a *different* ID per vendor family.
-- **`paths`** — which `get_chat_model` code paths to exercise. Valid keys:
-  `azure_responses`, `azure_chat_completions`, `vertex`, `bedrock_converse`,
-  `bedrock_invoke`, `anthropic_sdk`. List only the paths the model actually
-  ships on — a model ID sent to a vendor it doesn't exist on is a guaranteed
-  (and misleading) failure.
+- **`paths`** — which `get_chat_model` code paths to exercise. Two forms,
+  freely mixed:
+  - registry keys: `azure_responses`, `azure_chat_completions`, `vertex`,
+    `bedrock_converse`, `bedrock_invoke`, `anthropic_sdk`;
+  - **`vendor_type:api_flavor` pairs passed straight to `get_chat_model`**
+    (which accepts them as strings), e.g. `awsbedrock:converse`,
+    `openai:responses`, `vertexai:generate-content`,
+    `awsbedrock:AnthropicMessages`. `vendor:` alone lets the factory
+    autodetect the flavor. Every payload — including the coded agents — runs
+    with the model built for that path/flavor.
+
+  List only paths the model actually ships on — a model ID sent to a vendor
+  it doesn't exist on is a guaranteed (and misleading) failure.
 - **`agenthub_config`** — AgentHub config header value; must exist in the tenant
   behind your `BASE_URL`. Defaults to `agentsplayground`.
 - **`files`** — file attachments for the `files/*` payload. Valid keys:

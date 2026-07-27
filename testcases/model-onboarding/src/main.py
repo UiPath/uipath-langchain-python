@@ -243,11 +243,36 @@ class GraphState(MessagesState):
 def _build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> object:
     """Build a model instance for a registered path.
 
+    Accepts either a PATH_REGISTRY key (e.g. ``azure_responses``) or a
+    ``vendor:flavor`` pair (e.g. ``awsbedrock:converse``, ``openai:responses``,
+    ``vertexai:generate-content``) so any API flavor can be supplied directly —
+    the model built here is what every payload, including the coded agents,
+    runs with. ``vendor:`` alone lets the factory autodetect the flavor.
+
     Raises:
-        KeyError: If ``path`` is not a registered PATH_REGISTRY key.
+        ValueError: If ``path`` is neither a registry key nor a resolvable
+            ``vendor:flavor`` pair.
     """
-    builder = PATH_REGISTRY[path]
-    return builder(model_name, settings)
+    if path in PATH_REGISTRY:
+        return PATH_REGISTRY[path](model_name, settings)
+
+    vendor_type, sep, api_flavor = path.partition(":")
+    if not sep:
+        raise ValueError(
+            f"unknown path '{path}' (registry keys: {sorted(PATH_REGISTRY)}; "
+            "or pass 'vendor_type:api_flavor' directly, e.g. "
+            "'awsbedrock:converse', 'openai:responses')"
+        )
+    # get_chat_model accepts vendor_type/api_flavor as plain strings and
+    # validates them itself; invalid values fail legibly in the __build__ cell.
+    return get_chat_model(
+        model=model_name,
+        client_settings=settings,
+        vendor_type=vendor_type.strip(),
+        api_flavor=api_flavor.strip() or None,
+        temperature=0.0,
+        max_tokens=200,
+    )
 
 
 async def _run_simple(model: BaseChatModel, prompt: str) -> str:
@@ -321,9 +346,12 @@ async def run_model_onboarding(state: GraphState) -> dict:
     for path in spec.paths:
         logger.info(f"Testing path '{path}' with model '{spec.model_name}'...")
 
-        if path not in PATH_REGISTRY:
+        if path not in PATH_REGISTRY and ":" not in path:
             logger.error(f"  unknown path '{path}'")
-            model_results[path] = {"__path__": f"✗ unknown path '{path}'"}
+            model_results[path] = {
+                "__path__": f"✗ unknown path '{path}' (registry keys: "
+                f"{sorted(PATH_REGISTRY)}; or 'vendor_type:api_flavor')"
+            }
             continue
 
         try:
