@@ -124,8 +124,8 @@ def build_graph(llm):
 async def _upload_attachment(file_info) -> Attachment:
     """Fetch the test file and register it as a platform attachment."""
     import httpx
+    from uipath._utils._ssl_context import get_httpx_client_kwargs
     from uipath.platform import UiPath
-    from uipath_langchain._utils import get_httpx_client_kwargs
 
     async with httpx.AsyncClient(**get_httpx_client_kwargs()) as client:
         response = await client.get(file_info.url)
