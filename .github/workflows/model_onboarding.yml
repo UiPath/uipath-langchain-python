@@ -99,34 +99,30 @@ jobs:
         PROMPT: ${{ inputs.prompt }}
         AGENTHUB_CONFIG: ${{ inputs.agenthub_config }}
       run: |
-        # Normalize the comma-separated lists in the shell (trim each item,
-        # drop blanks) so jq only has to split on commas — this avoids regex
-        # backslash-escaping hazards inside YAML. jq then builds valid JSON
-        # regardless of characters in the free-text inputs.
-        normalize() {
-          echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-            | grep -v '^$' | paste -sd, -
-        }
-        PATHS_CLEAN=$(normalize "$PATHS")
-        FILES_CLEAN=$(normalize "$FILES")
+        # Build input.json with python3 — the uv container does NOT ship jq
+        # (first live dispatch failed with exit 127). python3 is guaranteed in
+        # the image and builds valid JSON regardless of input characters.
+        python3 - <<'PY'
+        import json
+        import os
 
-        jq -n \
-          --arg prompt "$PROMPT" \
-          --arg model_name "$MODEL_NAME" \
-          --arg agenthub_config "$AGENTHUB_CONFIG" \
-          --arg paths "$PATHS_CLEAN" \
-          --arg files "$FILES_CLEAN" \
-          '{
-            prompt: $prompt,
-            model_spec: {
-              model_name: $model_name,
-              agenthub_config: $agenthub_config,
-              paths: ($paths | split(",") | map(select(length > 0))),
-              files: ($files | split(",") | map(select(length > 0)))
-            }
-          }' > input.json
-        echo "=== Generated input.json ==="
-        cat input.json
+        def split(csv: str) -> list[str]:
+            return [x.strip() for x in (csv or "").split(",") if x.strip()]
+
+        spec = {
+            "prompt": os.environ["PROMPT"],
+            "model_spec": {
+                "model_name": os.environ["MODEL_NAME"],
+                "agenthub_config": os.environ["AGENTHUB_CONFIG"],
+                "paths": split(os.environ.get("PATHS", "")),
+                "files": split(os.environ.get("FILES", "")),
+            },
+        }
+        with open("input.json", "w", encoding="utf-8") as f:
+            json.dump(spec, f, indent=2)
+        print("=== Generated input.json ===")
+        print(json.dumps(spec, indent=2))
+        PY
 
     - name: Run testcase
       env:
