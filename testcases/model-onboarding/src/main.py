@@ -331,7 +331,7 @@ async def run_model_onboarding(state: GraphState) -> dict:
             logger.info(f"  Created: {type(model).__name__}")
         except Exception as e:  # model construction itself can fail
             logger.error(f"  construction failed: {e}")
-            model_results[path] = {"__build__": f"✗ {str(e)[:60]}"}
+            model_results[path] = {"__build__": f"✗ {f"{type(e).__name__}: {e}"[:220]}"}
             continue
 
         cell_results: dict[str, str] = {}
@@ -341,7 +341,7 @@ async def run_model_onboarding(state: GraphState) -> dict:
         try:
             cell_results["simple"] = await _run_simple(model, state["prompt"])
         except Exception as e:
-            cell_results["simple"] = f"✗ {str(e)[:60]}"
+            cell_results["simple"] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
         logger.info(f"    simple: {cell_results['simple']}")
 
         # 2. Tool call (full round trip)
@@ -349,7 +349,7 @@ async def run_model_onboarding(state: GraphState) -> dict:
         try:
             cell_results["tools"] = await _run_tools(model)
         except Exception as e:
-            cell_results["tools"] = f"✗ {str(e)[:60]}"
+            cell_results["tools"] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
         logger.info(f"    tools: {cell_results['tools']}")
 
         # 3. File processing — one cell per selected file
@@ -361,7 +361,7 @@ async def run_model_onboarding(state: GraphState) -> dict:
                     model, state["prompt"], FILE_REGISTRY[file_name]
                 )
             except Exception as e:
-                cell_results[label] = f"✗ {str(e)[:60]}"
+                cell_results[label] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
             logger.info(f"    {label}: {cell_results[label]}")
 
         # 4. IS Activity tools — call-only: the model is bound to the real
@@ -373,7 +373,7 @@ async def run_model_onboarding(state: GraphState) -> dict:
                 model, spec.is_tools.prompt
             )
         except Exception as e:
-            cell_results["is_tools"] = f"✗ {str(e)[:60]}"
+            cell_results["is_tools"] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
         logger.info(f"    is_tools: {cell_results['is_tools']}")
 
         model_results[path] = cell_results
