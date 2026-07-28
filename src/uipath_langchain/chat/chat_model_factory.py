@@ -10,7 +10,8 @@ passed through as the ``use_new_llm_clients`` argument of :func:`get_chat_model`
   before the ``uipath_langchain_client`` migration.
 """
 
-from typing import Any, Final
+from enum import Enum
+from typing import Any, Final, TypeVar
 
 from langchain_core.callbacks import BaseCallbackHandler, Callbacks
 from langchain_core.language_models import BaseChatModel
@@ -96,9 +97,16 @@ def get_chat_model(
         byo_connection_id: Optional Integration Service connection ID.
         client_settings: Overrides the default ``uipath_langchain_client`` settings.
         routing_mode: ``PASSTHROUGH`` (vendor-specific) or ``NORMALIZED``.
+            Strings are accepted and matched forgivingly (case-insensitive,
+            ``-``/``_`` interchangeable).
         vendor_type: Filter models by vendor; auto-detected when omitted.
+            Strings are accepted and matched forgivingly against member names
+            and values (e.g. ``"awsbedrock"``, ``"AWSBedrock"``,
+            ``"aws_bedrock"``).
         api_flavor: Vendor-specific API flavor (e.g. OpenAI Responses, Bedrock
-            Converse). Auto-detected when omitted.
+            Converse). Auto-detected when omitted. Strings are accepted and
+            matched forgivingly (e.g. ``"anthropic_messages"``,
+            ``"AnthropicMessages"``, ``"chat-completions"``).
         custom_class: Custom ``UiPathBaseChatModel`` subclass to instantiate
             instead of the auto-detected one.
         temperature: Sampling temperature. Defaults to 0.0. Pass ``None`` to
@@ -125,7 +133,15 @@ def get_chat_model(
 
     Returns:
         A configured ``BaseChatModel`` instance.
+
+    Raises:
+        ValueError: If ``routing_mode``, ``vendor_type``, or ``api_flavor`` is
+            a string that matches no enum member.
     """
+    routing_mode = _coerce_enum(routing_mode, RoutingMode)
+    vendor_type = _coerce_enum(vendor_type, VendorType)
+    api_flavor = _coerce_enum(api_flavor, ApiFlavor)
+
     # Always inject trace context headers per-request via a dynamic-headers
     # callback.  For the new path the UiPathHttpxClient reads the ContextVar
     # set by the callback; for the legacy path the callback is a no-op but
@@ -186,6 +202,43 @@ def get_chat_model(
             detail=detail,
             category=UiPathErrorCategory.DEPLOYMENT,
         ) from e
+
+
+_E = TypeVar("_E", bound=Enum)
+
+
+def _coerce_enum(value: "_E | str | None", enum_cls: type[_E]) -> "_E | None":
+    """Coerce a string to an ``enum_cls`` member, forgiving spelling variants.
+
+    Matching is case-insensitive against both member names and values, with
+    hyphens and underscores treated as interchangeable — so ``"AWSBedrock"``,
+    ``"aws_bedrock"``, and ``"awsbedrock"`` all resolve to
+    ``VendorType.AWSBEDROCK``, and ``"anthropic_messages"`` resolves to
+    ``ApiFlavor.ANTHROPIC_MESSAGES`` (value ``"AnthropicMessages"``).
+
+    Args:
+        value: An enum member (returned as-is), a string naming one, or None
+            (returned as-is).
+        enum_cls: The target enum class.
+
+    Returns:
+        The resolved enum member, or ``None`` when ``value`` is ``None``.
+
+    Raises:
+        ValueError: If ``value`` is a string that matches no member.
+    """
+    if value is None or isinstance(value, enum_cls):
+        return value
+    key = str(value).strip().lower().replace("-", "").replace("_", "")
+    for member in enum_cls:
+        candidates = {
+            member.name.lower().replace("_", ""),
+            str(member.value).lower().replace("-", "").replace("_", ""),
+        }
+        if key in candidates:
+            return member
+    valid = [str(m.value) for m in enum_cls]
+    raise ValueError(f"Unknown {enum_cls.__name__} {value!r}. Valid values: {valid}")
 
 
 def _ensure_trace_context_callback(callbacks: Callbacks) -> list[BaseCallbackHandler]:
