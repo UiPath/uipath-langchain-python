@@ -13,7 +13,8 @@
         "UiPathChatGoogleGenerativeAI",
         "UiPathChatBedrockConverse",
         "UiPathChatBedrock",
-        "UiPathChatAnthropicBedrock"
+        "UiPathChatAnthropicBedrock",
+        "UiPathChatAnthropic"
       ],
       "attributes": {
         "openinference.span.kind": "LLM"
