@@ -89,7 +89,7 @@ PATH_REGISTRY: dict[str, PathBuilder] = {
         client_settings=settings,
         api_flavor=ApiFlavor.RESPONSES,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     ),
     # VendorType.OPENAI + CHAT_COMPLETIONS -> UiPathAzureChatOpenAI (chat API)
     "azure_chat_completions": lambda model, settings: get_chat_model(
@@ -97,7 +97,7 @@ PATH_REGISTRY: dict[str, PathBuilder] = {
         client_settings=settings,
         api_flavor=ApiFlavor.CHAT_COMPLETIONS,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     ),
     # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI.
     # vendor_type + api_flavor are pinned explicitly so this path deterministically
@@ -108,7 +108,7 @@ PATH_REGISTRY: dict[str, PathBuilder] = {
         vendor_type=VendorType.VERTEXAI,
         api_flavor=ApiFlavor.GENERATE_CONTENT,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     ),
     # VendorType.AWSBEDROCK (UiPath-owned) -> UiPathChatBedrockConverse
     "bedrock_converse": lambda model, settings: get_chat_model(
@@ -116,7 +116,7 @@ PATH_REGISTRY: dict[str, PathBuilder] = {
         client_settings=settings,
         api_flavor=ApiFlavor.CONVERSE,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     ),
     # VendorType.AWSBEDROCK + INVOKE -> UiPathChatBedrock
     "bedrock_invoke": lambda model, settings: get_chat_model(
@@ -124,14 +124,14 @@ PATH_REGISTRY: dict[str, PathBuilder] = {
         client_settings=settings,
         api_flavor=ApiFlavor.INVOKE,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     ),
     # Direct instantiation -> UiPathChatAnthropicBedrock (not factory-reachable)
     "anthropic_sdk": lambda model, settings: UiPathChatAnthropicBedrock(
         model_name=model,
         settings=settings,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     ),
 }
 
@@ -271,7 +271,7 @@ def _build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> ob
         vendor_type=vendor_type.strip(),
         api_flavor=api_flavor.strip() or None,
         temperature=0.0,
-        max_tokens=200,
+        max_tokens=2000,
     )
 
 
