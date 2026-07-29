@@ -70,10 +70,10 @@ FILE_REGISTRY: dict[str, FileCase] = {
             name="document.pdf",
             mime_type="application/pdf",
         ),
-        question=(
-            "What is the first word of the text inside this document? "
-            "Answer with one word only."
-        ),
+        # Phrased to ask for the content itself. Asking for "the first word of
+        # the extracted text" made the agent reason about extraction quality
+        # and raise instead of answering, even when the tool returned "Dummy".
+        question="What does this document say? Answer with one word only.",
         expected="dummy",
     ),
 }
