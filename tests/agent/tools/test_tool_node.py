@@ -10,6 +10,7 @@ from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
+from uipath.platform.common import UiPathTimeoutError
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -66,6 +67,19 @@ class MockFailingTool(BaseTool):
 
     async def _arun(self, input_text: str = "") -> str:
         raise ValueError(f"Async tool execution failed: {input_text}")
+
+
+class MockTimeoutTool(BaseTool):
+    """Mock tool that always times out."""
+
+    name: str = "mock_timeout_tool"
+    description: str = "A mock tool that times out"
+
+    def _run(self, input_text: str = "") -> str:
+        raise UiPathTimeoutError({"input": input_text})
+
+    async def _arun(self, input_text: str = "") -> str:
+        raise UiPathTimeoutError({"input": input_text})
 
 
 class FilteredState(BaseModel):
@@ -441,6 +455,26 @@ class TestCreateToolNode:
         assert tool_message.status == "error"
         assert isinstance(tool_message.content, str)
         assert "Async tool execution failed: test input" in tool_message.content
+
+    async def test_wrap_tools_with_error_handling_reraises_timeout(self):
+        """A timeout fails the agent instead of becoming an error ToolMessage."""
+        timeout_tool = MockTimeoutTool()
+        tool_call = {
+            "name": "mock_timeout_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        state = AgentGraphState(
+            messages=[AIMessage(content="Using tool", tool_calls=[tool_call])]
+        )
+
+        node = UiPathToolNode(timeout_tool)
+        wrapped = wrap_tools_with_error_handling({"mock_timeout_tool": node})[
+            "mock_timeout_tool"
+        ]
+
+        with pytest.raises(UiPathTimeoutError, match="UiPath interrupt timed out"):
+            await wrapped.ainvoke(state)
 
 
 class TestToolNodeConfirmation:

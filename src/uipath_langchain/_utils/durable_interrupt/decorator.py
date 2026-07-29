@@ -33,11 +33,13 @@ index in sync with LangGraph's own ``interrupt_counter``.
 import asyncio
 import contextvars
 import functools
-from typing import Any, Callable, TypeVar
+from datetime import UTC, datetime, timedelta
+from typing import Any, Callable, TypeVar, overload
 
 from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph.config import get_config
 from langgraph.types import interrupt
+from uipath.platform.common import WaitUntil, assert_no_timeout
 
 from .skip_interrupt import SkipInterruptValue
 
@@ -94,7 +96,34 @@ def _inject_resume(scratchpad: Any, value: Any) -> Any:
     return value
 
 
-def durable_interrupt(fn: F) -> F:
+def _interrupt_with_timeout(value: Any, timeout: int | None) -> Any:
+    """Interrupt with an optional timeout expressed in milliseconds."""
+    if timeout is None or timeout <= 0:
+        return interrupt(value)
+
+    resume_time = datetime.now(UTC) + timedelta(milliseconds=timeout)
+    return assert_no_timeout(interrupt([value, WaitUntil(resume_time=resume_time)]))
+
+
+def _resume_interrupt(timeout: int | None) -> Any:
+    """Resume an interrupt and raise when its configured timer completed first."""
+    result = interrupt(None)
+    if timeout is None or timeout <= 0:
+        return result
+    return assert_no_timeout(result)
+
+
+@overload
+def durable_interrupt(fn: F, *, timeout: int | None = None) -> F: ...
+
+
+@overload
+def durable_interrupt(*, timeout: int | None = None) -> Callable[[F], F]: ...
+
+
+def durable_interrupt(
+    fn: F | None = None, *, timeout: int | None = None
+) -> F | Callable[[F], F]:
     """Decorator that executes a side-effecting function exactly once and interrupts.
 
     On first execution the body runs and its return value is passed to
@@ -110,9 +139,10 @@ def durable_interrupt(fn: F) -> F:
     decorator that enforces the pairing contract.  Works correctly in both
     parent graphs and subgraphs.
 
-    Supports both sync and async functions::
+    Supports both sync and async functions. Pass ``timeout`` in milliseconds
+    to resume on either the operation or a ``WaitUntil`` timer::
 
-        @durable_interrupt
+        @durable_interrupt(timeout=60_000)
         async def create_task():
             return await client.tasks.create_async(...)
 
@@ -126,28 +156,33 @@ def durable_interrupt(fn: F) -> F:
         result = create_task_sync()
     """
 
-    if asyncio.iscoroutinefunction(fn):
+    def decorate(func: F) -> F:
+        if asyncio.iscoroutinefunction(func):
 
-        @functools.wraps(fn)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            @functools.wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                scratchpad, idx = _next_durable_index()
+                if _is_resumed(scratchpad, idx):
+                    return _resume_interrupt(timeout)
+                result = await func(*args, **kwargs)
+                if isinstance(result, SkipInterruptValue):
+                    return _inject_resume(scratchpad, result.resume_value)
+                return _interrupt_with_timeout(result, timeout)
+
+            return async_wrapper  # type: ignore[return-value]
+
+        @functools.wraps(func)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             scratchpad, idx = _next_durable_index()
             if _is_resumed(scratchpad, idx):
-                return interrupt(None)
-            result = await fn(*args, **kwargs)
+                return _resume_interrupt(timeout)
+            result = func(*args, **kwargs)
             if isinstance(result, SkipInterruptValue):
                 return _inject_resume(scratchpad, result.resume_value)
-            return interrupt(result)
+            return _interrupt_with_timeout(result, timeout)
 
-        return async_wrapper  # type: ignore[return-value]
+        return sync_wrapper  # type: ignore[return-value]
 
-    @functools.wraps(fn)
-    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-        scratchpad, idx = _next_durable_index()
-        if _is_resumed(scratchpad, idx):
-            return interrupt(None)
-        result = fn(*args, **kwargs)
-        if isinstance(result, SkipInterruptValue):
-            return _inject_resume(scratchpad, result.resume_value)
-        return interrupt(result)
-
-    return sync_wrapper  # type: ignore[return-value]
+    if fn is None:
+        return decorate
+    return decorate(fn)

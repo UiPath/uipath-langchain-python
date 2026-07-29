@@ -13,11 +13,13 @@ from uipath.agent.models.agent import (
     AgentInternalBatchTransformToolProperties,
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
+    AgentToolSettings,
     BatchTransformFileExtension,
     BatchTransformFileExtensionSetting,
     BatchTransformWebSearchGrounding,
     BatchTransformWebSearchGroundingSetting,
 )
+from uipath.platform.common import WaitUntil
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
@@ -165,7 +167,8 @@ class TestCreateBatchTransformTool:
         resource_config_static,
         mock_llm,
     ):
-        """Test Batch Transform tool with static query when index is immediately ready."""
+        """Test Batch Transform uses a composite interrupt when timeout is configured."""
+        resource_config_static.settings = AgentToolSettings(timeout=60_000)
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
@@ -208,6 +211,10 @@ class TestCreateBatchTransformTool:
 
         assert tool.coroutine is not None
         result = await tool.coroutine(attachment=mock_attachment)
+
+        interrupt_value = mock_interrupt.call_args.args[0]
+        assert isinstance(interrupt_value, list)
+        assert isinstance(interrupt_value[1], WaitUntil)
 
         # Verify result contains attachment info
         assert result == {

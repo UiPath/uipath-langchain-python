@@ -65,6 +65,7 @@ def create_deeprag_tool(
     tool_name = sanitize_tool_name(resource.name)
     properties = resource.properties
     settings = properties.settings
+    operation_timeout = resource.settings.timeout if resource.settings else None
 
     # Extract settings
     query_setting = settings.query
@@ -114,7 +115,7 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag(**_tool_kwargs: Any):
-            @durable_interrupt
+            @durable_interrupt(timeout=operation_timeout)
             async def create_ephemeral_index():
                 uipath = UiPath()
                 ephemeral_index = (
@@ -134,7 +135,7 @@ def create_deeprag_tool(
             else:
                 ephemeral_index = index_result
 
-            @durable_interrupt
+            @durable_interrupt(timeout=operation_timeout)
             async def create_deeprag():
                 return CreateDeepRag(
                     name=f"task-{uuid.uuid4()}",

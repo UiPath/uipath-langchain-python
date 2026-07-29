@@ -10,6 +10,7 @@ from langgraph._internal._runnable import RunnableCallable
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 from pydantic import BaseModel
+from uipath.platform.common import UiPathTimeoutError
 from uipath.platform.resume_triggers import is_no_content_marker
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -251,15 +252,16 @@ def _wrap_tool_error_handling(
 ) -> RunnableCallable:
     """Wrap a tool node to catch errors and return them as ToolMessages, rather than failing the entire graph execution.
 
-    Catch and re-raise GraphBubbleUp, since LangGraph uses exceptions for interrupt control flow.
-    This is so we don't swallow expected interrupts as tool errors.
+    Catch and re-raise GraphBubbleUp, since LangGraph uses exceptions for interrupt
+    control flow. Also re-raise UiPathTimeoutError so a configured operation timeout
+    fails the agent instead of being returned to the model as a tool result.
     (https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/)
     """
 
     def _func(state: AgentGraphState) -> OutputType:
         try:
             return tool_node.invoke(state)
-        except GraphBubbleUp:
+        except (GraphBubbleUp, UiPathTimeoutError):
             raise
         except Exception as e:
             result = _get_tool_error_result(e, state, tool_name)
@@ -270,7 +272,7 @@ def _wrap_tool_error_handling(
     async def _afunc(state: AgentGraphState) -> OutputType:
         try:
             return await tool_node.ainvoke(state)
-        except GraphBubbleUp:
+        except (GraphBubbleUp, UiPathTimeoutError):
             raise
         except Exception as e:
             result = _get_tool_error_result(e, state, tool_name)

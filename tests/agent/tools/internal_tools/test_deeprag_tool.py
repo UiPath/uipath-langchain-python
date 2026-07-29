@@ -12,11 +12,13 @@ from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
+    AgentToolSettings,
     CitationMode,
     DeepRagCitationModeSetting,
     DeepRagFileExtension,
     DeepRagFileExtensionSetting,
 )
+from uipath.platform.common import WaitUntil
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
@@ -136,7 +138,8 @@ class TestCreateDeepRagTool:
         resource_config_static,
         mock_llm,
     ):
-        """Test DeepRAG tool with static query when index is immediately ready."""
+        """Test DeepRAG uses a composite interrupt when timeout is configured."""
+        resource_config_static.settings = AgentToolSettings(timeout=60_000)
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
@@ -188,6 +191,9 @@ class TestCreateDeepRagTool:
 
         # Only create_deeprag calls interrupt(); index was instant-resumed
         assert mock_interrupt.call_count == 1
+        interrupt_value = mock_interrupt.call_args.args[0]
+        assert isinstance(interrupt_value, list)
+        assert isinstance(interrupt_value[1], WaitUntil)
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
