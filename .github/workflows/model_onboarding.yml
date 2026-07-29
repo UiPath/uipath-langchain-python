@@ -123,43 +123,4 @@ jobs:
         echo "Model: ${{ inputs.model_name }}"
 
         bash run.sh
-
-        # TEMPORARY DIAGNOSTIC — identifies the CI principal so its Orchestrator
-        # permissions can be checked (attachment creation currently 403s). Prints
-        # only non-secret JWT claims (sub / client_id / org / tenant); never the
-        # token or the client secret. Remove once the 403 is resolved.
-        echo "=== CI principal (from token claims) ==="
-        python3 - <<'PY' || echo "(diagnostic failed; not fatal)"
-        import base64, glob, json, os, re
-
-        def claims(tok):
-            payload = tok.split(".")[1]
-            payload += "=" * (-len(payload) % 4)
-            return json.loads(base64.urlsafe_b64decode(payload))
-
-        found = False
-        # uipath auth writes the token into the project .env / a json store.
-        for path in [".env", *glob.glob(os.path.expanduser("~/.uipath/**/*.json"), recursive=True)]:
-            try:
-                text = open(path, encoding="utf-8", errors="replace").read()
-            except OSError:
-                continue
-            for tok in re.findall(r"ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+", text):
-                try:
-                    c = claims(tok)
-                except Exception:
-                    continue
-                keep = {k: c.get(k) for k in
-                        ("sub", "client_id", "azp", "prt_id", "prt_name", "tenant_id",
-                         "tenantId", "expZone", "aud", "scope") if c.get(k)}
-                print(f"source={path}")
-                print(json.dumps(keep, indent=2)[:1200])
-                found = True
-                break
-            if found:
-                break
-        if not found:
-            print("no JWT found — checked .env and ~/.uipath/**.json")
-        PY
-
         bash ../common/validate_output.sh
