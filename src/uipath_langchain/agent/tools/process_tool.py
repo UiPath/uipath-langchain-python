@@ -75,7 +75,7 @@ def create_process_tool(
             parent_span_id = _span_context.pop("parent_span_id", None)
             parent_operation_id = _bts_context.pop("parent_operation_id", None)
 
-            @durable_interrupt
+            @durable_interrupt(timeout=resource.settings.timeout)
             async def start_job():
                 client = UiPath()
                 try:

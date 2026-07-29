@@ -6,7 +6,7 @@ from typing import Any, Optional
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import StructuredTool
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import AgentIxpExtractionResourceConfig
 from uipath.eval.mocks import mockable
@@ -14,6 +14,7 @@ from uipath.platform.common import DocumentExtraction
 from uipath.platform.documents import ExtractionResponseIXP
 from uipath.platform.errors import EnrichedException
 
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.job_attachments import raise_for_job_attachment_error
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
@@ -94,13 +95,16 @@ def create_ixp_extraction_tool(
                 attachment_id=attachment.id,
             )
             raise
-        document_extraction_response = interrupt(
-            DocumentExtraction(
+
+        @durable_interrupt(timeout=resource.settings.timeout)
+        async def extract_document() -> Any:
+            return DocumentExtraction(
                 project_name=project_name,
                 tag=version_tag,
                 file_path=attachment_local_file_path,
             )
-        )
+
+        document_extraction_response = await extract_document()
 
         return document_extraction_response
 

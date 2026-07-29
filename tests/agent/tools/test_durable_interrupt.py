@@ -1,11 +1,14 @@
 """Tests for the durable_interrupt decorator."""
 
 from collections.abc import Generator
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
+from uipath.core.triggers import UIPATH_METADATA_KEY
+from uipath.platform.common import UiPathTimeoutError, WaitUntil
 
 from uipath_langchain._utils.durable_interrupt import (
     _durable_state,
@@ -117,6 +120,76 @@ class TestAsyncResumeExecution:
 
         mock_interrupt.assert_called_once_with(None)
         assert result == "resume-value"
+
+
+class TestTimeout:
+    """Configured timeouts use a composite interrupt and reject timer resumes."""
+
+    @patch(PATCH_INTERRUPT)
+    @patch(PATCH_GET_CONFIG)
+    async def test_async_first_execution_adds_wait_until(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        scratchpad = FakeScratchpad(resume=[])
+        mock_get_config.return_value = _make_config(scratchpad)
+        mock_interrupt.side_effect = lambda value: value
+        before = datetime.now(UTC)
+
+        @durable_interrupt(timeout=60_000)
+        async def start_job() -> dict[str, str]:
+            return {"wait": "job-123"}
+
+        result = await start_job()
+
+        interrupt_value = mock_interrupt.call_args.args[0]
+        assert interrupt_value[0] == {"wait": "job-123"}
+        assert isinstance(interrupt_value[1], WaitUntil)
+        assert interrupt_value[1].resume_time >= before
+        assert result is interrupt_value
+
+    @patch(PATCH_INTERRUPT)
+    @patch(PATCH_GET_CONFIG)
+    def test_sync_first_execution_adds_wait_until(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        scratchpad = FakeScratchpad(resume=[])
+        mock_get_config.return_value = _make_config(scratchpad)
+        mock_interrupt.side_effect = lambda value: value
+
+        @durable_interrupt(timeout=30_000)
+        def create_task() -> str:
+            return "task-123"
+
+        result = create_task()
+
+        interrupt_value = mock_interrupt.call_args.args[0]
+        assert interrupt_value[0] == "task-123"
+        assert isinstance(interrupt_value[1], WaitUntil)
+        assert result is interrupt_value
+
+    @patch(PATCH_INTERRUPT)
+    @patch(PATCH_GET_CONFIG)
+    async def test_timeout_resume_raises(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        scratchpad = FakeScratchpad(resume=["timer-result"])
+        mock_get_config.return_value = _make_config(scratchpad)
+        timeout_result = {
+            UIPATH_METADATA_KEY: {
+                "triggerType": "Timer",
+                "triggerName": "Timer",
+            }
+        }
+        mock_interrupt.return_value = timeout_result
+
+        @durable_interrupt(timeout=30_000)
+        async def start_job() -> str:
+            return "should-not-reach"
+
+        with pytest.raises(UiPathTimeoutError) as exc_info:
+            await start_job()
+
+        assert exc_info.value.value is timeout_result
 
 
 class TestSyncFirstExecution:

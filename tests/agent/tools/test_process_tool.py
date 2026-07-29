@@ -9,7 +9,7 @@ from uipath.agent.models.agent import (
     AgentProcessToolResourceConfig,
     AgentToolType,
 )
-from uipath.platform.common import WaitJob
+from uipath.platform.common import WaitJob, WaitUntil
 from uipath.platform.orchestrator import Job
 
 from uipath_langchain.agent.tools.process_tool import create_process_tool
@@ -188,7 +188,8 @@ class TestProcessToolInvocation:
     async def test_invoke_interrupts_with_wait_job(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
-        """Test that after invoking, the tool interrupts with WaitJobRaw."""
+        """Test that a configured timeout adds WaitUntil beside WaitJobRaw."""
+        process_resource.settings.timeout = 30_000
         mock_job = MagicMock(spec=Job)
         mock_job.key = "job-key-456"
         mock_job.folder_key = "folder-key-456"
@@ -207,10 +208,13 @@ class TestProcessToolInvocation:
         await tool.ainvoke({})
 
         mock_interrupt.assert_called_once()
-        wait_job_arg = mock_interrupt.call_args[0][0]
+        interrupt_value = mock_interrupt.call_args[0][0]
+        assert isinstance(interrupt_value, list)
+        wait_job_arg, wait_until_arg = interrupt_value
         assert isinstance(wait_job_arg, WaitJob)
         assert wait_job_arg.job == mock_job
         assert wait_job_arg.process_folder_key == "folder-key-456"
+        assert isinstance(wait_until_arg, WaitUntil)
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/DataFolder"})

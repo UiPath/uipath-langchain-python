@@ -8,8 +8,10 @@ import pytest
 from uipath.agent.models.agent import (
     AgentIxpExtractionResourceConfig,
     AgentIxpExtractionToolProperties,
+    AgentToolSettings,
 )
 from uipath.platform.attachments import Attachment
+from uipath.platform.common import WaitUntil
 from uipath.platform.documents import ExtractionResponseIXP
 from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
@@ -166,11 +168,12 @@ class TestExtractionToolFunctionality:
 
     @pytest.mark.asyncio
     @patch("uipath.platform.UiPath")
-    @patch("uipath_langchain.agent.tools.extraction_tool.interrupt")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_extraction_tool_downloads_attachment_and_calls_interrupt(
         self, mock_interrupt, mock_uipath_class, extraction_resource
     ):
-        """Test that extraction tool downloads attachment and calls interrupt with correct params."""
+        """Test extraction adds WaitUntil when a timeout is configured."""
+        extraction_resource.settings = AgentToolSettings(timeout=60_000)
         mock_client = MagicMock()
         mock_uipath_class.return_value = mock_client
         mock_client.attachments.download_async = AsyncMock(
@@ -194,16 +197,19 @@ class TestExtractionToolFunctionality:
         )
 
         assert mock_interrupt.called
-        interrupt_arg = mock_interrupt.call_args[0][0]
+        interrupt_value = mock_interrupt.call_args[0][0]
+        assert isinstance(interrupt_value, list)
+        interrupt_arg, wait_until_arg = interrupt_value
         assert interrupt_arg.project_name == "TestProject"
         assert interrupt_arg.tag == "v1.0"
         assert interrupt_arg.file_path == "/path/to/document.pdf"
+        assert isinstance(wait_until_arg, WaitUntil)
 
         assert result == {"extracted_data": {"field1": "value1"}}
 
     @pytest.mark.asyncio
     @patch("uipath.platform.UiPath")
-    @patch("uipath_langchain.agent.tools.extraction_tool.interrupt")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_extraction_tool_with_different_version_tag(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -327,7 +333,7 @@ class TestExtractionToolFunctionality:
 
     @pytest.mark.asyncio
     @patch("uipath.platform.UiPath")
-    @patch("uipath_langchain.agent.tools.extraction_tool.interrupt")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_extraction_tool_handles_alias_keyed_input(
         self, mock_interrupt, mock_uipath_class, extraction_resource
     ):
