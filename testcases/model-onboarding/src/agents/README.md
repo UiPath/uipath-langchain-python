@@ -18,17 +18,14 @@ production ReAct stack: `create_agent` + the *Analyze Files* internal tool
 
 ### What `run()` returns
 
-`run(model, prompt, files)` returns **the model's own answer**, prefixed with
-the route it took, so the probe records the actual evidence:
+`run(model, prompt, files)` uploads the file as a real platform attachment,
+invokes the generated agent, and returns **the model's own answer** — the
+evidence the probe records.
 
-- `[agent] <answer>` — full fidelity: the file was uploaded as a real platform
-  attachment and the generated graph answered via *Analyze Files*.
-- `[direct; attachments unavailable: <ErrorType>] <answer>` — the org forbids
-  attachment creation (the CI principal gets 403 on
-  `POST /odata/Attachments`), so it degraded to the direct multimodal invoke.
-
-It raises `ValueError` when no file is supplied or the model returns nothing;
-the probe catches that and records the cell as failed.
+Nothing is caught here. If attachment creation is denied (the CI principal
+gets 403 on `POST /odata/Attachments`), the model errors, or the answer is
+empty, it raises — the agent path was not exercised, so the probe records the
+cell as failed instead of substituting a weaker check that would pass.
 
 ### Refreshing after a low-code change
 

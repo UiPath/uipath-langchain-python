@@ -4,11 +4,14 @@ Runs the coded **[`file_processing` agent](src/agents/README.md)** — Studio
 Web's "Clone as Coded Agent" of the low-code FileProcessingAgent — against
 **one runtime-specified model**, once per `api_flavor × file`.
 
-Each cell records the model's **actual answer** about the file, prefixed with
-the route it took (`[agent]` via a real platform attachment + the *Analyze
-Files* tool, or `[direct]` when the org forbids attachment creation), so
+Each cell records the model's **actual answer** about the file — uploaded as a
+real platform attachment and read by the agent's *Analyze Files* tool — so
 `result_summary` is evidence rather than a bare tick. Any failing cell flips
 the single `success` boolean, asserted alongside the emitted traces.
+
+There is no fallback: if the attachment can't be created (the CI principal
+needs permission to `POST /odata/Attachments`), the cell fails, because the
+agent path was not exercised.
 
 Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 **input**. To onboard a model, edit `input.json` — no code change.

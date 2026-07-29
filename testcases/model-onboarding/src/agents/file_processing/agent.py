@@ -146,52 +146,36 @@ async def _upload_attachment(file_info) -> Attachment:
 async def run(model, prompt: str, files) -> str:
     """Testcase adapter: run the generated graph over one attached file.
 
-    Prefers the full-fidelity path (real platform attachment + the generated
-    graph with the Analyze Files tool). When the org forbids attachment
-    creation (e.g. 403 for the CI principal), degrades to a direct multimodal
-    call so the probe still validates the model's file processing — marked
-    explicitly in the returned text.
+    Uploads the file as a real platform attachment and invokes the generated
+    agent, which reads it with the *Analyze Files* tool. Everything is allowed
+    to raise: a failure here (attachment creation denied, model error, empty
+    completion) means the agent path was not exercised, so the probe must
+    record it as a failure rather than substitute a weaker check.
 
     Returns:
-        The model's own answer about the file, prefixed with the route it took
-        (``[agent]`` or ``[direct]``) so the probe records what came back.
+        The model's own answer about the file.
 
     Raises:
-        ValueError: If no file is supplied, or the model returns nothing.
+        ValueError: If no file is supplied, or the agent returns nothing.
     """
     if not files:
         raise ValueError("file_processing requires a file")
 
-    route = "agent"
-    try:
-        attachment = await _upload_attachment(files[0])
-    except Exception as e:
-        # Attachment creation denied/unavailable in this org — fall back to
-        # the direct multimodal invoke (same path multimodal-invoke uses).
-        from langchain_core.messages import HumanMessage as _HumanMessage
-
-        from uipath_langchain.agent.multimodal.invoke import llm_call_with_files
-
-        response = await llm_call_with_files(
-            [_HumanMessage(content=prompt)], list(files), model
-        )
-        content = response.content
-        route = f"direct; attachments unavailable: {type(e).__name__}"
-    else:
-        graph = build_graph(model)
-        if hasattr(graph, "compile"):  # create_agent returns an uncompiled StateGraph
-            graph = graph.compile()
-        result = await graph.ainvoke(AgentInput(prompt=prompt, fileIn=attachment))
-        content = (
-            (result or {}).get("content")
-            if isinstance(result, dict)
-            else getattr(result, "content", None)
-        )
+    attachment = await _upload_attachment(files[0])
+    graph = build_graph(model)
+    if hasattr(graph, "compile"):  # create_agent returns an uncompiled StateGraph
+        graph = graph.compile()
+    result = await graph.ainvoke(AgentInput(prompt=prompt, fileIn=attachment))
+    content = (
+        (result or {}).get("content")
+        if isinstance(result, dict)
+        else getattr(result, "content", None)
+    )
 
     text = _as_text(content)
     if not text:
-        raise ValueError(f"empty response ({route})")
-    return f"[{route}] {text}"
+        raise ValueError("agent returned an empty response")
+    return text
 
 
 def _as_text(content) -> str:
