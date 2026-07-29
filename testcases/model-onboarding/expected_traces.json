@@ -1,10 +1,16 @@
 {
-  "description": "Model-onboarding trace assertions - the node ran and at least one LLM span was emitted by one of the reachable client classes.",
+  "description": "Model-onboarding trace assertions - the probe ran, the agent invoked the Analyze Files tool (proof the file was actually read), and an LLM span was emitted by a reachable client class.",
   "required_spans": [
     {
       "name": "probe_file_processing",
       "attributes": {
         "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": "Analyze Files",
+      "attributes": {
+        "openinference.span.kind": "TOOL"
       }
     },
     {

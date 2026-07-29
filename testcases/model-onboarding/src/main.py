@@ -46,6 +46,29 @@ FILE_REGISTRY: dict[str, FileInfo] = {
     ),
 }
 
+# Words the answer must contain to prove the agent read the file rather than
+# guessing from its name/MIME type. At least one alternative per group must
+# appear (case-insensitive).
+FILE_EVIDENCE: dict[str, list[list[str]]] = {
+    # Only visible in the photo: cliffside houses above the sea.
+    "image": [["village", "houses", "buildings", "town"], ["sea", "water", "coast", "bay", "ocean"]],
+    # The PDF's only content is the line "Dummy PDF file".
+    "pdf": [["dummy"]],
+}
+
+
+def _missing_evidence(file_name: str, answer: str) -> str:
+    """Return the first evidence group the answer fails to mention, if any.
+
+    Guards against a model answering plausibly from the file name alone: the
+    reply has to contain something only the file's contents reveal.
+    """
+    lowered = answer.lower()
+    for group in FILE_EVIDENCE.get(file_name, []):
+        if not any(word in lowered for word in group):
+            return "/".join(group)
+    return ""
+
 
 class ModelSpec(BaseModel):
     """The model under test."""
@@ -94,8 +117,21 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 )
             except Exception as e:
                 failed = True
-                answer = f"✗ {type(e).__name__}: {e}"
-            lines.append(f"  {file_name}: {answer}")
+                # Collapse newlines: some SDK errors are multi-line and would
+                # break the one-cell-per-line summary.
+                detail = " ".join(str(e).split())
+                lines.append(f"  {file_name}: ✗ {type(e).__name__}: {detail}"[:300])
+                continue
+
+            missing = _missing_evidence(file_name, answer)
+            if missing:
+                failed = True
+                lines.append(
+                    f"  {file_name}: ✗ answer lacks {missing} (did the agent "
+                    f"read the file?): {answer}"[:300]
+                )
+            else:
+                lines.append(f"  {file_name}: ✓ {answer}"[:400])
 
     summary = "\n".join(lines)
     logger.info(f"Success: {not failed}\nSummary:\n{summary}")
