@@ -122,7 +122,14 @@ def build_graph(llm):
 
 
 async def _upload_attachment(file_info) -> Attachment:
-    """Fetch the test file and register it as a platform attachment."""
+    """Fetch the test file and register it as a platform attachment.
+
+    Attachment creation is folder-scoped in Orchestrator, so a folder must be
+    in play. ``UIPATH_FOLDER_PATH`` (set by run.sh / the dispatch workflow)
+    selects it; the SDK default is used when that is unset.
+    """
+    import os
+
     import httpx
     from uipath._utils._ssl_context import get_httpx_client_kwargs
     from uipath.platform import UiPath
@@ -132,9 +139,10 @@ async def _upload_attachment(file_info) -> Attachment:
         response.raise_for_status()
         content = response.content
 
+    folder_path = os.environ.get("UIPATH_FOLDER_PATH") or None
     sdk = UiPath()
     attachment_id = await sdk.attachments.upload_async(
-        name=file_info.name, content=content
+        name=file_info.name, content=content, folder_path=folder_path
     )
     return Attachment(
         id=attachment_id,

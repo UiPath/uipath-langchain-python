@@ -66,6 +66,9 @@ jobs:
       env:
         UIPATH_JOB_KEY: "3a03d5cb-fa21-4021-894d-a8e2eda0afe0"
         UIPATH_TRACING_ENABLED: false
+        # Attachment creation is folder-scoped; without a folder the
+        # Orchestrator permission check cannot pass.
+        UIPATH_FOLDER_PATH: "Shared"
     strategy:
       fail-fast: false
       matrix:
