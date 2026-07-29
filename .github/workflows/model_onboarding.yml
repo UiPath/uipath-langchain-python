@@ -13,20 +13,15 @@ on:
         required: true
         type: string
       api_flavors:
-        description: "Comma-separated API flavors: shorthands (azure_responses, azure_chat_completions, vertex, bedrock_converse, bedrock_invoke) and/or vendor_type:api_flavor pairs passed straight to get_chat_model (e.g. awsbedrock:converse, openai:responses, vertexai:generate-content, awsbedrock:AnthropicMessages)"
+        description: "Comma-separated vendor_type:api_flavor pairs passed straight to get_chat_model, e.g. openai:responses, openai:chat-completions, awsbedrock:converse, awsbedrock:invoke, awsbedrock:AnthropicMessages, vertexai:generate-content (vendor_type: alone autodetects the flavor)"
         required: true
         type: string
-        default: "azure_responses,azure_chat_completions"
+        default: "openai:responses"
       files:
         description: "Comma-separated file attachments (image,pdf). Leave empty for a text-only model."
         required: false
         type: string
         default: "image,pdf"
-      prompt:
-        description: "Prompt sent to the model"
-        required: false
-        type: string
-        default: "Describe the content of this file in one sentence."
       agenthub_config:
         description: "AgentHub config header value (must exist in the target tenant)"
         required: false
@@ -96,7 +91,6 @@ jobs:
         MODEL_NAME: ${{ inputs.model_name }}
         API_FLAVORS: ${{ inputs.api_flavors }}
         FILES: ${{ inputs.files }}
-        PROMPT: ${{ inputs.prompt }}
         AGENTHUB_CONFIG: ${{ inputs.agenthub_config }}
       run: |
         # Build input.json with python3 — the uv container does NOT ship jq
@@ -110,7 +104,6 @@ jobs:
             return [x.strip() for x in (csv or "").split(",") if x.strip()]
 
         spec = {
-            "prompt": os.environ["PROMPT"],
             "model_spec": {
                 "model_name": os.environ["MODEL_NAME"],
                 "agenthub_config": os.environ["AGENTHUB_CONFIG"],

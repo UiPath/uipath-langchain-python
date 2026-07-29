@@ -19,8 +19,9 @@ production ReAct stack: `create_agent` + the *Analyze Files* internal tool
 ### What `run()` returns
 
 `run(model, prompt, files)` uploads the file as a real platform attachment,
-invokes the generated agent, and returns **the model's own answer** — the
-evidence the probe records.
+invokes the generated agent, and returns **the model's own answer**. The probe
+asks a question with one deterministic answer (see `FILE_REGISTRY` in
+`../main.py`) and fails the cell unless that word comes back.
 
 Nothing is caught here. If attachment creation is denied (the CI principal
 gets 403 on `POST /odata/Attachments`), the model errors, or the answer is

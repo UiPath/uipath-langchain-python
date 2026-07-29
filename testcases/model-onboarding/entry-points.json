@@ -1,0 +1,114 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "a63343ed-91db-49ff-800b-a9ea68a12093",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "default": "Describe the content of this file in one sentence.",
+                        "title": "Prompt",
+                        "type": "string"
+                    },
+                    "model_spec": {
+                        "description": "The model under test.",
+                        "properties": {
+                            "model_name": {
+                                "description": "Vendor-qualified model identifier.",
+                                "title": "Model Name",
+                                "type": "string"
+                            },
+                            "api_flavors": {
+                                "description": "'vendor_type:api_flavor' pairs forwarded to get_chat_model.",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "title": "Api Flavors",
+                                "type": "array"
+                            },
+                            "agenthub_config": {
+                                "default": "agentsplayground",
+                                "title": "Agenthub Config",
+                                "type": "string"
+                            },
+                            "files": {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "title": "Files",
+                                "type": "array"
+                            }
+                        },
+                        "required": [
+                            "model_name",
+                            "api_flavors"
+                        ],
+                        "title": "ModelSpec",
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "model_spec"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "title": "Success",
+                        "type": "boolean"
+                    },
+                    "result_summary": {
+                        "title": "Result Summary",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "success",
+                    "result_summary"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "probe_file_processing",
+                        "name": "probe_file_processing",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "probe_file_processing",
+                        "label": null
+                    },
+                    {
+                        "source": "probe_file_processing",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}

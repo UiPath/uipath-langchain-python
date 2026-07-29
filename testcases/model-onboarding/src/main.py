@@ -2,10 +2,9 @@
 
 Runs the coded ``file_processing`` agent (Studio Web's "Clone as Coded Agent"
 of the low-code FileProcessingAgent) against a model supplied at runtime via
-``input.json``, once per file, and returns the model's own answers.
+``input.json``, once per file.
 
     {
-      "prompt": "Describe the content of this file in one sentence.",
       "model_spec": {
         "model_name": "gpt-5.2-2025-12-11",
         "api_flavors": ["openai:responses"],
@@ -13,6 +12,11 @@ of the low-code FileProcessingAgent) against a model supplied at runtime via
         "files": ["image", "pdf"]
       }
     }
+
+Each file asks a question with one deterministic answer that only its contents
+reveal — "what animal is this?" over a photo of a dog, "what is the first word
+inside?" over a PDF reading "Dummy PDF file". The answer word appears nowhere
+in the file name, so a model that never opened the file cannot produce it.
 
 Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 ``get_chat_model`` (e.g. ``openai:responses``, ``awsbedrock:converse``,
@@ -32,42 +36,47 @@ from agents.file_processing.agent import run as run_file_processing
 
 logger = logging.getLogger(__name__)
 
-# Files the agent processes, selected by name via `model_spec.files`.
-FILE_REGISTRY: dict[str, FileInfo] = {
-    "image": FileInfo(
-        url="https://www.w3schools.com/css/img_5terre.jpg",
-        name="img_5terre.jpg",
-        mime_type="image/jpeg",
-    ),
-    "pdf": FileInfo(
-        url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-        name="dummy.pdf",
-        mime_type="application/pdf",
-    ),
-}
+class FileCase(BaseModel):
+    """A file plus the question to ask and the answer that proves it was read.
 
-# Words the answer must contain to prove the agent read the file rather than
-# guessing from its name/MIME type. At least one alternative per group must
-# appear (case-insensitive).
-FILE_EVIDENCE: dict[str, list[list[str]]] = {
-    # Only visible in the photo: cliffside houses above the sea.
-    "image": [["village", "houses", "buildings", "town"], ["sea", "water", "coast", "bay", "ocean"]],
-    # The PDF's only content is the line "Dummy PDF file".
-    "pdf": [["dummy"]],
-}
-
-
-def _missing_evidence(file_name: str, answer: str) -> str:
-    """Return the first evidence group the answer fails to mention, if any.
-
-    Guards against a model answering plausibly from the file name alone: the
-    reply has to contain something only the file's contents reveal.
+    Each question has one deterministic word as its answer, and that word is
+    absent from the file name — so an agent that never opened the file cannot
+    produce it.
     """
-    lowered = answer.lower()
-    for group in FILE_EVIDENCE.get(file_name, []):
-        if not any(word in lowered for word in group):
-            return "/".join(group)
-    return ""
+
+    file: FileInfo
+    question: str
+    expected: str
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+# Files the agent processes, selected by name via `model_spec.files`.
+FILE_REGISTRY: dict[str, FileCase] = {
+    "image": FileCase(
+        # A white Samoyed sitting on grass.
+        file=FileInfo(
+            url="https://raw.githubusercontent.com/pytorch/hub/master/images/dog.jpg",
+            name="animal.jpg",
+            mime_type="image/jpeg",
+        ),
+        question="What animal is in this image? Answer with one word only.",
+        expected="dog",
+    ),
+    "pdf": FileCase(
+        # A one-page PDF whose entire content is the line "Dummy PDF file".
+        file=FileInfo(
+            url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            name="document.pdf",
+            mime_type="application/pdf",
+        ),
+        question=(
+            "What is the first word of the text inside this document? "
+            "Answer with one word only."
+        ),
+        expected="dummy",
+    ),
+}
 
 
 class ModelSpec(BaseModel):
@@ -82,7 +91,6 @@ class ModelSpec(BaseModel):
 
 
 class GraphInput(BaseModel):
-    prompt: str = Field(default="Describe the content of this file in one sentence.")
     model_spec: ModelSpec
 
 
@@ -111,9 +119,10 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
         lines.append(f"{flavor}:")
 
         for file_name in spec.files:
+            case = FILE_REGISTRY[file_name]
             try:
                 answer = await run_file_processing(
-                    model, state.prompt, [FILE_REGISTRY[file_name]]
+                    model, case.question, [case.file]
                 )
             except Exception as e:
                 failed = True
@@ -123,15 +132,13 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 lines.append(f"  {file_name}: ✗ {type(e).__name__}: {detail}"[:300])
                 continue
 
-            missing = _missing_evidence(file_name, answer)
-            if missing:
+            if case.expected in answer.lower():
+                lines.append(f"  {file_name}: ✓ {answer}"[:200])
+            else:
                 failed = True
                 lines.append(
-                    f"  {file_name}: ✗ answer lacks {missing} (did the agent "
-                    f"read the file?): {answer}"[:300]
+                    f"  {file_name}: ✗ expected '{case.expected}', got: {answer}"[:300]
                 )
-            else:
-                lines.append(f"  {file_name}: ✓ {answer}"[:400])
 
     summary = "\n".join(lines)
     logger.info(f"Success: {not failed}\nSummary:\n{summary}")

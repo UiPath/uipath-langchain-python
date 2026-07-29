@@ -4,10 +4,19 @@ Runs the coded **[`file_processing` agent](src/agents/README.md)** — Studio
 Web's "Clone as Coded Agent" of the low-code FileProcessingAgent — against
 **one runtime-specified model**, once per `api_flavor × file`.
 
-Each cell records the model's **actual answer** about the file — uploaded as a
-real platform attachment and read by the agent's *Analyze Files* tool — so
-`result_summary` is evidence rather than a bare tick. Any failing cell flips
-the single `success` boolean, asserted alongside the emitted traces.
+Each file is uploaded as a real platform attachment and read by the agent's
+*Analyze Files* tool, then asked a question with **one deterministic answer
+that only the file's contents reveal**:
+
+| file | question | answer |
+|---|---|---|
+| `image` (`animal.jpg`, a photo of a dog) | "What animal is in this image? Answer with one word only." | `dog` |
+| `pdf` (`document.pdf`, reading "Dummy PDF file") | "What is the first word of the text inside this document?" | `dummy` |
+
+The answer word appears nowhere in the file name, so a model that never opened
+the file cannot produce it. A wrong or missing answer fails the cell and flips
+the single `success` boolean, asserted alongside the emitted traces — which
+also require an `Analyze Files` TOOL span.
 
 There is no fallback: if the attachment can't be created (the CI principal
 needs permission to `POST /odata/Attachments`), the cell fails, because the
@@ -20,10 +29,9 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 
 ```json
 {
-  "prompt": "Describe the content of this file in one sentence.",
   "model_spec": {
     "model_name": "gpt-5.2-2025-12-11",
-    "api_flavors": ["azure_responses", "azure_chat_completions"],
+    "api_flavors": ["openai:responses", "openai:chat-completions"],
     "agenthub_config": "agentsplayground",
     "files": ["image", "pdf"]
   }
@@ -32,15 +40,12 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 
 - **`model_name`** — the vendor-qualified model ID. Note a single logical model
   may need a *different* ID per vendor family.
-- **`api_flavors`** — which API flavors to exercise. Two forms, freely mixed:
-  - shorthands: `azure_responses`, `azure_chat_completions`, `vertex`,
-    `bedrock_converse`, `bedrock_invoke`;
-  - **`vendor_type:api_flavor` pairs passed straight to `get_chat_model`**
-    (which accepts them as strings), e.g. `awsbedrock:converse`,
-    `openai:responses`, `vertexai:generate-content`,
-    `awsbedrock:AnthropicMessages`. `vendor_type:` alone lets the factory
-    autodetect the flavor. The agent runs with the model built for that
-    flavor.
+- **`api_flavors`** — `vendor_type:api_flavor` pairs passed straight to
+  `get_chat_model` (which accepts them as strings), e.g. `openai:responses`,
+  `openai:chat-completions`, `awsbedrock:converse`, `awsbedrock:invoke`,
+  `awsbedrock:AnthropicMessages`, `vertexai:generate-content`.
+  `vendor_type:` alone lets the factory autodetect the flavor. The agent runs
+  with the model built for each flavor.
 
   List only flavors the model actually ships on — a model ID sent to a vendor
   it doesn't exist on is a guaranteed (and misleading) failure.
@@ -48,7 +53,8 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
   behind your `BASE_URL`. Defaults to `agentsplayground`.
 - **`files`** — files the agent processes, one cell each. Valid keys: `image`,
   `pdf`. Defaults to both; at least one is required (the agent needs a file).
-- **`prompt`** — the task the agent answers about each file.
+  Each file's question and expected answer live in `FILE_REGISTRY`
+  (`src/main.py`).
 
 ## Prerequisites (external to the repo)
 
@@ -95,7 +101,7 @@ change the model.
 ```bash
 gh workflow run model_onboarding.yml \
   -f model_name="anthropic.claude-sonnet-4-5-20250929-v1:0" \
-  -f api_flavors="bedrock_converse,bedrock_invoke" \
+  -f api_flavors="awsbedrock:converse,awsbedrock:invoke" \
   -f files="image,pdf" \
   -f environments="alpha,staging,cloud"
 
@@ -127,5 +133,6 @@ default/example spec — dispatch inputs override it at runtime.
 3. `success is True` and `result_summary` is non-empty.
 4. `"Successful execution."` appears in `local_run_output.log` (the second,
    empty-`UIPATH_JOB_KEY` run).
-5. Traces contain the `probe_file_processing` CHAIN span and at least one `LLM`
-   span from a reachable client class (`expected_traces.json`).
+5. Traces contain the `probe_file_processing` CHAIN span, an `Analyze Files`
+   TOOL span (proof the agent read the file), and at least one `LLM` span from
+   a reachable client class (`expected_traces.json`).

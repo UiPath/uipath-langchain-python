@@ -1,5 +1,4 @@
 {
-    "prompt": "Describe the content of this file in one sentence.",
     "model_spec": {
         "model_name": "gpt-5.2-2025-12-11",
         "agenthub_config": "agentsplayground",
