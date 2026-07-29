@@ -102,15 +102,10 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
     return GraphOutput(success=not failed, result_summary=summary)
 
 
-# `langgraph.json` points the runtime at ./src/main.py:graph, so the probe is
-# wrapped in a single-node graph. The agent under test brings its own graph;
-# see agents/file_processing/agent.py.
-def build_graph():
-    builder = StateGraph(GraphInput, output_schema=GraphOutput)
-    builder.add_node("probe_file_processing", probe_file_processing)
-    builder.add_edge(START, "probe_file_processing")
-    builder.add_edge("probe_file_processing", END)
-    return builder.compile()
-
-
-graph = build_graph()
+# `langgraph.json` points the runtime at ./src/main.py:graph, which must be a
+# StateGraph; the runtime compiles it with its own checkpointer. The agent
+# under test brings its own graph — see agents/file_processing/agent.py.
+graph = StateGraph(GraphInput, output_schema=GraphOutput)
+graph.add_node(probe_file_processing)
+graph.add_edge(START, "probe_file_processing")
+graph.add_edge("probe_file_processing", END)
