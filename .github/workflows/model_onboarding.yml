@@ -17,11 +17,6 @@ on:
         required: true
         type: string
         default: "openai:responses"
-      files:
-        description: "Comma-separated file attachments (image,pdf). Leave empty for a text-only model."
-        required: false
-        type: string
-        default: "image,pdf"
       agenthub_config:
         description: "AgentHub config header value (must exist in the target tenant)"
         required: false
@@ -90,7 +85,6 @@ jobs:
       env:
         MODEL_NAME: ${{ inputs.model_name }}
         API_FLAVORS: ${{ inputs.api_flavors }}
-        FILES: ${{ inputs.files }}
         AGENTHUB_CONFIG: ${{ inputs.agenthub_config }}
       run: |
         # Build input.json with python3 — the uv container does NOT ship jq
@@ -108,7 +102,6 @@ jobs:
                 "model_name": os.environ["MODEL_NAME"],
                 "agenthub_config": os.environ["AGENTHUB_CONFIG"],
                 "api_flavors": split(os.environ.get("API_FLAVORS", "")),
-                "files": split(os.environ.get("FILES", "")),
             },
         }
         with open("input.json", "w", encoding="utf-8") as f:

@@ -32,8 +32,7 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
   "model_spec": {
     "model_name": "gpt-5.2-2025-12-11",
     "api_flavors": ["openai:responses", "openai:chat-completions"],
-    "agenthub_config": "agentsplayground",
-    "files": ["image", "pdf"]
+    "agenthub_config": "agentsplayground"
   }
 }
 ```
@@ -51,10 +50,9 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
   it doesn't exist on is a guaranteed (and misleading) failure.
 - **`agenthub_config`** — AgentHub config header value; must exist in the tenant
   behind your `BASE_URL`. Defaults to `agentsplayground`.
-- **`files`** — files the agent processes, one cell each. Valid keys: `image`,
-  `pdf`. Defaults to both; at least one is required (the agent needs a file).
-  Each file's question and expected answer live in `FILE_REGISTRY`
-  (`src/main.py`).
+
+Every file in `FILE_REGISTRY` (`src/main.py`) is exercised — add a case there
+to cover another format.
 
 ## Prerequisites (external to the repo)
 
@@ -94,7 +92,7 @@ is written into `input.json` at runtime — you never edit or commit a file to
 change the model.
 
 **From the GitHub UI:** Actions → "Model onboarding" → "Run workflow", fill in
-`model_name`, `api_flavors`, `files`, and pick the environment(s), then Run.
+`model_name` and `api_flavors`, pick the environment(s), then Run.
 
 **From the CLI:**
 
@@ -102,7 +100,6 @@ change the model.
 gh workflow run model_onboarding.yml \
   -f model_name="anthropic.claude-sonnet-4-5-20250929-v1:0" \
   -f api_flavors="awsbedrock:converse,awsbedrock:invoke" \
-  -f files="image,pdf" \
   -f environments="alpha,staging,cloud"
 
 gh run watch $(gh run list --workflow=model_onboarding.yml --limit 1 --json databaseId -q '.[0].databaseId')

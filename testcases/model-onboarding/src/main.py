@@ -8,15 +8,15 @@ of the low-code FileProcessingAgent) against a model supplied at runtime via
       "model_spec": {
         "model_name": "gpt-5.2-2025-12-11",
         "api_flavors": ["openai:responses"],
-        "agenthub_config": "agentsplayground",
-        "files": ["image", "pdf"]
+        "agenthub_config": "agentsplayground"
       }
     }
 
-Each file asks a question with one deterministic answer that only its contents
-reveal — "what animal is this?" over a photo of a dog, "what is the first word
-inside?" over a PDF reading "Dummy PDF file". The answer word appears nowhere
-in the file name, so a model that never opened the file cannot produce it.
+Every file in ``FILE_REGISTRY`` is exercised. Each asks a question with one
+deterministic answer that only its contents reveal — "what animal is this?"
+over a photo of a dog, "what is the first word inside?" over a PDF reading
+"Dummy PDF file". The answer word appears nowhere in the file name, so a model
+that never opened the file cannot produce it.
 
 Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 ``get_chat_model`` (e.g. ``openai:responses``, ``awsbedrock:converse``,
@@ -87,7 +87,6 @@ class ModelSpec(BaseModel):
         description="'vendor_type:api_flavor' pairs forwarded to get_chat_model.",
     )
     agenthub_config: str = Field(default="agentsplayground")
-    files: list[str] = Field(default_factory=lambda: ["image", "pdf"])
 
 
 class GraphInput(BaseModel):
@@ -118,8 +117,7 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
         )
         lines.append(f"{flavor}:")
 
-        for file_name in spec.files:
-            case = FILE_REGISTRY[file_name]
+        for file_name, case in FILE_REGISTRY.items():
             try:
                 answer = await run_file_processing(
                     model, case.question, [case.file]
