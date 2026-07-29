@@ -1,5 +1,5 @@
 {
-  "description": "Model-onboarding trace assertions - the probe ran, the agent invoked the Analyze Files tool (proof the file was actually read), and an LLM span was emitted by a reachable client class.",
+  "description": "Model-onboarding trace assertions. The probe ran, the file was uploaded as a real platform attachment and its blob fetched (proof the agent read it, not just described the file name), the generated ReAct agent executed, and an LLM span was emitted by a reachable client class.",
   "required_spans": [
     {
       "name": "probe_file_processing",
@@ -8,9 +8,15 @@
       }
     },
     {
-      "name": "Analyze Files",
+      "name": "attachments_upload"
+    },
+    {
+      "name": "attachments_get_blob_uri"
+    },
+    {
+      "name": "agent",
       "attributes": {
-        "openinference.span.kind": "TOOL"
+        "openinference.span.kind": "AGENT"
       }
     },
     {
