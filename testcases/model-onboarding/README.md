@@ -2,7 +2,7 @@
 
 Runs the coded **[`file_processing` agent](src/agents/README.md)** — Studio
 Web's "Clone as Coded Agent" of the low-code FileProcessingAgent — against
-**one runtime-specified model**, once per `path × file`.
+**one runtime-specified model**, once per `api_flavor × file`.
 
 Each cell records the model's **actual answer** about the file, prefixed with
 the route it took (`[agent]` via a real platform attachment + the *Analyze
@@ -20,7 +20,7 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
   "prompt": "Describe the content of this file in one sentence.",
   "model_spec": {
     "model_name": "gpt-5.2-2025-12-11",
-    "paths": ["azure_responses", "azure_chat_completions"],
+    "api_flavors": ["azure_responses", "azure_chat_completions"],
     "agenthub_config": "agentsplayground",
     "files": ["image", "pdf"]
   }
@@ -29,8 +29,7 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 
 - **`model_name`** — the vendor-qualified model ID. Note a single logical model
   may need a *different* ID per vendor family.
-- **`paths`** — which `get_chat_model` code paths to exercise. Two forms,
-  freely mixed:
+- **`api_flavors`** — which API flavors to exercise. Two forms, freely mixed:
   - shorthands: `azure_responses`, `azure_chat_completions`, `vertex`,
     `bedrock_converse`, `bedrock_invoke`;
   - **`vendor_type:api_flavor` pairs passed straight to `get_chat_model`**
@@ -38,21 +37,19 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
     `openai:responses`, `vertexai:generate-content`,
     `awsbedrock:AnthropicMessages`. `vendor_type:` alone lets the factory
     autodetect the flavor. The agent runs with the model built for that
-    path/flavor.
+    flavor.
 
-  List only paths the model actually ships on — a model ID sent to a vendor
+  List only flavors the model actually ships on — a model ID sent to a vendor
   it doesn't exist on is a guaranteed (and misleading) failure.
 - **`agenthub_config`** — AgentHub config header value; must exist in the tenant
   behind your `BASE_URL`. Defaults to `agentsplayground`.
-- **`files`** — file attachments for the `files/*` payload. Valid keys:
-  `image`, `pdf`. Use `[]` for a **text-only** model — the `simple` and `tools`
-  payloads still run; only the per-file cells are skipped.
-- **`prompt`** — used by the `simple` and `files/*` payloads. The `tools`
-  payload uses its own fixed weather prompt.
+- **`files`** — files the agent processes, one cell each. Valid keys: `image`,
+  `pdf`. Defaults to both; at least one is required (the agent needs a file).
+- **`prompt`** — the task the agent answers about each file.
 
 ## Prerequisites (external to the repo)
 
-- Model IDs per path you list.
+- Model IDs per flavor you list.
 - Credentials for the target env: alpha (`ALPHA_TEST_CLIENT_ID` /
   `ALPHA_TEST_CLIENT_SECRET` / `ALPHA_BASE_URL`), staging (`STAGING_*`), or
   prod (`CLOUD_*` — prod is named `cloud` in this repo).
@@ -76,9 +73,9 @@ bash run.sh                       # sync -> auth -> init -> pack -> run x2
 bash ../common/validate_output.sh # prints output.json, runs src/assert.py
 ```
 
-The answer is `assert.py`'s exit code plus the `result_summary` grid it prints.
-Exit 0 = model good on that env. Non-zero = the summary names the failing cell
-and the truncated error.
+The answer is `assert.py`'s exit code plus the `result_summary` it prints —
+including the model's actual answer per file. Exit 0 = model good on that env.
+Non-zero = the summary names the failing cell and the error.
 
 ## Mechanism B — on-demand CI run (no commit, pick the model at start)
 
@@ -88,14 +85,14 @@ is written into `input.json` at runtime — you never edit or commit a file to
 change the model.
 
 **From the GitHub UI:** Actions → "Model onboarding" → "Run workflow", fill in
-`model_name`, `paths`, `files`, and pick the environment(s), then Run.
+`model_name`, `api_flavors`, `files`, and pick the environment(s), then Run.
 
 **From the CLI:**
 
 ```bash
 gh workflow run model_onboarding.yml \
   -f model_name="anthropic.claude-sonnet-4-5-20250929-v1:0" \
-  -f paths="bedrock_converse,bedrock_invoke,anthropic_sdk" \
+  -f api_flavors="bedrock_converse,bedrock_invoke" \
   -f files="image,pdf" \
   -f environments="alpha,staging,cloud"
 
@@ -120,9 +117,6 @@ runs **only on demand** via Mechanism A (local) or Mechanism B (the
 `model_onboarding.yml` dispatch workflow). The committed `input.json` is just a
 default/example spec — dispatch inputs override it at runtime.
 
-Optional enhancement (not wired): add a `workflow_dispatch:` trigger with a
-`model_spec` input so a run can be launched without a commit.
-
 ## What gets asserted (`src/assert.py`)
 
 1. A `.nupkg` was produced.
@@ -130,5 +124,5 @@ Optional enhancement (not wired): add a `workflow_dispatch:` trigger with a
 3. `success is True` and `result_summary` is non-empty.
 4. `"Successful execution."` appears in `local_run_output.log` (the second,
    empty-`UIPATH_JOB_KEY` run).
-5. Traces contain the `run_model_onboarding` CHAIN span and at least one `LLM`
+5. Traces contain the `probe_file_processing` CHAIN span and at least one `LLM`
    span from a reachable client class (`expected_traces.json`).

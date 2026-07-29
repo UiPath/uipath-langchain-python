@@ -10,13 +10,13 @@ answer for each file.
       "prompt": "Describe the content of this file in one sentence.",
       "model_spec": {
         "model_name": "gpt-5.2-2025-12-11",
-        "paths": ["azure_responses"],
+        "api_flavors": ["azure_responses"],
         "agenthub_config": "agentsplayground",
         "files": ["image", "pdf"]
       }
     }
 
-``paths`` entries are either ``get_chat_model`` shorthands (``azure_responses``,
+``api_flavors`` entries are either shorthands (``azure_responses``,
 ``azure_chat_completions``, ``vertex``, ``bedrock_converse``,
 ``bedrock_invoke``) or ``vendor_type:api_flavor`` pairs passed straight to
 ``get_chat_model`` (e.g. ``awsbedrock:converse``, ``openai:responses``).
@@ -37,9 +37,9 @@ from agents.file_processing.agent import run as run_file_processing
 
 logger = logging.getLogger(__name__)
 
-# Shorthand names for the api_flavor of each get_chat_model code path. Anything
-# not listed here is parsed as "vendor_type:api_flavor".
-PATH_SHORTHANDS: dict[str, tuple[str | None, ApiFlavor | None]] = {
+# Shorthand names for common vendor/api_flavor combinations. Anything not
+# listed here is parsed as "vendor_type:api_flavor".
+FLAVOR_SHORTHANDS: dict[str, tuple[str | None, ApiFlavor | None]] = {
     "azure_responses": (None, ApiFlavor.RESPONSES),
     "azure_chat_completions": (None, ApiFlavor.CHAT_COMPLETIONS),
     "vertex": ("vertexai", ApiFlavor.GENERATE_CONTENT),
@@ -66,8 +66,8 @@ class ModelSpec(BaseModel):
     """Runtime specification for the model under test."""
 
     model_name: str = Field(description="Vendor-qualified model identifier.")
-    paths: list[str] = Field(
-        description="Code paths to exercise: PATH_SHORTHANDS keys or "
+    api_flavors: list[str] = Field(
+        description="API flavors to exercise: FLAVOR_SHORTHANDS keys or "
         "'vendor_type:api_flavor' pairs.",
     )
     agenthub_config: str = Field(
@@ -97,11 +97,11 @@ class GraphState(TypedDict, total=False):
     result_summary: str
 
 
-def build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> object:
-    """Build the chat model for one code path.
+def build_model(flavor: str, model_name: str, settings: UiPathBaseSettings) -> object:
+    """Build the chat model for one API flavor.
 
     Args:
-        path: A PATH_SHORTHANDS key, or ``vendor_type:api_flavor``
+        flavor: A FLAVOR_SHORTHANDS key, or ``vendor_type:api_flavor``
             (``vendor_type:`` alone lets the factory autodetect the flavor).
         model_name: Vendor-qualified model identifier.
         settings: Client settings carrying the AgentHub config.
@@ -110,18 +110,19 @@ def build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> obj
         A configured chat model.
 
     Raises:
-        ValueError: If ``path`` is neither a shorthand nor a vendor:flavor pair.
+        ValueError: If ``flavor`` is neither a shorthand nor a vendor:flavor pair.
     """
-    if path in PATH_SHORTHANDS:
-        vendor_type, api_flavor = PATH_SHORTHANDS[path]
-    elif ":" in path:
-        vendor_raw, _, flavor_raw = path.partition(":")
+    if flavor in FLAVOR_SHORTHANDS:
+        vendor_type, api_flavor = FLAVOR_SHORTHANDS[flavor]
+    elif ":" in flavor:
+        vendor_raw, _, flavor_raw = flavor.partition(":")
         vendor_type = vendor_raw.strip() or None
         api_flavor = flavor_raw.strip() or None  # type: ignore[assignment]
     else:
         raise ValueError(
-            f"unknown path '{path}': expected one of {sorted(PATH_SHORTHANDS)} "
-            "or 'vendor_type:api_flavor'"
+            f"unknown api_flavor '{flavor}': expected one of "
+            f"{sorted(FLAVOR_SHORTHANDS)} or "
+            "'vendor_type:api_flavor'"
         )
 
     return get_chat_model(
@@ -135,7 +136,7 @@ def build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> obj
 
 
 async def probe_file_processing(state: GraphState) -> dict:
-    """Run the file_processing agent for every path x file combination."""
+    """Run the file_processing agent for every api_flavor x file combination."""
     spec = ModelSpec.model_validate(state["model_spec"])
 
     try:
@@ -151,11 +152,11 @@ async def probe_file_processing(state: GraphState) -> dict:
     lines: list[str] = []
     failed = False
 
-    for path in spec.paths:
-        lines.append(f"{path}:")
+    for flavor in spec.api_flavors:
+        lines.append(f"{flavor}:")
         try:
-            model = build_model(path, spec.model_name, settings)
-            logger.info(f"{path}: built {type(model).__name__}")
+            model = build_model(flavor, spec.model_name, settings)
+            logger.info(f"{flavor}: built {type(model).__name__}")
         except Exception as e:
             failed = True
             lines.append(f"  build: ✗ {type(e).__name__}: {e}"[:220])
@@ -178,7 +179,7 @@ async def probe_file_processing(state: GraphState) -> dict:
 
     if not lines:
         failed = True
-        lines.append("(no paths specified)")
+        lines.append("(no api_flavors specified)")
 
     return {"success": not failed, "result_summary": "\n".join(lines)}
 

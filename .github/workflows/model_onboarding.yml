@@ -12,8 +12,8 @@ on:
         description: "Vendor-qualified model ID (e.g. gpt-5.2-2025-12-11, anthropic.claude-sonnet-4-5-20250929-v1:0)"
         required: true
         type: string
-      paths:
-        description: "Comma-separated code paths: registry keys (azure_responses, azure_chat_completions, vertex, bedrock_converse, bedrock_invoke, anthropic_sdk) and/or vendor_type:api_flavor pairs passed straight to get_chat_model (e.g. awsbedrock:converse, openai:responses, vertexai:generate-content, awsbedrock:AnthropicMessages)"
+      api_flavors:
+        description: "Comma-separated API flavors: shorthands (azure_responses, azure_chat_completions, vertex, bedrock_converse, bedrock_invoke) and/or vendor_type:api_flavor pairs passed straight to get_chat_model (e.g. awsbedrock:converse, openai:responses, vertexai:generate-content, awsbedrock:AnthropicMessages)"
         required: true
         type: string
         default: "azure_responses,azure_chat_completions"
@@ -94,7 +94,7 @@ jobs:
       working-directory: testcases/model-onboarding
       env:
         MODEL_NAME: ${{ inputs.model_name }}
-        PATHS: ${{ inputs.paths }}
+        API_FLAVORS: ${{ inputs.api_flavors }}
         FILES: ${{ inputs.files }}
         PROMPT: ${{ inputs.prompt }}
         AGENTHUB_CONFIG: ${{ inputs.agenthub_config }}
@@ -114,7 +114,7 @@ jobs:
             "model_spec": {
                 "model_name": os.environ["MODEL_NAME"],
                 "agenthub_config": os.environ["AGENTHUB_CONFIG"],
-                "paths": split(os.environ.get("PATHS", "")),
+                "api_flavors": split(os.environ.get("API_FLAVORS", "")),
                 "files": split(os.environ.get("FILES", "")),
             },
         }
