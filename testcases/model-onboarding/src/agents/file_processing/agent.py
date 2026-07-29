@@ -149,13 +149,20 @@ async def run(model, prompt: str, files) -> str:
     Prefers the full-fidelity path (real platform attachment + the generated
     graph with the Analyze Files tool). When the org forbids attachment
     creation (e.g. 403 for the CI principal), degrades to a direct multimodal
-    call so the cell still validates the model's file processing — marked
-    explicitly in the result.
+    call so the probe still validates the model's file processing — marked
+    explicitly in the returned text.
 
-    Returns ``"✓"`` / ``"✓ (direct...)"`` or ``"✗ ..."`` per the cell contract.
+    Returns:
+        The model's own answer about the file, prefixed with the route it took
+        (``[agent]`` or ``[direct]``) so the probe records what came back.
+
+    Raises:
+        ValueError: If no file is supplied, or the model returns nothing.
     """
     if not files:
-        return "✗ file_processing requires a file"
+        raise ValueError("file_processing requires a file")
+
+    route = "agent"
     try:
         attachment = await _upload_attachment(files[0])
     except Exception as e:
@@ -168,15 +175,20 @@ async def run(model, prompt: str, files) -> str:
         response = await llm_call_with_files(
             [_HumanMessage(content=prompt)], list(files), model
         )
-        if response.content and str(response.content).strip():
-            return f"✓ (direct multimodal; attachments unavailable: {type(e).__name__})"
-        return "✗ empty response (direct multimodal fallback)"
+        content = response.content
+        route = f"direct; attachments unavailable: {type(e).__name__}"
+    else:
+        graph = build_graph(model)
+        if hasattr(graph, "compile"):  # create_agent returns an uncompiled StateGraph
+            graph = graph.compile()
+        result = await graph.ainvoke(AgentInput(prompt=prompt, fileIn=attachment))
+        content = (
+            (result or {}).get("content")
+            if isinstance(result, dict)
+            else getattr(result, "content", None)
+        )
 
-    graph = build_graph(model)
-    if hasattr(graph, "compile"):  # create_agent returns an uncompiled StateGraph
-        graph = graph.compile()
-    result = await graph.ainvoke(AgentInput(prompt=prompt, fileIn=attachment))
-    content = (result or {}).get("content") if isinstance(result, dict) else getattr(result, "content", None)
-    if content and str(content).strip():
-        return "✓"
-    return "✗ empty response"
+    text = " ".join(str(content).split()) if content else ""
+    if not text:
+        raise ValueError(f"empty response ({route})")
+    return f"[{route}] {text}"

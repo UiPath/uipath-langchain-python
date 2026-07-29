@@ -1,146 +1,53 @@
-"""Model-parameterized onboarding test case.
+"""Model-onboarding test case: file processing.
 
-Exercises a single model — supplied at runtime via ``input.json`` — across the
-distinct ``get_chat_model`` code paths that model is expected to support. For
-every path, three capability payloads are run:
-
-- ``simple``  — a plain text ``ainvoke``; asserts a non-empty completion.
-- ``tools``   — a full tool-calling round trip: bind a tool, let the model
-                request it, execute the tool, feed the ``ToolMessage`` back, and
-                assert the model produces a final answer that uses the result.
-- ``files/*`` — one cell per selected file attachment via ``llm_call_with_files``.
-
-Every ``path x payload`` cell is invoked independently; failures are caught per
-cell and rolled up into one ``success`` boolean, mirroring the
-``multimodal-invoke`` output contract so this project drops into the existing
-integration-test matrix unchanged.
-
-The model is NOT hardcoded. Edit ``input.json`` to onboard any model:
+Runs the coded ``file_processing`` agent (Studio Web's "Clone as Coded Agent"
+of the low-code FileProcessingAgent) against a model supplied at runtime via
+``input.json`` — one cell per attached file, rolled up into a single
+``success`` boolean plus a ``result_summary`` carrying the model's actual
+answer for each file.
 
     {
       "prompt": "Describe the content of this file in one sentence.",
       "model_spec": {
         "model_name": "gpt-5.2-2025-12-11",
-        "paths": ["azure_responses", "azure_chat_completions"],
+        "paths": ["azure_responses"],
         "agenthub_config": "agentsplayground",
         "files": ["image", "pdf"]
       }
     }
 
-``paths`` is explicit on purpose: a model ID is only valid on the vendor
-families it actually ships on, so the caller declares which surfaces to test.
-``files`` may be empty — the ``simple`` and ``tools`` payloads still run, only
-the per-file cells are skipped.
+``paths`` entries are either ``get_chat_model`` shorthands (``azure_responses``,
+``azure_chat_completions``, ``vertex``, ``bedrock_converse``,
+``bedrock_invoke``) or ``vendor_type:api_flavor`` pairs passed straight to
+``get_chat_model`` (e.g. ``awsbedrock:converse``, ``openai:responses``).
 """
 
 import logging
-from typing import Callable
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_core.tools import tool
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 from uipath.llm_client.settings import PlatformSettings
-from uipath_langchain_client.clients.bedrock.chat_models import (
-    UiPathChatAnthropicBedrock,
-)
-from uipath_langchain_client.settings import (
-    ApiFlavor,
-    UiPathBaseSettings,
-    VendorType,
-)
+from uipath_langchain_client.settings import ApiFlavor, UiPathBaseSettings
 
-from uipath_langchain.agent.multimodal.invoke import llm_call_with_files
 from uipath_langchain.agent.multimodal.types import FileInfo
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 
-# main.py is loaded as a top-level module (./src/main.py:graph), so `agents`
-# is a sibling top-level package on sys.path. Fall back to loading it by path
-# if the loader did not put src/ on sys.path.
-try:
-    from agents import AGENT_REGISTRY
-    from agents.is_tools.agent import run as run_is_tools
-except ModuleNotFoundError:  # pragma: no cover - defensive for alt loaders
-    import os
-    import sys
-
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from agents import AGENT_REGISTRY
-    from agents.is_tools.agent import run as run_is_tools
+from agents.file_processing.agent import run as run_file_processing
 
 logger = logging.getLogger(__name__)
 
-
-# --------------------------------------------------------------------------- #
-# Path registry: one builder per distinct get_chat_model code path.
-#
-# Each builder returns a configured BaseChatModel for the given model name and
-# client settings. The keys are the strings the caller lists in
-# `model_spec.paths`. Adding a new reachable class is a one-line addition here.
-# --------------------------------------------------------------------------- #
-PathBuilder = Callable[[str, UiPathBaseSettings], object]
-
-PATH_REGISTRY: dict[str, PathBuilder] = {
-    # VendorType.OPENAI (UiPath-owned) -> UiPathAzureChatOpenAI (responses API)
-    "azure_responses": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.RESPONSES,
-        temperature=0.0,
-        max_tokens=2000,
-    ),
-    # VendorType.OPENAI + CHAT_COMPLETIONS -> UiPathAzureChatOpenAI (chat API)
-    "azure_chat_completions": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.CHAT_COMPLETIONS,
-        temperature=0.0,
-        max_tokens=2000,
-    ),
-    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI.
-    # vendor_type + api_flavor are pinned explicitly so this path deterministically
-    # exercises the GENERATE_CONTENT flavor rather than relying on autodetection.
-    "vertex": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        vendor_type=VendorType.VERTEXAI,
-        api_flavor=ApiFlavor.GENERATE_CONTENT,
-        temperature=0.0,
-        max_tokens=2000,
-    ),
-    # VendorType.AWSBEDROCK (UiPath-owned) -> UiPathChatBedrockConverse
-    "bedrock_converse": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.CONVERSE,
-        temperature=0.0,
-        max_tokens=2000,
-    ),
-    # VendorType.AWSBEDROCK + INVOKE -> UiPathChatBedrock
-    "bedrock_invoke": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.INVOKE,
-        temperature=0.0,
-        max_tokens=2000,
-    ),
-    # Direct instantiation -> UiPathChatAnthropicBedrock (not factory-reachable)
-    "anthropic_sdk": lambda model, settings: UiPathChatAnthropicBedrock(
-        model_name=model,
-        settings=settings,
-        temperature=0.0,
-        max_tokens=2000,
-    ),
+# Shorthand names for the api_flavor of each get_chat_model code path. Anything
+# not listed here is parsed as "vendor_type:api_flavor".
+PATH_SHORTHANDS: dict[str, tuple[str | None, ApiFlavor | None]] = {
+    "azure_responses": (None, ApiFlavor.RESPONSES),
+    "azure_chat_completions": (None, ApiFlavor.CHAT_COMPLETIONS),
+    "vertex": ("vertexai", ApiFlavor.GENERATE_CONTENT),
+    "bedrock_converse": (None, ApiFlavor.CONVERSE),
+    "bedrock_invoke": (None, ApiFlavor.INVOKE),
 }
 
-
-# --------------------------------------------------------------------------- #
-# File registry: named file attachments the caller selects via
-# `model_spec.files`. Public, reachable URLs so the run environment can fetch
-# them. Extend as needed for other formats you want to onboard against.
-# --------------------------------------------------------------------------- #
+# Files the agent is asked to process; selected by name via `model_spec.files`.
 FILE_REGISTRY: dict[str, FileInfo] = {
     "image": FileInfo(
         url="https://www.w3schools.com/css/img_5terre.jpg",
@@ -155,70 +62,21 @@ FILE_REGISTRY: dict[str, FileInfo] = {
 }
 
 
-# --------------------------------------------------------------------------- #
-# Tool-calling payload: a single deterministic tool. The prompt is written to
-# force a call, and the expected answer is deterministic so the round trip can
-# be asserted end to end.
-# --------------------------------------------------------------------------- #
-@tool
-def get_weather(city: str) -> str:
-    """Get the current weather for a city.
-
-    Args:
-        city: The city to look up the weather for.
-    """
-    # Deterministic so the final-answer assertion is stable.
-    return f"The weather in {city} is 22 degrees Celsius and sunny."
-
-
-TOOLS = [get_weather]
-TOOL_PROMPT = "What is the weather in Paris? Use the get_weather tool."
-# A token the final answer must contain to prove the tool result was consumed.
-TOOL_ANSWER_TOKEN = "22"
-
-
-class IsToolsSpec(BaseModel):
-    """Configuration for the IS-tools payload (agents/is_tools).
-
-    The agent is the Studio Web coded copy of the low-code IsToolsAgent: the
-    model under test is bound to real Integration Service Activity tools
-    (Slack Send Message to Channel, Outlook 365 Send Email) and must produce
-    a well-formed tool call. Call-only — the tools are never executed, so no
-    connections are needed and nothing is actually sent.
-    """
-
-    prompt: str = Field(
-        default=(
-            "Send a Slack message saying 'model onboarding connectivity "
-            "test' to the channel #model-onboarding-tests, then send an "
-            "email with subject 'model onboarding connectivity test' and "
-            "the same body to model-onboarding-tests@uipath.com."
-        ),
-        description="The communication request the model must translate "
-        "into Activity tool calls.",
-    )
-
-
 class ModelSpec(BaseModel):
     """Runtime specification for the model under test."""
 
     model_name: str = Field(description="Vendor-qualified model identifier.")
     paths: list[str] = Field(
-        description="get_chat_model code paths to exercise; keys of PATH_REGISTRY.",
+        description="Code paths to exercise: PATH_SHORTHANDS keys or "
+        "'vendor_type:api_flavor' pairs.",
     )
     agenthub_config: str = Field(
         default="agentsplayground",
         description="AgentHub config header value; must exist in the target tenant.",
     )
     files: list[str] = Field(
-        default_factory=list,
-        description="File attachments for the 'files' payload; keys of "
-        "FILE_REGISTRY. Empty => only simple + tools payloads run.",
-    )
-    is_tools: IsToolsSpec = Field(
-        default_factory=IsToolsSpec,
-        description="IS activity-tool payload configuration; empty flavors "
-        "list => no is_tools cells.",
+        default_factory=lambda: ["image", "pdf"],
+        description="Files to process; keys of FILE_REGISTRY.",
     )
 
 
@@ -232,222 +90,115 @@ class GraphOutput(BaseModel):
     result_summary: str
 
 
-class GraphState(MessagesState):
+class GraphState(TypedDict, total=False):
     prompt: str
     model_spec: dict
     success: bool
     result_summary: str
-    model_results: dict
 
 
-def _build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> object:
-    """Build a model instance for a registered path.
+def build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> object:
+    """Build the chat model for one code path.
 
-    Accepts either a PATH_REGISTRY key (e.g. ``azure_responses``) or a
-    ``vendor:flavor`` pair (e.g. ``awsbedrock:converse``, ``openai:responses``,
-    ``vertexai:generate-content``) so any API flavor can be supplied directly —
-    the model built here is what every payload, including the coded agents,
-    runs with. ``vendor:`` alone lets the factory autodetect the flavor.
+    Args:
+        path: A PATH_SHORTHANDS key, or ``vendor_type:api_flavor``
+            (``vendor_type:`` alone lets the factory autodetect the flavor).
+        model_name: Vendor-qualified model identifier.
+        settings: Client settings carrying the AgentHub config.
+
+    Returns:
+        A configured chat model.
 
     Raises:
-        ValueError: If ``path`` is neither a registry key nor a resolvable
-            ``vendor:flavor`` pair.
+        ValueError: If ``path`` is neither a shorthand nor a vendor:flavor pair.
     """
-    if path in PATH_REGISTRY:
-        return PATH_REGISTRY[path](model_name, settings)
-
-    vendor_type, sep, api_flavor = path.partition(":")
-    if not sep:
+    if path in PATH_SHORTHANDS:
+        vendor_type, api_flavor = PATH_SHORTHANDS[path]
+    elif ":" in path:
+        vendor_raw, _, flavor_raw = path.partition(":")
+        vendor_type = vendor_raw.strip() or None
+        api_flavor = flavor_raw.strip() or None  # type: ignore[assignment]
+    else:
         raise ValueError(
-            f"unknown path '{path}' (registry keys: {sorted(PATH_REGISTRY)}; "
-            "or pass 'vendor_type:api_flavor' directly, e.g. "
-            "'awsbedrock:converse', 'openai:responses')"
+            f"unknown path '{path}': expected one of {sorted(PATH_SHORTHANDS)} "
+            "or 'vendor_type:api_flavor'"
         )
-    # get_chat_model accepts vendor_type/api_flavor as plain strings and
-    # validates them itself; invalid values fail legibly in the __build__ cell.
+
     return get_chat_model(
         model=model_name,
         client_settings=settings,
-        vendor_type=vendor_type.strip(),
-        api_flavor=api_flavor.strip() or None,
+        vendor_type=vendor_type,
+        api_flavor=api_flavor,
         temperature=0.0,
         max_tokens=2000,
     )
 
 
-async def _run_simple(model: BaseChatModel, prompt: str) -> str:
-    """Simple-call payload: plain ainvoke, require a non-empty completion."""
-    response = await model.ainvoke([HumanMessage(content=prompt)])
-    if not isinstance(response, AIMessage):
-        return f"✗ non-AIMessage: {type(response).__name__}"
-    if response.content and str(response.content).strip():
-        return "✓"
-    return "✗ empty response"
-
-
-async def _run_tools(model: BaseChatModel) -> str:
-    """Tool-calling payload: a full round trip.
-
-    Binds the tool, forces a call, executes the tool locally, feeds the
-    ToolMessage back, and asserts the final answer reflects the tool result.
-    """
-    llm = model.bind_tools(TOOLS)
-    messages: list = [HumanMessage(content=TOOL_PROMPT)]
-
-    first = await llm.ainvoke(messages)
-    if not isinstance(first, AIMessage) or not first.tool_calls:
-        return "✗ no tool call requested"
-
-    messages.append(first)
-    by_name = {t.name: t for t in TOOLS}
-    for call in first.tool_calls:
-        tool_obj = by_name.get(call["name"])
-        if tool_obj is None:
-            return f"✗ unexpected tool '{call['name']}'"
-        result = tool_obj.invoke(call["args"])
-        messages.append(ToolMessage(content=str(result), tool_call_id=call["id"]))
-
-    final = await llm.ainvoke(messages)
-    if not isinstance(final, AIMessage) or not str(final.content).strip():
-        return "✗ empty final answer"
-    if TOOL_ANSWER_TOKEN not in str(final.content):
-        return f"✗ final answer did not use tool result (missing '{TOOL_ANSWER_TOKEN}')"
-    return "✓"
-
-
-async def _run_file(
-    model: BaseChatModel, prompt: str, file_info: FileInfo
-) -> str:
-    """File-processing payload: delegate to the coded file_processing agent.
-
-    The agent is the coded equivalent of the low-code FileProcessingAgent; it
-    receives the built model (already configured for the target path/flavor),
-    the task prompt, and the single file to attach.
-    """
-    return await AGENT_REGISTRY["file_processing"](model, prompt, [file_info])
-
-
-async def run_model_onboarding(state: GraphState) -> dict:
+async def probe_file_processing(state: GraphState) -> dict:
+    """Run the file_processing agent for every path x file combination."""
     spec = ModelSpec.model_validate(state["model_spec"])
 
     try:
-        client_settings = PlatformSettings(agenthub_config=spec.agenthub_config)
+        settings = PlatformSettings(agenthub_config=spec.agenthub_config)
     except Exception as e:
-        # Settings need UiPath auth env vars (set by `uipath auth`). If they are
-        # missing the whole run is moot; surface it as a legible failure.
+        # Settings need the auth env vars that `uipath auth` writes.
         logger.error(f"PlatformSettings construction failed: {e}")
         return {
             "success": False,
-            "result_summary": f"settings: ✗ {str(e)[:120]}",
-            "model_results": {},
+            "result_summary": f"settings: ✗ {type(e).__name__}: {e}"[:220],
         }
 
-    model_results: dict[str, dict[str, str]] = {}
+    lines: list[str] = []
+    failed = False
+
     for path in spec.paths:
-        logger.info(f"Testing path '{path}' with model '{spec.model_name}'...")
-
-        if path not in PATH_REGISTRY and ":" not in path:
-            logger.error(f"  unknown path '{path}'")
-            model_results[path] = {
-                "__path__": f"✗ unknown path '{path}' (registry keys: "
-                f"{sorted(PATH_REGISTRY)}; or 'vendor_type:api_flavor')"
-            }
+        lines.append(f"{path}:")
+        try:
+            model = build_model(path, spec.model_name, settings)
+            logger.info(f"{path}: built {type(model).__name__}")
+        except Exception as e:
+            failed = True
+            lines.append(f"  build: ✗ {type(e).__name__}: {e}"[:220])
             continue
 
-        try:
-            model = _build_model(path, spec.model_name, client_settings)
-            logger.info(f"  Created: {type(model).__name__}")
-        except Exception as e:  # model construction itself can fail
-            logger.error(f"  construction failed: {e}")
-            model_results[path] = {"__build__": f"✗ {f"{type(e).__name__}: {e}"[:220]}"}
-            continue
-
-        cell_results: dict[str, str] = {}
-
-        # 1. Simple call
-        logger.info("  simple...")
-        try:
-            cell_results["simple"] = await _run_simple(model, state["prompt"])
-        except Exception as e:
-            cell_results["simple"] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
-        logger.info(f"    simple: {cell_results['simple']}")
-
-        # 2. Tool call (full round trip)
-        logger.info("  tools...")
-        try:
-            cell_results["tools"] = await _run_tools(model)
-        except Exception as e:
-            cell_results["tools"] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
-        logger.info(f"    tools: {cell_results['tools']}")
-
-        # 3. File processing — one cell per selected file
         for file_name in spec.files:
-            label = f"files/{file_name}"
-            logger.info(f"  {label}...")
+            file_info = FILE_REGISTRY.get(file_name)
+            if file_info is None:
+                failed = True
+                lines.append(f"  {file_name}: ✗ unknown file")
+                continue
             try:
-                cell_results[label] = await _run_file(
-                    model, state["prompt"], FILE_REGISTRY[file_name]
-                )
+                answer = await run_file_processing(model, state["prompt"], [file_info])
             except Exception as e:
-                cell_results[label] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
-            logger.info(f"    {label}: {cell_results[label]}")
+                failed = True
+                lines.append(f"  {file_name}: ✗ {type(e).__name__}: {e}"[:220])
+                continue
+            # The agent's own answer is the evidence the probe returns.
+            lines.append(f"  {file_name}: ✓ {answer}"[:400])
 
-        # 4. IS Activity tools — call-only: the model is bound to the real
-        # Slack/Outlook Activity tools (Studio Web coded copy) and must
-        # produce a well-formed tool call. Nothing is executed or sent.
-        logger.info("  is_tools...")
-        try:
-            cell_results["is_tools"] = await run_is_tools(
-                model, spec.is_tools.prompt
-            )
-        except Exception as e:
-            cell_results["is_tools"] = f"✗ {f"{type(e).__name__}: {e}"[:220]}"
-        logger.info(f"    is_tools: {cell_results['is_tools']}")
+    if not lines:
+        failed = True
+        lines.append("(no paths specified)")
 
-        model_results[path] = cell_results
-
-    summary_lines = []
-    for path, results in model_results.items():
-        summary_lines.append(f"{path}:")
-        for cell_name, result in results.items():
-            summary_lines.append(f"  {cell_name}: {result}")
-
-    has_failures = any(
-        "✗" in v for results in model_results.values() for v in results.values()
-    )
-    # A spec with no runnable paths is a failure, not a vacuous success.
-    if not model_results:
-        has_failures = True
-        summary_lines.append("(no paths specified)")
-
-    return {
-        "success": not has_failures,
-        "result_summary": "\n".join(summary_lines),
-        "model_results": model_results,
-    }
+    return {"success": not failed, "result_summary": "\n".join(lines)}
 
 
 async def return_results(state: GraphState) -> GraphOutput:
     logger.info(f"Success: {state['success']}")
     logger.info(f"Summary:\n{state['result_summary']}")
     return GraphOutput(
-        success=state["success"],
-        result_summary=state["result_summary"],
+        success=state["success"], result_summary=state["result_summary"]
     )
 
 
-def build_graph() -> StateGraph:
+def build_graph():
     builder = StateGraph(GraphState, input_schema=GraphInput, output_schema=GraphOutput)
-
-    builder.add_node("run_model_onboarding", run_model_onboarding)
+    builder.add_node("probe_file_processing", probe_file_processing)
     builder.add_node("results", return_results)
-
-    builder.add_edge(START, "run_model_onboarding")
-    builder.add_edge("run_model_onboarding", "results")
+    builder.add_edge(START, "probe_file_processing")
+    builder.add_edge("probe_file_processing", "results")
     builder.add_edge("results", END)
-
-    memory = MemorySaver()
-    return builder.compile(checkpointer=memory)
+    return builder.compile()
 
 
 graph = build_graph()

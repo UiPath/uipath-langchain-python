@@ -1,0 +1,149 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "46ce02e5-58c3-4ddd-a442-b0a3dfe05001",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "default": "Describe the content of this file in one sentence.",
+                        "title": "Prompt",
+                        "type": "string"
+                    },
+                    "model_spec": {
+                        "description": "Runtime specification for the model under test.",
+                        "properties": {
+                            "model_name": {
+                                "description": "Vendor-qualified model identifier.",
+                                "title": "Model Name",
+                                "type": "string"
+                            },
+                            "paths": {
+                                "description": "get_chat_model code paths to exercise; keys of PATH_REGISTRY.",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "title": "Paths",
+                                "type": "array"
+                            },
+                            "agenthub_config": {
+                                "default": "agentsplayground",
+                                "description": "AgentHub config header value; must exist in the target tenant.",
+                                "title": "Agenthub Config",
+                                "type": "string"
+                            },
+                            "files": {
+                                "description": "File attachments for the 'files' payload; keys of FILE_REGISTRY. Empty => only simple + tools payloads run.",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "title": "Files",
+                                "type": "array"
+                            },
+                            "is_tools": {
+                                "description": "Configuration for the IS-tools payload (agents/is_tools).\n\nThe agent is the Studio Web coded copy of the low-code IsToolsAgent: the\nmodel under test drives real Integration Service Activity tools (Slack\nSend Message to Channel, Outlook 365 Send Email). Running it performs\nreal communication actions, so the payload only runs when connection ids\nare configured.",
+                                "properties": {
+                                    "connections": {
+                                        "additionalProperties": {
+                                            "type": "string"
+                                        },
+                                        "description": "IS connection ids by tool key ('slack', 'outlook'). Empty => payload skipped (no is_tools cell).",
+                                        "title": "Connections",
+                                        "type": "object"
+                                    },
+                                    "prompt": {
+                                        "default": "Send a Slack message saying 'model onboarding connectivity test' to the channel #model-onboarding-tests, then send an email with subject 'model onboarding connectivity test' and the same body to model-onboarding-tests@uipath.com.",
+                                        "description": "The communication action the model must perform via the Activity tools.",
+                                        "title": "Prompt",
+                                        "type": "string"
+                                    }
+                                },
+                                "title": "IsToolsSpec",
+                                "type": "object"
+                            }
+                        },
+                        "required": [
+                            "model_name",
+                            "paths"
+                        ],
+                        "title": "ModelSpec",
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "model_spec"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "title": "Success",
+                        "type": "boolean"
+                    },
+                    "result_summary": {
+                        "title": "Result Summary",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "success",
+                    "result_summary"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "run_model_onboarding",
+                        "name": "run_model_onboarding",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "results",
+                        "name": "results",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "run_model_onboarding",
+                        "label": null
+                    },
+                    {
+                        "source": "run_model_onboarding",
+                        "target": "results",
+                        "label": null
+                    },
+                    {
+                        "source": "results",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}

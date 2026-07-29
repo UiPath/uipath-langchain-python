@@ -1,0 +1,6 @@
+{
+  "ProjectType": "Agent",
+  "Name": "model-onboarding",
+  "Description": "Onboard a runtime-specified LLM model across get_chat_model code paths",
+  "MainFile": null
+}

@@ -1,23 +1,14 @@
 # model-onboarding testcase
 
-Exercises **one runtime-specified model** across the distinct `get_chat_model`
-code paths it is expected to support. For **every path** it runs four
-capability payloads:
+Runs the coded **[`file_processing` agent](src/agents/README.md)** — Studio
+Web's "Clone as Coded Agent" of the low-code FileProcessingAgent — against
+**one runtime-specified model**, once per `path × file`.
 
-- **`simple`** — a plain text call; asserts a non-empty completion.
-- **`tools`** — a full tool-calling **round trip**: bind a tool, let the model
-  request it, execute the tool, feed the result back, and assert the final
-  answer uses it.
-- **`files/<name>`** — one cell per selected file attachment, run through the
-  coded file-processing agent (Studio Web coded copy; real platform
-  attachment + Analyze Files internal tool).
-- **`is_tools`** — call-only Activity-tool check: bind the coded copy's real
-  Integration Service tools (Slack Send Message to Channel, Outlook 365 Send
-  Email) and assert the model produces a well-formed tool call. Nothing is
-  executed or sent. See [src/agents/README.md](src/agents/README.md).
-
-Every `path × payload` cell rolls up into a single `success` boolean, asserted
-alongside the emitted traces.
+Each cell records the model's **actual answer** about the file, prefixed with
+the route it took (`[agent]` via a real platform attachment + the *Analyze
+Files* tool, or `[direct]` when the org forbids attachment creation), so
+`result_summary` is evidence rather than a bare tick. Any failing cell flips
+the single `success` boolean, asserted alongside the emitted traces.
 
 Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 **input**. To onboard a model, edit `input.json` — no code change.
@@ -40,14 +31,14 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
   may need a *different* ID per vendor family.
 - **`paths`** — which `get_chat_model` code paths to exercise. Two forms,
   freely mixed:
-  - registry keys: `azure_responses`, `azure_chat_completions`, `vertex`,
-    `bedrock_converse`, `bedrock_invoke`, `anthropic_sdk`;
+  - shorthands: `azure_responses`, `azure_chat_completions`, `vertex`,
+    `bedrock_converse`, `bedrock_invoke`;
   - **`vendor_type:api_flavor` pairs passed straight to `get_chat_model`**
     (which accepts them as strings), e.g. `awsbedrock:converse`,
     `openai:responses`, `vertexai:generate-content`,
-    `awsbedrock:AnthropicMessages`. `vendor:` alone lets the factory
-    autodetect the flavor. Every payload — including the coded agents — runs
-    with the model built for that path/flavor.
+    `awsbedrock:AnthropicMessages`. `vendor_type:` alone lets the factory
+    autodetect the flavor. The agent runs with the model built for that
+    path/flavor.
 
   List only paths the model actually ships on — a model ID sent to a vendor
   it doesn't exist on is a guaranteed (and misleading) failure.
