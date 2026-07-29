@@ -188,7 +188,34 @@ async def run(model, prompt: str, files) -> str:
             else getattr(result, "content", None)
         )
 
-    text = " ".join(str(content).split()) if content else ""
+    text = _as_text(content)
     if not text:
         raise ValueError(f"empty response ({route})")
     return f"[{route}] {text}"
+
+
+def _as_text(content) -> str:
+    """Flatten LangChain message content to plain text.
+
+    Vendors differ: some return a plain string, others (e.g. the OpenAI
+    Responses API) return a list of content blocks like
+    ``[{"type": "text", "text": "...", "id": "msg_..."}]``. Only the text is
+    kept — block ids change every run and would make results
+    non-deterministic.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        parts = [content]
+    elif isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(str(block.get("text") or block.get("content") or ""))
+            else:
+                parts.append(str(getattr(block, "text", "") or ""))
+    else:
+        parts = [str(content)]
+    return " ".join(" ".join(parts).split())
