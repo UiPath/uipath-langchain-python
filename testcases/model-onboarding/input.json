@@ -8,7 +8,7 @@
             "pdf"
         ],
         "api_flavors": [
-            "azure_responses"
+            "openai:responses"
         ]
     }
 }
