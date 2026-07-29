@@ -79,6 +79,20 @@ FILE_REGISTRY: dict[str, FileCase] = {
 }
 
 
+def _matches(expected: str, answer: str) -> bool:
+    """Was the expected word actually given as the answer?
+
+    Each question asks for one word, so a correct reply is short. A substring
+    check alone is not enough: a model that fails to read the file may still
+    quote the word while explaining that it could not ("the tool returned a
+    placeholder result ('Dummy'), so the text cannot be determined") — that
+    passed a plain `in` check while asserting the opposite. Require the word
+    *and* an answer short enough to be an answer rather than a hedge.
+    """
+    words = [w.strip(".,'\"“”‘’!?:;()").lower() for w in answer.split()]
+    return expected.lower() in words and len(words) <= 4
+
+
 class ModelSpec(BaseModel):
     """The model under test."""
 
@@ -130,7 +144,7 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 lines.append(f"  {file_name}: ✗ {type(e).__name__}: {detail}"[:300])
                 continue
 
-            if case.expected in answer.lower():
+            if _matches(case.expected, answer):
                 lines.append(f"  {file_name}: ✓ {answer}"[:200])
             else:
                 failed = True
