@@ -70,10 +70,15 @@ FILE_REGISTRY: dict[str, FileCase] = {
             name="document.pdf",
             mime_type="application/pdf",
         ),
-        # Phrased to ask for the content itself. Asking for "the first word of
-        # the extracted text" made the agent reason about extraction quality
-        # and raise instead of answering, even when the tool returned "Dummy".
-        question="What does this document say? Answer with one word only.",
+        # Ask for a verbatim transcription. Asking what the document "says" or
+        # for "the first word of the extracted text" let the model judge
+        # whether "Dummy" was real content or a placeholder — it repeatedly
+        # answered that the file could not be read while quoting the very word
+        # it had been given. Transcription leaves no room for that judgement.
+        question=(
+            "Transcribe the text in this file exactly, with no commentary. "
+            "It is three words long."
+        ),
         expected="dummy",
     ),
 }
