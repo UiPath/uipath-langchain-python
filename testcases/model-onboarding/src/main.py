@@ -86,18 +86,35 @@ FILE_REGISTRY: dict[str, FileCase] = {
 }
 
 
+# Phrases a model uses when it quotes the expected word while denying it read
+# the file. A plain substring check passed those, asserting the opposite of
+# what the answer said.
+_REFUSAL_MARKERS = (
+    "cannot",
+    "can't",
+    "unable",
+    "not available",
+    "no actual",
+    "placeholder",
+    "unreadable",
+    "appears to be",
+    "rather than",
+)
+
+
 def _matches(expected: str, answer: str) -> bool:
     """Was the expected word actually given as the answer?
 
-    Each question asks for one word, so a correct reply is short. A substring
-    check alone is not enough: a model that fails to read the file may still
-    quote the word while explaining that it could not ("the tool returned a
-    placeholder result ('Dummy'), so the text cannot be determined") — that
-    passed a plain `in` check while asserting the opposite. Require the word
-    *and* an answer short enough to be an answer rather than a hedge.
+    Requires the word as a real token and no refusal language. Length is not a
+    criterion: a verbatim transcription legitimately carries the parser's
+    ``<PARSED TEXT FOR PAGE: 1 / 1>`` prefix, which a word-count limit rejected
+    even though the answer was correct.
     """
-    words = [w.strip(".,'\"“”‘’!?:;()").lower() for w in answer.split()]
-    return expected.lower() in words and len(words) <= 4
+    lowered = answer.lower()
+    if any(marker in lowered for marker in _REFUSAL_MARKERS):
+        return False
+    words = [w.strip(".,'\"“”‘’!?:;()<>/").lower() for w in lowered.split()]
+    return expected.lower() in words
 
 
 class ModelSpec(BaseModel):
