@@ -70,14 +70,16 @@ FILE_REGISTRY: dict[str, FileCase] = {
             name="document.pdf",
             mime_type="application/pdf",
         ),
-        # Ask for a verbatim transcription. Asking what the document "says" or
-        # for "the first word of the extracted text" let the model judge
-        # whether "Dummy" was real content or a placeholder — it repeatedly
-        # answered that the file could not be read while quoting the very word
-        # it had been given. Transcription leaves no room for that judgement.
+        # This file's text is the literal string "Dummy PDF file", which reads
+        # as a placeholder — across six runs the model answered it correctly
+        # three times and three times refused, reporting the file unreadable
+        # while quoting the very text the tool had returned. Asking it to
+        # repeat the tool output verbatim removes the judgement call; the
+        # instruction not to evaluate the text is what makes this stable.
         question=(
-            "Transcribe the text in this file exactly, with no commentary. "
-            "It is three words long."
+            "Call the Analyze Files tool, then repeat its result back "
+            "verbatim as your entire answer. Do not evaluate, judge or "
+            "comment on whether the text is meaningful."
         ),
         expected="dummy",
     ),
