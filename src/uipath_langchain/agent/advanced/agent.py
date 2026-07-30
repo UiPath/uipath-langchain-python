@@ -1,20 +1,26 @@
 """Advanced agent builder."""
 
-from collections.abc import Callable, Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, NotRequired, cast
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
 from deepagents.backends import BackendProtocol
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from pydantic import BaseModel
+from pydantic import AliasChoices, AliasPath, BaseModel, create_model
 from uipath.core.chat import UiPathConversationMessageData
 
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
@@ -27,14 +33,91 @@ from .utils import (
 )
 
 
+class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Attach a once-resolved invocation prompt to every model request."""
+
+    def __init__(self, state_key: str) -> None:
+        self.state_key = state_key
+        self.state_schema = type(
+            "RuntimeSystemPromptState",
+            (AgentState,),
+            {"__annotations__": {state_key: NotRequired[str | None]}},
+        )
+
+    def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
+        runtime_prompt = cast("str | None", request.state.get(self.state_key))
+        if runtime_prompt is None:
+            return request
+
+        if request.system_message is None:
+            system_message = SystemMessage(content=runtime_prompt)
+        else:
+            system_message = SystemMessage(
+                content_blocks=[
+                    {"type": "text", "text": f"{runtime_prompt}\n\n"},
+                    *request.system_message.content_blocks,
+                ]
+            )
+        return request.override(system_message=system_message)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        return handler(self._prepare_request(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        return await handler(self._prepare_request(request))
+
+
+def _allocate_runtime_system_prompt_key(
+    input_schema: type[BaseModel] | None,
+) -> str:
+    """Allocate a graph-state key that cannot overlap the graph's input contract."""
+    occupied_fields = set(AdvancedAgentGraphState.model_fields)
+    if input_schema is not None:
+        occupied_fields.update(input_schema.model_fields)
+        for field in input_schema.model_fields.values():
+            aliases: list[str | AliasPath] = []
+            if field.alias is not None:
+                aliases.append(field.alias)
+            if isinstance(field.validation_alias, AliasChoices):
+                aliases.extend(field.validation_alias.choices)
+            elif field.validation_alias is not None:
+                aliases.append(field.validation_alias)
+
+            for alias in aliases:
+                if isinstance(alias, str):
+                    occupied_fields.add(alias)
+                elif alias.path and isinstance(alias.path[0], str):
+                    occupied_fields.add(alias.path[0])
+
+    default_key = "uipath_system_prompt"
+    if default_key not in occupied_fields:
+        return default_key
+
+    for suffix in range(1, len(occupied_fields) + 1):
+        state_key = f"{default_key}_{suffix}"
+        if state_key not in occupied_fields:
+            return state_key
+
+    raise AssertionError("A free system-prompt state key must exist")
+
+
 def create_advanced_agent(
     model: BaseChatModel,
-    system_prompt: str = "",
+    system_prompt: str | SystemMessage | None = "",
     tools: Sequence[BaseTool] = (),
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
     backend: BackendProtocol | BackendFactory | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
@@ -50,13 +133,14 @@ def create_advanced_agent(
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
+        middleware=list(middleware),
     )
 
 
 def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
-    system_prompt: str,
+    system_prompt: str | Callable[[dict[str, Any]], str],
     backend: BackendProtocol | BackendFactory | None,
     response_format: ResponseFormat[Any] | None,
     input_schema: type[BaseModel] | None,
@@ -74,18 +158,45 @@ def create_advanced_agent_graph(
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
     )
+    if callable(system_prompt):
+        build_system_prompt = system_prompt
+        static_system_prompt = None
+    else:
+        build_system_prompt = None
+        static_system_prompt = system_prompt
+    runtime_system_prompt_key = (
+        _allocate_runtime_system_prompt_key(input_schema)
+        if build_system_prompt is not None
+        else None
+    )
 
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
-        system_prompt=system_prompt,
+        system_prompt=static_system_prompt,
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
+        middleware=(
+            [_RuntimeSystemPromptMiddleware(runtime_system_prompt_key)]
+            if runtime_system_prompt_key is not None
+            else []
+        ),
     )
 
     wrapper_state = create_state_with_input(input_schema)
+    if runtime_system_prompt_key is not None:
+        runtime_state_field: dict[str, Any] = {
+            runtime_system_prompt_key: (str | None, None)
+        }
+        wrapper_state = create_model(
+            "RuntimeAdvancedAgentGraphState",
+            __base__=wrapper_state,
+            **runtime_state_field,
+        )
     internal_fields = set(AdvancedAgentGraphState.model_fields.keys())
+    if runtime_system_prompt_key is not None:
+        internal_fields.add(runtime_system_prompt_key)
     attachment_paths = (
         get_job_attachment_paths(input_schema) if input_schema is not None else []
     )
@@ -103,7 +214,12 @@ def create_advanced_agent_graph(
                 backend, attachment_paths, input_args
             )
         user_text = build_user_message(input_args)
-        return {"messages": [HumanMessage(content=user_text, id="user-input")]}
+        update: dict[str, Any] = {
+            "messages": [HumanMessage(content=user_text, id="user-input")]
+        }
+        if build_system_prompt is not None and runtime_system_prompt_key is not None:
+            update[runtime_system_prompt_key] = build_system_prompt(input_args)
+        return update
 
     def transform_output(state: BaseModel) -> dict[str, Any]:
         structured = getattr(state, "structured_response", {})
