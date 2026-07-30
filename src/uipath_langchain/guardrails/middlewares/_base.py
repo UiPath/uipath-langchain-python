@@ -4,7 +4,7 @@ import ast
 import asyncio
 import json
 import logging
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from langchain.agents.middleware import (
     AgentMiddleware,
@@ -48,6 +48,10 @@ from ._utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: ``$guardrailType`` discriminator for built-in validator guardrails. Typed as
+#: a ``Literal`` so it satisfies ``BuiltInValidatorGuardrail.guardrail_type``.
+BUILT_IN_VALIDATOR_GUARDRAIL_TYPE: Literal["builtInValidator"] = "builtInValidator"
 
 
 def _get_tool_message_content(result: ToolMessage | Command[Any]) -> Any:

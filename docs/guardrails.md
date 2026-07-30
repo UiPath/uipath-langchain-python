@@ -70,6 +70,7 @@ from uipath.core.guardrails import GuardrailScope
 | `UiPathIntellectualPropertyMiddleware` | AGENT, LLM only | POST only | `entities` |
 | `UiPathLLMAsJudgeMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `guardrail_text`, `model`, `threshold`, `positive_examples`, `negative_examples`, `tools`, `stage` |
 | `UiPathDeterministicGuardrailMiddleware` | TOOL only | PRE / POST / PRE_AND_POST | `tools`, `rules`, `stage` |
+| `UiPathByoGuardrailMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `validator_name`, `connection_id`, `validator_parameters`, `tools`, `stage` |
 
 TOOL scope for `UiPathPIIDetectionMiddleware`, `UiPathHarmfulContentMiddleware`, and `UiPathLLMAsJudgeMiddleware` requires passing `tools=[...]` to restrict `wrap_tool_call` hooks to specific tools.
 
@@ -87,6 +88,7 @@ Additional parameters per class:
 - **`UiPathIntellectualPropertyMiddleware`**: `entities` (list of `IntellectualPropertyEntityType` values).
 - **`UiPathLLMAsJudgeMiddleware`**: `guardrail_text` (required — the plain-language rule the judge evaluates against, ≤ 4000 chars), `model` (required — judge model id, e.g. `"gpt-4o-2024-08-06"`; must be a model your governance policy allows for the LLM-as-judge guardrail — LLM Gateway enforces the permitted list), `threshold` (`0` strictest … `6` most lenient, default `2`), `positive_examples` / `negative_examples` (optional calibration payloads — ≤ 2 each, ≤ 1000 chars each), `tools` (required only when `GuardrailScope.TOOL` is used), `stage`. See the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/#llm-as-judge) for the full parameter reference.
 - **`UiPathDeterministicGuardrailMiddleware`**: `tools` (required — list of tools to guard), `rules` (list of lambda functions), `stage`.
+- **`UiPathByoGuardrailMiddleware`**: `validator_name` (required — the BYOG configuration's validator name), `connection_id` (recommended — the Integration Service connection id backing the configuration), `validator_parameters` (optional connector-defined parameters, passed through as-is), `tools` (required only when `GuardrailScope.TOOL` is used), `stage`. See [Bring Your Own Guardrail](#bring-your-own-guardrail-byog).
 
 ### Full example
 
@@ -214,6 +216,80 @@ agent = create_agent(
     name="Output transformer",
 ),
 ```
+
+### Bring Your Own Guardrail (BYOG)
+
+`UiPathByoGuardrailMiddleware` runs a **customer-managed** validator instead of a UiPath-managed one — for example a cloud content-safety subscription, a vendor validation service, or a custom Integration Service connector wrapping an internal classifier.
+
+**Admin prerequisite.** An Org Admin first creates the BYOG configuration under **Admin → AI Trust Layer → Guardrails Configurations**: pick a guardrail connector (a UiPath-shipped one or a custom one wrapping your own vendor), create an Integration Service connection with your credentials, and save the configuration with a validator name. If the Guardrails Configurations page is not available, Bring Your Own Guardrail is not enabled on your tenant yet.
+
+The middleware references that configuration by name:
+
+```python
+from uipath.core.guardrails import GuardrailScope
+from uipath_langchain.guardrails import (
+    BlockAction,
+    UiPathByoGuardrailMiddleware,
+)
+
+byog = UiPathByoGuardrailMiddleware(
+    validator_name="my-harmful-content-guardrail",   # the configuration's validator name
+    scopes=[GuardrailScope.AGENT],
+    action=BlockAction(),
+    connection_id="my-byog-guardrail-connection",     # IS connection id
+)
+
+agent = create_agent(model=llm, tools=[...], middleware=[*byog])
+```
+
+To find the `validator_name` and `connection_id`, list the validators available to your tenant:
+
+```bash
+uip agent guardrails list --output json
+```
+
+Your BYOG configurations are listed alongside the built-in validators — so the same validator type can appear more than once, once for the UiPath-managed validator and once per BYOG configuration. Copy the validator name and connection id from your configuration's entry.
+
+Notes:
+
+- **Always pass `connection_id`.** Validator names are unique per connection only; without the id the server picks the first configuration matching the name.
+- **You choose the scopes and stages.** BYOG validators are not scope- or stage-restricted: like the built-in validators they are available on AGENT, LLM and TOOL scope for both PRE and POST, and it is up to you which ones to register. The entry's `AllowedScopes` / `GuardrailStages` in the CLI output confirm what a given validator accepts.
+- **Parameters are connector-defined.** Pass `validator_parameters` as raw parameter values when your connector expects them; there is no static schema on the client. See [Tuning a BYOG validator](#tuning-a-byog-validator) below.
+- **Error semantics.** A removed or disabled configuration, BYOG not being enabled for the tenant, or a vendor failure (with fallback off) returns `PROVIDER_ERROR`/`FEATURE_DISABLED` — the middleware treats these like any non-failed result (fail-open) and logs the details. Fallback to the UiPath-managed validator (`FallbackOnUiPath`) applies only when the configuration's validator type maps to an out-of-the-box validator.
+
+#### Tuning a BYOG validator
+
+`validator_parameters` is forwarded to the guardrail on every evaluation. The parameter **ids, types and allowed values are defined by the guardrail connector**, not by this SDK — read them from the validator's `Parameters` array in `uip agent guardrails list`, which gives each parameter's `Id`, `Type`, whether it is `Required`, its `DefaultValue`, and the applicable `Options` / `KeySource` / `Min` / `Max` / `Step`. Omit the argument to fall back to those `DefaultValue`s.
+
+```python
+from uipath.platform.guardrails import EnumListParameterValue, MapEnumParameterValue
+from uipath_langchain.guardrails.enums import HarmfulContentEntityType
+
+# Example for the Azure Content Safety connector's `harmful_content` validator:
+# select the harm categories and set a per-category severity threshold.
+byog_parameters = [
+    EnumListParameterValue(
+        parameter_type="enum-list",
+        id="harmfulContentEntities",
+        value=[entity.value for entity in HarmfulContentEntityType],
+    ),
+    MapEnumParameterValue(
+        parameter_type="map-enum",
+        id="harmfulContentEntityThresholds",
+        value={entity.value: 4 for entity in HarmfulContentEntityType},
+    ),
+]
+
+byog = UiPathByoGuardrailMiddleware(
+    validator_name="my-harmful-content-guardrail",
+    scopes=[GuardrailScope.AGENT],
+    action=BlockAction(),
+    connection_id="my-byog-guardrail-connection",
+    validator_parameters=byog_parameters,
+)
+```
+
+That connector flags a category when `severity >= threshold` on Azure's 0/2/4/6 scale, so a threshold of `4` lets low-severity (2) content through while still blocking 4 and 6; categories that are not selected are ignored. Other connectors define their own parameters — always read the ids out of `uip agent guardrails list` rather than assuming these ones.
 
 ### Custom middleware hooks
 
@@ -516,6 +592,7 @@ Use **middleware** when you want all guardrail policy in one place alongside a s
 
 - [`samples/joke-agent`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent) — middleware pattern
 - [`samples/joke-agent-decorator`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-decorator) — decorator pattern
+- [`samples/joke-agent-bring-your-own-guardrail`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-bring-your-own-guardrail) — Bring Your Own Guardrail (middleware pattern)
 
 ---
 

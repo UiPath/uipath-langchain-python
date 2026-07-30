@@ -34,6 +34,7 @@ from uipath.platform.guardrails.decorators import (
 from ._langchain_adapter import LangChainGuardrailAdapter
 from .escalate_action import EscalateAction
 from .middlewares import (
+    UiPathByoGuardrailMiddleware,
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
@@ -81,6 +82,7 @@ __all__ = [
     "GuardrailTargetAdapter",
     "register_guardrail_adapter",
     # Middlewares
+    "UiPathByoGuardrailMiddleware",
     "UiPathHarmfulContentMiddleware",
     "UiPathIntellectualPropertyMiddleware",
     "UiPathLLMAsJudgeMiddleware",

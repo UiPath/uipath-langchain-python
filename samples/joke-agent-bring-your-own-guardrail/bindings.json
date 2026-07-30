@@ -1,0 +1,22 @@
+{
+    "version": "2.0",
+    "resources": [
+        {
+            "resource": "connection",
+            "key": "my-byog-guardrail-connection",
+            "value": {
+                "connectionId": {
+                    "defaultValue": "my-byog-guardrail-connection",
+                    "isExpression": false,
+                    "displayName": "BYOG guardrail connection ID"
+                }
+            },
+            "metadata": {
+                "connector": "uipath-azure-contentsafety-guardrails",
+                "useConnectionService": "true",
+                "bindingsVersion": "2.2",
+                "solutionsSupport": "true"
+            }
+        }
+    ]
+}

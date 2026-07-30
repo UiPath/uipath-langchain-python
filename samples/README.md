@@ -21,6 +21,9 @@ This sample demonstrates a LangGraph agent that generates family-friendly jokes 
 ## [Joke agent (decorator-based guardrails)](joke-agent-decorator)
 This sample shows how to use the unified `@guardrail` decorator to apply guardrails to LLM factories, tools, agent factories, graph nodes, and plain Python functions — without a middleware stack.
 
+## [Joke agent (Bring Your Own Guardrail)](joke-agent-bring-your-own-guardrail)
+This sample guards a joke agent with a customer-managed validator (BYOG): your own guardrail vendor connected through Integration Service and referenced by validator name + connection id via `UiPathByoGuardrailMiddleware`.
+
 ## [Multi agent supervisor, researcher, coder](multi-agent-supervisor-researcher-coder)
 This sample showcases a multi-agent system, involving a supervisor, a researcher, and a coder working in coordination to tackle complex tasks.
 

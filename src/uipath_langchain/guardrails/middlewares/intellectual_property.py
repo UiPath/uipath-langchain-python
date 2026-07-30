@@ -14,7 +14,10 @@ from uipath.platform.guardrails import (
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
-from ._base import BuiltInGuardrailMiddlewareMixin
+from ._base import (
+    BUILT_IN_VALIDATOR_GUARDRAIL_TYPE,
+    BuiltInGuardrailMiddlewareMixin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +121,7 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
             description=self._description,
             enabled_for_evals=self.enabled_for_evals,
             selector=GuardrailSelector(scopes=self.scopes),
-            guardrail_type="builtInValidator",
+            guardrail_type=BUILT_IN_VALIDATOR_GUARDRAIL_TYPE,
             validator_type="intellectual_property",
             validator_parameters=validator_parameters,
         )
