@@ -33,6 +33,7 @@ from uipath_langchain.agent.multimodal.types import FileInfo
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 
 from agents.file_processing.agent import run as run_file_processing
+from agents.judge_guardrail.agent import run as run_judge_guardrail
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,17 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 lines.append(
                     f"  {file_name}: ✗ expected '{case.expected}', got: {answer}"[:300]
                 )
+
+        # LLM-as-judge guardrail with the model under test in the judge role.
+        try:
+            verdict = await run_judge_guardrail(model, spec.model_name)
+            lines.append(f"  judge_guardrail: ✓ {verdict}"[:220])
+        except Exception as e:
+            failed = True
+            detail = " ".join(str(e).split())
+            lines.append(
+                f"  judge_guardrail: ✗ {type(e).__name__}: {detail}"[:300]
+            )
 
     summary = "\n".join(lines)
     logger.info(f"Success: {not failed}\nSummary:\n{summary}")
