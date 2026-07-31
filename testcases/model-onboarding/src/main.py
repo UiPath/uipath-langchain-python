@@ -24,6 +24,7 @@ Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 """
 
 import logging
+import re
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -87,19 +88,19 @@ FILE_REGISTRY: dict[str, FileCase] = {
 }
 
 
-# Phrases a model uses when it quotes the expected word while denying it read
-# the file. A plain substring check passed those, asserting the opposite of
-# what the answer said.
+# Phrases a model uses when it denies having read the file. Only the outright
+# refusals belong here.
+#
+# Descriptive words like "placeholder" and "appears to be" were once on this
+# list and had to come off: the model reads the PDF correctly, then volunteers
+# commentary ("Content type: Plain text placeholder"). That is a *correct*
+# answer with editorializing attached, and matching the word alone failed it.
 _REFUSAL_MARKERS = (
     "cannot",
     "can't",
     "unable",
     "not available",
-    "no actual",
-    "placeholder",
     "unreadable",
-    "appears to be",
-    "rather than",
 )
 
 
@@ -114,7 +115,10 @@ def _matches(expected: str, answer: str) -> bool:
     lowered = answer.lower()
     if any(marker in lowered for marker in _REFUSAL_MARKERS):
         return False
-    words = [w.strip(".,'\"“”‘’!?:;()<>/").lower() for w in lowered.split()]
+    # Split on non-word characters rather than stripping a hand-listed set of
+    # punctuation: the model wraps the answer in markdown (`` `Dummy PDF file` ``),
+    # and a strip-list missed the backtick, failing a correct answer.
+    words = re.findall(r"\w+", lowered)
     return expected.lower() in words
 
 

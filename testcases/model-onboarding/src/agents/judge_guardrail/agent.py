@@ -115,14 +115,29 @@ async def _run_once(llm, judge_model: str, prompt: str) -> tuple[bool, str]:
         ``(blocked, detail)`` — whether the guardrail fired, plus the answer or
         the block reason.
     """
-    from uipath_langchain.guardrails import GuardrailBlockException
+    # A fired BlockAction raises AgentRuntimeError with
+    # TERMINATION_GUARDRAIL_VIOLATION (see agent/guardrails/actions/
+    # block_action.py) — NOT GuardrailBlockException, which an earlier version
+    # of this file caught. That mismatch reported a working block as a probe
+    # failure, so match on the error code rather than the exception class.
+    from uipath_langchain.agent.exceptions import (
+        AgentRuntimeError,
+        AgentRuntimeErrorCode,
+    )
 
     graph = build_graph(llm, judge_model)
     if hasattr(graph, "compile"):
         graph = graph.compile()
     try:
         result = await graph.ainvoke(AgentInput(prompt=prompt))
-    except GuardrailBlockException as e:
+    except AgentRuntimeError as e:
+        # The code lives on `error_info` and is namespace-prefixed
+        # ("AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"); there is no
+        # `.code` attribute on the exception itself.
+        if not e.error_info.code.endswith(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+        ):
+            raise
         return True, " ".join(str(e).split())[:120]
 
     content = (
