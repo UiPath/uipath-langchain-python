@@ -43,6 +43,13 @@ from uipath_langchain.guardrails.middlewares._utils import create_modified_tool_
 
 logger = logging.getLogger(__name__)
 
+#: Logged when a guardrail evaluator raises. Evaluation is fail-open, so the
+#: run continues unvalidated -- the WARNING (with traceback) is the only signal
+#: that a guardrail is misconfigured. Takes the guardrail name as its argument.
+_EVALUATION_FAILED_MSG = (
+    "Guardrail '%s' evaluation failed; continuing without validation."
+)
+
 
 # ---------------------------------------------------------------------------
 # Exception conversion helper
@@ -321,6 +328,7 @@ def _apply_llm_pre(
     try:
         result = evaluator(text, GuardrailExecutionStage.PRE, None, None)
     except Exception:
+        logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
@@ -350,6 +358,7 @@ def _apply_llm_post(
     try:
         result = evaluator(response.content, GuardrailExecutionStage.POST, None, None)
     except Exception:
+        logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
@@ -451,6 +460,7 @@ def _apply_agent_input_guardrail(
     try:
         result = evaluator(text, GuardrailExecutionStage.PRE, None, None)
     except Exception:
+        logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
@@ -488,6 +498,7 @@ def _apply_agent_output_guardrail(
     try:
         result = evaluator(text, GuardrailExecutionStage.POST, None, None)
     except Exception:
+        logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:

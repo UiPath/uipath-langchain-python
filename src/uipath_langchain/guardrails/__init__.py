@@ -6,6 +6,7 @@ Platform guardrail decorators plus LangChain/LangGraph adapter auto-registration
 from uipath.agent.models.agent import AgentGuardrailSeverityLevel
 from uipath.platform.guardrails.decorators import (
     BlockAction,
+    ByoValidator,
     CustomValidator,
     GuardrailAction,
     GuardrailBlockException,
@@ -59,6 +60,7 @@ __all__ = [
     "PIIValidator",
     "PromptInjectionValidator",
     "UserPromptAttacksValidator",
+    "ByoValidator",
     "CustomValidator",
     "RuleFunction",
     # Models & enums

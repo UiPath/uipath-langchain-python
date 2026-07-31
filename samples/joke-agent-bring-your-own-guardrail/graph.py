@@ -1,13 +1,20 @@
 """Joke agent guarded by a Bring Your Own Guardrail (BYOG) configuration.
 
-The agent generates a family-friendly joke, but every agent input and output is
-validated by a *customer-managed* guardrail — your own vendor connected through
-Integration Service and configured by an Org Admin under
-``Admin -> AI Trust Layer -> Guardrails Configurations``. This sample was
-validated against a harmful-content configuration; substitute your own.
+One agent, one BYOG configuration, **both guardrail flavors**:
 
-The middleware references that configuration by validator name + connection id;
-the credentials never appear in this project.
+- **Middleware** (``UiPathByoGuardrailMiddleware``) guards the AGENT scope:
+  the requested topic and the produced joke are validated and violations are
+  logged (``LogAction``) -- the run continues.
+- **Decorator** (``@guardrail`` + ``ByoValidator``) guards the LLM scope:
+  every prompt is validated before it reaches the model and a violation
+  blocks the run (``BlockAction``).
+
+The validator is *customer-managed* — your own vendor connected through
+Integration Service and configured by an Org Admin under
+``Admin -> AI Trust Layer -> Guardrails Configurations``. Both flavors
+reference that configuration purely by validator name + connection id; the
+credentials never appear in this project. This sample was validated against a
+harmful-content configuration; substitute your own.
 """
 
 from langchain.agents import create_agent
@@ -21,28 +28,30 @@ from uipath.core.guardrails import GuardrailScope
 from uipath_langchain.chat import UiPathChat
 from uipath_langchain.guardrails import (
     BlockAction,
+    ByoValidator,
     GuardrailExecutionStage,
+    LogAction,
     UiPathByoGuardrailMiddleware,
+    guardrail,
 )
 
-# The BYOG configuration to use. Both values come from
+# The BYOG configuration both flavors use. Both values come from
 # Admin -> AI Trust Layer -> Guardrails Configurations, or from the CLI:
-# `uip agent guardrails list`, which lists your BYOG configurations alongside
-# the built-in validators.
-# Replace them with your own configuration's validator name and connection id.
-# The connection id is also declared as a binding in bindings.json so it can be
-# rebound per environment at deploy time; locally this literal value is used.
+# `uip agent guardrails list --byo` (fields `ByoValidatorName` and
+# `ByoConnectionId`).
+# Replace them with your own configuration's values.
 BYOG_VALIDATOR_NAME = "my-harmful-content-guardrail"
 BYOG_CONNECTION_ID = "my-byog-guardrail-connection"
 
-# Optional: `validator_parameters` tunes the validator per run.
+# Optional: `validator_parameters` (middleware) / `parameters` (ByoValidator)
+# tune the validator per run.
 #
 # The parameter ids, types and allowed values are defined by the guardrail
 # *connector*, not by this SDK — read them from the validator's `Parameters`
-# array in `uip agent guardrails list` (each entry carries its `Id`, `Type`,
-# `Required`, `DefaultValue` and any `Options`/`KeySource`/`Min`/`Max`/`Step`)
-# and pass the values through as-is. Omit the argument to fall back to those
-# defaults.
+# array in `uip agent guardrails list --byo` (each entry carries its `Id`,
+# `Type`, `Required`, `DefaultValue` and any `Options`/`KeySource`/`Min`/`Max`/
+# `Step`) and pass the values through as-is. Omit the argument to fall back to
+# those defaults.
 #
 # The example below is for the Azure Content Safety connector's `harmful_content`
 # validator: it selects the four categories explicitly and flags a category when
@@ -74,7 +83,15 @@ BYOG_CONNECTION_ID = "my-byog-guardrail-connection"
 #         ),
 #     ]
 #
-# ...then pass `validator_parameters=BYOG_VALIDATOR_PARAMETERS` to the middleware.
+# ...then pass `validator_parameters=BYOG_VALIDATOR_PARAMETERS` to the
+# middleware, or `parameters=BYOG_VALIDATOR_PARAMETERS` to `ByoValidator`.
+
+# Decorator flavor: a reusable validator object referencing the same BYOG
+# configuration — declare once, stack on any number of targets.
+byog_harmful_content = ByoValidator(
+    BYOG_VALIDATOR_NAME,
+    connection_id=BYOG_CONNECTION_ID,
+)
 
 
 class Input(BaseModel):
@@ -89,7 +106,22 @@ class Output(BaseModel):
     joke: str
 
 
-llm = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
+# Decorator flavor guards the LLM. LLM scope is inferred from the factory's
+# BaseChatModel return value; PRE only: every prompt is validated by the
+# customer's vendor before it reaches the model, and a violation aborts the
+# run (BlockAction) with the vendor's verdict details.
+@guardrail(
+    validator=byog_harmful_content,
+    action=BlockAction(),
+    stage=GuardrailExecutionStage.PRE,
+    name="BYOG LLM Harmful Content",
+)
+def create_llm():
+    """Create the LLM guarded by the BYOG configuration."""
+    return UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
+
+
+llm = create_llm()
 
 
 @tool
@@ -120,28 +152,18 @@ agent = create_agent(
     tools=[analyze_joke_syntax],
     system_prompt=SYSTEM_PROMPT,
     middleware=[
-        # Customer-managed harmful-content guardrail (BYOG). PRE_AND_POST on
-        # AGENT scope: the requested topic is validated before the LLM runs and
-        # the produced joke is validated before it is returned. On a violation
-        # BlockAction aborts the run with the vendor's verdict details.
+        # Middleware flavor guards the agent. PRE_AND_POST on AGENT scope: the
+        # requested topic and the produced joke are validated by the customer's
+        # vendor, and a violation is logged (LogAction) without stopping the
+        # run -- the LLM-scope BlockAction above is the enforcing guardrail.
         *UiPathByoGuardrailMiddleware(
             validator_name=BYOG_VALIDATOR_NAME,
             scopes=[GuardrailScope.AGENT],
-            action=BlockAction(),
+            action=LogAction(),
             connection_id=BYOG_CONNECTION_ID,
             # Optionally add validator_parameters=... — see the example above.
             stage=GuardrailExecutionStage.PRE_AND_POST,
             name="BYOG Harmful Content",
-        ),
-        # The same configuration can also guard individual tools:
-        *UiPathByoGuardrailMiddleware(
-            validator_name=BYOG_VALIDATOR_NAME,
-            scopes=[GuardrailScope.TOOL],
-            action=BlockAction(),
-            connection_id=BYOG_CONNECTION_ID,
-            tools=[analyze_joke_syntax],
-            stage=GuardrailExecutionStage.PRE,
-            name="BYOG Tool Harmful Content",
         ),
     ],
 )

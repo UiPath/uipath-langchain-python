@@ -1,6 +1,7 @@
 """Guardrail decorators package."""
 
 from uipath.platform.guardrails.decorators import (
+    ByoValidator,
     CustomValidator,
     GuardrailValidatorBase,
     PIIValidator,
@@ -12,6 +13,7 @@ from uipath.platform.guardrails.decorators import (
 __all__ = [
     "guardrail",
     "GuardrailValidatorBase",
+    "ByoValidator",
     "PIIValidator",
     "PromptInjectionValidator",
     "CustomValidator",

@@ -242,13 +242,13 @@ byog = UiPathByoGuardrailMiddleware(
 agent = create_agent(model=llm, tools=[...], middleware=[*byog])
 ```
 
-To find the `validator_name` and `connection_id`, list the validators available to your tenant:
+To find the `validator_name` and `connection_id`, list your tenant's BYOG configurations:
 
 ```bash
-uip agent guardrails list --output json
+uip agent guardrails list --byo --output json
 ```
 
-Your BYOG configurations are listed alongside the built-in validators — so the same validator type can appear more than once, once for the UiPath-managed validator and once per BYOG configuration. Copy the validator name and connection id from your configuration's entry.
+Each entry carries `ByoValidatorName` (→ `validator_name`) and `ByoConnectionId` (→ `connection_id`), alongside its `AllowedScopes` / `GuardrailStages` and the full `Parameters` schema. No solution binding is needed for the connection: it is resolved server-side from the BYOG configuration.
 
 Notes:
 
@@ -259,7 +259,7 @@ Notes:
 
 #### Tuning a BYOG validator
 
-`validator_parameters` is forwarded to the guardrail on every evaluation. The parameter **ids, types and allowed values are defined by the guardrail connector**, not by this SDK — read them from the validator's `Parameters` array in `uip agent guardrails list`, which gives each parameter's `Id`, `Type`, whether it is `Required`, its `DefaultValue`, and the applicable `Options` / `KeySource` / `Min` / `Max` / `Step`. Omit the argument to fall back to those `DefaultValue`s.
+`validator_parameters` is forwarded to the guardrail on every evaluation. The parameter **ids, types and allowed values are defined by the guardrail connector**, not by this SDK — read them from the validator's `Parameters` array in `uip agent guardrails list --byo`, which gives each parameter's `Id`, `Type`, whether it is `Required`, its `DefaultValue`, and the applicable `Options` / `KeySource` / `Min` / `Max` / `Step`. Omit the argument to fall back to those `DefaultValue`s.
 
 ```python
 from uipath.platform.guardrails import EnumListParameterValue, MapEnumParameterValue
@@ -289,7 +289,7 @@ byog = UiPathByoGuardrailMiddleware(
 )
 ```
 
-That connector flags a category when `severity >= threshold` on Azure's 0/2/4/6 scale, so a threshold of `4` lets low-severity (2) content through while still blocking 4 and 6; categories that are not selected are ignored. Other connectors define their own parameters — always read the ids out of `uip agent guardrails list` rather than assuming these ones.
+That connector flags a category when `severity >= threshold` on Azure's 0/2/4/6 scale, so a threshold of `4` lets low-severity (2) content through while still blocking 4 and 6; categories that are not selected are ignored. Other connectors define their own parameters — always read the ids out of `uip agent guardrails list --byo` rather than assuming these ones.
 
 ### Custom middleware hooks
 
@@ -528,6 +528,33 @@ async def my_node(state: Input) -> Output:
     ...
 ```
 
+### Bring Your Own Guardrail (BYOG)
+
+`ByoValidator` is the decorator equivalent of [`UiPathByoGuardrailMiddleware`](#bring-your-own-guardrail-byog): it runs a **customer-managed** validator instead of a UiPath-managed one — your own content-safety subscription, a vendor validation service, or a custom Integration Service connector wrapping an internal classifier.
+
+The admin prerequisite and how to look up the validator name, connection id and parameter schema are the same as for the middleware flavor — see [Bring Your Own Guardrail (BYOG)](#bring-your-own-guardrail-byog) under the middleware pattern.
+
+The validator references that configuration by name; scope is inferred from the decorated target as usual:
+
+```python
+from uipath_langchain.guardrails import BlockAction, ByoValidator, guardrail
+
+byog_harmful_content = ByoValidator(
+    "my-harmful-content-guardrail",                          # the configuration's validator name
+    connection_id="my-byog-guardrail-connection",            # IS connection id
+)
+
+@guardrail(validator=byog_harmful_content, action=BlockAction())
+def create_joke_agent():
+    return create_agent(model=llm, tools=[...])
+```
+
+Notes specific to the decorator path — the [middleware notes](#bring-your-own-guardrail-byog) on `connection_id`, scopes/stages and connector-defined parameters apply here too:
+
+- **`parameters` instead of `validator_parameters`.** Same passthrough of raw parameter values; read the ids and allowed values from the validator's `Parameters` array in `uip agent guardrails list --byo`.
+- **No static stage restriction.** Because BYOG validators are available on every scope and stage, `ByoValidator` declares no `supported_stages` — you pick the `stage`, and the scope comes from the decorated target.
+- **Error semantics.** A removed or disabled configuration, BYOG not being enabled for the tenant, or a vendor failure (with fallback off) returns `PROVIDER_ERROR`/`FEATURE_DISABLED` — the decorator path treats these like any non-failed result (fail-open) and logs the details, including the guardrail name and traceback.
+
 ### Escalation action (human-in-the-loop)
 
 `EscalateAction` works on the decorator path exactly as it does for middleware — on a violation it suspends the run via `interrupt(CreateEscalation(...))`, creates a review task in a UiPath **Action App**, and resumes on Approve/Reject. It is the **same action class** as the middleware path; just pass it as the `action` of a `@guardrail` on the factory you want to guard. The escalation task's `Component` / `ExecutionStage` are **derived automatically** from the inferred scope of the decorated target — no extra configuration:
@@ -592,7 +619,7 @@ Use **middleware** when you want all guardrail policy in one place alongside a s
 
 - [`samples/joke-agent`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent) — middleware pattern
 - [`samples/joke-agent-decorator`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-decorator) — decorator pattern
-- [`samples/joke-agent-bring-your-own-guardrail`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-bring-your-own-guardrail) — Bring Your Own Guardrail (middleware pattern)
+- [`samples/joke-agent-bring-your-own-guardrail`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-bring-your-own-guardrail) — Bring Your Own Guardrail, both patterns in one agent (middleware logging on the agent scope, decorator blocking on the LLM)
 
 ---
 
