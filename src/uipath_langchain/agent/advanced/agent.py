@@ -20,9 +20,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from pydantic import AliasChoices, AliasPath, BaseModel, create_model
+from pydantic import BaseModel, create_model
 from uipath.core.chat import UiPathConversationMessageData
 
+from uipath_langchain._utils import get_unique_model_field_name
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
 
 from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
@@ -73,40 +74,6 @@ class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
     ) -> ModelResponse[Any]:
         return await handler(self._prepare_request(request))
-
-
-def _allocate_runtime_system_prompt_key(
-    input_schema: type[BaseModel] | None,
-) -> str:
-    """Allocate a graph-state key that cannot overlap the graph's input contract."""
-    occupied_fields = set(AdvancedAgentGraphState.model_fields)
-    if input_schema is not None:
-        occupied_fields.update(input_schema.model_fields)
-        for field in input_schema.model_fields.values():
-            aliases: list[str | AliasPath] = []
-            if field.alias is not None:
-                aliases.append(field.alias)
-            if isinstance(field.validation_alias, AliasChoices):
-                aliases.extend(field.validation_alias.choices)
-            elif field.validation_alias is not None:
-                aliases.append(field.validation_alias)
-
-            for alias in aliases:
-                if isinstance(alias, str):
-                    occupied_fields.add(alias)
-                elif alias.path and isinstance(alias.path[0], str):
-                    occupied_fields.add(alias.path[0])
-
-    default_key = "uipath_system_prompt"
-    if default_key not in occupied_fields:
-        return default_key
-
-    for suffix in range(1, len(occupied_fields) + 1):
-        state_key = f"{default_key}_{suffix}"
-        if state_key not in occupied_fields:
-            return state_key
-
-    raise AssertionError("A free system-prompt state key must exist")
 
 
 def create_advanced_agent(
@@ -165,7 +132,9 @@ def create_advanced_agent_graph(
         build_system_prompt = None
         static_system_prompt = system_prompt
     runtime_system_prompt_key = (
-        _allocate_runtime_system_prompt_key(input_schema)
+        get_unique_model_field_name(
+            "uipath_system_prompt", AdvancedAgentGraphState, input_schema
+        )
         if build_system_prompt is not None
         else None
     )

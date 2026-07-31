@@ -8,10 +8,9 @@ from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda
-from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from uipath_langchain.agent.advanced.agent import (
-    _allocate_runtime_system_prompt_key,
     _RuntimeSystemPromptMiddleware,
     create_advanced_agent_graph,
 )
@@ -80,26 +79,6 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
     assert len(call_kwargs["middleware"]) == 1
     assert isinstance(call_kwargs["middleware"][0], _RuntimeSystemPromptMiddleware)
     assert call_kwargs["middleware"][0].state_key == "uipath_system_prompt"
-
-
-@pytest.mark.parametrize(
-    "validation_alias",
-    [
-        "uipath_system_prompt",
-        AliasChoices("uipath_system_prompt", "prompt"),
-        AliasPath("uipath_system_prompt", "value"),
-    ],
-)
-def test_runtime_prompt_key_avoids_input_aliases(
-    validation_alias: str | AliasChoices | AliasPath,
-) -> None:
-    class AliasedPromptInput(BaseModel):
-        prompt: str = Field(validation_alias=validation_alias)
-
-    assert (
-        _allocate_runtime_system_prompt_key(AliasedPromptInput)
-        == "uipath_system_prompt_1"
-    )
 
 
 @pytest.mark.asyncio
