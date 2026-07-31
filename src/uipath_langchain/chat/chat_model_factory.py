@@ -10,6 +10,7 @@ passed through as the ``use_new_llm_clients`` argument of :func:`get_chat_model`
   before the ``uipath_langchain_client`` migration.
 """
 
+from collections.abc import Mapping
 from typing import Any, Final
 
 from langchain_core.callbacks import BaseCallbackHandler, Callbacks
@@ -87,6 +88,7 @@ def get_chat_model(
     callbacks: Callbacks = _UNSET,
     agenthub_config: str | None = None,
     use_new_llm_clients: bool = True,
+    model_settings: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create and configure a chat model, dispatching legacy vs new clients.
@@ -164,6 +166,7 @@ def get_chat_model(
             api_flavor=api_flavor,
             custom_class=custom_class,
             agenthub_config=agenthub_config,
+            model_settings=model_settings,
             **optional_kwargs,
             **kwargs,
         )

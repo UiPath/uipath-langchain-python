@@ -226,6 +226,19 @@ class TestRouteAgentThinkingMessages:
             AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
         )
 
+    def test_reasoning_enabled_does_not_raise_on_thinking_turns(
+        self, state_excessive_thinking
+    ):
+        """With reasoning_enabled, tool-less thinking turns don't error (tool_choice
+        can't be forced under extended thinking); the loop is bounded elsewhere."""
+        route_func = create_route_agent(
+            valid_targets=_VALID_TARGETS,
+            thinking_messages_limit=0,
+            reasoning_enabled=True,
+        )
+        result = route_func(state_excessive_thinking)
+        assert result == AgentGraphNode.AGENT
+
     def test_thinking_messages_limit_zero_forbids_thinking(self):
         """Should not allow any thinking messages when limit is 0."""
         route_func = create_route_agent(
