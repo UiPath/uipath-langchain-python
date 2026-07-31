@@ -9,6 +9,7 @@ Guardrails configured:
 - "Agent PII Detection"            — AGENT scope, PII (PERSON), PRE, BlockAction
 - "Agent Harmful Content Detection"— AGENT+LLM scope, HarmfulContent (Violence), BlockAction
 - "Agent LLM Judge"                — AGENT scope, LLMAsJudge, POST, BlockAction
+- "Agent BYOG Detection"           — AGENT scope, BYOG (byo validator), PRE, BlockAction
 - "LLM User Prompt Attacks Detection" — LLM scope, UserPromptAttacks, PRE, BlockAction
 - "LLM PII Detection"              — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
 - "LLM IP Detection"               — LLM scope, IntellectualProperty (Text), POST, LogAction
@@ -43,6 +44,7 @@ from uipath_langchain.guardrails import (
     HarmfulContentEntity,
     LogAction,
     PIIDetectionEntity,
+    UiPathByoGuardrailMiddleware,
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
@@ -189,6 +191,16 @@ agent = create_agent(
             model="gpt-4o-2024-08-06",
             threshold=2,
             stage=GuardrailExecutionStage.POST,
+        ),
+        # AGENT scope BYOG — BlockAction (PRE): customer-managed validator
+        # referenced by name + connection id
+        *UiPathByoGuardrailMiddleware(
+            name="Agent BYOG Detection",
+            validator_name="my-harmful-content-guardrail",
+            connection_id="my-byog-guardrail-connection",
+            scopes=[GuardrailScope.AGENT],
+            action=BlockAction(),
+            stage=GuardrailExecutionStage.PRE,
         ),
         # LLM scope User Prompt Attacks — BlockAction
         *UiPathUserPromptAttacksMiddleware(

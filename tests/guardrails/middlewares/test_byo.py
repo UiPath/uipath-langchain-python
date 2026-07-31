@@ -33,8 +33,8 @@ from uipath_langchain.guardrails.middlewares import UiPathByoGuardrailMiddleware
 _LOG = LogAction()
 _BLOCK = BlockAction()
 
-_VALIDATOR_NAME = "byog-harmful-content"
-_CONNECTION_ID = "24887687-6ed1-4fe2-9b87-087ffb232682"
+_VALIDATOR_NAME = "my-harmful-content-guardrail"
+_CONNECTION_ID = "my-byog-guardrail-connection"
 
 
 def _hook_names(middleware: Iterable[Any]) -> list[str]:

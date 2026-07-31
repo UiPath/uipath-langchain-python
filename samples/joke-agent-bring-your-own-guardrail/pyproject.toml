@@ -1,7 +1,7 @@
 [project]
 name = "joke-agent-bring-your-own-guardrail"
 version = "0.0.1"
-description = "Joke agent guarded by a Bring Your Own Guardrail (BYOG) harmful-content configuration"
+description = "Joke agent guarded by a Bring Your Own Guardrail (BYOG) configuration - middleware and decorator flavors in one agent"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
@@ -13,3 +13,4 @@ dependencies = [
 dev = [
     "uipath-dev",
 ]
+
