@@ -67,6 +67,7 @@ def create_llm_node(
     tool_choice: Literal["auto", "any"] = "auto",
     parallel_tool_calls: bool = True,
     strict_mode: bool = False,
+    reasoning_enabled: bool = False,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -104,10 +105,15 @@ def create_llm_node(
             bindable_tools, state, input_schema or type(state)
         )
         current_tool_choice: Literal["auto", "any"] = tool_choice
-        if current_tool_choice == "auto" and (
-            not is_conversational
-            and bindable_tools
-            and count_consecutive_thinking_messages(messages) >= thinking_messages_limit
+        if (
+            current_tool_choice == "auto"
+            and not reasoning_enabled
+            and (
+                not is_conversational
+                and bindable_tools
+                and count_consecutive_thinking_messages(messages)
+                >= thinking_messages_limit
+            )
         ):
             current_tool_choice = "any"
 

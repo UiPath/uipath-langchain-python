@@ -125,6 +125,12 @@ class AgentGraphConfig(BaseModel):
         default="auto",
         description="The tool choice to use for the LLM. 'auto' means the LLM will choose the tool, 'any' means the LLM will return multiple tool calls in a single response.",
     )
+    reasoning_enabled: bool = Field(
+        default=False,
+        description="If set, the model runs with extended thinking, which is "
+        "incompatible with forcing tool_choice on Anthropic/Bedrock. The agent then "
+        "never forces tool_choice and does not error on tool-less thinking turns.",
+    )
     parallel_tool_calls: bool = Field(
         default=True,
         description="Allow the LLM to return multiple tool calls in a single response.",

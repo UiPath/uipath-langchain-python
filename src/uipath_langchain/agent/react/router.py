@@ -17,12 +17,16 @@ from .utils import (
 def create_route_agent(
     thinking_messages_limit: int = 0,
     valid_targets: Container[str] | None = None,
+    reasoning_enabled: bool = False,
 ):
     """Create a routing function configured with thinking_messages_limit.
 
     Args:
         thinking_messages_limit: Max consecutive thinking messages before error
         valid_targets: Allowed routing destinations
+        reasoning_enabled: When True the model runs with extended thinking and tool
+            calls cannot be forced, so tool-less thinking turns are not treated as
+            an error (the llm_messages_limit still bounds the loop).
     Returns:
         Routing function for LangGraph conditional edges
     """
@@ -61,7 +65,10 @@ def create_route_agent(
                 messages
             )
 
-            if consecutive_thinking_messages > thinking_messages_limit:
+            if (
+                not reasoning_enabled
+                and consecutive_thinking_messages > thinking_messages_limit
+            ):
                 raise AgentRuntimeError(
                     code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
                     title="Agent exceeded consecutive completions limit without producing tool calls.",
