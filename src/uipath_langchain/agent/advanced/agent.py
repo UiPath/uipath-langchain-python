@@ -53,11 +53,13 @@ class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
         if request.system_message is None:
             system_message = SystemMessage(content=runtime_prompt)
         else:
-            system_message = SystemMessage(
-                content_blocks=[
-                    {"type": "text", "text": f"{runtime_prompt}\n\n"},
-                    *request.system_message.content_blocks,
-                ]
+            system_message = request.system_message.model_copy(
+                update={
+                    "content": [
+                        {"type": "text", "text": f"{runtime_prompt}\n\n"},
+                        *request.system_message.content_blocks,
+                    ]
+                }
             )
         return request.override(system_message=system_message)
 

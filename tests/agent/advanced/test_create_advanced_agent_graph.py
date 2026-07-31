@@ -296,7 +296,13 @@ def test_runtime_system_prompt_middleware_preserves_prepared_prompt() -> None:
     request = ModelRequest(
         model=_mock_model(),
         messages=[],
-        system_message=SystemMessage(content_blocks=cast(Any, prepared_blocks)),
+        system_message=SystemMessage(
+            content_blocks=cast(Any, prepared_blocks),
+            id="prepared-system-message",
+            name="prepared-system",
+            additional_kwargs={"provider": "value"},
+            response_metadata={"response": "value"},
+        ),
         state=cast(
             Any,
             {
@@ -316,6 +322,10 @@ def test_runtime_system_prompt_middleware_preserves_prepared_prompt() -> None:
     assert captured[0].system_message is not None
     assert captured[0].system_message.text == ("runtime prompt\n\ndeepagents prompt")
     assert captured[0].system_message.content_blocks[1:] == prepared_blocks
+    assert captured[0].system_message.id == "prepared-system-message"
+    assert captured[0].system_message.name == "prepared-system"
+    assert captured[0].system_message.additional_kwargs == {"provider": "value"}
+    assert captured[0].system_message.response_metadata == {"response": "value"}
 
 
 @pytest.mark.asyncio
