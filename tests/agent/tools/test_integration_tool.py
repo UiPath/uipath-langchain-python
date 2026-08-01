@@ -566,6 +566,7 @@ class TestStripEnumsFromSchema:
         result = strip_enums_from_schema(schema, parameters)
 
         assert "enum" not in result["properties"]["title"]
+        assert "Custom title" in result["properties"]["title"]["description"]
 
     def test_handles_schema_without_properties(self):
         """A schema with no properties key is returned unchanged."""
@@ -739,6 +740,50 @@ class TestStripEnumsFromSchema:
         result = strip_enums_from_schema(schema, parameters)
 
         assert result == schema
+
+    def test_folds_oneof_const_value_into_description(self):
+        """A field whose fixed value is encoded as both `enum` and `oneOf`/`const`
+        gets its value folded into the description."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "engine": {
+                    "type": "string",
+                    "title": "Search Engine",
+                    "description": "The search engine to use",
+                    "oneOf": [
+                        {"const": "PlaceholderEngine", "title": "PlaceholderEngine"}
+                    ],
+                    "enum": ["PlaceholderEngine"],
+                },
+                "query": {
+                    "type": "string",
+                    "description": "The natural language query to search for",
+                },
+            },
+            "required": ["engine", "query"],
+        }
+        parameters = [
+            AgentIntegrationToolParameter(
+                name="engine",
+                type="string",
+                value="PlaceholderEngine",
+                field_location="body",
+                field_variant="static",
+            ),
+        ]
+
+        result = strip_enums_from_schema(schema, parameters)
+
+        engine_schema = result["properties"]["engine"]
+        assert "enum" not in engine_schema
+        assert engine_schema["oneOf"] == [
+            {"const": "PlaceholderEngine", "title": "PlaceholderEngine"}
+        ]
+        assert engine_schema["type"] == "string"
+        assert engine_schema["title"] == "Search Engine"
+        assert engine_schema["description"].startswith("The search engine to use")
+        assert "PlaceholderEngine" in engine_schema["description"]
 
 
 class TestCreateIntegrationToolWithArgumentProperties:

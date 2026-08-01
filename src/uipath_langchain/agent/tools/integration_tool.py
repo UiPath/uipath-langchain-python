@@ -31,7 +31,7 @@ from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_output_model,
 )
 
-from .schema_editing import strip_enum
+from .schema_editing import handle_enum
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -172,7 +172,7 @@ def strip_enums_from_schema(
 
     for param in parameters:
         segments = _param_name_to_segments(param.name)
-        strip_enum(schema, segments)
+        handle_enum(schema, segments)
 
     return schema
 
