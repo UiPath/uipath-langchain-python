@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
+import openai
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import RunnableConfig
@@ -15,6 +16,7 @@ from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
 )
+from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -122,6 +124,41 @@ class TestCreateAnalyzeFileTool:
             properties=properties,
         )
 
+    async def _invoke_with_llm_error(self, resource_config, mock_llm, error):
+        with (
+            patch(
+                "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+            ) as mock_resolve_attachments,
+            patch(
+                "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+            ) as mock_add_files,
+            patch(
+                "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+            ),
+        ):
+            mock_resolve_attachments.return_value = [
+                FileInfo(
+                    url="https://example.com/file.pdf",
+                    name="test.pdf",
+                    mime_type="application/pdf",
+                )
+            ]
+            mock_add_files.return_value = HumanMessage(content="Summarize the document")
+            mock_llm.ainvoke.side_effect = error
+
+            tool = create_analyze_file_tool(resource_config, mock_llm)
+            assert tool.coroutine is not None
+            return await tool.coroutine(
+                analysisTask="Summarize the document",
+                attachments=[
+                    MockAttachment(
+                        ID=str(uuid.uuid4()),
+                        FullName="test.pdf",
+                        MimeType="application/pdf",
+                    )
+                ],
+            )
+
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
@@ -202,6 +239,100 @@ class TestCreateAnalyzeFileTool:
         assert len(messages_arg) == 2
         assert messages_arg[0].content == ANALYZE_FILES_SYSTEM_MESSAGE
         assert messages_arg[1] == mock_message_with_files
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_provider_5xx_is_categorized_as_system(
+        self,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://example.com/file.pdf",
+                name="test.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="Summarize the document")
+        mock_get_wrapper.return_value = Mock()
+
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            500,
+            request=request,
+            json={
+                "error": {
+                    "message": (
+                        "Exception of type 'System.OutOfMemoryException' was thrown."
+                    )
+                }
+            },
+        )
+        mock_llm.ainvoke.side_effect = openai.InternalServerError(
+            "Internal server error",
+            response=response,
+            body=response.json(),
+        )
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        assert tool.coroutine is not None
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.coroutine(
+                analysisTask="Summarize the document",
+                attachments=[
+                    MockAttachment(
+                        ID=str(uuid.uuid4()),
+                        FullName="test.pdf",
+                        MimeType="application/pdf",
+                    )
+                ],
+            )
+
+        info = exc_info.value.error_info
+        assert info.status == 500
+        assert info.category == UiPathErrorCategory.SYSTEM
+        assert info.code.endswith(AgentRuntimeErrorCode.HTTP_ERROR.value)
+        assert info.title == "LLM provider returned HTTP 500"
+
+    async def test_normalized_provider_5xx_is_categorized_as_system(
+        self, resource_config, mock_llm
+    ):
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            500,
+            request=request,
+            json={"status": 500, "detail": "LLM gateway failed"},
+        )
+        error = UiPathAPIError.from_response(response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        info = exc_info.value.error_info
+        assert info.status == 500
+        assert info.category == UiPathErrorCategory.SYSTEM
+
+    async def test_unmapped_llm_client_error_propagates_unchanged(
+        self, resource_config, mock_llm
+    ):
+        error = UiPathError(error_code="SOME_OTHER_CODE", detail="unrelated")
+
+        with pytest.raises(UiPathError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        assert exc_info.value is error
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
