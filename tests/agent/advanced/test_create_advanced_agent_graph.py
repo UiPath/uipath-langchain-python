@@ -35,8 +35,8 @@ class _AliasedInput(BaseModel):
 
 
 class _PromptNamedInput(BaseModel):
-    uipath_system_prompt: str
-    uipath_system_prompt_1: str
+    uipath__system_prompt: str
+    uipath__system_prompt_1: str
 
 
 def _mock_model() -> MagicMock:
@@ -78,7 +78,7 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
     assert call_kwargs["system_prompt"] is None
     assert len(call_kwargs["middleware"]) == 1
     assert isinstance(call_kwargs["middleware"][0], _RuntimeSystemPromptMiddleware)
-    assert call_kwargs["middleware"][0].state_key == "uipath_system_prompt"
+    assert call_kwargs["middleware"][0].state_key == "uipath__system_prompt"
 
 
 @pytest.mark.asyncio
@@ -92,7 +92,7 @@ async def test_transform_input_without_schema_builds_single_user_message() -> No
     assert isinstance(message, HumanMessage)
     assert message.content == "hi there"
     assert message.id == "user-input"
-    assert "uipath_system_prompt" not in out
+    assert "uipath__system_prompt" not in out
 
 
 @pytest.mark.asyncio
@@ -114,15 +114,15 @@ async def test_transform_input_builds_runtime_system_prompt_once() -> None:
     out = await graph.nodes["transform_input"].runnable.ainvoke(state)
 
     assert calls == [{"book": {}, "question": "runtime value"}]
-    assert out["uipath_system_prompt"] == "system:runtime value"
+    assert out["uipath__system_prompt"] == "system:runtime value"
 
 
 @pytest.mark.asyncio
 async def test_internal_prompt_state_does_not_shadow_user_input() -> None:
     """A generated collision is rejected in favor of a fresh internal state key."""
     captured_args: list[dict[str, Any]] = []
-    colliding_key = "uipath_system_prompt"
-    fresh_key = "uipath_system_prompt_2"
+    colliding_key = "uipath__system_prompt"
+    fresh_key = "uipath__system_prompt_2"
 
     def build_user_message(args: dict[str, Any]) -> str:
         captured_args.append(args)
@@ -135,8 +135,8 @@ async def test_internal_prompt_state_does_not_shadow_user_input() -> None:
     )
     state_cls = create_state_with_input(_PromptNamedInput)
     state = state_cls(
-        uipath_system_prompt="user value",
-        uipath_system_prompt_1="another user value",
+        uipath__system_prompt="user value",
+        uipath__system_prompt_1="another user value",
     )
 
     out = await graph.nodes["transform_input"].runnable.ainvoke(state)
@@ -144,7 +144,7 @@ async def test_internal_prompt_state_does_not_shadow_user_input() -> None:
     assert captured_args == [
         {
             colliding_key: "user value",
-            "uipath_system_prompt_1": "another user value",
+            "uipath__system_prompt_1": "another user value",
         }
     ]
     assert out[fresh_key] == "system:user value"

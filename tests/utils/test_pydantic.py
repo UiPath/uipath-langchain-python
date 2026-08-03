@@ -1,7 +1,7 @@
 """Tests for shared Pydantic model utilities."""
 
 import pytest
-from pydantic import AliasChoices, AliasPath, BaseModel, Field
+from pydantic import AliasChoices, AliasPath, BaseModel, Field, computed_field
 
 from uipath_langchain._utils import get_unique_model_field_name
 
@@ -20,6 +20,15 @@ def test_unique_model_field_name_accepts_classes_and_instances() -> None:
 
     assert get_unique_model_field_name("state_key", instance) == "state_key_2"
     assert get_unique_model_field_name("state_key", _OccupiedNames) == "state_key_2"
+
+
+def test_unique_model_field_name_avoids_computed_fields_and_aliases() -> None:
+    class ComputedNames(BaseModel):
+        @computed_field(alias="state_key_1")
+        def state_key(self) -> str:
+            return "value"
+
+    assert get_unique_model_field_name("state_key", ComputedNames) == "state_key_2"
 
 
 @pytest.mark.parametrize(

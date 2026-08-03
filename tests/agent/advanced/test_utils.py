@@ -33,6 +33,17 @@ def test_create_state_merges_schema_with_state() -> None:
     assert "question" in merged.model_fields
 
 
+def test_create_state_does_not_retain_extra_fields() -> None:
+    """The combined deep-agent state must not silently allow undeclared keys."""
+    state_type = create_state_with_input(_InputSchema)
+    state = state_type.model_validate(
+        {"question": "value", "undeclared": "extra"}
+    )
+
+    assert state_type.model_config.get("extra") != "allow"
+    assert "undeclared" not in state.model_dump()
+
+
 @pytest.mark.asyncio
 async def test_resolve_input_attachments_downloads_and_adds_filepath(
     tmp_path: Path,

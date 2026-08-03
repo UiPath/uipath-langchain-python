@@ -15,6 +15,7 @@ def get_unique_model_field_name(
             continue
         model_type = model if isinstance(model, type) else type(model)
         occupied_names.update(model_type.model_fields)
+        occupied_names.update(model_type.model_computed_fields)
 
         for field in model_type.model_fields.values():
             aliases: list[str | AliasPath] = []
@@ -30,6 +31,12 @@ def get_unique_model_field_name(
                     occupied_names.add(alias)
                 elif alias.path and isinstance(alias.path[0], str):
                     occupied_names.add(alias.path[0])
+
+        occupied_names.update(
+            field.alias
+            for field in model_type.model_computed_fields.values()
+            if field.alias is not None
+        )
 
     if preferred_name not in occupied_names:
         return preferred_name

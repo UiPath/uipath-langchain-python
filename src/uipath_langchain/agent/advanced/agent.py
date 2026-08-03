@@ -135,7 +135,7 @@ def create_advanced_agent_graph(
         static_system_prompt = system_prompt
     runtime_system_prompt_key = (
         get_unique_model_field_name(
-            "uipath_system_prompt", AdvancedAgentGraphState, input_schema
+            "uipath__system_prompt", AdvancedAgentGraphState, input_schema
         )
         if build_system_prompt is not None
         else None
