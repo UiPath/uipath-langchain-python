@@ -1,14 +1,19 @@
 """Tests for the create_advanced_agent_graph wrapper builder."""
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableLambda
 from pydantic import BaseModel, ConfigDict, Field
 
-from uipath_langchain.agent.advanced.agent import create_advanced_agent_graph
+from uipath_langchain.agent.advanced.agent import (
+    _RuntimeSystemPromptMiddleware,
+    create_advanced_agent_graph,
+)
 from uipath_langchain.agent.advanced.types import AdvancedAgentGraphState
 from uipath_langchain.agent.advanced.utils import create_state_with_input
 
@@ -27,6 +32,11 @@ class _AliasedInput(BaseModel):
 
     schema_: str = Field(alias="schema")
     question: str = ""
+
+
+class _PromptNamedInput(BaseModel):
+    uipath__system_prompt: str
+    uipath__system_prompt_1: str
 
 
 def _mock_model() -> MagicMock:
@@ -56,6 +66,21 @@ def test_wrapper_graph_has_io_nodes() -> None:
     assert {"transform_input", "advanced_agent", "transform_output"} <= set(graph.nodes)
 
 
+def test_callable_system_prompt_enables_runtime_middleware() -> None:
+    """The inner deep agent keeps its base prompt and receives runtime middleware."""
+    with patch(
+        "uipath_langchain.agent.advanced.agent._create_deep_agent",
+        return_value=MagicMock(),
+    ) as mock_create:
+        _build(system_prompt=lambda args: f"system:{args}")
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["system_prompt"] is None
+    assert len(call_kwargs["middleware"]) == 1
+    assert isinstance(call_kwargs["middleware"][0], _RuntimeSystemPromptMiddleware)
+    assert call_kwargs["middleware"][0].state_key == "uipath__system_prompt"
+
+
 @pytest.mark.asyncio
 async def test_transform_input_without_schema_builds_single_user_message() -> None:
     """With no input schema, the built message comes straight from build_user_message."""
@@ -67,6 +92,137 @@ async def test_transform_input_without_schema_builds_single_user_message() -> No
     assert isinstance(message, HumanMessage)
     assert message.content == "hi there"
     assert message.id == "user-input"
+    assert "uipath__system_prompt" not in out
+
+
+@pytest.mark.asyncio
+async def test_transform_input_builds_runtime_system_prompt_once() -> None:
+    """A callable system prompt is resolved from invocation input by the pre-node."""
+    calls: list[dict[str, Any]] = []
+
+    def build_system_prompt(args: dict[str, Any]) -> str:
+        calls.append(args)
+        return f"system:{args['question']}"
+
+    graph = _build(
+        input_schema=_Input,
+        system_prompt=build_system_prompt,
+    )
+    state_cls = create_state_with_input(_Input)
+    state = state_cls(question="runtime value")
+
+    out = await graph.nodes["transform_input"].runnable.ainvoke(state)
+
+    assert calls == [{"book": {}, "question": "runtime value"}]
+    assert out["uipath__system_prompt"] == "system:runtime value"
+
+
+@pytest.mark.asyncio
+async def test_internal_prompt_state_does_not_shadow_user_input() -> None:
+    """A generated collision is rejected in favor of a fresh internal state key."""
+    captured_args: list[dict[str, Any]] = []
+    colliding_key = "uipath__system_prompt"
+    fresh_key = "uipath__system_prompt_2"
+
+    def build_user_message(args: dict[str, Any]) -> str:
+        captured_args.append(args)
+        return "user"
+
+    graph = _build(
+        input_schema=_PromptNamedInput,
+        system_prompt=lambda args: f"system:{args[colliding_key]}",
+        build_user_message=build_user_message,
+    )
+    state_cls = create_state_with_input(_PromptNamedInput)
+    state = state_cls(
+        uipath__system_prompt="user value",
+        uipath__system_prompt_1="another user value",
+    )
+
+    out = await graph.nodes["transform_input"].runnable.ainvoke(state)
+
+    assert captured_args == [
+        {
+            colliding_key: "user value",
+            "uipath__system_prompt_1": "another user value",
+        }
+    ]
+    assert out[fresh_key] == "system:user value"
+
+
+@pytest.mark.asyncio
+async def test_runtime_system_prompt_crosses_into_deep_agent_once() -> None:
+    """The wrapper carries one resolved prompt into the deep-agent state schema."""
+    resolver_calls: list[dict[str, Any]] = []
+    captured_requests: list[ModelRequest[Any]] = []
+    prepared_blocks = [
+        {
+            "type": "text",
+            "text": "deepagents prompt",
+            "cache_control": {"type": "ephemeral"},
+        },
+        {"type": "non_standard", "value": {"custom": "value"}},
+    ]
+
+    def build_system_prompt(args: dict[str, Any]) -> str:
+        resolver_calls.append(args)
+        return f"runtime:{args['question']}"
+
+    def create_inner_graph(**kwargs: Any) -> Any:
+        middleware = kwargs["middleware"][0]
+        runtime_key = middleware.state_key
+
+        def capture_model_request(state: BaseModel) -> dict[str, Any]:
+            state_data = state.model_dump()
+            assert runtime_key in state_data
+            state_data["messages"] = cast(Any, state).messages
+            request = ModelRequest(
+                model=_mock_model(),
+                messages=state_data["messages"],
+                system_message=SystemMessage(content_blocks=cast(Any, prepared_blocks)),
+                state=cast(Any, state_data),
+            )
+
+            def handler(prepared: ModelRequest[Any]) -> ModelResponse[Any]:
+                captured_requests.append(prepared)
+                return ModelResponse(result=[])
+
+            middleware.wrap_model_call(request, handler)
+            return {"structured_response": {"result": "done"}}
+
+        return RunnableLambda(capture_model_request)
+
+    with patch(
+        "uipath_langchain.agent.advanced.agent._create_deep_agent",
+        side_effect=create_inner_graph,
+    ):
+        wrapper = create_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt=build_system_prompt,
+            backend=None,
+            response_format=None,
+            input_schema=_Input,
+            output_schema=_Output,
+            build_user_message=lambda args: f"user:{args['question']}",
+        )
+        initial_state = wrapper.state_schema(question="value")
+        transform_node = cast(Any, wrapper.nodes["transform_input"].runnable)
+        transform_update = await transform_node.ainvoke(initial_state)
+        inner_input = wrapper.state_schema(question="value", **transform_update)
+        inner_node = cast(Any, wrapper.nodes["advanced_agent"].runnable)
+
+        result = inner_node.invoke(inner_input)
+
+    assert result == {"structured_response": {"result": "done"}}
+    assert resolver_calls == [{"book": {}, "question": "value"}]
+    assert len(captured_requests) == 1
+    request = captured_requests[0]
+    assert request.system_message is not None
+    assert request.system_message.text == "runtime:value\n\ndeepagents prompt"
+    assert request.system_message.content_blocks[1:] == prepared_blocks
+    assert isinstance(request.messages[0], HumanMessage)
+    assert request.messages[0].content == "user:value"
 
 
 @pytest.mark.asyncio
@@ -124,3 +280,76 @@ def test_transform_output_validates_structured_response() -> None:
         AdvancedAgentGraphState(structured_response={"result": "done"})
     )
     assert out == {"result": "done"}
+
+
+def test_runtime_system_prompt_middleware_preserves_prepared_prompt() -> None:
+    """The runtime prompt is prepended without discarding deepagents' prompt."""
+    middleware = _RuntimeSystemPromptMiddleware("runtime_prompt")
+    prepared_blocks = [
+        {
+            "type": "text",
+            "text": "deepagents prompt",
+            "cache_control": {"type": "ephemeral"},
+        },
+        {"type": "non_standard", "value": {"custom": "value"}},
+    ]
+    request = ModelRequest(
+        model=_mock_model(),
+        messages=[],
+        system_message=SystemMessage(
+            content_blocks=cast(Any, prepared_blocks),
+            id="prepared-system-message",
+            name="prepared-system",
+            additional_kwargs={"provider": "value"},
+            response_metadata={"response": "value"},
+        ),
+        state=cast(
+            Any,
+            {
+                "messages": [],
+                middleware.state_key: "runtime prompt",
+            },
+        ),
+    )
+    captured: list[ModelRequest[Any]] = []
+
+    def handler(prepared: ModelRequest[Any]) -> ModelResponse[Any]:
+        captured.append(prepared)
+        return ModelResponse(result=[])
+
+    middleware.wrap_model_call(request, handler)
+
+    assert captured[0].system_message is not None
+    assert captured[0].system_message.text == ("runtime prompt\n\ndeepagents prompt")
+    assert captured[0].system_message.content_blocks[1:] == prepared_blocks
+    assert captured[0].system_message.id == "prepared-system-message"
+    assert captured[0].system_message.name == "prepared-system"
+    assert captured[0].system_message.additional_kwargs == {"provider": "value"}
+    assert captured[0].system_message.response_metadata == {"response": "value"}
+
+
+@pytest.mark.asyncio
+async def test_runtime_system_prompt_middleware_supports_async_model_calls() -> None:
+    middleware = _RuntimeSystemPromptMiddleware("runtime_prompt")
+    request = ModelRequest(
+        model=_mock_model(),
+        messages=[],
+        system_message=SystemMessage(content="deepagents prompt"),
+        state=cast(
+            Any,
+            {
+                "messages": [],
+                middleware.state_key: "runtime prompt",
+            },
+        ),
+    )
+    captured: list[ModelRequest[Any]] = []
+
+    async def handler(prepared: ModelRequest[Any]) -> ModelResponse[Any]:
+        captured.append(prepared)
+        return ModelResponse(result=[])
+
+    await middleware.awrap_model_call(request, handler)
+
+    assert captured[0].system_message is not None
+    assert captured[0].system_message.text == ("runtime prompt\n\ndeepagents prompt")
