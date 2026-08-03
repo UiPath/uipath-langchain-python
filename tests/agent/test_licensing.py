@@ -37,18 +37,24 @@ def test_403_maps_to_license_not_available():
     assert info.detail == _DETAIL
 
 
-def test_other_status_maps_to_http_error():
+def test_5xx_maps_to_system_http_error():
     err = _api_error(500, {"status": 500, "detail": "boom"})
     with pytest.raises(AgentRuntimeError) as exc_info:
         raise_for_provider_http_error(err)
 
     info = exc_info.value.error_info
     assert info.status == 500
-    assert info.category == UiPathErrorCategory.UNKNOWN
+    assert info.category == UiPathErrorCategory.SYSTEM
     assert info.code.endswith(AgentRuntimeErrorCode.HTTP_ERROR.value)
-    # UNKNOWN-category errors are wrapped with a generic prefix by AgentRuntimeError,
-    # but the original gateway detail is preserved within.
     assert "boom" in info.detail
+
+
+def test_unclassified_status_remains_unknown():
+    err = _api_error(400, {"status": 400, "detail": "bad request"})
+    with pytest.raises(AgentRuntimeError) as exc_info:
+        raise_for_provider_http_error(err)
+
+    assert exc_info.value.error_info.category == UiPathErrorCategory.UNKNOWN
 
 
 def test_legacy_raw_provider_error_is_normalized_and_mapped():
