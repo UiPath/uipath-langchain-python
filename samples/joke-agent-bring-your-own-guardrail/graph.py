@@ -12,9 +12,10 @@ One agent, one BYOG configuration, **both guardrail flavors**:
 The validator is *customer-managed* — your own vendor connected through
 Integration Service and configured by an Org Admin under
 ``Admin -> AI Trust Layer -> Guardrails Configurations``. Both flavors
-reference that configuration purely by validator name + connection id; the
-credentials never appear in this project. This sample was validated against a
-harmful-content configuration; substitute your own.
+reference that configuration purely by its validator name (unique per
+tenant); the Integration Service connection is resolved server-side from the
+configuration, and the credentials never appear in this project. This sample
+was validated against a harmful-content configuration; substitute your own.
 """
 
 from langchain.agents import create_agent
@@ -35,13 +36,12 @@ from uipath_langchain.guardrails import (
     guardrail,
 )
 
-# The BYOG configuration both flavors use. Both values come from
-# Admin -> AI Trust Layer -> Guardrails Configurations, or from the CLI:
-# `uip agent guardrails list --byo` (fields `ByoValidatorName` and
-# `ByoConnectionId`).
-# Replace them with your own configuration's values.
+# The BYOG configuration both flavors use, referenced by its validator name
+# (unique per tenant). The name comes from Admin -> AI Trust Layer ->
+# Guardrails Configurations, or from the CLI: `uip agent guardrails list
+# --byo` (field `ByoValidatorName`). Replace it with your own configuration's
+# name.
 BYOG_VALIDATOR_NAME = "my-harmful-content-guardrail"
-BYOG_CONNECTION_ID = "my-byog-guardrail-connection"
 
 # Optional: `validator_parameters` (middleware) / `parameters` (ByoValidator)
 # tune the validator per run.
@@ -88,10 +88,7 @@ BYOG_CONNECTION_ID = "my-byog-guardrail-connection"
 
 # Decorator flavor: a reusable validator object referencing the same BYOG
 # configuration — declare once, stack on any number of targets.
-byog_harmful_content = ByoValidator(
-    BYOG_VALIDATOR_NAME,
-    connection_id=BYOG_CONNECTION_ID,
-)
+byog_harmful_content = ByoValidator(BYOG_VALIDATOR_NAME)
 
 
 class Input(BaseModel):
@@ -160,7 +157,6 @@ agent = create_agent(
             validator_name=BYOG_VALIDATOR_NAME,
             scopes=[GuardrailScope.AGENT],
             action=LogAction(),
-            connection_id=BYOG_CONNECTION_ID,
             # Optionally add validator_parameters=... — see the example above.
             stage=GuardrailExecutionStage.PRE_AND_POST,
             name="BYOG Harmful Content",

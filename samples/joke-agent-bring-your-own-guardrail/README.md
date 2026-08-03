@@ -3,13 +3,13 @@
 A minimal starter for using a **customer-managed guardrail** in a coded agent — with **both
 guardrail flavors in one agent**. The agent generates a family-friendly joke; agent
 input/output and the tool input are validated by a **BYOG configuration** — your own
-guardrail vendor connected through Integration Service, referenced purely by validator name
-+ connection id. Credentials never appear in this project.
+guardrail vendor connected through Integration Service, referenced purely by its validator
+name. Credentials never appear in this project.
 
 The guardrail can be backed by any vendor your admin configured: a cloud subscription
 (e.g. a content-safety service), a vendor validation platform, or a custom Integration
-Service connector wrapping an internal classifier. The validator name and connection id in
-[graph.py](graph.py) are **placeholders** — substitute your own configuration's values.
+Service connector wrapping an internal classifier. The validator name in
+[graph.py](graph.py) is a **placeholder** — substitute your own configuration's name.
 
 ## How the two flavors are wired
 
@@ -41,11 +41,11 @@ and to reuse one validator across many of them. See
    uip agent guardrails list --byo --output json
    ```
 
-   Copy your configuration's `ByoValidatorName` → `BYOG_VALIDATOR_NAME` and
-   `ByoConnectionId` → `BYOG_CONNECTION_ID` in [graph.py](graph.py) (both ship as
-   placeholders).
+   Copy your configuration's `ByoValidatorName` → `BYOG_VALIDATOR_NAME` in
+   [graph.py](graph.py) (ships as a placeholder).
 
-> Always pass the connection id: validator names are unique **per connection** only.
+> Validator names are unique **per tenant**, so the name alone identifies the
+> configuration; the Integration Service connection is resolved from it server-side.
 
 ## Run it
 
@@ -96,14 +96,14 @@ ignored. Verified end to end against a live configuration:
 ## How it works
 
 - Both flavors build a guardrail with `validator_type="byo"` plus
-  `byoValidatorName`/`byoConnectionId`, evaluated via
+  `byoValidatorName`, evaluated via
   `POST /agentsruntime_/api/execution/guardrails/validate`.
 - The Guardrails Service resolves your configuration and invokes the Integration Service
   connector against your vendor, which returns the verdict.
 - The middleware registers agent hooks for its configured scopes; the decorator infers the
   scope from the decorated target (here: a factory returning a `BaseChatModel` → LLM).
-- No solution binding is needed: the connection is resolved server-side from the BYOG
-  configuration — the agent only references it by validator name + connection id.
+- No connection details are needed: the Integration Service connection is resolved
+  server-side from the BYOG configuration — the agent only sends the validator name.
 
 ## Notes
 

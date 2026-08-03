@@ -56,7 +56,6 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_name="my-harmful-content-guardrail",
             scopes=[GuardrailScope.AGENT],
             action=BlockAction(),
-            connection_id="my-byog-guardrail-connection",
         )
 
         # Same configuration applied to a specific tool
@@ -64,7 +63,6 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_name="my-harmful-content-guardrail",
             scopes=[GuardrailScope.TOOL],
             action=BlockAction(),
-            connection_id="my-byog-guardrail-connection",
             tools=[analyze_joke_syntax],
         )
 
@@ -78,16 +76,14 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
     Args:
         validator_name: The BYOG configuration's validator name
             (``byoValidatorName``), as shown in Admin -> AI Trust Layer ->
-            Guardrails Configurations or by ``uip agent guardrails list``.
+            Guardrails Configurations or by ``uip agent guardrails list --byo``.
+            Unique per tenant; the Integration Service connection to use is
+            resolved server-side from the configuration.
         scopes: List of scopes where the guardrail applies (Agent, LLM, Tool).
             BYOG validators are not scope-restricted -- all three scopes are
             available, as with the built-in validators.
         action: Action to take when the validation fails (LogAction,
             BlockAction, EscalateAction, or a custom GuardrailAction).
-        connection_id: Optional Integration Service connection id backing the
-            BYOG configuration. Strongly recommended: validator names are only
-            unique per connection, so omitting it lets the server pick the
-            first configuration matching the name.
         validator_parameters: Optional list of validator parameters. BYO
             parameter schemas are connector-defined, so values are passed
             through as-is; read the ids and allowed values from the
@@ -114,7 +110,6 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
         scopes: Sequence[GuardrailScope],
         action: GuardrailAction,
         *,
-        connection_id: str | None = None,
         validator_parameters: Sequence[ValidatorParameter] | None = None,
         tools: Sequence[str | BaseTool] | None = None,
         stage: GuardrailExecutionStage = GuardrailExecutionStage.PRE_AND_POST,
@@ -139,7 +134,6 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
         self.scopes = scopes_list
         self.action = action
         self.validator_name = validator_name
-        self.connection_id = connection_id
         self.validator_parameters = list(validator_parameters or [])
         self._tool_stage = stage
         self._name = name or f"BYO Guardrail ({validator_name})"
@@ -175,5 +169,4 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_type=BYO_VALIDATOR_TYPE,
             validator_parameters=self.validator_parameters,
             byo_validator_name=self.validator_name,
-            byo_connection_id=self.connection_id,
         )

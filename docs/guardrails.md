@@ -70,7 +70,7 @@ from uipath.core.guardrails import GuardrailScope
 | `UiPathIntellectualPropertyMiddleware` | AGENT, LLM only | POST only | `entities` |
 | `UiPathLLMAsJudgeMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `guardrail_text`, `model`, `threshold`, `positive_examples`, `negative_examples`, `tools`, `stage` |
 | `UiPathDeterministicGuardrailMiddleware` | TOOL only | PRE / POST / PRE_AND_POST | `tools`, `rules`, `stage` |
-| `UiPathByoGuardrailMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `validator_name`, `connection_id`, `validator_parameters`, `tools`, `stage` |
+| `UiPathByoGuardrailMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `validator_name`, `validator_parameters`, `tools`, `stage` |
 
 TOOL scope for `UiPathPIIDetectionMiddleware`, `UiPathHarmfulContentMiddleware`, and `UiPathLLMAsJudgeMiddleware` requires passing `tools=[...]` to restrict `wrap_tool_call` hooks to specific tools.
 
@@ -88,7 +88,7 @@ Additional parameters per class:
 - **`UiPathIntellectualPropertyMiddleware`**: `entities` (list of `IntellectualPropertyEntityType` values).
 - **`UiPathLLMAsJudgeMiddleware`**: `guardrail_text` (required — the plain-language rule the judge evaluates against, ≤ 4000 chars), `model` (required — judge model id, e.g. `"gpt-4o-2024-08-06"`; must be a model your governance policy allows for the LLM-as-judge guardrail — LLM Gateway enforces the permitted list), `threshold` (`0` strictest … `6` most lenient, default `2`), `positive_examples` / `negative_examples` (optional calibration payloads — ≤ 2 each, ≤ 1000 chars each), `tools` (required only when `GuardrailScope.TOOL` is used), `stage`. See the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/#llm-as-judge) for the full parameter reference.
 - **`UiPathDeterministicGuardrailMiddleware`**: `tools` (required — list of tools to guard), `rules` (list of lambda functions), `stage`.
-- **`UiPathByoGuardrailMiddleware`**: `validator_name` (required — the BYOG configuration's validator name), `connection_id` (recommended — the Integration Service connection id backing the configuration), `validator_parameters` (optional connector-defined parameters, passed through as-is), `tools` (required only when `GuardrailScope.TOOL` is used), `stage`. See [Bring Your Own Guardrail](#bring-your-own-guardrail-byog).
+- **`UiPathByoGuardrailMiddleware`**: `validator_name` (required — the BYOG configuration's validator name, unique per tenant), `validator_parameters` (optional connector-defined parameters, passed through as-is), `tools` (required only when `GuardrailScope.TOOL` is used), `stage`. See [Bring Your Own Guardrail](#bring-your-own-guardrail-byog).
 
 ### Full example
 
@@ -236,23 +236,22 @@ byog = UiPathByoGuardrailMiddleware(
     validator_name="my-harmful-content-guardrail",   # the configuration's validator name
     scopes=[GuardrailScope.AGENT],
     action=BlockAction(),
-    connection_id="my-byog-guardrail-connection",     # IS connection id
 )
 
 agent = create_agent(model=llm, tools=[...], middleware=[*byog])
 ```
 
-To find the `validator_name` and `connection_id`, list your tenant's BYOG configurations:
+To find the `validator_name`, list your tenant's BYOG configurations:
 
 ```bash
 uip agent guardrails list --byo --output json
 ```
 
-Each entry carries `ByoValidatorName` (→ `validator_name`) and `ByoConnectionId` (→ `connection_id`), alongside its `AllowedScopes` / `GuardrailStages` and the full `Parameters` schema. No solution binding is needed for the connection: it is resolved server-side from the BYOG configuration.
+Each entry carries `ByoValidatorName` (→ `validator_name`), alongside its `AllowedScopes` / `GuardrailStages` and the full `Parameters` schema. No connection details are needed: the Integration Service connection is resolved server-side from the BYOG configuration.
 
 Notes:
 
-- **Always pass `connection_id`.** Validator names are unique per connection only; without the id the server picks the first configuration matching the name.
+- **The name is the identity.** Validator names are unique per tenant, so the name alone resolves the configuration; the connection comes from the configuration, so an admin rebind is always honored.
 - **You choose the scopes and stages.** BYOG validators are not scope- or stage-restricted: like the built-in validators they are available on AGENT, LLM and TOOL scope for both PRE and POST, and it is up to you which ones to register. The entry's `AllowedScopes` / `GuardrailStages` in the CLI output confirm what a given validator accepts.
 - **Parameters are connector-defined.** Pass `validator_parameters` as raw parameter values when your connector expects them; there is no static schema on the client. See [Tuning a BYOG validator](#tuning-a-byog-validator) below.
 - **Error semantics.** A removed or disabled configuration, BYOG not being enabled for the tenant, or a vendor failure (with fallback off) returns `PROVIDER_ERROR`/`FEATURE_DISABLED` — the middleware treats these like any non-failed result (fail-open) and logs the details. Fallback to the UiPath-managed validator (`FallbackOnUiPath`) applies only when the configuration's validator type maps to an out-of-the-box validator.
@@ -284,7 +283,6 @@ byog = UiPathByoGuardrailMiddleware(
     validator_name="my-harmful-content-guardrail",
     scopes=[GuardrailScope.AGENT],
     action=BlockAction(),
-    connection_id="my-byog-guardrail-connection",
     validator_parameters=byog_parameters,
 )
 ```
@@ -532,7 +530,7 @@ async def my_node(state: Input) -> Output:
 
 `ByoValidator` is the decorator equivalent of [`UiPathByoGuardrailMiddleware`](#bring-your-own-guardrail-byog): it runs a **customer-managed** validator instead of a UiPath-managed one — your own content-safety subscription, a vendor validation service, or a custom Integration Service connector wrapping an internal classifier.
 
-The admin prerequisite and how to look up the validator name, connection id and parameter schema are the same as for the middleware flavor — see [Bring Your Own Guardrail (BYOG)](#bring-your-own-guardrail-byog) under the middleware pattern.
+The admin prerequisite and how to look up the validator name and parameter schema are the same as for the middleware flavor — see [Bring Your Own Guardrail (BYOG)](#bring-your-own-guardrail-byog) under the middleware pattern.
 
 The validator references that configuration by name; scope is inferred from the decorated target as usual:
 
@@ -540,8 +538,7 @@ The validator references that configuration by name; scope is inferred from the 
 from uipath_langchain.guardrails import BlockAction, ByoValidator, guardrail
 
 byog_harmful_content = ByoValidator(
-    "my-harmful-content-guardrail",                          # the configuration's validator name
-    connection_id="my-byog-guardrail-connection",            # IS connection id
+    "my-harmful-content-guardrail",  # the configuration's validator name (unique per tenant)
 )
 
 @guardrail(validator=byog_harmful_content, action=BlockAction())
@@ -549,7 +546,7 @@ def create_joke_agent():
     return create_agent(model=llm, tools=[...])
 ```
 
-Notes specific to the decorator path — the [middleware notes](#bring-your-own-guardrail-byog) on `connection_id`, scopes/stages and connector-defined parameters apply here too:
+Notes specific to the decorator path — the [middleware notes](#bring-your-own-guardrail-byog) on naming, scopes/stages and connector-defined parameters apply here too:
 
 - **`parameters` instead of `validator_parameters`.** Same passthrough of raw parameter values; read the ids and allowed values from the validator's `Parameters` array in `uip agent guardrails list --byo`.
 - **No static stage restriction.** Because BYOG validators are available on every scope and stage, `ByoValidator` declares no `supported_stages` — you pick the `stage`, and the scope comes from the decorated target.

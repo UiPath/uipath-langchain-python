@@ -1,9 +1,9 @@
 """Tests for ``UiPathByoGuardrailMiddleware`` (Bring Your Own Guardrail).
 
-BYOG guardrails reference an admin-created configuration by validator name
-(plus an optional Integration Service connection id). These tests pin:
+BYOG guardrails reference an admin-created configuration purely by validator
+name, which is unique per tenant. These tests pin:
 - the ``BuiltInValidatorGuardrail`` the middleware constructs (``validator_type
-  == "byo"`` sentinel + ``byoValidatorName``/``byoConnectionId`` aliases),
+  == "byo"`` sentinel + the ``byoValidatorName`` alias),
 - constructor validation,
 - hook wiring parity with the other built-in middlewares (scopes x stage),
 - that the evaluation path forwards the BYO guardrail to the service and that
@@ -34,7 +34,6 @@ _LOG = LogAction()
 _BLOCK = BlockAction()
 
 _VALIDATOR_NAME = "my-harmful-content-guardrail"
-_CONNECTION_ID = "my-byog-guardrail-connection"
 
 
 def _hook_names(middleware: Iterable[Any]) -> list[str]:
@@ -59,22 +58,20 @@ class TestByoGuardrailConstruction:
         middleware = _byo()
         assert middleware._guardrail.validator_type == BYO_VALIDATOR_TYPE
 
-    def test_guardrail_carries_validator_name_and_connection_id(self) -> None:
-        middleware = _byo(connection_id=_CONNECTION_ID)
-        assert middleware._guardrail.byo_validator_name == _VALIDATOR_NAME
-        assert middleware._guardrail.byo_connection_id == _CONNECTION_ID
-
-    def test_connection_id_defaults_to_none(self) -> None:
+    def test_guardrail_carries_validator_name(self) -> None:
         middleware = _byo()
-        assert middleware._guardrail.byo_connection_id is None
+        assert middleware._guardrail.byo_validator_name == _VALIDATOR_NAME
 
     def test_aliases_serialize_for_the_wire(self) -> None:
-        middleware = _byo(connection_id=_CONNECTION_ID)
+        middleware = _byo()
         dumped = middleware._guardrail.model_dump(by_alias=True)
         assert dumped["validatorType"] == "byo"
         assert dumped["byoValidatorName"] == _VALIDATOR_NAME
-        assert dumped["byoConnectionId"] == _CONNECTION_ID
         assert dumped["$guardrailType"] == "builtInValidator"
+        # BYOG resolves by validator name alone (unique per tenant). On
+        # uipath-platform releases that still carry the legacy field it dumps
+        # as None; once removed it is absent - never a real value.
+        assert dumped.get("byoConnectionId") is None
 
     def test_validator_parameters_pass_through(self) -> None:
         parameter = NumberParameterValue(
@@ -214,7 +211,7 @@ class TestByoGuardrailEvaluationPath:
         )
 
     def test_evaluate_forwards_byo_guardrail_to_service(self) -> None:
-        middleware = _byo(connection_id=_CONNECTION_ID)
+        middleware = _byo()
         mock_uipath = MagicMock()
         mock_uipath.guardrails.evaluate_guardrail.return_value = self._passed()
         middleware._uipath = mock_uipath
@@ -227,7 +224,6 @@ class TestByoGuardrailEvaluationPath:
         assert input_data == "some input"
         assert guardrail.validator_type == BYO_VALIDATOR_TYPE
         assert guardrail.byo_validator_name == _VALIDATOR_NAME
-        assert guardrail.byo_connection_id == _CONNECTION_ID
 
     def test_block_action_raises_on_validation_failed(self) -> None:
         middleware = _byo(action=_BLOCK)

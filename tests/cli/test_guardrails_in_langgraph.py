@@ -618,8 +618,9 @@ class TestGuardrailsParity:
 
         BYOG parity has one extra dimension the built-in scenarios don't: the
         wire contract. Both flavors must deliver the SAME ``byo`` guardrail to
-        the service — ``validator_type="byo"`` carrying ``byoValidatorName`` and
-        ``byoConnectionId`` — and block identically on a failing verdict.
+        the service — ``validator_type="byo"`` carrying ``byoValidatorName``,
+        the sole BYOG identity (unique per tenant) — and block identically on
+        a failing verdict.
         """
         flavor, script, langgraph_json = agent_setup
 
@@ -670,7 +671,9 @@ class TestGuardrailsParity:
         for g in seen_byo_guardrails:
             assert g.validator_type == "byo", f"[{flavor}] wrong validator_type"
             assert g.byo_validator_name == "my-harmful-content-guardrail"
-            assert g.byo_connection_id == "my-byog-guardrail-connection"
+            # BYOG identity is the name alone; no connection id may ride along
+            # (works both before and after uipath-platform drops the field).
+            assert not getattr(g, "byo_connection_id", None)
 
 
 # ---------------------------------------------------------------------------

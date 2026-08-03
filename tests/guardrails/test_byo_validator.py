@@ -8,9 +8,9 @@ Two groups:
    deleted/disabled config, BYOG not enabled) is visible instead of silent.
 
 2. **``ByoValidator`` through ``@guardrail``** — the validator reaches the
-   guardrails service as a ``byo`` guardrail carrying ``byoValidatorName`` /
-   ``byoConnectionId``, for a tool, a plain function, and a validator reused
-   across targets.
+   guardrails service as a ``byo`` guardrail carrying ``byoValidatorName``
+   (the sole BYOG identity, unique per tenant), for a tool, a plain function,
+   and a validator reused across targets.
 """
 
 import logging
@@ -111,10 +111,7 @@ class TestByoValidatorThroughDecorator:
 
     def test_tool_scope_forwards_byo_guardrail(self) -> None:
         @guardrail(
-            validator=ByoValidator(
-                "my-harmful-content-guardrail",
-                connection_id="my-byog-guardrail-connection",
-            ),
+            validator=ByoValidator("my-harmful-content-guardrail"),
             action=LogAction(),
             name="BYOG tool guardrail",
         )
@@ -132,7 +129,6 @@ class TestByoValidatorThroughDecorator:
         _, g = mock_uipath.guardrails.evaluate_guardrail.call_args[0]
         assert g.validator_type == "byo"
         assert g.byo_validator_name == "my-harmful-content-guardrail"
-        assert g.byo_connection_id == "my-byog-guardrail-connection"
         assert g.name == "BYOG tool guardrail"
 
     def test_plain_function_forwards_byo_guardrail(self) -> None:
@@ -151,10 +147,9 @@ class TestByoValidatorThroughDecorator:
         _, g = mock_uipath.guardrails.evaluate_guardrail.call_args[0]
         assert g.validator_type == "byo"
         assert g.byo_validator_name == "byog-pii"
-        assert g.byo_connection_id is None
 
     def test_validator_is_reusable_across_targets(self) -> None:
-        shared = ByoValidator("byog-shared", connection_id="conn-1")
+        shared = ByoValidator("byog-shared")
 
         @guardrail(validator=shared, action=LogAction())
         def first(text: str) -> str:
@@ -174,4 +169,3 @@ class TestByoValidatorThroughDecorator:
         for call in calls:
             _, g = call[0]
             assert g.byo_validator_name == "byog-shared"
-            assert g.byo_connection_id == "conn-1"
