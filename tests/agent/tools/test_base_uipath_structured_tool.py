@@ -5,7 +5,12 @@ from types import CodeType
 import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -225,3 +230,38 @@ async def test_coroutine_with_self_parameter():
 
     result = await tool.ainvoke({"self": "async_test", "value": 99})
     assert result == "async_test:99"
+
+
+@pytest.mark.asyncio
+async def test_invalid_dynamic_tool_input_is_categorized_as_user_error():
+    input_schema = create_model(
+        {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "const": "ExpectedProvider",
+                }
+            },
+            "required": ["provider"],
+        }
+    )
+    tool = BaseUiPathStructuredTool(
+        coroutine=_noop_coroutine,
+        name="Web_Search",
+        description="Search the web",
+        args_schema=input_schema,
+    )
+
+    with pytest.raises(AgentRuntimeError) as exc_info:
+        await tool.ainvoke({"provider": "anotherProvider"})
+
+    info = exc_info.value.error_info
+    assert info.code == AgentRuntimeError.full_code(
+        AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT
+    )
+    assert info.category == UiPathErrorCategory.USER
+    assert info.title == "Invalid input for tool 'Web_Search'"
+    assert "Revise the agent prompt or tool configuration" in info.detail
+    assert "provider" in info.detail
+    assert "ExpectedProvider" in info.detail
