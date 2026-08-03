@@ -36,9 +36,7 @@ def test_create_state_merges_schema_with_state() -> None:
 def test_create_state_does_not_retain_extra_fields() -> None:
     """The combined deep-agent state must not silently allow undeclared keys."""
     state_type = create_state_with_input(_InputSchema)
-    state = state_type.model_validate(
-        {"question": "value", "undeclared": "extra"}
-    )
+    state = state_type.model_validate({"question": "value", "undeclared": "extra"})
 
     assert state_type.model_config.get("extra") != "allow"
     assert "undeclared" not in state.model_dump()
