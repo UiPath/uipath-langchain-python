@@ -244,10 +244,7 @@ llm = create_llm()
 
 
 @guardrail(
-    validator=ByoValidator(
-        "my-harmful-content-guardrail",
-        connection_id="my-byog-guardrail-connection",
-    ),
+    validator=ByoValidator("my-harmful-content-guardrail"),
     action=BlockAction(),
     name="Agent BYOG Detection",
     stage=GuardrailExecutionStage.PRE,

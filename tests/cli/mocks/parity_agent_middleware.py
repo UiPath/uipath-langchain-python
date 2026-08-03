@@ -193,11 +193,10 @@ agent = create_agent(
             stage=GuardrailExecutionStage.POST,
         ),
         # AGENT scope BYOG — BlockAction (PRE): customer-managed validator
-        # referenced by name + connection id
+        # referenced by validator name (unique per tenant)
         *UiPathByoGuardrailMiddleware(
             name="Agent BYOG Detection",
             validator_name="my-harmful-content-guardrail",
-            connection_id="my-byog-guardrail-connection",
             scopes=[GuardrailScope.AGENT],
             action=BlockAction(),
             stage=GuardrailExecutionStage.PRE,
