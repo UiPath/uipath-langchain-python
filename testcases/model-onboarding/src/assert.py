@@ -37,7 +37,9 @@ print("\nTest Results:")
 print(f"  Success: {success}")
 print(f"  Summary:\n{result_summary}")
 
-assert success is True, "Test did not succeed. See detailed results above."
+# Trace assertions run BEFORE the success gate: a failing run is exactly when
+# the spans (and the trace dump they print) are most useful for diagnosis.
+assert_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 # The second (empty UIPATH_JOB_KEY) local run appends to this log.
 with open("local_run_output.log", "r", encoding="utf-8") as f:
@@ -48,6 +50,6 @@ assert "Successful execution." in local_run_output, (
     f"Actual response: {local_run_output}"
 )
 
-assert_traces(".uipath/traces.jsonl", "expected_traces.json")
+assert success is True, "Test did not succeed. See detailed results above."
 
 print("All validations passed successfully!")

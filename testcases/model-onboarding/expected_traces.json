@@ -1,10 +1,22 @@
 {
-  "description": "Model-onboarding trace assertions - the node ran and at least one LLM span was emitted by one of the reachable client classes.",
+  "description": "Model-onboarding trace assertions. The probe ran, the file was uploaded as a real platform attachment and its blob fetched (proof the agent read it, not just described the file name), the generated ReAct agent executed, and an LLM span was emitted by a reachable client class.",
   "required_spans": [
     {
-      "name": "run_model_onboarding",
+      "name": "probe_file_processing",
       "attributes": {
         "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": "attachments_upload"
+    },
+    {
+      "name": "attachments_get_blob_uri"
+    },
+    {
+      "name": "agent",
+      "attributes": {
+        "openinference.span.kind": "AGENT"
       }
     },
     {
@@ -13,7 +25,8 @@
         "UiPathChatGoogleGenerativeAI",
         "UiPathChatBedrockConverse",
         "UiPathChatBedrock",
-        "UiPathChatAnthropicBedrock"
+        "UiPathChatAnthropicBedrock",
+        "UiPathChatAnthropic"
       ],
       "attributes": {
         "openinference.span.kind": "LLM"

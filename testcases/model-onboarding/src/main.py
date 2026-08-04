@@ -1,151 +1,133 @@
-"""Model-parameterized onboarding test case.
+"""Model-onboarding test case: run the file_processing agent on a model.
 
-Exercises a single model — supplied at runtime via ``input.json`` — across the
-distinct ``get_chat_model`` code paths that model is expected to support, plus
-an optional set of file attachments. Every ``path x file`` cell is invoked
-independently; failures are caught per cell and rolled up into one ``success``
-boolean, mirroring the ``multimodal-invoke`` contract so this project drops into
-the existing integration-test matrix unchanged.
-
-The model is NOT hardcoded. Edit ``input.json`` to onboard any model:
+Runs the coded ``file_processing`` agent (Studio Web's "Clone as Coded Agent"
+of the low-code FileProcessingAgent) against a model supplied at runtime via
+``input.json``, once per file.
 
     {
-      "prompt": "Describe the content of this file in one sentence.",
       "model_spec": {
         "model_name": "gpt-5.2-2025-12-11",
-        "paths": ["azure_responses", "azure_chat_completions"],
-        "agenthub_config": "agentsplayground",
-        "files": ["image", "pdf"]
+        "api_flavors": ["openai:responses"],
+        "agenthub_config": "agentsplayground"
       }
     }
 
-``paths`` is explicit on purpose: a model ID is only valid on the vendor
-families it actually ships on, so the caller declares which surfaces to test
-rather than the code guessing from the name. ``files`` may be empty for
-text-only models — an empty list runs a plain ``ainvoke`` reachability check.
+Every file in ``FILE_REGISTRY`` is exercised. Each asks a question with one
+deterministic answer that only its contents reveal — "what animal is this?"
+over a photo of a dog, "what is the first word inside?" over a PDF reading
+"Dummy PDF file". The answer word appears nowhere in the file name, so a model
+that never opened the file cannot produce it.
+
+Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
+``get_chat_model`` (e.g. ``openai:responses``, ``awsbedrock:converse``,
+``vertexai:generate-content``); ``vendor_type:`` alone autodetects the flavor.
 """
 
 import logging
-from typing import Callable
 
-from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 from uipath.llm_client.settings import PlatformSettings
-from uipath_langchain_client.clients.bedrock.chat_models import (
-    UiPathChatAnthropicBedrock,
-)
-from uipath_langchain_client.settings import (
-    ApiFlavor,
-    UiPathBaseSettings,
-)
 
-from uipath_langchain.agent.multimodal.invoke import llm_call_with_files
 from uipath_langchain.agent.multimodal.types import FileInfo
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 
+from agents.file_processing.agent import run as run_file_processing
+
 logger = logging.getLogger(__name__)
 
+class FileCase(BaseModel):
+    """A file plus the question to ask and the answer that proves it was read.
 
-# --------------------------------------------------------------------------- #
-# Path registry: one builder per distinct get_chat_model code path.
-#
-# Each builder returns a configured BaseChatModel for the given model name and
-# client settings. The keys are the strings the caller lists in
-# `model_spec.paths`. Adding a new reachable class is a one-line addition here.
-# --------------------------------------------------------------------------- #
-PathBuilder = Callable[[str, UiPathBaseSettings], object]
+    Each question has one deterministic word as its answer, and that word is
+    absent from the file name — so an agent that never opened the file cannot
+    produce it.
+    """
 
-PATH_REGISTRY: dict[str, PathBuilder] = {
-    # VendorType.OPENAI (UiPath-owned) -> UiPathAzureChatOpenAI (responses API)
-    "azure_responses": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.RESPONSES,
-        temperature=0.0,
-        max_tokens=200,
+    file: FileInfo
+    question: str
+    expected: str
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+# Files the agent processes, selected by name via `model_spec.files`.
+FILE_REGISTRY: dict[str, FileCase] = {
+    "image": FileCase(
+        # A white Samoyed sitting on grass.
+        file=FileInfo(
+            url="https://raw.githubusercontent.com/pytorch/hub/master/images/dog.jpg",
+            name="animal.jpg",
+            mime_type="image/jpeg",
+        ),
+        question="What animal is in this image? Answer with one word only.",
+        expected="dog",
     ),
-    # VendorType.OPENAI + CHAT_COMPLETIONS -> UiPathAzureChatOpenAI (chat API)
-    "azure_chat_completions": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.CHAT_COMPLETIONS,
-        temperature=0.0,
-        max_tokens=200,
-    ),
-    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI
-    "vertex": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        temperature=0.0,
-        max_tokens=200,
-    ),
-    # VendorType.AWSBEDROCK (UiPath-owned) -> UiPathChatBedrockConverse
-    "bedrock_converse": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.CONVERSE,
-        temperature=0.0,
-        max_tokens=200,
-    ),
-    # VendorType.AWSBEDROCK + INVOKE -> UiPathChatBedrock
-    "bedrock_invoke": lambda model, settings: get_chat_model(
-        model=model,
-        client_settings=settings,
-        api_flavor=ApiFlavor.INVOKE,
-        temperature=0.0,
-        max_tokens=200,
-    ),
-    # Direct instantiation -> UiPathChatAnthropicBedrock (not factory-reachable)
-    "anthropic_sdk": lambda model, settings: UiPathChatAnthropicBedrock(
-        model_name=model,
-        settings=settings,
-        temperature=0.0,
-        max_tokens=200,
+    "pdf": FileCase(
+        # A one-page PDF whose entire content is the line "Dummy PDF file".
+        file=FileInfo(
+            url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            name="document.pdf",
+            mime_type="application/pdf",
+        ),
+        # This file's text is the literal string "Dummy PDF file", which reads
+        # as a placeholder — across six runs the model answered it correctly
+        # three times and three times refused, reporting the file unreadable
+        # while quoting the very text the tool had returned. Asking it to
+        # repeat the tool output verbatim removes the judgement call; the
+        # instruction not to evaluate the text is what makes this stable.
+        question=(
+            "Call the Analyze Files tool, then repeat its result back "
+            "verbatim as your entire answer. Do not evaluate, judge or "
+            "comment on whether the text is meaningful."
+        ),
+        expected="dummy",
     ),
 }
 
 
-# --------------------------------------------------------------------------- #
-# File registry: named file attachments the caller selects via
-# `model_spec.files`. Public, reachable URLs so the run environment can fetch
-# them. Extend as needed for other formats you want to onboard against.
-# --------------------------------------------------------------------------- #
-FILE_REGISTRY: dict[str, FileInfo] = {
-    "image": FileInfo(
-        url="https://www.w3schools.com/css/img_5terre.jpg",
-        name="img_5terre.jpg",
-        mime_type="image/jpeg",
-    ),
-    "pdf": FileInfo(
-        url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-        name="dummy.pdf",
-        mime_type="application/pdf",
-    ),
-}
+# Phrases a model uses when it quotes the expected word while denying it read
+# the file. A plain substring check passed those, asserting the opposite of
+# what the answer said.
+_REFUSAL_MARKERS = (
+    "cannot",
+    "can't",
+    "unable",
+    "not available",
+    "no actual",
+    "placeholder",
+    "unreadable",
+    "appears to be",
+    "rather than",
+)
+
+
+def _matches(expected: str, answer: str) -> bool:
+    """Was the expected word actually given as the answer?
+
+    Requires the word as a real token and no refusal language. Length is not a
+    criterion: a verbatim transcription legitimately carries the parser's
+    ``<PARSED TEXT FOR PAGE: 1 / 1>`` prefix, which a word-count limit rejected
+    even though the answer was correct.
+    """
+    lowered = answer.lower()
+    if any(marker in lowered for marker in _REFUSAL_MARKERS):
+        return False
+    words = [w.strip(".,'\"“”‘’!?:;()<>/").lower() for w in lowered.split()]
+    return expected.lower() in words
 
 
 class ModelSpec(BaseModel):
-    """Runtime specification for the model under test."""
+    """The model under test."""
 
     model_name: str = Field(description="Vendor-qualified model identifier.")
-    paths: list[str] = Field(
-        description="get_chat_model code paths to exercise; keys of PATH_REGISTRY.",
+    api_flavors: list[str] = Field(
+        description="'vendor_type:api_flavor' pairs forwarded to get_chat_model.",
     )
-    agenthub_config: str = Field(
-        default="agentsplayground",
-        description="AgentHub config header value; must exist in the target tenant.",
-    )
-    files: list[str] = Field(
-        default_factory=list,
-        description="File attachments to test; keys of FILE_REGISTRY. Empty => "
-        "text-only reachability check via plain ainvoke.",
-    )
+    agenthub_config: str = Field(default="agentsplayground")
 
 
 class GraphInput(BaseModel):
-    prompt: str = Field(default="Describe the content of this file in one sentence.")
     model_spec: ModelSpec
 
 
@@ -154,126 +136,55 @@ class GraphOutput(BaseModel):
     result_summary: str
 
 
-class GraphState(MessagesState):
-    prompt: str
-    model_spec: dict
-    success: bool
-    result_summary: str
-    model_results: dict
+async def probe_file_processing(state: GraphInput) -> GraphOutput:
+    """Run the agent for every api_flavor x file, collecting its answers."""
+    spec = state.model_spec
+    settings = PlatformSettings(agenthub_config=spec.agenthub_config)
+    lines: list[str] = []
+    failed = False
 
+    for flavor in spec.api_flavors:
+        vendor_type, _, api_flavor = flavor.partition(":")
+        model = get_chat_model(
+            model=spec.model_name,
+            client_settings=settings,
+            vendor_type=vendor_type or None,
+            api_flavor=api_flavor or None,
+            temperature=0.0,
+            max_tokens=2000,
+        )
+        lines.append(f"{flavor}:")
 
-def _build_model(path: str, model_name: str, settings: UiPathBaseSettings) -> object:
-    """Build a model instance for a registered path.
-
-    Raises:
-        KeyError: If ``path`` is not a registered PATH_REGISTRY key.
-    """
-    builder = PATH_REGISTRY[path]
-    return builder(model_name, settings)
-
-
-async def run_model_onboarding(state: GraphState) -> dict:
-    spec = ModelSpec.model_validate(state["model_spec"])
-    messages = [HumanMessage(content=state["prompt"])]
-
-    # Empty files => a single text-only cell (llm_call_with_files does a plain
-    # ainvoke when the file list is empty).
-    selected_files: list[tuple[str, list[FileInfo]]]
-    if spec.files:
-        selected_files = [(name, [FILE_REGISTRY[name]]) for name in spec.files]
-    else:
-        selected_files = [("text-only", [])]
-
-    try:
-        client_settings = PlatformSettings(agenthub_config=spec.agenthub_config)
-    except Exception as e:
-        # Settings need UiPath auth env vars (set by `uipath auth`). If they are
-        # missing the whole run is moot; surface it as a legible failure.
-        logger.error(f"PlatformSettings construction failed: {e}")
-        return {
-            "success": False,
-            "result_summary": f"settings: ✗ {str(e)[:120]}",
-            "model_results": {},
-        }
-
-    model_results: dict[str, dict[str, str]] = {}
-    for path in spec.paths:
-        logger.info(f"Testing path '{path}' with model '{spec.model_name}'...")
-
-        if path not in PATH_REGISTRY:
-            logger.error(f"  unknown path '{path}'")
-            model_results[path] = {"__path__": f"✗ unknown path '{path}'"}
-            continue
-
-        try:
-            model = _build_model(path, spec.model_name, client_settings)
-            logger.info(f"  Created: {type(model).__name__}")
-        except Exception as e:  # model construction itself can fail
-            logger.error(f"  construction failed: {e}")
-            model_results[path] = {"__build__": f"✗ {str(e)[:60]}"}
-            continue
-
-        cell_results: dict[str, str] = {}
-        for label, files in selected_files:
-            logger.info(f"  {label}...")
+        for file_name, case in FILE_REGISTRY.items():
             try:
-                response: AIMessage = await llm_call_with_files(
-                    messages, files, model
+                answer = await run_file_processing(
+                    model, case.question, [case.file]
                 )
-                # Guard against an empty/blank completion counting as success.
-                if response.content and str(response.content).strip():
-                    logger.info(f"    {label}: ✓")
-                    cell_results[label] = "✓"
-                else:
-                    logger.warning(f"    {label}: ✗ empty response")
-                    cell_results[label] = "✗ empty response"
             except Exception as e:
-                logger.error(f"    {label}: ✗ {e}")
-                cell_results[label] = f"✗ {str(e)[:60]}"
-        model_results[path] = cell_results
+                failed = True
+                # Collapse newlines: some SDK errors are multi-line and would
+                # break the one-cell-per-line summary.
+                detail = " ".join(str(e).split())
+                lines.append(f"  {file_name}: ✗ {type(e).__name__}: {detail}"[:300])
+                continue
 
-    summary_lines = []
-    for path, results in model_results.items():
-        summary_lines.append(f"{path}:")
-        for cell_name, result in results.items():
-            summary_lines.append(f"  {cell_name}: {result}")
+            if _matches(case.expected, answer):
+                lines.append(f"  {file_name}: ✓ {answer}"[:200])
+            else:
+                failed = True
+                lines.append(
+                    f"  {file_name}: ✗ expected '{case.expected}', got: {answer}"[:300]
+                )
 
-    has_failures = any(
-        "✗" in v for results in model_results.values() for v in results.values()
-    )
-    # A spec with no runnable paths is a failure, not a vacuous success.
-    if not model_results:
-        has_failures = True
-        summary_lines.append("(no paths specified)")
-
-    return {
-        "success": not has_failures,
-        "result_summary": "\n".join(summary_lines),
-        "model_results": model_results,
-    }
+    summary = "\n".join(lines)
+    logger.info(f"Success: {not failed}\nSummary:\n{summary}")
+    return GraphOutput(success=not failed, result_summary=summary)
 
 
-async def return_results(state: GraphState) -> GraphOutput:
-    logger.info(f"Success: {state['success']}")
-    logger.info(f"Summary:\n{state['result_summary']}")
-    return GraphOutput(
-        success=state["success"],
-        result_summary=state["result_summary"],
-    )
-
-
-def build_graph() -> StateGraph:
-    builder = StateGraph(GraphState, input_schema=GraphInput, output_schema=GraphOutput)
-
-    builder.add_node("run_model_onboarding", run_model_onboarding)
-    builder.add_node("results", return_results)
-
-    builder.add_edge(START, "run_model_onboarding")
-    builder.add_edge("run_model_onboarding", "results")
-    builder.add_edge("results", END)
-
-    memory = MemorySaver()
-    return builder.compile(checkpointer=memory)
-
-
-graph = build_graph()
+# `langgraph.json` points the runtime at ./src/main.py:graph, which must be a
+# StateGraph; the runtime compiles it with its own checkpointer. The agent
+# under test brings its own graph — see agents/file_processing/agent.py.
+graph = StateGraph(GraphInput, output_schema=GraphOutput)
+graph.add_node(probe_file_processing)
+graph.add_edge(START, "probe_file_processing")
+graph.add_edge("probe_file_processing", END)
