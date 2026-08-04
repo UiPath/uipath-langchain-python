@@ -12,11 +12,15 @@ of the low-code FileProcessingAgent) against a model supplied at runtime via
       }
     }
 
-Every file in ``FILE_REGISTRY`` is exercised. Each asks a question with one
-deterministic answer that only its contents reveal — "what animal is this?"
-over a photo of a dog, "what is the first word inside?" over a PDF reading
-"Dummy PDF file". The answer word appears nowhere in the file name, so a model
-that never opened the file cannot produce it.
+Every file in ``FILE_REGISTRY`` is exercised. Each asks a question whose answer
+is **unguessable** — a random code inside a PDF, the colour of a shape in an
+image. That property is what makes the assertion meaningful: there is no prior
+a model can fall back on, so producing the answer proves it read the file.
+
+This matters more than it sounds. Earlier fixtures asked "what animal is in
+this image?" over ``dog.jpg``; "dog" is the most likely answer to that question
+with no image at all, and the file name was visible in the prompt, so a model
+that never opened the file still scored correct.
 
 Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 ``get_chat_model`` (e.g. ``openai:responses``, ``awsbedrock:converse``,
@@ -53,105 +57,82 @@ class FileCase(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
-# Files the agent processes, selected by name via `model_spec.files`.
+# Files the agent processes. Both fixtures are generated and committed under
+# fixtures/ (see fixtures/README.md), and both answers are unguessable — which
+# is the whole point.
+#
+# The previous fixtures were borrowed from the web and both were guessable:
+#
+# - dog.jpg asked "what animal is this?", and "dog" is the single most likely
+#   answer to that question with no image at all. A model that never opened the
+#   file scored correct. The file name was visible in the prompt too.
+# - dummy.pdf's text is the literal string "Dummy PDF file", which reads as a
+#   placeholder, so the model kept editorializing about whether the content was
+#   real instead of reporting it — flaky in both directions.
+#
+# A random code and an arbitrary color have no prior to fall back on: the model
+# either read the file or it did not.
 FILE_REGISTRY: dict[str, FileCase] = {
     "image": FileCase(
-        # A white Samoyed sitting on grass.
+        # A purple square on white. The subject carries no colour prior.
         file=FileInfo(
-            url="https://raw.githubusercontent.com/pytorch/hub/master/images/dog.jpg",
-            name="animal.jpg",
-            mime_type="image/jpeg",
+            url="fixtures/shape.png",
+            name="shape.png",
+            mime_type="image/png",
         ),
-        question="What animal is in this image? Answer with one word only.",
-        expected="dog",
+        question=(
+            "What colour is the large shape in the centre of this image? "
+            "Answer with one word only."
+        ),
+        expected="purple",
     ),
     "pdf": FileCase(
-        # A one-page PDF whose entire content is the line "Dummy PDF file".
+        # A one-page PDF whose only text is "Verification code: PDF-CODE-74915".
         file=FileInfo(
-            url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            url="fixtures/document.pdf",
             name="document.pdf",
             mime_type="application/pdf",
         ),
-        # This file's text is the literal string "Dummy PDF file", which reads
-        # as a placeholder — across six runs the model answered it correctly
-        # three times and three times refused, reporting the file unreadable
-        # while quoting the very text the tool had returned. Asking it to
-        # repeat the tool output verbatim removes the judgement call; the
-        # instruction not to evaluate the text is what makes this stable.
         question=(
-            "Call the Analyze Files tool, then repeat its result back "
-            "verbatim as your entire answer. Do not evaluate, judge or "
-            "comment on whether the text is meaningful."
+            "What is the verification code written in this document? "
+            "Answer with the code only."
         ),
-        expected="dummy",
+        expected="PDF-CODE-74915",
     ),
 }
 
 
-# Phrases a model uses when it denies having read the file, or hedges that it
-# is guessing. Any of these disqualifies the answer outright.
-#
-# Two calibration notes, both from real answers:
-#
-# - Descriptive words ("placeholder", "appears to be") do NOT belong here. The
-#   model reads the PDF correctly and then volunteers commentary ("Content
-#   type: Plain text placeholder"); that is a correct answer with
-#   editorializing attached, and matching the word alone failed it.
-# - Negations and guess-hedges DO belong here. Without them, "There is no dog
-#   in this image; it is a cat." and "I don't have access to the image, but
-#   based on the filename it is probably a dog." both passed — the exact
-#   false-pass this test exists to prevent.
-_REFUSAL_MARKERS = (
-    "cannot",
-    "can't",
-    "unable",
-    "not available",
-    "unreadable",
-    "no access",
-    "not have access",
-    "don't have access",
-    "sorry",
-    "failed to",
-    "there is no",
-    "is not a",
-    "based on the filename",
-    "based on the file name",
-    "probably",
-    "i guess",
-    "my guess",
-)
-
-# How far into the answer the expected word must appear. A direct answer leads
-# with it (optionally after a parser prefix); a narrative that mentions it in
-# passing buries it. Generous enough for the PDF parser's
-# "<PARSED TEXT FOR PAGE: 1 / 1>" preamble.
-_MAX_TOKENS_BEFORE_ANSWER = 12
-
-
 def _matches(expected: str, answer: str) -> bool:
-    """Was the expected word actually given as the answer?
+    """Does the answer contain the expected value as a whole token?
 
-    Three conditions, each earned by a real failure:
+    Deliberately simple, and only safe because the expected values are
+    unguessable (a random code, an arbitrary colour). Earlier fixtures were
+    guessable, which forced a refusal-phrase blocklist and a
+    position-in-answer heuristic to tell "read the file" from "guessed the
+    obvious"; both were brittle — they rejected correct answers that carried
+    commentary, and still passed "there is no dog; it is a cat".
 
-    1. No refusal or guess-hedge language anywhere (see ``_REFUSAL_MARKERS``).
-    2. The word appears as a whole token — not a substring, so "Samoyed"
-       does not satisfy "dog" and "dogma" would not either.
-    3. It appears **early**. Length is not a criterion (a verbatim
-       transcription legitimately carries the parser's
-       ``<PARSED TEXT FOR PAGE: 1 / 1>`` prefix), but position is: a model
-       narrating its way to the word is not answering with it.
+    Choosing a fixture whose answer cannot be guessed removes the need to
+    interpret the prose around it: presence of the token *is* the evidence.
+    Matching is case-insensitive and on whole tokens, so a substring like
+    "Samoyed" cannot satisfy "dog", and markdown or a parser prefix around the
+    answer is harmless.
     """
-    lowered = answer.lower()
-    if any(marker in lowered for marker in _REFUSAL_MARKERS):
+    # Hyphens are token separators here, so "PDF-CODE-74915" is compared as its
+    # parts in order — robust to the model reformatting the separator.
+    def tokens(text: str) -> list[str]:
+        return re.findall(r"\w+", text.lower())
+
+    expected_tokens = tokens(expected)
+    answer_tokens = tokens(answer)
+    if not expected_tokens:
         return False
-    # Split on non-word characters rather than stripping a hand-listed set of
-    # punctuation: the model wraps the answer in markdown (`` `Dummy PDF file` ``),
-    # and a strip-list missed the backtick, failing a correct answer.
-    words = re.findall(r"\w+", lowered)
-    try:
-        return words.index(expected.lower()) < _MAX_TOKENS_BEFORE_ANSWER
-    except ValueError:
-        return False
+    # Look for the expected token sequence anywhere in the answer.
+    span = len(expected_tokens)
+    return any(
+        answer_tokens[i : i + span] == expected_tokens
+        for i in range(len(answer_tokens) - span + 1)
+    )
 
 
 class ModelSpec(BaseModel):

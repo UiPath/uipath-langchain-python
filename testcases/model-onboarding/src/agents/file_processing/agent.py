@@ -131,15 +131,31 @@ def build_graph(llm):
 
 
 async def _upload_attachment(file_info) -> Attachment:
-    """Fetch the test file and register it as a platform attachment."""
-    import httpx
-    from uipath._utils._ssl_context import get_httpx_client_kwargs
+    """Read the test file and register it as a platform attachment.
+
+    Accepts a local path or an ``http(s)`` URL. The committed fixtures are
+    local so the assertion cannot drift when a third-party host changes a
+    file, and so the expected answer is a property of bytes in this repo.
+    """
+    from pathlib import Path
+
     from uipath.platform import UiPath
 
-    async with httpx.AsyncClient(**get_httpx_client_kwargs()) as client:
-        response = await client.get(file_info.url)
-        response.raise_for_status()
-        content = response.content
+    if file_info.url.startswith(("http://", "https://")):
+        import httpx
+        from uipath._utils._ssl_context import get_httpx_client_kwargs
+
+        async with httpx.AsyncClient(**get_httpx_client_kwargs()) as client:
+            response = await client.get(file_info.url)
+            response.raise_for_status()
+            content = response.content
+    else:
+        # Resolve relative to the project root (this file is src/agents/
+        # file_processing/agent.py), so the run works from any cwd.
+        path = Path(file_info.url)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[3] / path
+        content = path.read_bytes()
 
     sdk = UiPath()
     attachment_id = await sdk.attachments.upload_async(
