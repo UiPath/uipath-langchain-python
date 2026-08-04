@@ -849,10 +849,10 @@ class TestMcpClient:
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
     @patch("httpx.AsyncClient")
-    async def test_retrieve_async_uses_execution_folder_path(
+    async def test_retrieve_async_uses_name_and_execution_folder_path(
         self, mock_async_client_class, mcp_resource_config
     ):
-        """Test that retrieve_async is called with folder_path from the execution environment."""
+        """Test that name resolution receives both identities and the execution folder."""
         mock_sdk = MagicMock()
         mock_server = MagicMock()
         mock_server.mcp_url = "https://test.uipath.com/mcp"
@@ -876,7 +876,8 @@ class TestMcpClient:
             await session.call_tool("test_tool", {"query": "test"})
 
         mock_sdk.mcp.retrieve_async.assert_called_once_with(
-            slug="test-server", folder_path="/Shared/TestFolder"
+            name="test_server",
+            folder_path="/Shared/TestFolder",
         )
 
         await session.dispose()

@@ -17,6 +17,7 @@ Scenarios covered (× 2 flavors):
   9. test_tool_harmful_content_post_block — TOOL-scope harmful content (POST) → BlockAction
  10. test_intellectual_property_log       — LLM-scope IP → LogAction (no block)
  11. test_llm_as_judge_block             — AGENT-scope LLM-as-judge (POST) → BlockAction
+ 12. test_byog_agent_block               — AGENT-scope BYOG → BlockAction + byo wire contract
 
 Mock files:
   tests/cli/mocks/parity_agent_middleware.py
@@ -610,6 +611,69 @@ class TestGuardrailsParity:
         # Both flavors must build an llm_as_judge validator guardrail (parity point)
         assert seen_guardrails, f"[{flavor}] judge guardrail was never evaluated"
         assert all(g.validator_type == "llm_as_judge" for g in seen_guardrails)
+
+    @pytest.mark.asyncio
+    async def test_byog_agent_block(self, agent_setup):
+        """AGENT-scope BYOG guardrail (PRE) → BlockAction + byo wire contract.
+
+        BYOG parity has one extra dimension the built-in scenarios don't: the
+        wire contract. Both flavors must deliver the SAME ``byo`` guardrail to
+        the service — ``validator_type="byo"`` carrying ``byoValidatorName``,
+        the sole BYOG identity (unique per tenant) — and block identically on
+        a failing verdict.
+        """
+        flavor, script, langgraph_json = agent_setup
+
+        mock_llm = _make_tool_calling_llm(
+            joke="Why did the chicken cross the road?",
+            final_content="Joke delivered.",
+            call_id="call_byog_1",
+        )
+
+        seen_byo_guardrails = []
+
+        def mock_evaluate(text, guardrail):
+            if guardrail.name == "Agent BYOG Detection":
+                seen_byo_guardrails.append(guardrail)
+                # Trigger only on real string input — the decorator factory's
+                # import-time PRE check passes an empty dict {}.
+                if isinstance(text, str) and "forbidden" in text:
+                    return _GUARDRAIL_FAILED
+            return _GUARDRAIL_PASSED
+
+        async with _patched_run(mock_llm, mock_evaluate) as temp_dir:
+            with pytest.raises(Exception) as exc_info:
+                await _run_agent(
+                    temp_dir,
+                    script,
+                    langgraph_json,
+                    flavor,
+                    {"topic": "a forbidden topic"},
+                )
+            # Identical block contract in both flavors
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, AgentRuntimeError)
+            assert (
+                cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            )
+            assert (
+                cause.error_info.title
+                == "Guardrail [Agent BYOG Detection] blocked execution"
+            )
+            assert cause.error_info.detail == "Guardrail triggered"
+            assert cause.error_info.category == UiPathErrorCategory.USER
+
+        # Identical wire contract in both flavors — asserted OUTSIDE the mock so
+        # a mismatch fails the test instead of being swallowed by a fail-open path
+        assert seen_byo_guardrails, (
+            f"[{flavor}] BYOG guardrail never reached the service"
+        )
+        for g in seen_byo_guardrails:
+            assert g.validator_type == "byo", f"[{flavor}] wrong validator_type"
+            assert g.byo_validator_name == "my-harmful-content-guardrail"
+            # BYOG identity is the name alone; no connection id may ride along
+            # (works both before and after uipath-platform drops the field).
+            assert not getattr(g, "byo_connection_id", None)
 
 
 # ---------------------------------------------------------------------------

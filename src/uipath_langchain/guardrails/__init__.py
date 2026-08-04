@@ -6,6 +6,7 @@ Platform guardrail decorators plus LangChain/LangGraph adapter auto-registration
 from uipath.agent.models.agent import AgentGuardrailSeverityLevel
 from uipath.platform.guardrails.decorators import (
     BlockAction,
+    ByoValidator,
     CustomValidator,
     GuardrailAction,
     GuardrailBlockException,
@@ -34,6 +35,7 @@ from uipath.platform.guardrails.decorators import (
 from ._langchain_adapter import LangChainGuardrailAdapter
 from .escalate_action import EscalateAction
 from .middlewares import (
+    UiPathByoGuardrailMiddleware,
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
@@ -58,6 +60,7 @@ __all__ = [
     "PIIValidator",
     "PromptInjectionValidator",
     "UserPromptAttacksValidator",
+    "ByoValidator",
     "CustomValidator",
     "RuleFunction",
     # Models & enums
@@ -81,6 +84,7 @@ __all__ = [
     "GuardrailTargetAdapter",
     "register_guardrail_adapter",
     # Middlewares
+    "UiPathByoGuardrailMiddleware",
     "UiPathHarmfulContentMiddleware",
     "UiPathIntellectualPropertyMiddleware",
     "UiPathLLMAsJudgeMiddleware",

@@ -9,7 +9,13 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from langchain_core.tools.base import ArgsSchema, _get_runnable_config_param
 from langchain_core.utils.pydantic import get_fields
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 
 
 class BaseUiPathStructuredTool(StructuredTool):
@@ -106,7 +112,10 @@ class BaseUiPathStructuredTool(StructuredTool):
         Fields produced by jsonschema-pydantic-converter for reserved JSON property
         names use exactly such aliases (schema -> schema_ with alias='schema').
         """
-        parsed = super()._parse_input(tool_input, tool_call_id)
+        try:
+            parsed = super()._parse_input(tool_input, tool_call_id)
+        except ValidationError as e:
+            raise self._invalid_input_error(e) from e
         if not isinstance(parsed, dict) or not isinstance(tool_input, dict):
             return parsed
 
@@ -128,6 +137,17 @@ class BaseUiPathStructuredTool(StructuredTool):
             if alias in parsed:
                 parsed[alias] = getattr(result, python_name)
         return parsed
+
+    def _invalid_input_error(self, error: ValidationError) -> AgentRuntimeError:
+        return AgentRuntimeError(
+            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
+            title=f"Invalid input for tool '{self.name}'",
+            detail=(
+                "Revise the agent prompt or tool configuration so the generated "
+                f"arguments match the tool input schema.\n\n{error}"
+            ),
+            category=UiPathErrorCategory.USER,
+        )
 
     @property
     def tool_call_schema(self) -> ArgsSchema:

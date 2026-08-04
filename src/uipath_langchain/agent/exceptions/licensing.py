@@ -23,6 +23,15 @@ _LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
 }
 
 
+def _category_for_status(status_code: int) -> UiPathErrorCategory:
+    """Map LLM provider HTTP statuses to their runtime error category."""
+    if status_code == 403:
+        return UiPathErrorCategory.DEPLOYMENT
+    if status_code >= 500:
+        return UiPathErrorCategory.SYSTEM
+    return UiPathErrorCategory.UNKNOWN
+
+
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
 
@@ -31,11 +40,7 @@ def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     """
     status_code = error.status_code
     code = _LLM_STATUS_CODE_MAP.get(status_code, AgentRuntimeErrorCode.HTTP_ERROR)
-    category = (
-        UiPathErrorCategory.DEPLOYMENT
-        if status_code == 403
-        else UiPathErrorCategory.UNKNOWN
-    )
+    category = _category_for_status(status_code)
     detail = error.body.get("detail") if isinstance(error.body, dict) else None
 
     raise AgentRuntimeError(

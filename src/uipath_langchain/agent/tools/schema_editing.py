@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 from typing import Any
 
 from jsonpath_ng import (  # type: ignore[import-untyped]
@@ -16,6 +17,8 @@ from jsonpath_ng import (  # type: ignore[import-untyped]
 STATIC_ARGUMENT_DESCRIPTION = (
     "This argument is pre-configured and will be overwritten. Leave it empty"
 )
+
+_TEMPLATE_VALUE_PATTERN = re.compile(r"^\{\{.+\}\}$")
 
 
 class SchemaNavigationError(ValueError):
@@ -114,11 +117,15 @@ def _navigate_schema_inlining_refs(
     return current
 
 
-def strip_enum(
+def handle_enum(
     schema: dict[str, Any],
     path_segments: list[str],
 ) -> None:
-    """Navigate to a field in schema and remove its enum constraint.
+    """Navigate to a field in schema and fold its allowed value(s) into the description.
+
+    States the allowed value(s) in plain text in the field's description, in
+    addition to whatever enum/oneOf/const constraint is already there. Removes
+    the redundant `enum` key.
 
     If the path doesn't exist in the schema, this is a no-op.
 
@@ -130,6 +137,22 @@ def strip_enum(
         field_schema = _navigate_schema_inlining_refs(schema, path_segments)
     except SchemaNavigationError:
         return
+
+    values = field_schema.get("enum")
+    if not values and isinstance(field_schema.get("oneOf"), list):
+        values = [
+            branch["const"]
+            for branch in field_schema["oneOf"]
+            if isinstance(branch, dict) and "const" in branch
+        ]
+
+    # Skip templated placeholders ({{arg}}), those aren't real allowed values.
+    if values and not any(
+        isinstance(v, str) and _TEMPLATE_VALUE_PATTERN.match(v) for v in values
+    ):
+        hint = f"Allowed value(s): {', '.join(str(v) for v in values)}."
+        description = field_schema.get("description")
+        field_schema["description"] = f"{description} ({hint})" if description else hint
 
     field_schema.pop("enum", None)
 

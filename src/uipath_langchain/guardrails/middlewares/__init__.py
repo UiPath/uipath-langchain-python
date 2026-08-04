@@ -1,5 +1,6 @@
 """Guardrail middlewares for LangChain agents."""
 
+from .byo import UiPathByoGuardrailMiddleware
 from .deterministic import (
     RuleFunction,
     UiPathDeterministicGuardrailMiddleware,
@@ -13,6 +14,7 @@ from .user_prompt_attacks import UiPathUserPromptAttacksMiddleware
 
 __all__ = [
     "RuleFunction",
+    "UiPathByoGuardrailMiddleware",
     "UiPathDeterministicGuardrailMiddleware",
     "UiPathHarmfulContentMiddleware",
     "UiPathIntellectualPropertyMiddleware",

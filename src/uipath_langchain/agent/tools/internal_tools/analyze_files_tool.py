@@ -21,6 +21,8 @@ from uipath.agent.models.agent import (
 )
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.eval.mocks import mockable
+from uipath.llm_client import UiPathAPIError, UiPathError
+from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.platform import UiPath
 from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
@@ -34,6 +36,8 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
+from uipath_langchain.agent.exceptions.licensing import raise_for_provider_http_error
+from uipath_langchain.agent.exceptions.llm import raise_for_llm_client_error
 from uipath_langchain.agent.multimodal import (
     FileInfo,
     build_file_content_blocks_for,
@@ -335,7 +339,19 @@ def create_analyze_file_tool(
         config = var_child_runnable_config.get(None)
         config = config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
-        result = await non_streaming_llm.ainvoke(messages, config=config)
+        try:
+            result = await non_streaming_llm.ainvoke(messages, config=config)
+        except UiPathAPIError as exc:
+            raise_for_provider_http_error(exc)
+        except UiPathError as exc:
+            raise_for_llm_client_error(exc)
+            raise
+        except Exception as exc:
+            # legacy clients surface raw provider SDK exceptions.
+            uipath_error = as_uipath_error(exc)
+            if isinstance(uipath_error, UiPathAPIError):
+                raise_for_provider_http_error(uipath_error)
+            raise
 
         del messages, human_message_with_files, files
 
