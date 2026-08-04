@@ -88,29 +88,58 @@ FILE_REGISTRY: dict[str, FileCase] = {
 }
 
 
-# Phrases a model uses when it denies having read the file. Only the outright
-# refusals belong here.
+# Phrases a model uses when it denies having read the file, or hedges that it
+# is guessing. Any of these disqualifies the answer outright.
 #
-# Descriptive words like "placeholder" and "appears to be" were once on this
-# list and had to come off: the model reads the PDF correctly, then volunteers
-# commentary ("Content type: Plain text placeholder"). That is a *correct*
-# answer with editorializing attached, and matching the word alone failed it.
+# Two calibration notes, both from real answers:
+#
+# - Descriptive words ("placeholder", "appears to be") do NOT belong here. The
+#   model reads the PDF correctly and then volunteers commentary ("Content
+#   type: Plain text placeholder"); that is a correct answer with
+#   editorializing attached, and matching the word alone failed it.
+# - Negations and guess-hedges DO belong here. Without them, "There is no dog
+#   in this image; it is a cat." and "I don't have access to the image, but
+#   based on the filename it is probably a dog." both passed — the exact
+#   false-pass this test exists to prevent.
 _REFUSAL_MARKERS = (
     "cannot",
     "can't",
     "unable",
     "not available",
     "unreadable",
+    "no access",
+    "not have access",
+    "don't have access",
+    "sorry",
+    "failed to",
+    "there is no",
+    "is not a",
+    "based on the filename",
+    "based on the file name",
+    "probably",
+    "i guess",
+    "my guess",
 )
+
+# How far into the answer the expected word must appear. A direct answer leads
+# with it (optionally after a parser prefix); a narrative that mentions it in
+# passing buries it. Generous enough for the PDF parser's
+# "<PARSED TEXT FOR PAGE: 1 / 1>" preamble.
+_MAX_TOKENS_BEFORE_ANSWER = 12
 
 
 def _matches(expected: str, answer: str) -> bool:
     """Was the expected word actually given as the answer?
 
-    Requires the word as a real token and no refusal language. Length is not a
-    criterion: a verbatim transcription legitimately carries the parser's
-    ``<PARSED TEXT FOR PAGE: 1 / 1>`` prefix, which a word-count limit rejected
-    even though the answer was correct.
+    Three conditions, each earned by a real failure:
+
+    1. No refusal or guess-hedge language anywhere (see ``_REFUSAL_MARKERS``).
+    2. The word appears as a whole token — not a substring, so "Samoyed"
+       does not satisfy "dog" and "dogma" would not either.
+    3. It appears **early**. Length is not a criterion (a verbatim
+       transcription legitimately carries the parser's
+       ``<PARSED TEXT FOR PAGE: 1 / 1>`` prefix), but position is: a model
+       narrating its way to the word is not answering with it.
     """
     lowered = answer.lower()
     if any(marker in lowered for marker in _REFUSAL_MARKERS):
@@ -119,7 +148,10 @@ def _matches(expected: str, answer: str) -> bool:
     # punctuation: the model wraps the answer in markdown (`` `Dummy PDF file` ``),
     # and a strip-list missed the backtick, failing a correct answer.
     words = re.findall(r"\w+", lowered)
-    return expected.lower() in words
+    try:
+        return words.index(expected.lower()) < _MAX_TOKENS_BEFORE_ANSWER
+    except ValueError:
+        return False
 
 
 class ModelSpec(BaseModel):

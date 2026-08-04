@@ -74,10 +74,19 @@ def create_messages(state: AgentInput) -> Sequence[SystemMessage | HumanMessage]
     fileIn = getattr(state, 'fileIn', '')
     prompt = getattr(state, 'prompt', '')
 
+    # Serialize with by_alias + mode="json" so the attachment interpolates as
+    # the shape the Analyze Files tool documents — {"ID": "8da6…"} — rather than
+    # a Python repr. A plain model_dump() renders it as
+    # {'id': UUID('8da6…'), 'full_name': …}: a model copying UUID('…') gets
+    # INVALID_ATTACHMENT_ID, and one emitting lowercase `id` has the item
+    # skipped and analyzes nothing. mode="json" is required — without it the
+    # UUID stays a UUID object and serialization raises downstream.
+    state_values = state.model_dump(by_alias=True, mode="json")
+
     # Apply system prompt template
     current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     system_prompt_content = """You are a file-processing assistant. You are given a single file (PDF or image) and a task. Use the Analyze Files tool to read the file's contents, then answer the task concisely based only on what the file contains. If the file cannot be read, say so plainly."""
-    system_prompt_content = interpolate_legacy_message(system_prompt_content, state.model_dump())
+    system_prompt_content = interpolate_legacy_message(system_prompt_content, state_values)
     enhanced_system_prompt = (
         AGENT_SYSTEM_PROMPT_TEMPLATE
         .replace('{{systemPrompt}}', system_prompt_content)
@@ -89,7 +98,7 @@ def create_messages(state: AgentInput) -> Sequence[SystemMessage | HumanMessage]
         SystemMessage(content=enhanced_system_prompt),
         HumanMessage(content=interpolate_legacy_message("""{{prompt}}
 
-{{fileIn}}""", state.model_dump())),
+{{fileIn}}""", state_values)),
     ]
 
 
