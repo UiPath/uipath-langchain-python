@@ -153,24 +153,70 @@ class GraphOutput(BaseModel):
     result_summary: str
 
 
+def _one_line(error: BaseException) -> str:
+    """Collapse an exception to one line for the per-cell summary."""
+    return " ".join(str(error).split())
+
+
 async def probe_file_processing(state: GraphInput) -> GraphOutput:
-    """Run the agent for every api_flavor x file, collecting its answers."""
+    """Run the agent for every api_flavor x file, collecting its answers.
+
+    Nothing here is allowed to abort the run. Every cell — settings, each
+    model build, each file — is recorded as ✓ or ✗ and the loop continues,
+    because a model that fails one flavor is exactly the condition this test
+    is meant to *report*. An unguarded raise kills the node, `uipath run`
+    exits non-zero, and `set -e` in run.sh stops the script before
+    validate_output.sh, discarding the summary and every flavor that already
+    passed.
+    """
     spec = state.model_spec
-    settings = PlatformSettings(agenthub_config=spec.agenthub_config)
     lines: list[str] = []
     failed = False
 
+    def record(line: str) -> None:
+        """Append a summary line and log it immediately.
+
+        Logged as it happens so a run that dies for an unforeseen reason still
+        leaves the partial results in the job log.
+        """
+        lines.append(line)
+        logger.info(line)
+
+    try:
+        settings = PlatformSettings(agenthub_config=spec.agenthub_config)
+    except Exception as e:
+        # A bad agenthub_config fails every flavor, so report it once and stop
+        # rather than repeat the same error per flavor.
+        detail = f"settings: ✗ {type(e).__name__}: {_one_line(e)}"[:300]
+        record(detail)
+        return GraphOutput(success=False, result_summary="\n".join(lines))
+
     for flavor in spec.api_flavors:
+        record(f"{flavor}:")
         vendor_type, _, api_flavor = flavor.partition(":")
-        model = get_chat_model(
-            model=spec.model_name,
-            client_settings=settings,
-            vendor_type=vendor_type or None,
-            api_flavor=api_flavor or None,
-            temperature=0.0,
-            max_tokens=2000,
-        )
-        lines.append(f"{flavor}:")
+
+        # get_chat_model raises on an unknown vendor (ValueError) or a model
+        # the tenant cannot serve (AgentStartupError, via ModelNotFoundError).
+        # Both are ordinary findings for this test, not crashes.
+        try:
+            model = get_chat_model(
+                model=spec.model_name,
+                client_settings=settings,
+                vendor_type=vendor_type or None,
+                api_flavor=api_flavor or None,
+                temperature=0.0,
+                max_tokens=2000,
+            )
+        except Exception as e:
+            failed = True
+            record(f"  build: ✗ {type(e).__name__}: {_one_line(e)}"[:300])
+            continue
+
+        # Log the class actually constructed: discovery can override the
+        # requested api_flavor, and an unrecognized Bedrock flavor falls
+        # through to Converse — so echoing the requested string alone would
+        # sign off on a surface that was never exercised.
+        record(f"  build: ✓ {type(model).__name__}")
 
         for file_name, case in FILE_REGISTRY.items():
             try:
@@ -179,19 +225,20 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 )
             except Exception as e:
                 failed = True
-                # Collapse newlines: some SDK errors are multi-line and would
-                # break the one-cell-per-line summary.
-                detail = " ".join(str(e).split())
-                lines.append(f"  {file_name}: ✗ {type(e).__name__}: {detail}"[:300])
+                record(f"  {file_name}: ✗ {type(e).__name__}: {_one_line(e)}"[:300])
                 continue
 
             if _matches(case.expected, answer):
-                lines.append(f"  {file_name}: ✓ {answer}"[:200])
+                record(f"  {file_name}: ✓ {answer}"[:200])
             else:
                 failed = True
-                lines.append(
+                record(
                     f"  {file_name}: ✗ expected '{case.expected}', got: {answer}"[:300]
                 )
+
+    if not spec.api_flavors:
+        failed = True
+        record("✗ no api_flavors supplied")
 
     summary = "\n".join(lines)
     logger.info(f"Success: {not failed}\nSummary:\n{summary}")
