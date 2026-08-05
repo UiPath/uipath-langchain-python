@@ -18,10 +18,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.action_center.tasks import (
-    Task,
-    TaskRecipient,
-)
+from uipath.platform.action_center.tasks import Task, TaskRecipient
 from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -45,10 +42,6 @@ from ..exceptions import (
     AgentStartupErrorCode,
 )
 from ..react.types import AgentGraphState
-from .escalation_jit import (
-    resolve_is_debug_run_safely,
-    resolve_jit_escalation_app,
-)
 from .escalation_memory import (
     EscalationMemorySettings,
     _check_escalation_memory_cache,
@@ -202,14 +195,9 @@ def _get_exported_trace_id(trace_id: str | None) -> str | None:
     return trace_id
 
 
-def _channel_app_prop(channel: EscalationChannel, prop: str) -> Any:
-    """Return an app property from an ``AgentEscalationChannel``, else None.
-
-    Covers ``app_name`` / ``app_version`` / ``app_type``; other channel types
-    (e.g. quick form) carry no app properties, so None is returned.
-    """
+def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
     return (
-        getattr(channel.properties, prop, None)
+        channel.properties.app_name
         if isinstance(channel, AgentEscalationChannel)
         else None
     )
@@ -223,9 +211,6 @@ async def create_task_for_channel(
     data: dict[str, Any],
     recipient: TaskRecipient | None,
     folder_path: str | None,
-    app_project_key: str | None = None,
-    app_type: str | None = None,
-    action_schema: Any = None,
 ) -> Task:
     """Create the human task backing an escalation channel."""
     if isinstance(channel, AgentQuickFormEscalationChannel):
@@ -253,9 +238,6 @@ async def create_task_for_channel(
         labels=channel.labels,
         is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
         actionable_message_metadata=channel.properties.actionable_message_meta_data,
-        app_project_key=app_project_key,
-        app_type=app_type,
-        action_schema=action_schema,
     )
 
 
@@ -329,25 +311,6 @@ def create_escalation_tool(
                 else None
             )
 
-        app_project_key: str | None = None
-        app_version = _channel_app_prop(channel, "app_version")
-        app_name = _channel_app_prop(channel, "app_name")
-        app_type = _channel_app_prop(channel, "app_type")
-        action_schema = _channel_app_prop(channel, "action_schema")
-
-        # Resolve the debug status unconditionally for all escalations
-        is_debug = await resolve_is_debug_run_safely()
-
-        if isinstance(channel, AgentEscalationChannel):
-            app_project_key, app_type, action_schema = await resolve_jit_escalation_app(
-                app_name=app_name,
-                app_version=app_version,
-                app_type=app_type,
-                action_schema=action_schema,
-                folder_path=folder_path,
-                is_debug=is_debug,
-            )
-
         task_title = "Escalation Task"
         if tool.metadata is not None:
             # Recipient requires runtime resolution, store in metadata after resolving
@@ -391,9 +354,6 @@ def create_escalation_tool(
                     data=serialized_data,
                     recipient=recipient,
                     folder_path=folder_path,
-                    app_project_key=app_project_key,
-                    app_type=app_type,
-                    action_schema=action_schema,
                 )
 
                 if created_task.id is not None:
@@ -402,7 +362,7 @@ def create_escalation_tool(
                 return WaitEscalation(
                     action=created_task,
                     app_folder_path=folder_path,
-                    app_name=_channel_app_prop(channel, "app_name"),
+                    app_name=_try_get_channel_app_name(channel),
                     recipient=recipient,
                 )
 
@@ -547,7 +507,7 @@ def create_escalation_tool(
         argument_properties=channel.argument_properties,
         metadata={
             "tool_type": "escalation",
-            "display_name": _channel_app_prop(channel, "app_name") or channel.name,
+            "display_name": _try_get_channel_app_name(channel) or channel.name,
             "channel_type": channel.type,
             "recipient": None,
             "args_schema": input_model,
