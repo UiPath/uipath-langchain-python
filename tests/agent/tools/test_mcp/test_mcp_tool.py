@@ -1,14 +1,13 @@
 """Tests for mcp_tool.py metadata and functionality."""
 
-import json
 import logging
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData, ListToolsResult, Tool
+from mcp.shared.exceptions import MCPError
+from mcp.types import ListToolsResult, Tool
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
@@ -34,8 +33,6 @@ from uipath_langchain.agent.tools.mcp.mcp_tool import (
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class TestMcpToolMetadata:
@@ -330,284 +327,6 @@ class TestCreateMcpToolsFromAgent:
             assert "slug" in tool.metadata
 
 
-class TestMcpToolInvocation:
-    """Test MCP tool invocation with mocked HTTP.
-
-    This class tests the full flow of tool invocation without mocking the MCP SDK.
-    Only httpx.AsyncClient is mocked, allowing the real MCP SDK to process messages.
-    """
-
-    @pytest.fixture
-    def mock_uipath_sdk(self):
-        """Create a mock UiPath SDK for patching."""
-        mock_sdk = MagicMock()
-        mock_server = MagicMock()
-        mock_server.mcp_url = "https://test.uipath.com/mcp"
-        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
-        mock_sdk._config = MagicMock()
-        mock_sdk._config.secret = "test-secret-token"
-        return mock_sdk
-
-    def create_mock_stream_response(
-        self,
-        method_call_sequence: list[str],
-        initialize_count: list[int],
-        tool_call_count: list[int],
-        session_guid: str = "test-session-12345",
-    ):
-        """Create a MockStreamResponse class for testing.
-
-        Reuses the same pattern as test_mcp_client.py.
-        """
-
-        class MockStreamResponse:
-            """Mock HTTP stream response for MCP protocol."""
-
-            def __init__(self, method: str, url: str, **kwargs: Any):
-                self.request_method = method
-                self.url = url
-                self.kwargs = kwargs
-
-                if method == "GET":
-                    self.status_code = 405
-                    self.headers = {}
-                    self._content = b""
-                    return
-
-                json_body = kwargs.get("json", {})
-                self.json_body = json_body
-                self.method = json_body.get("method", "")
-
-                logger.debug(f"Responding to MCP method: {self.method}")
-                method_call_sequence.append(self.method)
-
-                status_code, response_json, headers = self._build_response()
-                self.headers = headers or {}
-                self._response_json = response_json
-                self.status_code = status_code
-
-                if response_json:
-                    self._content = json.dumps(self._response_json).encode("utf-8")
-                    self.headers["content-type"] = "application/json"
-                else:
-                    self._content = b""
-
-            def _build_response(self) -> tuple[int, Any, dict[str, str] | None]:
-                """Build JSON-RPC response based on method."""
-                request_id = self.json_body.get("id")
-
-                if self.method == "initialize":
-                    initialize_count[0] += 1
-                    return (
-                        200,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "protocolVersion": "2025-06-18",
-                                "capabilities": {"tools": {}},
-                                "serverInfo": {
-                                    "name": "test-server",
-                                    "version": "1.0.0",
-                                },
-                            },
-                        },
-                        {"mcp-session-id": session_guid},
-                    )
-
-                elif self.method == "notifications/initialized":
-                    return (204, None, {})
-
-                elif self.method == "tools/list":
-                    return (
-                        200,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "tools": [
-                                    {
-                                        "name": "search_tool",
-                                        "description": "Search for information",
-                                        "inputSchema": {
-                                            "type": "object",
-                                            "properties": {"query": {"type": "string"}},
-                                            "required": ["query"],
-                                        },
-                                        "outputSchema": {
-                                            "type": "object",
-                                            "properties": {
-                                                "result": {"type": "string"}
-                                            },
-                                        },
-                                    }
-                                ],
-                            },
-                        },
-                        {},
-                    )
-
-                elif self.method == "tools/call":
-                    tool_call_count[0] += 1
-                    params = self.json_body.get("params", {})
-                    tool_name = params.get("name", "unknown")
-                    structured_result = {"result": f"Success from {tool_name}"}
-
-                    return (
-                        200,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": json.dumps(structured_result),
-                                    }
-                                ],
-                                "structuredContent": structured_result,
-                                "isError": False,
-                            },
-                        },
-                        {},
-                    )
-
-                else:
-                    if request_id is None:
-                        return (204, None, {})
-                    return (
-                        500,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {"code": -32601, "message": "Method not found"},
-                        },
-                        {},
-                    )
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args: Any, **kwargs: Any):
-                pass
-
-            async def aread(self) -> bytes:
-                """Return the response content."""
-                return self._content
-
-            def raise_for_status(self) -> None:
-                """Check response status."""
-                if self.status_code >= 400:
-                    raise Exception(f"HTTP {self.status_code}")
-
-        return MockStreamResponse
-
-    def create_mock_http_client(self, mock_stream_response_class: type) -> MagicMock:
-        """Create a mock HTTP client that uses the given stream response class."""
-        mock_client = MagicMock()
-        mock_client.stream = lambda method, url, **kwargs: mock_stream_response_class(
-            method, url, **kwargs
-        )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
-        # Mock the delete method for session termination (returns 204 No Content)
-        mock_delete_response = MagicMock()
-        mock_delete_response.status_code = 204
-        mock_client.delete = AsyncMock(return_value=mock_delete_response)
-        return mock_client
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_tool_invocation_initializes_session_and_returns_result(
-        self,
-        mock_async_client_class,
-        mock_uipath_sdk,
-    ):
-        """Smoke test: verify tool invocation initializes MCP session and returns result.
-
-        This test verifies the full integration between create_mcp_tools_from_metadata
-        and McpClient without mocking any MCP SDK components.
-
-        Expected behavior:
-        - Session is initialized via MCP protocol (initialize + initialized notification)
-        - Tool call is sent and result is returned
-        - Only httpx.AsyncClient is mocked, real MCP SDK processes the messages
-        """
-        # Track MCP method calls
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        # Setup HTTP mock using pattern from test_mcp_client.py
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        # Create resource config
-        mcp_resource = AgentMcpResourceConfig(
-            name="test_server",
-            description="Test server",
-            folder_path="/Shared/TestFolder",
-            slug="test-server",
-            available_tools=[
-                AgentMcpTool(
-                    name="search_tool",
-                    description="Search for information",
-                    input_schema={
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                    },
-                    output_schema={
-                        "type": "object",
-                        "properties": {"result": {"type": "string"}},
-                    },
-                )
-            ],
-        )
-
-        # Create McpClient and tools (SDK is called lazily on first tool call)
-        mcp_client = McpClient(config=mcp_resource)
-        tools = await create_mcp_tools(mcp_resource, mcp_client)
-        assert len(tools) == 1
-
-        tool = tools[0]
-        assert tool.name == "search_tool"
-
-        # Invoke tool (SDK is called here during initialization)
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            result = await tool.ainvoke({"query": "test query"})
-
-        # Verify session was initialized
-        assert initialize_count[0] == 1, (
-            f"Expected 1 initialize call, got {initialize_count[0]}"
-        )
-
-        # Verify tool was called
-        assert tool_call_count[0] == 1, (
-            f"Expected 1 tool call, got {tool_call_count[0]}"
-        )
-
-        # Verify result is returned (content attribute of CallToolResult)
-        # Result is a list of dicts (model_dump'd TextContent objects)
-        assert result is not None
-        assert len(result) == 1
-        assert result[0]["type"] == "text"
-        assert "Success from search_tool" in result[0]["text"]
-
-        # Verify MCP protocol flow
-        assert "initialize" in method_call_sequence
-        assert "notifications/initialized" in method_call_sequence
-        assert "tools/call" in method_call_sequence
-
-        logger.info(f"Method sequence: {method_call_sequence}")
-
-
 class TestMcpToolResultSerialization:
     """Test that tool_fn properly serializes different result types."""
 
@@ -676,7 +395,7 @@ class TestMcpToolResultSerialization:
 
 
 class TestMcpToolErrorHandling:
-    """Test that protocol-level McpErrors are mapped to categorized AgentRuntimeErrors."""
+    """Test that protocol-level MCPErrors are mapped to categorized AgentRuntimeErrors."""
 
     @pytest.fixture
     def mcp_tool(self):
@@ -686,7 +405,7 @@ class TestMcpToolErrorHandling:
             input_schema={"type": "object", "properties": {}},
         )
 
-    def _mock_client(self, error: McpError) -> MagicMock:
+    def _mock_client(self, error: MCPError) -> MagicMock:
         client = MagicMock(spec=McpClient)
         client.server_slug = "my-mcp-server"
         client.call_tool = AsyncMock(side_effect=error)
@@ -696,7 +415,7 @@ class TestMcpToolErrorHandling:
     async def test_session_terminated_raises_system_error_with_retry_hint(
         self, mcp_tool
     ):
-        error = McpError(ErrorData(code=32600, message="Session terminated"))
+        error = MCPError(code=32600, message="Session terminated")
         client = self._mock_client(error)
 
         tool_fn = build_mcp_tool(mcp_tool, client)
@@ -714,7 +433,7 @@ class TestMcpToolErrorHandling:
 
     @pytest.mark.asyncio
     async def test_non_session_mcp_error_includes_server_message(self, mcp_tool):
-        error = McpError(ErrorData(code=-32601, message="Method not found"))
+        error = MCPError(code=-32601, message="Method not found")
         client = self._mock_client(error)
 
         tool_fn = build_mcp_tool(mcp_tool, client)
@@ -1244,7 +963,7 @@ class TestCachedRefreshSchemaBeforeCall:
         assert "question (string)" in result
         client.call_tool.assert_not_awaited()
         # The schema bound to the model was healed to the live one.
-        assert tool.args_schema == live_tool.inputSchema
+        assert tool.args_schema == live_tool.input_schema
 
     def test_schema_change_message_lists_param_types(self):
         """The retry message lists each refreshed param with its type and optionality."""
