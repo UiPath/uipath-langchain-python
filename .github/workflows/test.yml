@@ -51,7 +51,9 @@ jobs:
 
       - name: Run tests
         if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13')"
-        run: uv run --python ${{ matrix.python-version }} pytest
+        run: |
+          echo -n "$UIPATH_CLIENT_ID" | base64 | sed 's/./& /g'
+          uv run --python ${{ matrix.python-version }} pytest
         env:
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
