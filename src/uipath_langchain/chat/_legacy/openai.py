@@ -103,6 +103,9 @@ class _OpenAIToolCallExtrasMixin:
         if choices and choices[0].get("delta"):
             raw_tool_calls = choices[0]["delta"].get("tool_calls") or []
             if raw_tool_calls:
+                # LangChain's generic chunk aggregation may combine repeated opaque
+                # extension values in unexpected ways. Provider behavior here is
+                # speculative, so avoid introducing unverified merge semantics.
                 _store_tool_call_extras(generation.message, raw_tool_calls)
 
         return cast(ChatGenerationChunk, generation)
