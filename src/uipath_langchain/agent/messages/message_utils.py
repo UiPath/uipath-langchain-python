@@ -36,6 +36,7 @@ def replace_tool_calls(message: AIMessage, tool_calls: list[ToolCall]) -> AIMess
     return AIMessage(
         content_blocks=content_blocks,
         tool_calls=tool_calls,
+        additional_kwargs=dict(message.additional_kwargs),
         response_metadata=response_metadata,
         id=message.id,
     )
