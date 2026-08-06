@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "id": "JsonSimilarityEvaluator",
+  "evaluatorTypeId": "uipath-json-similarity",
+  "evaluatorConfig": {
+    "name": "JsonSimilarityEvaluator",
+    "targetOutputKey": "*"
+  }
+}

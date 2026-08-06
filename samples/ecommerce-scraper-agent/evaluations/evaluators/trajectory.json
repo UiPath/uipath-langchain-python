@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "TrajectoryEvaluator",
+  "evaluatorTypeId": "uipath-llm-judge-trajectory-similarity",
+  "evaluatorConfig": {
+    "name": "LLMJudgeTrajectoryEvaluator",
+    "model": "gpt-4o-2024-11-20",
+    "temperature": 0.0
+  }
+}

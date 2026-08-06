@@ -1,0 +1,11 @@
+flowchart TB
+  __start__(__start__)
+  coordinator(coordinator)
+  scraper(scraper)
+  finalize(finalize)
+  __end__(__end__)
+  __start__ --> coordinator
+  coordinator --> finalize
+  coordinator --> scraper
+  scraper --> coordinator
+  finalize --> __end__

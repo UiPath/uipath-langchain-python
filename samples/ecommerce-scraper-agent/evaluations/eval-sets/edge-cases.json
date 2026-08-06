@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "id": "edge-cases",
+  "name": "Edge Cases and Error Scenarios",
+  "description": "Tests for unusual inputs, single pages, and boundary conditions",
+  "evaluatorRefs": ["JsonSimilarityEvaluator", "LLMJudgeOutputEvaluator", "TrajectoryEvaluator"],
+  "evaluations": [
+    {
+      "id": "test-1-single-product-page",
+      "name": "Starting from a single product page extracts that product",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products/1"
+      },
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "products": "Should contain at least one product with name, price, currency, and url fields. The product URL should be https://sandbox.oxylabs.io/products/1 or related products discovered from that page.",
+            "total_products": "At least 1 product should be found"
+          }
+        },
+        "TrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should: 1) Start with the single product URL. 2) Fetch the page and classify it as a 'product' page via LLM analysis. 3) Extract product data fields (name, price, description, etc.) using CSS selectors from the strategy. 4) Discover any related product links or navigation links on the product page. 5) Optionally follow discovered links to scrape more products. 6) Finalize with at least one product."
+        }
+      }
+    },
+    {
+      "id": "test-2-last-pagination-page",
+      "name": "Scraping the last page of pagination works correctly",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products?page=94"
+      },
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "products": "Should contain products from the last page. Each product should have valid name, price, and url fields.",
+            "total_products": "Should be a positive number, likely around 20-32 products from the last page and any discovered linked pages"
+          }
+        }
+      }
+    },
+    {
+      "id": "test-3-nonexistent-page",
+      "name": "Handling a page that returns no products",
+      "inputs": {
+        "start_url": "https://sandbox.oxylabs.io/products?page=9999"
+      },
+      "evaluationCriterias": {
+        "JsonSimilarityEvaluator": {
+          "expectedOutput": {
+            "total_products": 0,
+            "urls_scraped": 0
+          }
+        }
+      }
+    }
+  ]
+}
