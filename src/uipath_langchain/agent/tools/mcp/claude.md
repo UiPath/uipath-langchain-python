@@ -24,7 +24,7 @@ src/uipath_langchain/agent/tools/mcp/
 ├── __init__.py          # Public exports
 ├── mcp_client.py        # SessionInfoFactory, McpClient
 ├── mcp_tool.py          # Tool factory functions
-└── streamable_http.py   # SessionInfo, StreamableHTTPTransport (copied from MCP SDK)
+└── streamable_http.py   # SessionInfo + thin adapter over the MCP SDK transport
 ```
 
 ### Public Exports (`__init__.py`)
@@ -44,43 +44,29 @@ transport helper used only by `McpClient`.
 
 ## Architecture
 
-### streamable_http.py — Local Copy of MCP SDK Transport
+### streamable_http.py — Session-Aware SDK Transport Adapter
 
-This file is a local copy of the **client-side** streamable HTTP transport from
-the MCP Python SDK, adapted for session ID tracking via `SessionInfo`.
+This file is a thin adapter around the **client-side** streamable HTTP transport
+from MCP Python SDK 2.0. The SDK owns protocol parsing, SSE resumption,
+cancellation, protocol headers, and session deletion; UiPath adds externally
+persistable session ID tracking via `SessionInfo`.
 
 **Source**: [`mcp.client.streamable_http`](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/streamable_http.py)
 
-**Why a local copy?**
+**Why an adapter is still needed:**
 
-The upstream SDK transport has no hook for observing or injecting session IDs.
-We need this to support session persistence (e.g. debug state for playground
-mode).  The local copy adds a `SessionInfo` parameter that receives session ID
-updates from the server.
+The SDK 2.0 transport owns its in-memory session ID but has no asynchronous hook
+for loading and saving UiPath debug-state sessions. The adapter installs two
+`httpx2` event hooks on the client used by the SDK:
 
-**Key differences from the upstream SDK:**
+1. Before every request, call `SessionInfo.get_session_id()` and set or remove
+   the `mcp-session-id` header.
+2. After every response, persist a returned `mcp-session-id` through
+   `SessionInfo.set_session_id()`.
 
-1. **`SessionInfo` class added** — base class for session ID tracking, defined
-   at the top of the file.  The transport delegates all session ID storage to
-   this object via async methods.
-2. **Transport does not own session state** — `StreamableHTTPTransport` has no
-   `self.session_id`.  All reads/writes go through `self._session_info`.
-3. **`_prepare_headers` is async** — because it calls
-   `await self._session_info.get_session_id()`.
-4. **`_maybe_extract_session_id_from_response` is async** — calls
-   `await self._session_info.set_session_id()` so subclasses can persist.
-5. **`RequestContext` has no `session_id` field** — it was unused upstream
-   (headers are built from `_prepare_headers`, not from the context).
-6. **`streamable_http_client` accepts `session_info` parameter** — passed
-   through to the transport constructor.
-7. **Returns 2 values, not 3** — yields `(read_stream, write_stream)` instead
-   of the SDK's `(read_stream, write_stream, get_session_id_callback)`.
-
-**What was kept identical:**
-
-The overall request/response flow, SSE handling, reconnection logic, POST/GET
-patterns, and error handling are structurally the same as the upstream SDK.
-When updating, diff against the upstream source to understand what changed.
+The hooks are removed when the adapter context exits. This keeps the UiPath
+extension small and automatically picks up future SDK transport fixes instead
+of maintaining another transport fork.
 
 #### SessionInfo
 
@@ -92,45 +78,37 @@ class SessionInfo:
         self.session_id = session_id
 
     async def get_session_id(self) -> str | None: ...
-    async def set_session_id(self, session_id: str) -> None: ...
+    async def set_session_id(self, session_id: str | None) -> None: ...
 ```
 
 The base implementation stores session ID in a plain attribute.  Async methods
 exist so subclasses (e.g. `SessionInfoDebugState` in `uipath-agents`) can add
 side-effects like HTTP persistence.
 
-**Important:** The transport calls `set_session_id` during `initialize()` when
-the server assigns a session ID.  `McpClient._initialize_session` then reads
-the value via `get_session_id` — it does not call `set_session_id` again.
+**Important:** The response hook calls `set_session_id` during `initialize()`
+when the server assigns an ID. `McpClient._initialize_session` only reads the
+stored value afterward. Passing `None` clears a stale session before recovery.
 
-#### StreamableHTTPTransport
+#### Upstream StreamableHTTPTransport
 
-Handles the MCP streamable HTTP protocol: POST for requests, GET for
-server-initiated SSE streams, reconnection with `Last-Event-ID`, and session
-termination via DELETE.
-
-Key methods:
-
-| Method | Description |
-|--------|-------------|
-| `_prepare_headers()` | **async** — builds headers with session ID from `SessionInfo` |
-| `_maybe_extract_session_id_from_response()` | **async** — extracts session ID from response, calls `set_session_id` |
-| `_handle_post_request()` | POST with JSON or SSE response handling |
-| `handle_get_stream()` | GET SSE listener with auto-reconnect |
-| `_handle_reconnection()` | Recursive reconnect with `Last-Event-ID` |
-| `post_writer()` | Main write loop, dispatches requests to server |
-| `terminate_session()` | Sends DELETE to end the session |
-| `get_session_id()` | **async** — delegates to `SessionInfo.get_session_id` |
+MCP SDK 2.0's transport handles POST requests, the optional GET SSE channel,
+`Last-Event-ID` resumption, 2026 HTTP cancellation, protocol headers, structured
+errors from non-2xx responses, and session termination via DELETE. None of those
+internals are duplicated locally.
 
 #### streamable_http_client (context manager)
 
-Internal async context manager that wires up `StreamableHTTPTransport` with
-memory streams and a task group.  Used by `McpClient._initialize_client`.
+Internal async context manager that attaches the session hooks and delegates to
+the SDK context manager. Used by `McpClient._open_connection`.
 
 ```python
 async with streamable_http_client(url, http_client=client, session_info=info) as (read, write):
     session = ClientSession(read, write)
 ```
+
+The adapter yields the SDK's two transport streams unchanged. If no HTTP client
+is supplied, it creates and owns an `httpx2.AsyncClient`; `McpClient` normally
+supplies its long-lived authenticated client.
 
 ---
 
@@ -160,7 +138,8 @@ package.  They import `SessionInfo` and `SessionInfoFactory` from here.
 MCP connections for tool invocations with **two distinct initialization phases**:
 
 1. **Client Initialization** (first call): Retrieves MCP server URL via SDK, creates the full stack
-2. **Session Reinitialization** (on 404): Lightweight, reuses existing client
+2. **Connection Reinitialization** (on session loss): Reuses the HTTP client,
+   but replaces the transport and `ClientSession`
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -169,7 +148,7 @@ MCP connections for tool invocations with **two distinct initialization phases**
 │  Configuration (immutable after __init__)                   │
 │  ─────────────────────────────────────────                  │
 │  _config: AgentMcpResourceConfig  # Contains slug, folder   │
-│  _timeout: httpx.Timeout                                    │
+│  _timeout: httpx2.Timeout | float | None                    │
 │  _max_retries: int                                          │
 │  _session_info_factory: SessionInfoFactory                  │
 ├─────────────────────────────────────────────────────────────┤
@@ -182,34 +161,34 @@ MCP connections for tool invocations with **two distinct initialization phases**
 │  ───────────────                                            │
 │  _lock: asyncio.Lock     # Protects both init phases        │
 ├─────────────────────────────────────────────────────────────┤
-│  Client State (created once, reused on session reinit)      │
+│  Client State (created once, reused on connection reinit)   │
 │  ─────────────────────────────────────────────────────      │
-│  _http_client: httpx.AsyncClient | None                     │
-│  _read_stream: MemoryObjectReceiveStream | None             │
-│  _write_stream: MemoryObjectSendStream | None               │
+│  _http_client: httpx2.AsyncClient | None                    │
 │  _session_info: SessionInfo | None                          │
-│  _stack: AsyncExitStack | None                              │
+│  _stack: AsyncExitStack | None  # HTTP client               │
 │  _client_initialized: bool                                  │
 ├─────────────────────────────────────────────────────────────┤
-│  Session State (can be reinitialized without recreating)    │
-│  ───────────────────────────────────────────────────────    │
+│  Connection State (replaced after session loss)             │
+│  ──────────────────────────────────────────────             │
+│  _connection_stack: AsyncExitStack | None                   │
 │  _session: ClientSession | None                             │
-│  _session_id: str | None                                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Public Methods                                             │
 │  ──────────────                                             │
+│  + list_tools(force_refresh=False) -> ListToolsResult       │
 │  + call_tool(name, arguments) -> CallToolResult             │
 │  + dispose() -> None  # UiPathDisposableProtocol            │
-│  + session_id: str | None (property)                        │
+│  + get_session_id() -> str | None                           │
 │  + is_client_initialized: bool (property)                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Private Methods                                            │
 │  ───────────────                                            │
 │  - _initialize_client() -> None    # SDK + full init (once) │
-│  - _initialize_session() -> None   # MCP handshake only     │
+│  - _open_connection() -> None      # transport + session    │
+│  - _initialize_session() -> None   # legacy handshake       │
 │  - _ensure_session() -> ClientSession                       │
-│  - _reinitialize_session() -> None                          │
-│  - _is_session_error(error) -> bool                         │
+│  - _reinitialize_session(failed_session) -> None            │
+│  + is_session_error(error) -> bool                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -220,11 +199,16 @@ During client initialization, `McpClient`:
 1. Retrieves the `McpServer` from the UiPath SDK
 2. Calls `self._session_info_factory.create_session(mcp_server)` to get a `SessionInfo`
 3. Loads any existing session ID via `await session_info.get_session_id()`
-4. Passes the `SessionInfo` to the local `streamable_http_client`
-5. Calls `session.initialize()` — the transport calls `set_session_id` internally
-6. Reads the new session ID via `await session_info.get_session_id()`
+4. Passes the `SessionInfo` to the local adapter, which opens the SDK transport
+5. Creates a new `ClientSession` over those streams
+6. If no ID was restored, calls `session.initialize()`; the response hook stores
+   the server-assigned ID
+7. Reads the new session ID via `await session_info.get_session_id()`
 
-On session reinitialization (404 retry), only steps 5-6 repeat.
+On recovery, the HTTP client and `SessionInfo` are reused, but the old connection
+stack is closed and steps 4-7 run with a fresh transport and `ClientSession`.
+This is required because SDK 2.0 makes `ClientSession.initialize()` idempotent
+for the lifetime of one `ClientSession`.
 
 ### Tool Factory Functions
 
@@ -308,8 +292,8 @@ disposes all `McpClient` instances on exit.
 The key design principle is separating **client initialization** from **session initialization**:
 
 ```
-Phase 1: Client Initialization (expensive, done once)
-──────────────────────────────────────────────────────
+Phase 1: Base Client Initialization (expensive, done once)
+───────────────────────────────────────────────────────────
 ┌─────────────────┐
 │ UiPath SDK      │ ─── Retrieves MCP server URL
 │ mcp.retrieve()  │     and auth token (Bearer)
@@ -321,23 +305,20 @@ Phase 1: Client Initialization (expensive, done once)
 └─────────────────┘
 
 ┌─────────────────┐
-│ httpx.AsyncClient │ ─┐
-└─────────────────┘   │
-                      │
-┌─────────────────┐   │  Created once via
-│ streamable_http │   ├─ AsyncExitStack
-│   connection    │   │
-└─────────────────┘   │
-                      │
-┌─────────────────┐   │
-│  ClientSession  │ ─┘
+│httpx2.AsyncClient│ ─── Created once via the base AsyncExitStack
 └─────────────────┘
 
-Phase 2: Session Initialization (lightweight, can repeat)
-─────────────────────────────────────────────────────────
+Phase 2: Connection Initialization (repeated after session loss)
+──────────────────────────────────────────────────────────────
+┌─────────────────┐
+│ SDK transport + │ ─── Fresh connection AsyncExitStack
+│ ClientSession   │
+└─────────────────┘
+
 ┌─────────────────┐
 │ session.        │ ─── Sends initialize request
-│ initialize()    │     Transport calls set_session_id()
+│ initialize()    │     Response hook calls set_session_id()
+│                 │     (skipped when an ID was restored)
 └─────────────────┘
 ┌─────────────────┐
 │ McpClient reads │ ─── await session_info.get_session_id()
@@ -348,42 +329,27 @@ Phase 2: Session Initialization (lightweight, can repeat)
 ### Session Lifecycle
 
 ```
-           ┌──────────────┐
-           │   Created    │
-           │ (nothing     │
-           │  initialized)│
-           └──────┬───────┘
-                  │ call_tool() [first time]
-                  ▼
-           ┌──────────────┐
-           │   Client     │
-           │ Initializing │
-           │ (Phase 1)    │
-           └──────┬───────┘
-                  │ 1. UiPath SDK retrieves MCP URL
-                  │ 2. Factory creates SessionInfo
-                  │ 3. Creates HTTP client, streams, session
-                  │ 4. Calls _initialize_session()
-                  ▼
-           ┌──────────────┐
-           │   Session    │
-           │ Initializing │◄────────────────┐
-           │ (Phase 2)    │                 │
-           └──────┬───────┘                 │
-                  │ sends initialize,       │
-                  │ transport calls         │ 404 error
-                  │ set_session_id()        │ (only reinit
-                  ▼                         │  session,
-           ┌──────────────┐                 │  not client)
-           │    Active    │─────────────────┘
-           │   Session    │
-           └──────┬───────┘
-                  │ dispose()
-                  ▼
-           ┌──────────────┐
-           │    Closed    │
-           │ (can reuse)  │
-           └──────────────┘
+┌──────────────┐  first operation  ┌────────────────────┐
+│   Created    │ ────────────────► │ Base client init   │
+└──────────────┘                    │ SDK + HTTP client  │
+                                    └─────────┬──────────┘
+                                              │ open connection
+                                              ▼
+                                    ┌────────────────────┐
+                              ┌────►│ Session init       │
+                              │     │ transport + session│
+                              │     └─────────┬──────────┘
+                              │               │ initialize handshake
+                              │               ▼
+                              │     ┌────────────────────┐
+                              │     │ Active session     │
+                              │     └────┬──────────┬────┘
+                              │          │          │ dispose()
+               session error │          │          ▼
+               close old +   └──────────┘  ┌──────────────┐
+               clear ID                    │ Closed       │
+                                           │ (can reuse)  │
+                                           └──────────────┘
 ```
 
 ### MCP Protocol Flow
@@ -394,16 +360,16 @@ Phase 2: Session Initialization (lightweight, can repeat)
 Client                              Server
    │                                   │
    │──── initialize ──────────────────►│
-   │◄─── result + session-id-1 ────────│  ← transport calls set_session_id()
+   │◄─── result + session-id-1 ────────│  ← response hook calls set_session_id()
    │                                   │
    │──── notifications/initialized ───►│
-   │◄─── 204 No Content ───────────────│
+   │◄─── 202 Accepted / 204 ───────────│
    │                                   │
    │──── tools/call ──────────────────►│
    │◄─── result ───────────────────────│
 ```
 
-**On 404 error (session reinitialization only):**
+**On a terminated session (connection/session replacement):**
 
 ```
 Client                              Server
@@ -411,14 +377,15 @@ Client                              Server
    │──── tools/call ──────────────────►│
    │◄─── 404 (session terminated) ─────│
    │                                   │
-   │  [Reuses existing HTTP client     │
-   │   and streamable connection]      │
+   │  [Closes old transport/session;   │
+   │   clears stale SessionInfo;       │
+   │   reuses existing HTTP client]    │
    │                                   │
    │──── initialize ──────────────────►│  ← new session
-   │◄─── result + session-id-2 ────────│    (same client)
+   │◄─── result + session-id-2 ────────│    (same HTTP client)
    │                                   │
    │──── notifications/initialized ───►│
-   │◄─── 204 No Content ───────────────│
+   │◄─── 202 Accepted / 204 ───────────│
    │                                   │
    │──── tools/call ──────────────────►│  ← retry
    │◄─── result ───────────────────────│
@@ -430,8 +397,16 @@ The following error codes trigger automatic session reinitialization:
 
 | Code | Meaning | Source |
 |------|---------|--------|
-| `32600` | Session terminated | HTTP 404 converted by transport |
-| `-32000` | Server error | Can indicate session not found |
+| `CONNECTION_CLOSED` | Transport connection closed | MCP SDK dispatcher/transport |
+| `INVALID_REQUEST` (`-32600`) | Session terminated/expired/invalid | SDK 2 maps a bare session-bound HTTP 404 to this error |
+| `32600` | Session terminated | Compatibility with the positive code emitted by the older local transport |
+
+`INVALID_REQUEST` is retried only when its message explicitly identifies a
+terminated, expired, or invalid session. An externally restored session is not
+known inside a newly created SDK transport, so its first bare HTTP 404 appears
+as `METHOD_NOT_FOUND`/`"Not Found"`; `McpClient` treats that exact shape as
+recoverable only while `SessionInfo` still contains the restored ID. Structured
+JSON-RPC method errors are not retried.
 
 ## Key Implementation Details
 
@@ -468,13 +443,12 @@ The HTTP client MUST use `get_httpx_client_kwargs()` for proper SSL/proxy config
 ```python
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
-default_client_kwargs = get_httpx_client_kwargs()
+self._stack = AsyncExitStack()
+await self._stack.__aenter__()
+client_kwargs = get_httpx_client_kwargs(headers=self._headers)
+client_kwargs["timeout"] = self._timeout
 self._http_client = await self._stack.enter_async_context(
-    httpx.AsyncClient(
-        **default_client_kwargs,
-        headers=self._headers,
-        timeout=self._timeout,
-    )
+    httpx2.AsyncClient(**client_kwargs)
 )
 ```
 
@@ -492,12 +466,19 @@ async def _ensure_session(self) -> ClientSession:
                 await self._initialize_client()
     return self._session
 
-async def _reinitialize_session(self) -> None:
+async def _reinitialize_session(
+    self, failed_session: ClientSession | None = None
+) -> None:
     async with self._lock:
         if not self._client_initialized:
             await self._initialize_client()
         else:
-            await self._initialize_session()  # Lightweight!
+            # Another failing operation may arrive after recovery completed.
+            if failed_session is not None and self._session is not failed_session:
+                return
+            await self._connection_stack.aclose()
+            await self._session_info.set_session_id(None)
+            await self._open_connection()
 ```
 
 ### 4. No `with` Statement for AsyncExitStack
@@ -509,17 +490,20 @@ Manual lifecycle management:
 self._stack = AsyncExitStack()
 await self._stack.__aenter__()
 # ... use stack ...
-await self._stack.__aexit__(None, None, None)
+await self._stack.aclose()
 
 # Wrong - exits too early
 async with AsyncExitStack() as stack:
     ...  # Stack closes here!
 ```
 
-### 5. Reinitialization Reuses Client
+### 5. Reinitialization Reuses the HTTP Client
 
-On 404, only `_initialize_session()` is called — the HTTP client, streams,
-and `SessionInfo` instance are all reused.
+On a recoverable session error, `_reinitialize_session()` closes the old
+connection stack, clears the stale ID, and opens a fresh SDK transport and
+`ClientSession`. The authenticated `httpx2.AsyncClient` and `SessionInfo`
+instance are reused. The failed-session identity guard prevents a late failure
+from a concurrent operation from tearing down a replacement session.
 
 ## Cross-Package Dependencies
 
@@ -553,30 +537,32 @@ For detailed test documentation, mocking strategies, and guidelines for adding n
 
 | Test File | Purpose |
 |-----------|---------|
-| `test_mcp_client.py` | McpClient session tests (7 tests) |
-| `test_mcp_tool.py` | Tool factory tests (17 tests) |
+| `test_mcp_client.py` | Real SDK 2 transport, legacy negotiation, persisted sessions, recovery, caching, and disposal |
+| `test_mcp_tool.py` | Tool factory, schema refresh, result serialization, and error mapping |
+| `test_session_info.py` | SessionInfo and SessionInfoFactory contract |
 
 ### Key Test Classes
 
 | Class | Tests |
 |-------|-------|
-| `TestMcpClient` | Session lifecycle, 404 retry, client reuse |
+| Module-level client tests | 2025 negotiation, persisted sessions, 404 retry, concurrency, client reuse |
 | `TestMcpToolMetadata` | Tool metadata (tool_type, display_name, etc.) |
 | `TestMcpToolCreation` | Multiple tools, descriptions, disabled config |
 | `TestCreateMcpToolsFromAgent` | Agent factory function tests |
-| `TestMcpToolInvocation` | Full invocation flow smoke test |
 | `TestMcpToolNameSanitization` | Tool name sanitization |
 
 ### Key Assertion
 
-The most important test verifies client reuse on 404:
+The most important recovery test verifies a fresh session with HTTP client reuse:
 
 ```python
-# HTTP client created only ONCE (not recreated on retry)
-assert mock_async_client_class.call_count == 1
-
-# But session initialized TWICE
-assert initialize_count[0] == 2
+assert endpoint.initialize_count == 2
+assert endpoint.tool_call_count == 2
+assert await client.get_session_id() == "session-2"
+assert [h["mcp-session-id"] for h in endpoint.headers_for("tools/call")] == [
+    "session-1",
+    "session-2",
+]
 ```
 
 ## Guidelines for Changes
@@ -585,10 +571,10 @@ assert initialize_count[0] == 2
 
 When the upstream MCP SDK changes its transport:
 
-1. Diff the upstream [`mcp/client/streamable_http.py`](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/streamable_http.py) against our local copy
-2. Apply upstream changes while preserving our `SessionInfo` integration
-3. Key areas to watch: `_prepare_headers` (must stay async), `_maybe_extract_session_id_from_response` (must use `set_session_id`), `streamable_http_client` (must accept `session_info` param)
-4. The transport must never own session state directly — always delegate to `_session_info`
+1. Keep delegating to [`mcp.client.streamable_http`](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/streamable_http.py); do not copy the transport again
+2. Preserve the async `SessionInfo` request/response hooks and remove both hooks on context exit
+3. Confirm the SDK still accepts a supplied `httpx2.AsyncClient` and yields two transport streams
+4. Re-run the legacy-version, persisted-session, 404 recovery, and DELETE tests
 
 ### Adding New Factory Functions
 
@@ -601,17 +587,17 @@ When the upstream MCP SDK changes its transport:
 
 1. Changes go in `_initialize_client()`
 2. All resources must be added to `_stack` via `enter_async_context()`
-3. Set `_client_initialized = True` before calling `_initialize_session()`
+3. Set `_client_initialized = True` only after `_open_connection()` and the handshake succeed
 4. Always use `get_httpx_client_kwargs()` for HTTP client
 5. The `SessionInfo` is created via the factory — do not construct it directly
 
 ### Modifying Session Initialization
 
 1. Changes go in `_initialize_session()`
-2. This should remain lightweight — just the MCP handshake
-3. Don't create new HTTP resources here
-4. The transport handles `set_session_id` — `_initialize_session` only reads via `get_session_id`
-5. Verify tests still show `mock_async_client_class.call_count == 1` on retry
+2. It runs only on a newly created `ClientSession`; never call it again on the same SDK 2 session for recovery
+3. Don't create HTTP resources here; `_open_connection()` owns the transport/session stack
+4. The response hook handles `set_session_id` — `_initialize_session` only reads via `get_session_id`
+5. Verify recovery creates two sessions while retaining one HTTP client
 
 ### Adding New Methods to McpClient
 
@@ -638,7 +624,7 @@ When the upstream MCP SDK changes its transport:
 
 | File | Package | Purpose |
 |------|---------|---------|
-| `streamable_http.py` | uipath-langchain | SessionInfo + transport (local SDK copy) |
+| `streamable_http.py` | uipath-langchain | SessionInfo + thin SDK transport adapter |
 | `mcp_client.py` | uipath-langchain | SessionInfoFactory + McpClient |
 | `mcp_tool.py` | uipath-langchain | Tool factory functions |
 | `__init__.py` | uipath-langchain | Public exports |
@@ -649,30 +635,34 @@ When the upstream MCP SDK changes its transport:
 
 The implementation uses these MCP SDK components:
 
-- `mcp.ClientSession` - MCP client session (can call `initialize()` multiple times)
-- `mcp.shared.exceptions.McpError` - Error handling
+- `mcp.ClientSession` - MCP client session (`initialize()` is idempotent per instance)
+- `mcp.shared.exceptions.MCPError` - Error handling
 - `mcp.types.CallToolResult` - Tool call results
-- `mcp.client._transport.TransportStreams` - Type alias used by `streamable_http_client`
-- `mcp.shared._httpx_utils.create_mcp_http_client` - Default HTTP client factory
-- `mcp.shared.message.SessionMessage` - Message wrapper for JSON-RPC
+- `mcp.client.streamable_http.streamable_http_client` - Upstream transport context manager
+- `httpx2.AsyncClient` - HTTP and SSE client used by MCP SDK 2
 
 Key SDK behaviors:
-- `ClientSession.initialize()` sends initialize request + initialized notification
+- `ClientSession.initialize()` sends the latest legacy initialize request and initialized notification
 - `ClientSession.call_tool()` calls `_validate_tool_result()` on success
 - `_validate_tool_result()` calls `list_tools()` if output schema not cached
-- HTTP 404 is converted to `McpError` with code `32600` by `StreamableHTTPTransport`
+- A session-bound bare HTTP 404 is converted to `MCPError(INVALID_REQUEST, "Session terminated")`
+
+SDK 2 accepts legacy handshake responses for `2024-11-05`, `2025-03-26`,
+`2025-06-18`, and `2025-11-25`. This low-level UiPath path uses
+`ClientSession.initialize()`, so a server that supports only modern
+`2026-07-28` discovery is not supported here; the SDK high-level
+`Client(mode="auto")` owns that probe/fallback behavior.
 
 ## Performance Considerations
 
 Session reinitialization is efficient because:
 
 1. **HTTP client reused**: No new TCP connections
-2. **Streamable connection reused**: No new task groups or streams
+2. **Connection state replaced**: A fresh transport/task group and `ClientSession`
 3. **SessionInfo reused**: No new factory calls or debug state loads
-4. **Only MCP handshake**: Just 2 HTTP requests (initialize + notification)
+4. **Only MCP handshake repeated**: Initialize + initialized notification before retry
 
 This is significantly faster than full client reinitialization, which would require:
-- Creating new `httpx.AsyncClient`
-- Creating new task groups
-- Creating new memory streams
-- Establishing new connections
+- Creating a new `httpx2.AsyncClient`
+- Resolving the MCP registration and authorization again
+- Re-running the `SessionInfoFactory` and any external debug-state load
