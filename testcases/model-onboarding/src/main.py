@@ -12,11 +12,15 @@ of the low-code FileProcessingAgent) against a model supplied at runtime via
       }
     }
 
-Every file in ``FILE_REGISTRY`` is exercised. Each asks a question with one
-deterministic answer that only its contents reveal — "what animal is this?"
-over a photo of a dog, "what is the first word inside?" over a PDF reading
-"Dummy PDF file". The answer word appears nowhere in the file name, so a model
-that never opened the file cannot produce it.
+Every file in ``FILE_REGISTRY`` is exercised. Each asks a question whose answer
+is **unguessable** — a random code inside a PDF, the colour of a shape in an
+image. That property is what makes the assertion meaningful: there is no prior
+a model can fall back on, so producing the answer proves it read the file.
+
+This matters more than it sounds. Earlier fixtures asked "what animal is in
+this image?" over ``dog.jpg``; "dog" is the most likely answer to that question
+with no image at all, and the file name was visible in the prompt, so a model
+that never opened the file still scored correct.
 
 Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 ``get_chat_model`` (e.g. ``openai:responses``, ``awsbedrock:converse``,
@@ -24,6 +28,7 @@ Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 """
 
 import logging
+import re
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -51,70 +56,82 @@ class FileCase(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
-# Files the agent processes, selected by name via `model_spec.files`.
+# Files the agent processes. Both fixtures are generated and committed under
+# fixtures/ (see fixtures/README.md), and both answers are unguessable — which
+# is the whole point.
+#
+# The previous fixtures were borrowed from the web and both were guessable:
+#
+# - dog.jpg asked "what animal is this?", and "dog" is the single most likely
+#   answer to that question with no image at all. A model that never opened the
+#   file scored correct. The file name was visible in the prompt too.
+# - dummy.pdf's text is the literal string "Dummy PDF file", which reads as a
+#   placeholder, so the model kept editorializing about whether the content was
+#   real instead of reporting it — flaky in both directions.
+#
+# A random code and an arbitrary color have no prior to fall back on: the model
+# either read the file or it did not.
 FILE_REGISTRY: dict[str, FileCase] = {
     "image": FileCase(
-        # A white Samoyed sitting on grass.
+        # A purple square on white. The subject carries no colour prior.
         file=FileInfo(
-            url="https://raw.githubusercontent.com/pytorch/hub/master/images/dog.jpg",
-            name="animal.jpg",
-            mime_type="image/jpeg",
+            url="fixtures/shape.png",
+            name="shape.png",
+            mime_type="image/png",
         ),
-        question="What animal is in this image? Answer with one word only.",
-        expected="dog",
+        question=(
+            "What colour is the large shape in the centre of this image? "
+            "Answer with one word only."
+        ),
+        expected="purple",
     ),
     "pdf": FileCase(
-        # A one-page PDF whose entire content is the line "Dummy PDF file".
+        # A one-page PDF whose only text is "Verification code: PDF-CODE-74915".
         file=FileInfo(
-            url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            url="fixtures/document.pdf",
             name="document.pdf",
             mime_type="application/pdf",
         ),
-        # This file's text is the literal string "Dummy PDF file", which reads
-        # as a placeholder — across six runs the model answered it correctly
-        # three times and three times refused, reporting the file unreadable
-        # while quoting the very text the tool had returned. Asking it to
-        # repeat the tool output verbatim removes the judgement call; the
-        # instruction not to evaluate the text is what makes this stable.
         question=(
-            "Call the Analyze Files tool, then repeat its result back "
-            "verbatim as your entire answer. Do not evaluate, judge or "
-            "comment on whether the text is meaningful."
+            "What is the verification code written in this document? "
+            "Answer with the code only."
         ),
-        expected="dummy",
+        expected="PDF-CODE-74915",
     ),
 }
 
 
-# Phrases a model uses when it quotes the expected word while denying it read
-# the file. A plain substring check passed those, asserting the opposite of
-# what the answer said.
-_REFUSAL_MARKERS = (
-    "cannot",
-    "can't",
-    "unable",
-    "not available",
-    "no actual",
-    "placeholder",
-    "unreadable",
-    "appears to be",
-    "rather than",
-)
-
-
 def _matches(expected: str, answer: str) -> bool:
-    """Was the expected word actually given as the answer?
+    """Does the answer contain the expected value as a whole token?
 
-    Requires the word as a real token and no refusal language. Length is not a
-    criterion: a verbatim transcription legitimately carries the parser's
-    ``<PARSED TEXT FOR PAGE: 1 / 1>`` prefix, which a word-count limit rejected
-    even though the answer was correct.
+    Deliberately simple, and only safe because the expected values are
+    unguessable (a random code, an arbitrary colour). Earlier fixtures were
+    guessable, which forced a refusal-phrase blocklist and a
+    position-in-answer heuristic to tell "read the file" from "guessed the
+    obvious"; both were brittle — they rejected correct answers that carried
+    commentary, and still passed "there is no dog; it is a cat".
+
+    Choosing a fixture whose answer cannot be guessed removes the need to
+    interpret the prose around it: presence of the token *is* the evidence.
+    Matching is case-insensitive and on whole tokens, so a substring like
+    "Samoyed" cannot satisfy "dog", and markdown or a parser prefix around the
+    answer is harmless.
     """
-    lowered = answer.lower()
-    if any(marker in lowered for marker in _REFUSAL_MARKERS):
+    # Hyphens are token separators here, so "PDF-CODE-74915" is compared as its
+    # parts in order — robust to the model reformatting the separator.
+    def tokens(text: str) -> list[str]:
+        return re.findall(r"\w+", text.lower())
+
+    expected_tokens = tokens(expected)
+    answer_tokens = tokens(answer)
+    if not expected_tokens:
         return False
-    words = [w.strip(".,'\"“”‘’!?:;()<>/").lower() for w in lowered.split()]
-    return expected.lower() in words
+    # Look for the expected token sequence anywhere in the answer.
+    span = len(expected_tokens)
+    return any(
+        answer_tokens[i : i + span] == expected_tokens
+        for i in range(len(answer_tokens) - span + 1)
+    )
 
 
 class ModelSpec(BaseModel):
@@ -136,24 +153,70 @@ class GraphOutput(BaseModel):
     result_summary: str
 
 
+def _one_line(error: BaseException) -> str:
+    """Collapse an exception to one line for the per-cell summary."""
+    return " ".join(str(error).split())
+
+
 async def probe_file_processing(state: GraphInput) -> GraphOutput:
-    """Run the agent for every api_flavor x file, collecting its answers."""
+    """Run the agent for every api_flavor x file, collecting its answers.
+
+    Nothing here is allowed to abort the run. Every cell — settings, each
+    model build, each file — is recorded as ✓ or ✗ and the loop continues,
+    because a model that fails one flavor is exactly the condition this test
+    is meant to *report*. An unguarded raise kills the node, `uipath run`
+    exits non-zero, and `set -e` in run.sh stops the script before
+    validate_output.sh, discarding the summary and every flavor that already
+    passed.
+    """
     spec = state.model_spec
-    settings = PlatformSettings(agenthub_config=spec.agenthub_config)
     lines: list[str] = []
     failed = False
 
+    def record(line: str) -> None:
+        """Append a summary line and log it immediately.
+
+        Logged as it happens so a run that dies for an unforeseen reason still
+        leaves the partial results in the job log.
+        """
+        lines.append(line)
+        logger.info(line)
+
+    try:
+        settings = PlatformSettings(agenthub_config=spec.agenthub_config)
+    except Exception as e:
+        # A bad agenthub_config fails every flavor, so report it once and stop
+        # rather than repeat the same error per flavor.
+        detail = f"settings: ✗ {type(e).__name__}: {_one_line(e)}"[:300]
+        record(detail)
+        return GraphOutput(success=False, result_summary="\n".join(lines))
+
     for flavor in spec.api_flavors:
+        record(f"{flavor}:")
         vendor_type, _, api_flavor = flavor.partition(":")
-        model = get_chat_model(
-            model=spec.model_name,
-            client_settings=settings,
-            vendor_type=vendor_type or None,
-            api_flavor=api_flavor or None,
-            temperature=0.0,
-            max_tokens=2000,
-        )
-        lines.append(f"{flavor}:")
+
+        # get_chat_model raises on an unknown vendor (ValueError) or a model
+        # the tenant cannot serve (AgentStartupError, via ModelNotFoundError).
+        # Both are ordinary findings for this test, not crashes.
+        try:
+            model = get_chat_model(
+                model=spec.model_name,
+                client_settings=settings,
+                vendor_type=vendor_type or None,
+                api_flavor=api_flavor or None,
+                temperature=0.0,
+                max_tokens=2000,
+            )
+        except Exception as e:
+            failed = True
+            record(f"  build: ✗ {type(e).__name__}: {_one_line(e)}"[:300])
+            continue
+
+        # Log the class actually constructed: discovery can override the
+        # requested api_flavor, and an unrecognized Bedrock flavor falls
+        # through to Converse — so echoing the requested string alone would
+        # sign off on a surface that was never exercised.
+        record(f"  build: ✓ {type(model).__name__}")
 
         for file_name, case in FILE_REGISTRY.items():
             try:
@@ -162,19 +225,20 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 )
             except Exception as e:
                 failed = True
-                # Collapse newlines: some SDK errors are multi-line and would
-                # break the one-cell-per-line summary.
-                detail = " ".join(str(e).split())
-                lines.append(f"  {file_name}: ✗ {type(e).__name__}: {detail}"[:300])
+                record(f"  {file_name}: ✗ {type(e).__name__}: {_one_line(e)}"[:300])
                 continue
 
             if _matches(case.expected, answer):
-                lines.append(f"  {file_name}: ✓ {answer}"[:200])
+                record(f"  {file_name}: ✓ {answer}"[:200])
             else:
                 failed = True
-                lines.append(
+                record(
                     f"  {file_name}: ✗ expected '{case.expected}', got: {answer}"[:300]
                 )
+
+    if not spec.api_flavors:
+        failed = True
+        record("✗ no api_flavors supplied")
 
     summary = "\n".join(lines)
     logger.info(f"Success: {not failed}\nSummary:\n{summary}")
