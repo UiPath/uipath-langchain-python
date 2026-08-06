@@ -9,5 +9,8 @@ dependencies = [
 ]
 requires-python = ">=3.11"
 
+[tool.uv]
+exclude-newer = "2 days"
+
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }

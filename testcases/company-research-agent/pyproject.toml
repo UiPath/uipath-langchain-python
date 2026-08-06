@@ -15,6 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
 
+[tool.uv]
+exclude-newer = "2 days"
+
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }
 
