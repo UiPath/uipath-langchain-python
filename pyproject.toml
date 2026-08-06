@@ -5,10 +5,10 @@ description = "Python SDK that enables developers to build and deploy LangGraph 
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.13.16, <2.15.0",
+    "uipath>=2.14.1, <2.15.0",
     "uipath-core>=0.5.29, <0.6.0",
     "uipath-platform>=0.2.15, <0.3.0",
-    "uipath-runtime>=0.12.5, <0.14.0",
+    "uipath-runtime>=0.13.0, <0.14.0",
     "uipath-llm-client>=1.17.1, <1.18.0",
     "langgraph>=1.1.8, <2.0.0",
     "langchain-core>=1.2.27, <2.0.0",
