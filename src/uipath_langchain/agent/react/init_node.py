@@ -6,9 +6,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Overwrite
 from pydantic import BaseModel
 
+from uipath_langchain._conversation.types import ClientSideToolInfo
 from uipath_langchain.agent.tools.client_side_tool import (
     UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY,
-    ClientSideToolInfo,
     apply_tool_filter,
     available_client_side_tools,
 )

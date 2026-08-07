@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from uipath.platform.context_grounding import DeepRagContent
 from uipath.platform.guardrails import BaseGuardrail
 
-from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain._conversation.types import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ...runtime._citations import cas_deep_rag_citation_wrapper

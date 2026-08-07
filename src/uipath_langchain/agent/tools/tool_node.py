@@ -22,26 +22,32 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
+from uipath_langchain.agent.tool_types import (
+    AsyncToolWrapperType as AsyncToolWrapperType,
+)
+from uipath_langchain.agent.tool_types import (
+    AsyncToolWrapperWithoutState as AsyncToolWrapperWithoutState,
+)
+from uipath_langchain.agent.tool_types import (
+    AsyncToolWrapperWithState as AsyncToolWrapperWithState,
+)
+from uipath_langchain.agent.tool_types import (
+    ToolWrapperReturnType as ToolWrapperReturnType,
+)
+from uipath_langchain.agent.tool_types import (
+    ToolWrapperType as ToolWrapperType,
+)
+from uipath_langchain.agent.tool_types import (
+    ToolWrapperWithoutState as ToolWrapperWithoutState,
+)
+from uipath_langchain.agent.tool_types import (
+    ToolWrapperWithState as ToolWrapperWithState,
+)
 from uipath_langchain.chat.hitl import (
     IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     REQUIRE_CONVERSATIONAL_CONFIRMATION,
     request_conversational_tool_confirmation,
 )
-
-# the type safety can be improved with generics
-ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
-
-ToolWrapperWithoutState = Callable[[BaseTool, ToolCall], ToolWrapperReturnType]
-ToolWrapperWithState = Callable[[BaseTool, ToolCall, Any], ToolWrapperReturnType]
-ToolWrapperType = ToolWrapperWithoutState | ToolWrapperWithState
-
-AsyncToolWrapperWithoutState = Callable[
-    [BaseTool, ToolCall], Awaitable[ToolWrapperReturnType]
-]
-AsyncToolWrapperWithState = Callable[
-    [BaseTool, ToolCall, Any], Awaitable[ToolWrapperReturnType]
-]
-AsyncToolWrapperType = AsyncToolWrapperWithoutState | AsyncToolWrapperWithState
 
 OutputType = dict[Literal["messages"], list[ToolMessage]] | Command[Any] | None
 
