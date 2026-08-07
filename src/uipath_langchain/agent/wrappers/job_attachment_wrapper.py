@@ -6,14 +6,14 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from uipath_langchain.agent.react.job_attachments import (
+from uipath_langchain.agent.job_attachments import (
     get_job_attachment_paths,
     get_job_attachments,
     replace_job_attachment_ids,
 )
-from uipath_langchain.agent.react.json_utils import coerce_json_strings
-from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperWithState
+from uipath_langchain.agent.json_utils import coerce_json_strings
+from uipath_langchain.agent.tool_types import AsyncToolWrapperWithState
+from uipath_langchain.agent.types import AgentGraphState
 
 
 def _parse(content: str) -> Any:

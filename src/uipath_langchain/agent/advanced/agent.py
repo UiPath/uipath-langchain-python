@@ -20,13 +20,18 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, ConfigDict, create_model
 from uipath.core.chat import UiPathConversationMessageData
 
 from uipath_langchain._utils import get_unique_model_field_name
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
+from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
-from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
+from .types import (
+    AdvancedAgentGraphState,
+    ConversationalAdvancedAgentGraphState,
+    _ConversationalAdvancedAgentGraphInput,
+)
 from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
@@ -213,45 +218,132 @@ def create_advanced_agent_graph(
 def create_conversational_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
-    system_prompt: str,
+    system_prompt: str | Callable[[dict[str, Any]], str],
     backend: BackendProtocol | BackendFactory | None,
+    input_schema: type[BaseModel] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
     Conversational agents receive the full conversation history in the
     ``messages`` input each exchange and must output the newly produced
     messages as ``uipath__agent_response_messages``. The deepagent already
-    operates on ``messages``, so the wrapper only records the incoming history
-    size and maps the new messages to the conversational output field.
+    operates on ``messages``. Callable system prompts are resolved once from
+    the exchange input and applied to every main-agent model request in that
+    invocation.
     """
-    # deferred: avoids a circular import (runtime.messages imports agent modules)
-    from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
-
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+    )
+    if callable(system_prompt):
+        build_system_prompt = system_prompt
+        static_system_prompt = None
+    else:
+        build_system_prompt = None
+        static_system_prompt = system_prompt
+    initial_message_count_key = get_unique_model_field_name(
+        "initial_message_count",
+        _ConversationalAdvancedAgentGraphInput,
+        input_schema,
+    )
+    runtime_system_prompt_key = (
+        get_unique_model_field_name(
+            "uipath__system_prompt",
+            _ConversationalAdvancedAgentGraphInput,
+            input_schema,
+        )
+        if build_system_prompt is not None
+        else None
     )
 
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
-        system_prompt=system_prompt,
+        system_prompt=static_system_prompt,
         backend=backend,
         memory=memory_sources,
+        middleware=(
+            [_RuntimeSystemPromptMiddleware(runtime_system_prompt_key)]
+            if runtime_system_prompt_key is not None
+            else []
+        ),
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
         uipath__agent_response_messages: list[UiPathConversationMessageData] = []
 
-    def capture_exchange_start(
-        state: ConversationalAdvancedAgentGraphState,
-    ) -> dict[str, Any]:
-        return {"initial_message_count": len(state.messages)}
+    graph_input: type[BaseModel] = _ConversationalAdvancedAgentGraphInput
+    wrapper_input = graph_input
+    if input_schema is not None:
+        wrapper_input = type(
+            "CompleteConversationalAdvancedAgentInput",
+            (_ConversationalAdvancedAgentGraphInput, input_schema),
+            {
+                "model_config": ConfigDict(
+                    validate_by_alias=True,
+                    validate_by_name=True,
+                )
+            },
+        )
+        wrapper_input.model_rebuild()
+        graph_input = (
+            input_schema if "messages" in input_schema.model_fields else wrapper_input
+        )
+    initial_count_field: dict[str, Any] = {
+        initial_message_count_key: (int | None, None)
+    }
+    base_wrapper_state = cast(
+        type[BaseModel],
+        create_model(
+            "ConversationalAdvancedAgentGraphState",
+            __base__=wrapper_input,
+            **initial_count_field,
+        ),
+    )
+    if runtime_system_prompt_key is not None:
+        runtime_state_field: dict[str, Any] = {
+            runtime_system_prompt_key: (str | None, None)
+        }
+        wrapper_state = cast(
+            type[BaseModel],
+            create_model(
+                "RuntimeConversationalAdvancedAgentGraphState",
+                __base__=base_wrapper_state,
+                **runtime_state_field,
+            ),
+        )
+    else:
+        wrapper_state = base_wrapper_state
 
-    def transform_output(
-        state: ConversationalAdvancedAgentGraphState,
-    ) -> dict[str, Any]:
-        initial_count = state.initial_message_count or 0
-        new_messages = state.messages[initial_count:]
+    internal_fields = set(_ConversationalAdvancedAgentGraphInput.model_fields)
+    internal_fields.add(initial_message_count_key)
+    if runtime_system_prompt_key is not None:
+        internal_fields.add(runtime_system_prompt_key)
+
+    def capture_exchange_start(state: BaseModel) -> dict[str, Any]:
+        conversation_state = cast(ConversationalAdvancedAgentGraphState, state)
+        update: dict[str, Any] = {
+            initial_message_count_key: len(conversation_state.messages)
+        }
+        if build_system_prompt is not None and runtime_system_prompt_key is not None:
+            input_args = (
+                input_schema.model_construct(
+                    **{
+                        field_name: getattr(state, field_name)
+                        for field_name in input_schema.model_fields
+                        if field_name not in internal_fields
+                    }
+                ).model_dump(by_alias=True, exclude_unset=True)
+                if input_schema is not None
+                else {}
+            )
+            update[runtime_system_prompt_key] = build_system_prompt(input_args)
+        return update
+
+    def transform_output(state: BaseModel) -> dict[str, Any]:
+        initial_count = getattr(state, initial_message_count_key) or 0
+        new_messages = cast(ConversationalAdvancedAgentGraphState, state).messages[
+            initial_count:
+        ]
         converted = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
                 messages=new_messages, include_tool_results=False
@@ -262,7 +354,8 @@ def create_conversational_advanced_agent_graph(
         return {"uipath__agent_response_messages": converted}
 
     wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(
-        ConversationalAdvancedAgentGraphState,
+        wrapper_state,
+        input_schema=graph_input,
         output_schema=ConversationalAdvancedAgentOutput,
     )
     wrapper.add_node("capture_exchange_start", capture_exchange_start)

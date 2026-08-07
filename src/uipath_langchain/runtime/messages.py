@@ -40,7 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain._conversation.types import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ._citations import (
@@ -188,11 +188,6 @@ class UiPathChatMessagesMapper:
                                 )
                             )
                     elif isinstance(data, UiPathExternalValue):
-                        if uipath_message.role == "assistant":
-                            # Workspace files persisted by the advanced runtime
-                            # (hydrated into the file backend before the graph
-                            # runs); they are not attachments for the LLM.
-                            continue
                         attachment_id = self.parse_attachment_id_from_content_part_uri(
                             data.uri
                         )
@@ -707,15 +702,12 @@ class UiPathChatMessagesMapper:
             ),
         )
 
-    # Static methods for mapping langchain messages to uipath message types
-
     @staticmethod
     def map_langchain_messages_to_uipath_message_data_list(
         messages: list[AnyMessage], include_tool_results: bool = True
     ) -> list[UiPathConversationMessageData]:
         """Convert LangChain messages to UiPathConversationMessageData format. include_tool_results controls whether to include tool call results from ToolMessage instances in the output agent-messages."""
 
-        # Build map of tool_call_id -> ToolMessage lookup, if tool-results should be included
         tool_messages_map = (
             UiPathChatMessagesMapper._build_langchain_tool_messages_map(messages)
             if include_tool_results
@@ -744,31 +736,29 @@ class UiPathChatMessagesMapper:
     def _build_langchain_tool_messages_map(
         messages: list[AnyMessage],
     ) -> dict[str, ToolMessage]:
-        """Create mapping of tool_call_id -> ToolMessage for efficient lookup."""
-        tool_map: dict[str, ToolMessage] = {}
-        for msg in messages:
-            if isinstance(msg, ToolMessage) and msg.tool_call_id:
-                tool_map[msg.tool_call_id] = msg
-        return tool_map
+        """Create mapping of tool_call_id to ToolMessage for efficient lookup."""
+        return {
+            message.tool_call_id: message
+            for message in messages
+            if isinstance(message, ToolMessage) and message.tool_call_id
+        }
 
     @staticmethod
     def _parse_langchain_tool_result(content: Any) -> Any:
-        """Attempt to parse JSON result back to dict (reverse of json.dumps)."""
+        """Attempt to parse a JSON result back to its original value."""
         if not content or not isinstance(content, str):
             return content
 
         try:
             return json.loads(content)
         except (json.JSONDecodeError, TypeError):
-            # Not valid JSON, return as string
             return content
 
     @staticmethod
     def _map_langchain_human_message_to_uipath_message_data(
         message: HumanMessage,
     ) -> UiPathConversationMessageData:
-        """Convert HumanMessage to UiPathConversationMessageData."""
-
+        """Convert a HumanMessage to UiPathConversationMessageData."""
         text_content = UiPathChatMessagesMapper._extract_text(message.content)
         content_parts: list[UiPathConversationContentPartData] = []
         if text_content:
@@ -788,8 +778,7 @@ class UiPathChatMessagesMapper:
     def _map_langchain_ai_message_to_uipath_message_data(
         message: AIMessage, tool_message_map: dict[str, ToolMessage] | None
     ) -> UiPathConversationMessageData:
-        """Convert AIMessage to UiPathConversationMessageData with embedded tool-calls. When tool_message_map is passed in, tool results are matched by tool-call ID and included."""
-
+        """Convert an AIMessage to UiPathConversationMessageData."""
         content_parts: list[UiPathConversationContentPartData] = []
         text_content = UiPathChatMessagesMapper._extract_text(message.content)
         if text_content:
@@ -802,30 +791,23 @@ class UiPathChatMessagesMapper:
                 )
             )
 
-        # Convert tool_calls
         uipath_tool_calls: list[UiPathConversationToolCallData] = []
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                uipath_tool_call = UiPathConversationToolCallData(
-                    name=tool_call["name"], input=tool_call.get("args", {})
-                )
+        for tool_call in message.tool_calls:
+            uipath_tool_call = UiPathConversationToolCallData(
+                name=tool_call["name"], input=tool_call.get("args", {})
+            )
 
-                if tool_message_map and tool_call["id"]:
-                    # Find corresponding ToolMessage and build tool-call result if found
-                    tool_message = tool_message_map.get(tool_call["id"])
-                    result = None
-                    if tool_message:
-                        # Parse JSON result back to dict
-                        output = UiPathChatMessagesMapper._parse_langchain_tool_result(
+            if tool_message_map and tool_call["id"]:
+                tool_message = tool_message_map.get(tool_call["id"])
+                if tool_message:
+                    uipath_tool_call.result = UiPathConversationToolCallResult(
+                        output=UiPathChatMessagesMapper._parse_langchain_tool_result(
                             tool_message.content
-                        )
-                        result = UiPathConversationToolCallResult(
-                            output=output,
-                            is_error=tool_message.status == "error",
-                        )
-                        uipath_tool_call.result = result
+                        ),
+                        is_error=tool_message.status == "error",
+                    )
 
-                uipath_tool_calls.append(uipath_tool_call)
+            uipath_tool_calls.append(uipath_tool_call)
 
         return UiPathConversationMessageData(
             role="assistant",

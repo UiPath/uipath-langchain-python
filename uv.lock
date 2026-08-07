@@ -13,6 +13,7 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
+uipath-dev = false
 uipath-runtime = false
 uipath = false
 uipath-platform = false
@@ -4498,7 +4499,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.16.1"
+version = "0.16.2"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },

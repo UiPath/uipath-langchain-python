@@ -915,7 +915,7 @@ class TestMapMessages:
                     content_part_id="part-file",
                     mime_type="application/pdf",
                     data=UiPathExternalValue(
-                        uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+                        uri="urn:uipath:cas:file:orchestrator:00000000-0000-0000-0000-000000000000"
                     ),
                     name="test.pdf",
                     citations=[],
@@ -936,12 +936,50 @@ class TestMapMessages:
         assert len(msg.content_blocks) == 2
         assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
         assert "<uip:attachments>" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
-        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
+        assert "00000000-0000-0000-0000-000000000000" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
         assert "attachments" in msg.additional_kwargs
         assert msg.additional_kwargs["attachments"] == [
             {
-                "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
+                "id": "00000000-0000-0000-0000-000000000000",
                 "full_name": "test.pdf",
+                "mime_type": "application/pdf",
+            }
+        ]
+
+    def test_map_messages_preserves_assistant_external_value(self):
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:00000000-0000-0000-0000-000000000000"
+                    ),
+                    name="result.pdf",
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        message = result[0]
+        assert isinstance(message, AIMessage)
+        assert "<uip:attachments>" in message.content
+        assert message.additional_kwargs["attachments"] == [
+            {
+                "id": "00000000-0000-0000-0000-000000000000",
+                "full_name": "result.pdf",
                 "mime_type": "application/pdf",
             }
         ]
@@ -1888,7 +1926,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
 
 class TestMapLangChainAIMessageCitations:
-    """Tests for citation extraction in _map_langchain_ai_message_to_uipath_message_data."""
+    """Tests for citation conversion in assistant messages."""
 
     def test_ai_message_with_citation_tags_populates_citations(self):
         """AIMessage with inline citation tags should have citations populated and text cleaned."""

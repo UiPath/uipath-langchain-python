@@ -1,0 +1,1 @@
+"""Shared conversational message components."""
