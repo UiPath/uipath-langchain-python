@@ -1,7 +1,7 @@
 """Tests for LLM node tool call filtering functionality."""
 
 from typing import Any
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import openai
@@ -441,3 +441,109 @@ class TestLLMNodeProviderErrorHandling:
 
         with pytest.raises(ValueError, match="boom"):
             await node(self.state)
+
+
+class TestForcedExtractionEscalation:
+    """The forced-extraction fallback fires for any thinking model that stalls,
+    regardless of transport — including native-style handlers that don't downgrade."""
+
+    def _thinking_model(self) -> Any:
+        model = _StubAzureChatOpenAI.model_construct()
+        model.thinking = {"type": "adaptive"}  # thinking active; OpenAI MRO won't downgrade
+        model.bind_tools = Mock(return_value=model)
+        model.bind = Mock(return_value=model)
+        return model
+
+    def _plain_model(self) -> Any:
+        model = _StubAzureChatOpenAI.model_construct()
+        model.bind_tools = Mock(return_value=model)
+        model.bind = Mock(return_value=model)
+        return model
+
+    def _stalled_state(self) -> AgentGraphState:
+        prior = AIMessage(
+            content=[
+                {"type": "reasoning_content", "reasoning_content": {"text": "think"}},
+                {"type": "text", "text": "answer"},
+            ]
+        )
+        return AgentGraphState(messages=[HumanMessage(content="q"), prior])
+
+    async def _run_capture(self, model: Any) -> list[Any]:
+        captured: dict[str, Any] = {}
+
+        async def fake_ainvoke(msgs: Any) -> AIMessage:
+            captured["msgs"] = msgs
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+
+        model.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        node = create_llm_node(model, [tool])
+        await node(self._stalled_state())
+        return captured["msgs"]
+
+    @pytest.mark.asyncio
+    async def test_thinking_model_stall_strips_reasoning_and_nudges(self) -> None:
+        """Escalation fires: reasoning stripped from the stalled turn, and the request
+        ends on a user nudge (not an assistant prefill) so native accepts the forced call."""
+        msgs = await self._run_capture(self._thinking_model())
+        # stalled assistant turn: reasoning block gone, text kept
+        assert msgs[-2].content == [{"type": "text", "text": "answer"}]
+        # request ends on a user instruction to emit the terminal tool call
+        assert isinstance(msgs[-1], HumanMessage)
+        assert "end_execution" in msgs[-1].content
+
+    @pytest.mark.asyncio
+    async def test_non_thinking_model_does_not_escalate(self) -> None:
+        """No thinking => no escalation => history passed through untouched."""
+        msgs = await self._run_capture(self._plain_model())
+        assert msgs[-1].content == [
+            {"type": "reasoning_content", "reasoning_content": {"text": "think"}},
+            {"type": "text", "text": "answer"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_stall_does_not_escalate(self) -> None:
+        """First turn (no prior tool-less turn) must not force extraction."""
+        model = self._thinking_model()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="reasoning..."))
+        state = AgentGraphState(messages=[HumanMessage(content="q")])
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        with patch(
+            "uipath_langchain.agent.react.llm_node.build_extraction_call"
+        ) as spy:
+            await create_llm_node(model, [tool])(state)
+        spy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_thinking_model_forces_from_first_turn_despite_limit(
+        self,
+    ) -> None:
+        """A non-reasoning model ignores the thinking buffer: it forces tool_choice
+        from the first turn even when the configured limit is > 0."""
+        model = self._plain_model()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="done"))
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        node = create_llm_node(model, [tool], thinking_messages_limit=2)
+        await node(AgentGraphState(messages=[HumanMessage(content="q")]))
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
+
+    @pytest.mark.asyncio
+    async def test_thinking_model_gets_buffer_before_forcing(self) -> None:
+        """A thinking model keeps its configured buffer of tool-less turns before the
+        node forces tool_choice, so early reasoning turns aren't suppressed."""
+        model = self._thinking_model()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="reasoning..."))
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        node = create_llm_node(model, [tool], thinking_messages_limit=2)
+        await node(AgentGraphState(messages=[HumanMessage(content="q")]))
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"

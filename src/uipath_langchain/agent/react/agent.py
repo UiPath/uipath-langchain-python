@@ -191,7 +191,6 @@ def create_agent(
         tool_choice=config.tool_choice,
         parallel_tool_calls=config.parallel_tool_calls,
         strict_mode=config.strict_mode,
-        reasoning_enabled=config.reasoning_enabled,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema
@@ -220,8 +219,6 @@ def create_agent(
         ]
         route_agent = create_route_agent(
             valid_targets=target_node_names,
-            thinking_messages_limit=config.thinking_messages_limit,
-            reasoning_enabled=config.reasoning_enabled,
         )
 
     builder.add_conditional_edges(

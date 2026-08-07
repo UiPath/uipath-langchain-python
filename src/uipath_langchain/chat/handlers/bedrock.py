@@ -9,9 +9,20 @@ from langchain_core.tools import BaseTool
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
+from .anthropic import anthropic_thinking_type
 from .base import ModelPayloadHandler
 
 logger = logging.getLogger(__name__)
+
+
+def bedrock_rejects_forced_tool_choice(thinking_type: str | None) -> bool:
+    """Whether to drop forced tool_choice to 'auto' on Bedrock.
+
+    Bedrock rejects forcing under any thinking mode, so we downgrade whenever thinking is
+    on. Termination is still guaranteed by the thinking-off extraction fallback (see
+    agent/react/forced_extraction.py).
+    """
+    return thinking_type is not None
 
 
 # --- Converse API constants ---
@@ -86,15 +97,12 @@ class BedrockInvokePayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool | None = None,
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        _thinking = (getattr(self.model, "model_kwargs", None) or {}).get("thinking")
-        thinking_enabled = (
-            isinstance(_thinking, dict) and _thinking.get("type") == "enabled"
-        )
-        # Anthropic models via Invoke API don't support forced tool use with extended thinking
-        if thinking_enabled and tool_choice == "any":
+        if tool_choice == "any" and bedrock_rejects_forced_tool_choice(
+            anthropic_thinking_type(self.model)
+        ):
             logger.warning(
-                "Thinking is enabled for the model, but tool_choice is 'any'. "
-                "Changing tool_choice to 'auto' to keep the same behaviour as ChatAnthropicBedrock."
+                "Bedrock rejects forced tool_choice while thinking is active; "
+                "downgrading tool_choice 'any' -> 'auto'."
             )
             tool_choice = "auto"
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
@@ -142,17 +150,12 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool | None = None,
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        _thinking = (
-            getattr(self.model, "additional_model_request_fields", None) or {}
-        ).get("thinking")
-        thinking_enabled = (
-            isinstance(_thinking, dict) and _thinking.get("type") == "enabled"
-        )
-        # Anthropic models via Converse API don't support forced tool use with extended thinking
-        if thinking_enabled and tool_choice == "any":
+        if tool_choice == "any" and bedrock_rejects_forced_tool_choice(
+            anthropic_thinking_type(self.model)
+        ):
             logger.warning(
-                "Thinking is enabled for the model, but tool_choice is 'any'. "
-                "Changing tool_choice to 'auto' to keep the same behaviour as ChatAnthropicBedrock."
+                "Bedrock rejects forced tool_choice while thinking is active; "
+                "downgrading tool_choice 'any' -> 'auto'."
             )
             tool_choice = "auto"
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
