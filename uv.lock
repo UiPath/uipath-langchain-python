@@ -13,9 +13,9 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
+uipath-runtime = false
 uipath = false
 uipath-platform = false
-uipath-runtime = false
 uipath-llm-client = false
 jsonschema-pydantic-converter = false
 uipath-langchain-client = false
@@ -2802,7 +2802,7 @@ wheels = [
 
 [[package]]
 name = "openinference-instrumentation-langchain"
-version = "0.1.66"
+version = "0.1.69"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openinference-instrumentation" },
@@ -2812,9 +2812,9 @@ dependencies = [
     { name = "opentelemetry-semantic-conventions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7b/ac/8f67854dd90a4ab717f4377a3f6b01753cc2873c5ce1cc04f4c294606808/openinference_instrumentation_langchain-0.1.66.tar.gz", hash = "sha256:2f567b0b099f2e96de3ddd32696d3afd14cea2bb7af4c19f8b72a6c5fd2af576", size = 75639, upload-time = "2026-05-18T18:51:35.713Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/5c/13529631310dd66ac54e1029e06e67efe1aebce49976e4b4aa8f74784564/openinference_instrumentation_langchain-0.1.69.tar.gz", hash = "sha256:db18bb6d73bcb798266ff08d094817cb5ec90ad433e4118bec248425dc704aa0", size = 77927, upload-time = "2026-08-04T22:21:37.54Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/cf/0e4cc81ae8d9b504aa7f2942565a86d185f4c6c7206ad1e30bf4ac643274/openinference_instrumentation_langchain-0.1.66-py3-none-any.whl", hash = "sha256:f10c9bda4d2877583c35d5d55e3ca22de78917a1cdbe2cfe4da75312ea51840f", size = 24840, upload-time = "2026-05-18T18:51:34.384Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/48/89bfedfa72d351328bba5b5f0d29b9b1056f8cd135dd70bc9cfa2fc79716/openinference_instrumentation_langchain-0.1.69-py3-none-any.whl", hash = "sha256:4509fc63f28f52a07eda07d5beb315261643eca6d709801fa62a48273ada9a02", size = 25211, upload-time = "2026-08-04T22:21:36.259Z" },
 ]
 
 [[package]]
@@ -4498,7 +4498,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.16.0"
+version = "0.16.1"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4573,7 +4573,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.1.8,<2.0.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.3,<4.0.0" },
     { name = "mcp", specifier = "==1.26.0" },
-    { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
+    { name = "openinference-instrumentation-langchain", specifier = ">=0.1.69,<0.2.0" },
     { name = "pillow", specifier = ">=12.1.1" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
