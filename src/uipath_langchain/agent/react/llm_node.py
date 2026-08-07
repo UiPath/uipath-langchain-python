@@ -16,6 +16,7 @@ from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.chat.handlers import get_payload_handler
+from uipath_langchain.chat.handlers.anthropic import anthropic_thinking_type
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..exceptions.licensing import raise_for_provider_http_error
@@ -26,6 +27,7 @@ from .constants import (
     DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
     DEFAULT_MAX_LLM_MESSAGES,
 )
+from .forced_extraction import build_extraction_call
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_thinking_messages
 
@@ -67,7 +69,6 @@ def create_llm_node(
     tool_choice: Literal["auto", "any"] = "auto",
     parallel_tool_calls: bool = True,
     strict_mode: bool = False,
-    reasoning_enabled: bool = False,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -105,29 +106,34 @@ def create_llm_node(
             bindable_tools, state, input_schema or type(state)
         )
         current_tool_choice: Literal["auto", "any"] = tool_choice
+        uses_anthropic_thinking = anthropic_thinking_type(model) is not None
+        consecutive_thinking = count_consecutive_thinking_messages(messages)
+        effective_limit = thinking_messages_limit if uses_anthropic_thinking else 0
+        thinking_model_stalled = uses_anthropic_thinking and consecutive_thinking > 0
+        call_model: BaseChatModel = model
+        call_messages: list[AnyMessage] = messages
+        handler = payload_handler
         if (
             current_tool_choice == "auto"
-            and not reasoning_enabled
-            and (
-                not is_conversational
-                and bindable_tools
-                and count_consecutive_thinking_messages(messages)
-                >= thinking_messages_limit
-            )
+            and not is_conversational
+            and bindable_tools
+            and consecutive_thinking >= effective_limit
         ):
             current_tool_choice = "any"
+            if thinking_model_stalled:
+                call_model, call_messages = build_extraction_call(model, messages)
+                handler = get_payload_handler(call_model)
 
-        binding_kwargs = payload_handler.get_tool_binding_kwargs(
+        binding_kwargs = handler.get_tool_binding_kwargs(
             tools=static_schema_tools,
             tool_choice=current_tool_choice,
             parallel_tool_calls=parallel_tool_calls,
             strict_mode=strict_mode,
         )
-
-        llm = model.bind_tools(static_schema_tools, **binding_kwargs)
+        llm = call_model.bind_tools(static_schema_tools, **binding_kwargs)
 
         try:
-            response = await llm.ainvoke(messages)
+            response = await llm.ainvoke(call_messages)
         except UiPathAPIError as e:
             # New LLM clients surface provider HTTP errors as a normalized UiPathAPIError directly.
             raise_for_provider_http_error(e)

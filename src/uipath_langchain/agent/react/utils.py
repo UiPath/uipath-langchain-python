@@ -105,6 +105,25 @@ def extract_input_data_from_state(
     return input_model.model_validate(filtered_state, from_attributes=True).model_dump()
 
 
+_REASONING_BLOCK_TYPES = {"reasoning_content", "reasoning", "thinking"}
+
+
+def has_reasoning_block(message: BaseMessage) -> bool:
+    """Whether an AI message carries a reasoning/thinking content block.
+
+    Lets the router tell a real reasoning stall (loop) from a model that just ignored a
+    forced tool_choice (error). A thinking turn always has the block, even with the
+    display omitted (empty text + signature); plain text has none.
+    """
+    content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(block, dict) and block.get("type") in _REASONING_BLOCK_TYPES
+        for block in content
+    )
+
+
 def count_consecutive_thinking_messages(messages: Sequence[BaseMessage]) -> int:
     """Count consecutive AIMessages without tool calls at end of message history."""
     if not messages:

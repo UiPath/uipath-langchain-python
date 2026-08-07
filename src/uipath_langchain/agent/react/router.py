@@ -8,25 +8,20 @@ from uipath.runtime.errors import UiPathErrorCategory
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import FLOW_CONTROL_TOOLS, AgentGraphNode, AgentGraphState
 from .utils import (
-    count_consecutive_thinking_messages,
     extract_current_tool_call_index,
     find_latest_ai_message,
+    has_reasoning_block,
 )
 
 
 def create_route_agent(
-    thinking_messages_limit: int = 0,
     valid_targets: Container[str] | None = None,
-    reasoning_enabled: bool = False,
 ):
-    """Create a routing function configured with thinking_messages_limit.
+    """Create the conditional-edge routing function.
 
     Args:
-        thinking_messages_limit: Max consecutive thinking messages before error
         valid_targets: Allowed routing destinations
-        reasoning_enabled: When True the model runs with extended thinking and tool
-            calls cannot be forced, so tool-less thinking turns are not treated as
-            an error (the llm_messages_limit still bounds the loop).
+
     Returns:
         Routing function for LangGraph conditional edges
     """
@@ -61,31 +56,26 @@ def create_route_agent(
             )
 
         if not last_message.tool_calls:
-            consecutive_thinking_messages = count_consecutive_thinking_messages(
-                messages
-            )
+            # reasoning stall — loop so the next turn can force the extraction
+            if has_reasoning_block(last_message):
+                return AgentGraphNode.AGENT
 
-            if (
-                not reasoning_enabled
-                and consecutive_thinking_messages > thinking_messages_limit
-            ):
+            # content but no tool call and no reasoning: the model ignored tool_choice
+            if last_message.content:
                 raise AgentRuntimeError(
                     code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
-                    title="Agent exceeded consecutive completions limit without producing tool calls.",
-                    detail=f"Completions: {consecutive_thinking_messages}, max: {thinking_messages_limit}. "
-                    f"This should not happen as tool_choice='required' is enforced at the limit."
-                    "If you are using a BYOM configuration, verify your model deployment respects tool_choice or equivalent.",
+                    title="Agent produced a response without calling a tool.",
+                    detail="The model returned content but no tool call and no reasoning, "
+                    "despite a forced tool_choice. If you are using a BYOM configuration, "
+                    "verify your model deployment respects tool_choice.",
                     category=UiPathErrorCategory.SYSTEM,
                 )
-
-            if last_message.content:
-                return AgentGraphNode.AGENT
 
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.ROUTING_ERROR,
                 title="Agent produced empty response without tool calls.",
-                detail=f"Consecutive completions: {consecutive_thinking_messages}, has_content: False."
-                "If you are using a BYOM configuration, verify your model deployment",
+                detail="The model returned no content and no tool calls. "
+                "If you are using a BYOM configuration, verify your model deployment.",
                 category=UiPathErrorCategory.SYSTEM,
             )
 
