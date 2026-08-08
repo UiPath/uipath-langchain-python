@@ -1,0 +1,33 @@
+graph TD;
+    step_start[Start]
+    step_get_employee_details[Get Employee Details]
+    step_check_fields[Check Leave Details]
+    step_employee_hitl[HITL: Employee fills details]
+    step_categorize[Categorize Leave]
+    step_check_policy[Check Leaves Policy]
+    step_check_availability[Check Leave Eligibility]
+    step_hr_approval[HR Approval]
+    step_update_database[Update Leave Database]
+    step_send_approval[Send Approval Email]
+    step_send_rejection[Send Rejection Email]
+    step_end[End]
+
+    step_start --> step_get_employee_details
+    step_get_employee_details --> step_check_fields
+    step_check_fields -. leave_details_complete .-> step_categorize
+    step_check_fields -. leave_details_missing .-> step_employee_hitl
+    step_employee_hitl --> step_check_fields
+    step_categorize --> step_check_policy
+    step_check_policy --> step_check_availability
+    step_check_availability -. needs_hr_approval .-> step_hr_approval
+    step_check_availability -. auto_rejected .-> step_send_rejection
+    step_check_availability -. auto_approved .-> step_update_database
+    step_hr_approval -. rejected .-> step_send_rejection
+    step_hr_approval -. approved .-> step_update_database
+    step_update_database --> step_send_approval
+    step_send_approval --> step_end
+    step_send_rejection --> step_end
+
+    classDef default fill:#
+    classDef first fill-opacity:0
+    classDef last fill:#
