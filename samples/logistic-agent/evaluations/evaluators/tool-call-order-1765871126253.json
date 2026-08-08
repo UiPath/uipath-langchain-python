@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "fileName": "tool-call-order-1765871126253.json",
+  "id": "evaluator-tool-call-order-1765871126253",
+  "description": "Verify tool calls occur in expected order",
+  "evaluatorTypeId": "uipath-tool-call-order",
+  "evaluatorConfig": {
+    "strict": true,
+    "name": "New Order tool order",
+    "defaultEvaluationCriteria": {
+      "toolCallsOrder": [
+        "distance_fallback_tool",
+        "shipment_retriever_tool"
+      ]
+    }
+  },
+  "createdAt": "2025-12-16T07:45:26.253Z",
+  "updatedAt": "2025-12-16T07:50:06.226Z"
+}
