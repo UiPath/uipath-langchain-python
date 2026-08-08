@@ -1,0 +1,113 @@
+{
+  "entryPoints": [
+    {
+      "filePath": "src/peppol_participant_discovery/agent.py",
+      "uniqueId": "f7c8e9a0-b1d2-4e3f-8c5d-6a7b8c9d0e1f",
+      "type": "agent",
+      "input": {
+        "type": "object",
+        "properties": {
+          "signature_text": {
+            "type": "string",
+            "description": "Email signature text to extract company information from",
+            "examples": [
+              "John Doe, CEO\nAcme Corp\n123 Main St, Berlin 10115 DE\nHRB 12345"
+            ]
+          },
+          "fetch_from_api": {
+            "type": "boolean",
+            "default": false,
+            "description": "Fetch a random signature from Company Data Hub API instead of using signature_text"
+          },
+          "perform_peppol_lookup": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to perform PEPPOL Directory lookup"
+          }
+        },
+        "description": "Input for mail signature to PEPPOL conversion"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "signature_id": {
+            "type": "string",
+            "description": "Signature identifier",
+            "examples": ["F1103R_HRB118578", "manual_2025-01-03T10:30:00"]
+          },
+          "source": {
+            "type": "string",
+            "description": "Data source",
+            "examples": ["opencorporates", "coresignal", "user_input"]
+          },
+          "company_name": {
+            "type": "string",
+            "description": "Extracted company name",
+            "examples": ["Bounce GmbH"]
+          },
+          "country": {
+            "type": "string",
+            "description": "Country code",
+            "examples": ["DE", "FR", "NL"]
+          },
+          "email": {
+            "type": "string",
+            "description": "Extracted or generated email address",
+            "examples": ["billing@bounce.de"]
+          },
+          "domain": {
+            "type": "string",
+            "description": "Extracted domain",
+            "examples": ["bounce.de"]
+          },
+          "peppol_found": {
+            "type": "boolean",
+            "description": "Whether PEPPOL participant was found"
+          },
+          "peppol_participant_id": {
+            "type": "string",
+            "description": "PEPPOL participant identifier",
+            "examples": ["iso6523-actorid-upis::9915:b"]
+          },
+          "peppol_entities": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "PEPPOL business entities"
+          },
+          "search_method": {
+            "type": "string",
+            "description": "Which search method succeeded",
+            "examples": ["naive", "refined"]
+          },
+          "refined_company_name": {
+            "type": "string",
+            "description": "LLM-refined company name (if refinement was performed)",
+            "examples": ["Bounce"]
+          },
+          "validation_status": {
+            "type": "string",
+            "description": "Overall validation status",
+            "examples": ["valid", "not_found", "error"]
+          },
+          "confidence_score": {
+            "type": "number",
+            "description": "Confidence score of extraction (0.0-1.0)",
+            "examples": [1.0, 0.7, 0.0]
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if pipeline failed"
+          }
+        },
+        "required": ["signature_id", "source", "peppol_found", "validation_status", "confidence_score"],
+        "description": "Extracted PEPPOL master data from email signature"
+      }
+    }
+  ],
+  "bindings": {
+    "version": "2.0",
+    "resources": []
+  }
+}
