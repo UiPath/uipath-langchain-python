@@ -18,11 +18,12 @@ logger = logging.getLogger(__name__)
 def bedrock_rejects_forced_tool_choice(thinking_type: str | None) -> bool:
     """Whether to drop forced tool_choice to 'auto' on Bedrock.
 
-    Bedrock rejects forcing under any thinking mode, so we downgrade whenever thinking is
-    on. Termination is still guaranteed by the thinking-off extraction fallback (see
+    Bedrock rejects forcing under any active thinking mode, so we downgrade whenever
+    thinking is on ("disabled" keeps forcing intact — Bedrock accepts it). Termination
+    is still guaranteed by the thinking-off extraction fallback (see
     agent/react/forced_extraction.py).
     """
-    return thinking_type is not None
+    return thinking_type is not None and thinking_type != "disabled"
 
 
 # --- Converse API constants ---

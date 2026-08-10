@@ -11,7 +11,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from uipath.agent.react import END_EXECUTION_TOOL
 
-_REASONING_BLOCK_TYPES = {"reasoning_content", "reasoning", "thinking"}
+from .utils import _REASONING_BLOCK_TYPES
+
 _END_EXECUTION_NAME = getattr(
     END_EXECUTION_TOOL.name, "value", str(END_EXECUTION_TOOL.name)
 )
@@ -74,13 +75,18 @@ def _strip_reasoning_blocks(messages: list[AnyMessage]) -> list[AnyMessage]:
 
 
 def _with_extraction_nudge(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """Append (or merge into) a trailing user turn telling the model to call end_execution.
+    """Append (or merge into) a trailing user turn telling the model to call a tool.
 
-    Has to end on a user turn: native/Vertex rejects a forced call that ends on the
-    stalled assistant turn (a prefill). Merge instead of appending so roles stay
-    alternating even if the stalled turn was dropped as empty.
+    The wording is tool-neutral: continue the task, or finish with end_execution — so a
+    multi-tool agent that stalled mid-task isn't pushed to end early. Has to end on a user
+    turn: native/Vertex rejects a forced call that ends on the stalled assistant turn (a
+    prefill). Merge instead of appending so roles stay alternating even if the stalled turn
+    was dropped as empty.
     """
-    nudge = f"Provide the final result now by calling the {_END_EXECUTION_NAME} tool."
+    nudge = (
+        f"Call the tool to continue the task. If you've finished, call "
+        f"{_END_EXECUTION_NAME} with the result."
+    )
     if messages and isinstance(messages[-1], HumanMessage):
         last = messages[-1]
         if isinstance(last.content, str):
