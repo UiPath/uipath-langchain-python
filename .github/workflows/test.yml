@@ -50,7 +50,7 @@ jobs:
         run: uv sync --all-extras --python ${{ matrix.python-version }}
 
       - name: Run tests
-        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13')"
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && !(matrix.os == 'uipath-ubuntu-latest' && matrix.python-version == '3.13')"
         run: uv run --python ${{ matrix.python-version }} pytest
         env:
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
@@ -58,7 +58,7 @@ jobs:
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
 
       - name: Run tests with coverage
-        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'"
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'uipath-ubuntu-latest' && matrix.python-version == '3.13'"
         run: uv run --python ${{ matrix.python-version }} pytest --cov-report=xml --cov-report=html --tb=short
         env:
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
@@ -66,7 +66,7 @@ jobs:
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
 
       - name: Upload coverage HTML report
-        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && always()"
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'uipath-ubuntu-latest' && matrix.python-version == '3.13' && always()"
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: coverage-html-report
@@ -74,7 +74,7 @@ jobs:
           retention-days: 30
 
       - name: Upload coverage XML report
-        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && always()"
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'uipath-ubuntu-latest' && matrix.python-version == '3.13' && always()"
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: coverage-xml-report
