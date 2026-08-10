@@ -42,7 +42,7 @@ jobs:
   # Turn the comma-separated `environments` input into a JSON array the matrix
   # can consume, so a single dispatch can fan out across chosen environments.
   resolve-environments:
-    runs-on: ubuntu-latest
+    runs-on: uipath-ubuntu-latest
     outputs:
       environments: ${{ steps.split.outputs.environments }}
     steps:
@@ -59,7 +59,7 @@ jobs:
 
   model-onboarding:
     needs: [resolve-environments]
-    runs-on: ubuntu-latest
+    runs-on: uipath-ubuntu-latest
     timeout-minutes: 10
     container:
       image: ghcr.io/astral-sh/uv:python3.12-bookworm
@@ -75,7 +75,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
     - name: Install Dependencies
       run: uv sync
