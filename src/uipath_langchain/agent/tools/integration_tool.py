@@ -4,6 +4,7 @@ import copy
 import re
 from typing import Any
 
+import httpx
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -19,13 +20,18 @@ from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
     AgentStartupError,
     AgentStartupErrorCode,
     raise_for_enriched,
 )
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 
-from .schema_editing import strip_enum
+from .schema_editing import handle_enum
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -33,6 +39,10 @@ from .utils import sanitize_dict_for_serialization, sanitize_tool_name
 
 _INTEGRATION_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
     (400, None): (
+        "Integration service returned an error for tool '{tool}': {message}",
+        UiPathErrorCategory.USER,
+    ),
+    (422, "INVALID_DATA"): (
         "Integration service returned an error for tool '{tool}': {message}",
         UiPathErrorCategory.USER,
     ),
@@ -162,7 +172,7 @@ def strip_enums_from_schema(
 
     for param in parameters:
         segments = _param_name_to_segments(param.name)
-        strip_enum(schema, segments)
+        handle_enum(schema, segments)
 
     return schema
 
@@ -283,6 +293,17 @@ def create_integration_tool(
     resource: AgentIntegrationToolResourceConfig,
 ) -> StructuredTool:
     """Creates a StructuredTool for invoking an Integration Service connector activity."""
+    if not resource.properties.tool_path.strip():
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Invalid integration tool path",
+            detail=(
+                f"Generated Integration tool '{resource.name}' has an empty "
+                "'toolPath'. Try to remove and add the tool again. If the issue persists contact your Administrator."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
     tool_name: str = sanitize_tool_name(resource.name)
     if resource.properties.connection.id is None:
         raise AgentStartupError(
@@ -301,7 +322,9 @@ def create_integration_tool(
     input_model = create_model(cleaned_input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
     output_model: Any = (
-        create_model(remove_asterisk_from_properties(resource.output_schema))
+        create_output_model(
+            remove_asterisk_from_properties(resource.output_schema), resource.name
+        )
         if resource.output_schema
         else create_model({"type": "object", "properties": {}})
     )
@@ -334,6 +357,18 @@ def create_integration_tool(
                 tool=resource.name,
             )
             raise
+        except httpx.TimeoutException as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.HTTP_ERROR,
+                title=f"Tool '{resource.name}' timed out",
+                detail=(
+                    f"The Integration Service request for tool '{resource.name}' "
+                    "did not complete in time. This is usually a transient issue; "
+                    "please retry the run later."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+                should_wrap=False,
+            ) from e
 
         return result
 

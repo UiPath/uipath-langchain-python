@@ -40,6 +40,10 @@ class SequentialTriggerHandler:
         )
         return trigger
 
+    async def create_triggers(self, suspend_value: Any) -> list[UiPathResumeTrigger]:
+        """Create triggers from suspend value."""
+        return [await self.create_trigger(suspend_value)]
+
     async def read_trigger(self, trigger: UiPathResumeTrigger) -> Any:
         """Read trigger and return mock response.
 
@@ -78,6 +82,10 @@ class ParallelTriggerHandler:
             payload=suspend_value,
         )
         return trigger
+
+    async def create_triggers(self, suspend_value: Any) -> list[UiPathResumeTrigger]:
+        """Create triggers from suspend value."""
+        return [await self.create_trigger(suspend_value)]
 
     async def read_trigger(self, trigger: UiPathResumeTrigger) -> Any:
         """Read trigger and return immediate response."""
@@ -715,6 +723,10 @@ class CustomSequentialTriggerHandler:
             payload=suspend_value,
         )
         return trigger
+
+    async def create_triggers(self, suspend_value: Any) -> list[UiPathResumeTrigger]:
+        """Create triggers from suspend value."""
+        return [await self.create_trigger(suspend_value)]
 
     async def read_trigger(self, trigger: UiPathResumeTrigger) -> Any:
         """Read trigger and return mock response based on call pattern."""

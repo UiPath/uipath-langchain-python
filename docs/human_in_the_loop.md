@@ -215,6 +215,155 @@ The return value of the interrupt is the job output. If the job did not produce 
 
 ---
 
+## Time waits and composite interrupts
+
+### WaitUntil
+
+Waits until an absolute point in time. The `resume_time` value must include timezone information; it is normalized to a UTC instant.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `resume_time` | `datetime` | The timezone-aware instant when the agent should resume. |
+
+```python
+from datetime import UTC, datetime, timedelta
+
+from langgraph.types import interrupt
+from uipath.platform.common import WaitUntil
+
+resume_at = datetime.now(UTC) + timedelta(minutes=10)
+timer_result = interrupt(WaitUntil(resume_time=resume_at))
+```
+
+`WaitUntil` returns a payload containing the resume time. Use it directly when the timer itself is the work the agent is waiting for.
+
+### Waiting for the first completed trigger
+
+Pass a list of interrupt models when the agent should resume on whichever trigger completes first. Composite interrupts can combine any supported interrupt models, such as tasks, process jobs, Integration Service events, timers, and so on.
+
+Use this pattern whenever several independent events can unblock the same suspended agent.
+
+```python
+from langgraph.types import interrupt
+from uipath.core.triggers import UiPathResumeTriggerType
+from uipath.platform.common import CreateEscalation, InvokeProcess
+from uipath.platform.common import get_resume_metadata
+
+result = interrupt(
+    [
+        InvokeProcess(
+            name="background-validator",
+            process_folder_path="Shared",
+            input_arguments={"invoice_id": "INV-1001"},
+        ),
+        CreateEscalation(
+            app_name="Invoice Review",
+            app_folder_path="Shared",
+            title="Review invoice INV-1001",
+            data={"invoice_id": "INV-1001"},
+        ),
+    ]
+)
+```
+
+In this example, the agent resumes when either the validation process finishes or the reviewer completes the escalation task. The interrupt result is the resume value from whichever model completed first.
+
+When a composite interrupt resumes, UiPath adds metadata under the reserved `__uipath` key:
+
+```python
+{
+    "__uipath": {
+        "triggerType": "Job",
+        "triggerName": "Job",
+    },
+    ...
+}
+```
+
+Timeout resume values also include `"kind": "timeout"`.
+
+Use `get_resume_metadata(...)` to read this metadata as a typed object:
+
+```python
+metadata = get_resume_metadata(result)
+
+if metadata and metadata.trigger_type == UiPathResumeTriggerType.JOB:
+    # result is the InvokeProcess output
+    ...
+elif metadata and metadata.trigger_type == UiPathResumeTriggerType.TASK:
+    # result is the CreateEscalation task
+    ...
+```
+
+You can also combine more than two operations:
+
+```python
+from langgraph.types import interrupt
+from uipath.platform.common import CreateDeepRag, CreateEscalation, InvokeProcess
+
+result = interrupt(
+    [
+        CreateDeepRag(
+            name="contract-search",
+            index_name="Contracts",
+            prompt="Find termination clauses for Contoso",
+        ),
+        InvokeProcess(
+            name="contract-summary-agent",
+            process_folder_path="Shared",
+            input_arguments={"customer": "Contoso"},
+        ),
+        CreateEscalation(
+            app_name="Contract Review",
+            app_folder_path="Shared",
+            title="Review Contoso contract",
+            data={"customer": "Contoso"},
+        ),
+    ]
+)
+```
+
+This is also useful for timeout-style flows by adding a `WaitUntil` timer to the same list:
+
+```python
+from datetime import UTC, datetime, timedelta
+
+from langgraph.types import interrupt
+from uipath.platform.common import InvokeProcess, WaitUntil, assert_no_timeout
+
+resume_at = datetime.now(UTC) + timedelta(minutes=10)
+child_result = interrupt(
+    [
+        InvokeProcess(
+            name="timeout-child-agent",
+            process_folder_path="Shared",
+            input_arguments={"message": "start child work"},
+        ),
+        WaitUntil(resume_time=resume_at),
+    ]
+)
+
+assert_no_timeout(child_result)
+```
+
+When `InvokeProcess` completes first, `child_result` is the child process output. When `WaitUntil` completes first, `assert_no_timeout(child_result)` raises `UiPathTimeoutError`.
+
+For a practical implementation, refer to the [wait-until-timeout-agent sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/wait-until-timeout-agent).
+
+### Timeout helpers
+
+Timeout helper functions are imported from `uipath.platform.common`.
+
+| Helper | Description |
+| --- | --- |
+| `assert_no_timeout(value)` | Returns the original value when it is not a timeout. Raises `UiPathTimeoutError` when the resume value came from a timeout trigger. |
+| `is_timeout(value)` | Returns `True` when the resume value came from a timeout trigger. |
+| `get_resume_metadata(value)` | Returns typed UiPath resume metadata when the value includes UiPath metadata. The metadata includes fields such as `kind`, `trigger_type`, and `trigger_name`. |
+
+Use `assert_no_timeout(...)` when timeout should stop the current path. Use `is_timeout(...)` when timeout is a branch you want to handle explicitly. Use `get_resume_metadata(...)` when a composite interrupt has more than one non-time trigger and the code needs to inspect which UiPath trigger resumed the agent.
+
+---
+
 ## Context Grounding (RAG)
 
 These models drive Context Grounding operations: Deep RAG queries, ephemeral indexes, and batch transforms. Each `Create*` model starts an asynchronous operation and suspends the agent; the matching `Wait*` model resumes once the operation completes. Where a `Raw` variant exists, it returns the underlying response without validating its final status, so the agent can inspect the status itself.

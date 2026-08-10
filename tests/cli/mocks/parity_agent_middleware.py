@@ -8,6 +8,8 @@ guardrail flavors.
 Guardrails configured:
 - "Agent PII Detection"            — AGENT scope, PII (PERSON), PRE, BlockAction
 - "Agent Harmful Content Detection"— AGENT+LLM scope, HarmfulContent (Violence), BlockAction
+- "Agent LLM Judge"                — AGENT scope, LLMAsJudge, POST, BlockAction
+- "Agent BYOG Detection"           — AGENT scope, BYOG (byo validator), PRE, BlockAction
 - "LLM User Prompt Attacks Detection" — LLM scope, UserPromptAttacks, PRE, BlockAction
 - "LLM PII Detection"              — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
 - "LLM IP Detection"               — LLM scope, IntellectualProperty (Text), POST, LogAction
@@ -42,9 +44,11 @@ from uipath_langchain.guardrails import (
     HarmfulContentEntity,
     LogAction,
     PIIDetectionEntity,
+    UiPathByoGuardrailMiddleware,
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
+    UiPathLLMAsJudgeMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
 )
@@ -177,6 +181,25 @@ agent = create_agent(
             entities=[
                 HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2),
             ],
+        ),
+        # AGENT scope LLM-as-judge — BlockAction (POST: judges the model output)
+        *UiPathLLMAsJudgeMiddleware(
+            name="Agent LLM Judge",
+            scopes=[GuardrailScope.AGENT],
+            action=BlockAction(),
+            guardrail_text="The generated joke must be appropriate for children and families.",
+            model="gpt-4o-2024-08-06",
+            threshold=2,
+            stage=GuardrailExecutionStage.POST,
+        ),
+        # AGENT scope BYOG — BlockAction (PRE): customer-managed validator
+        # referenced by validator name (unique per tenant)
+        *UiPathByoGuardrailMiddleware(
+            name="Agent BYOG Detection",
+            validator_name="my-harmful-content-guardrail",
+            scopes=[GuardrailScope.AGENT],
+            action=BlockAction(),
+            stage=GuardrailExecutionStage.PRE,
         ),
         # LLM scope User Prompt Attacks — BlockAction
         *UiPathUserPromptAttacksMiddleware(

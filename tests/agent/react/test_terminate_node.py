@@ -5,7 +5,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
-from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.agent.react import (
+    END_EXECUTION_TOOL,
+    RAISE_ERROR_TOOL,
+)
 from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -21,6 +24,7 @@ class MockInnerState(BaseModel):
 
     job_attachments: dict[str, Any] = {}
     initial_message_count: int | None = None
+    conversational_output: dict[str, Any] | None = None
 
 
 class MockAgentGraphState(BaseModel):
@@ -173,8 +177,84 @@ class TestTerminateNodeConversational:
         assert messages[0]["toolCalls"][0]["name"] == "test_tool"
         assert messages[0]["toolCalls"][0]["input"] == {"param": "value"}
 
-    def test_conversational_ignores_end_execution_tool(self):
-        """Conversational mode should ignore END_EXECUTION tool calls."""
+    def test_conversational_extracts_custom_output_fields(self):
+        """When inner_state.conversational_output is populated (by the
+        upstream GENERATE_CONVERSATIONAL_OUTPUT node), the terminate node
+        merges those args into the schema-shaped output."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+            handoff_target: str
+            ready_for_handoff: bool
+
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+
+        agent_reply = AIMessage(content="Sure, I'll route you to billing.")
+        state = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="I have a billing issue"),
+                agent_reply,
+            ],
+            inner_state=MockInnerState(
+                initial_message_count=1,
+                conversational_output={
+                    "handoff_target": "billing",
+                    "ready_for_handoff": True,
+                },
+            ),
+        )
+
+        result = terminate_node(state)
+
+        assert result["handoff_target"] == "billing"
+        assert result["ready_for_handoff"] is True
+        messages = result["uipath__agent_response_messages"]
+        assert len(messages) == 1
+        assert "Sure, I'll route you to billing." in str(
+            messages[0]["contentParts"][0]["data"]
+        )
+
+    def test_conversational_missing_set_output_call_falls_through_to_schema_validation(
+        self,
+    ) -> None:
+        """When the schema has required custom fields but the last AIMessage
+        doesn't carry a set_conversational_output tool call, terminate does
+        NOT raise a routing error — it best-effort passes an empty custom
+        dict through, and the surrounding schema validation raises a clear
+        OUTPUT_VALIDATION_ERROR referencing the missing required field."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+            handoff_target: str
+
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+
+        # Last AIMessage has no tool calls — feature could be off, or the
+        # extraction model didn't call the tool.
+        agent_reply = AIMessage(content="Some reply")
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="hi"), agent_reply],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node(state)
+
+        # The error is a schema-validation error surfaced by Pydantic, not
+        # a routing error — the message references the missing required
+        # field on the response schema, not `set_conversational_output`.
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
+        )
+        assert "handoff_target" in exc_info.value.error_info.detail
+
+    def test_conversational_no_custom_fields_no_set_output_call_succeeds(self):
+        """When the schema has no custom fields and no set_conversational_output
+        tool call was made, terminate succeeds without extracting anything."""
 
         class ResponseSchema(BaseModel):
             uipath__agent_response_messages: list[UiPathConversationMessageData]
@@ -182,29 +262,19 @@ class TestTerminateNodeConversational:
         terminate_node = create_terminate_node(
             response_schema=ResponseSchema, is_conversational=True
         )
-        ai_message = AIMessage(
-            content="Done",
-            tool_calls=[
-                {
-                    "name": END_EXECUTION_TOOL.name,
-                    "args": {"result": "completed"},
-                    "id": "call_1",
-                }
-            ],
-        )
+        agent_reply = AIMessage(content="Some reply")
         state = MockAgentGraphState(
-            messages=[HumanMessage(content="Initial"), ai_message],
+            messages=[HumanMessage(content="hi"), agent_reply],
             inner_state=MockInnerState(initial_message_count=1),
         )
 
-        # Should process normally, not treat as special
         result = terminate_node(state)
 
-        assert "uipath__agent_response_messages" in result
+        # The final reply is preserved — no last-message slicing since no
+        # set_conversational_output call was found.
         messages = result["uipath__agent_response_messages"]
         assert len(messages) == 1
-        assert messages[0]["role"] == "assistant"
-        assert "Done" in str(messages[0]["contentParts"][0]["data"])
+        assert "Some reply" in str(messages[0]["contentParts"][0]["data"])
 
 
 class TestTerminateNodeNonConversational:

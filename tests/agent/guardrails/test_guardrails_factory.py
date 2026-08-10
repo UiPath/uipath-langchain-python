@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentBooleanOperator,
     AgentBooleanRule,
+    AgentBuiltInValidatorGuardrail,
     AgentCustomGuardrail,
     AgentEscalationRecipientType,
     AgentGuardrailActionType,
@@ -41,6 +42,7 @@ from uipath.core.guardrails import (
     UniversalRule,
     WordRule,
 )
+from uipath.platform.guardrails import BuiltInValidatorGuardrail
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
@@ -332,6 +334,64 @@ class TestGuardrailsFactory:
         assert exc_info.value.error_info.code == AgentStartupError.full_code(
             AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
         )
+
+    def test_byog_builtin_validator_is_mapped_and_preserves_byo_validator_name(
+        self,
+    ) -> None:
+        """A BYOG ("byo") built-in validator maps through unchanged, preserving
+        byo_validator_name."""
+        guardrail = AgentBuiltInValidatorGuardrail.model_validate(
+            {
+                "$guardrailType": "builtInValidator",
+                "id": "byog-databricks-pii",
+                "name": "Databricks PII (BYOG)",
+                "description": "Customer-provided PII validator",
+                "enabledForEvals": True,
+                "validatorType": "byo",
+                "byoValidatorName": "my_databricks_pii",
+                "validatorParameters": [],
+                "selector": {"scopes": ["Llm"]},
+                "action": {"$actionType": "block", "reason": "blocked by BYOG"},
+            }
+        )
+
+        result = build_guardrails_with_actions([guardrail], [])
+
+        assert len(result) == 1
+        gr, action = result[0]
+        assert gr is guardrail
+        assert isinstance(gr, BuiltInValidatorGuardrail)
+        assert gr.validator_type == "byo"
+        assert gr.byo_validator_name == "my_databricks_pii"
+        assert isinstance(action, BlockAction)
+        assert action.reason == "blocked by BYOG"
+
+    def test_byog_builtin_validator_tool_scope_sanitizes_match_names(self) -> None:
+        """A tool-scoped BYOG validator has its selector match_names sanitized so they
+        line up with the sanitized tool node names."""
+        guardrail = AgentBuiltInValidatorGuardrail.model_validate(
+            {
+                "$guardrailType": "builtInValidator",
+                "id": "byog-tool",
+                "name": "Custom tool validator (BYOG)",
+                "enabledForEvals": True,
+                "validatorType": "byo",
+                "byoValidatorName": "acme_toxicity",
+                "validatorParameters": [],
+                "selector": {"scopes": ["Tool"], "matchNames": ["My Tool!"]},
+                "action": {"$actionType": "block", "reason": "blocked"},
+            }
+        )
+
+        result = build_guardrails_with_actions([guardrail], [])
+
+        assert len(result) == 1
+        gr, action = result[0]
+        assert isinstance(gr, BuiltInValidatorGuardrail)
+        assert gr.selector is not None
+        assert gr.selector.match_names is not None
+        assert gr.selector.match_names != ["My Tool!"]
+        assert isinstance(action, BlockAction)
 
     def test_filter_action_is_mapped_with_fields(self) -> None:
         """FILTER action is mapped to FilterAction with correct fields."""

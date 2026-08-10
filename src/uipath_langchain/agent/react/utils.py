@@ -4,12 +4,16 @@ from typing import Any, Sequence, TypeVar, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from pydantic import BaseModel
+from pydantic import create_model as pydantic_create_model
 from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+)
+from uipath_langchain.agent.react.constants import (
+    UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import (
@@ -36,6 +40,43 @@ def resolve_output_model(
         return create_model(output_schema)
 
     return END_EXECUTION_TOOL.args_schema
+
+
+def has_custom_conversational_output_fields(
+    output_schema: type[BaseModel] | None,
+) -> bool:
+    """Return True iff the schema declares fields beyond `uipath__agent_response_messages`.
+
+    Used to decide whether a conversational agent needs the
+    `GENERATE_CONVERSATIONAL_OUTPUT` node inserted between AGENT and TERMINATE.
+    """
+    if output_schema is None:
+        return False
+    return any(
+        name != UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
+        for name in output_schema.model_fields
+    )
+
+
+def build_conversational_output_args_schema(
+    schema: type[BaseModel],
+) -> type[BaseModel]:
+    """Strip `uipath__agent_response_messages` from the schema.
+
+    That field is populated from message history at termination — not by the
+    LLM. Stripping it produces the args schema the LLM should actually fill
+    via `set_conversational_output`.
+    """
+    custom_fields: dict[str, Any] = {
+        name: (field.annotation, field)
+        for name, field in schema.model_fields.items()
+        if name != UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
+    }
+    return pydantic_create_model(
+        f"{schema.__name__}SetConversationalOutputArgs",
+        __base__=BaseModel,
+        **custom_fields,
+    )
 
 
 def extract_input_data_from_state(

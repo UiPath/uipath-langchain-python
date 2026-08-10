@@ -15,6 +15,8 @@ from uipath.agent.models.agent import (
     AgentIntegrationToolProperties,
     AgentIntegrationToolResourceConfig,
     AgentInternalAnalyzeFilesToolProperties,
+    AgentInternalDeepRagSettings,
+    AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
     AgentIxpExtractionResourceConfig,
@@ -28,12 +30,22 @@ from uipath.agent.models.agent import (
     AgentResourceType,
     AgentSettings,
     AgentToolType,
+    CitationMode,
+    DeepRagCitationModeSetting,
+    DeepRagFileExtension,
+    DeepRagFileExtensionSetting,
     LowCodeAgentDefinition,
 )
 from uipath.platform.connections import Connection
 
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    _UNRESOLVED_TYPE_TITLE,
+)
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
+)
+from uipath_langchain.agent.tools.structured_tool_with_output_type import (
+    StructuredToolWithOutputType,
 )
 from uipath_langchain.agent.tools.tool_factory import (
     _build_tool_for_resource,
@@ -226,6 +238,33 @@ def internal_resource() -> AgentInternalToolResourceConfig:
 
 
 @pytest.fixture
+def deeprag_resource() -> AgentInternalToolResourceConfig:
+    """Create a DeepRAG internal tool resource config."""
+    return AgentInternalToolResourceConfig(
+        type=AgentToolType.INTERNAL,
+        name="test_deeprag",
+        description="Test DeepRAG description",
+        input_schema=EMPTY_SCHEMA,
+        output_schema=EMPTY_SCHEMA,
+        properties=AgentInternalDeepRagToolProperties(
+            tool_type=AgentInternalToolType.DEEP_RAG,
+            settings=AgentInternalDeepRagSettings(
+                context_type="index",
+                query=AgentContextQuerySetting(
+                    variant="static",
+                    value="test query",
+                    description="test description",
+                ),
+                citation_mode=DeepRagCitationModeSetting(value=CitationMode.INLINE),
+                file_extension=DeepRagFileExtensionSetting(
+                    value=DeepRagFileExtension.PDF
+                ),
+            ),
+        ),
+    )
+
+
+@pytest.fixture
 def ixp_extraction_resource() -> AgentIxpExtractionResourceConfig:
     """Create an IXP extraction tool resource config."""
     return AgentIxpExtractionResourceConfig(
@@ -296,6 +335,32 @@ def assert_tool_is_base_uipath(tool):
     else:
         assert tool is not None
         assert isinstance(tool, BaseUiPathStructuredTool)
+
+
+# A tool output schema with a dangling $ref (no matching $defs entry) -- the shape
+# Studio Web emits for a .NET decimal? output argument -- alongside a valid sibling
+# that must survive. See create_output_model.
+_MALFORMED_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string"},  # valid sibling -- must be preserved
+        "left": {"$ref": "#/$defs/Nullableofdecimal", "type": "object"},  # dangling
+    },
+}
+
+
+def _set_malformed_output_schema(resource):
+    """Put a malformed output schema where the given resource type reads it.
+
+    Escalation tools take the output schema from their channel(s); every other
+    tool type reads ``resource.output_schema`` directly.
+    """
+    channels = getattr(resource, "channels", None)
+    if channels:
+        for channel in channels:
+            channel.output_schema = _MALFORMED_OUTPUT_SCHEMA
+    else:
+        resource.output_schema = _MALFORMED_OUTPUT_SCHEMA
 
 
 @pytest.mark.asyncio
@@ -405,3 +470,37 @@ class TestCreateToolsFromResources:
             function_resource, run_as_me=False
         )
         assert tool is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "resource_fixture",
+        [
+            "process_resource",
+            "escalation_resource",
+            "integration_resource",
+            "internal_resource",  # analyze_files
+            "deeprag_resource",
+        ],
+    )
+    async def test_malformed_output_schema_is_non_blocking(
+        self, resource_fixture, mock_uipath_sdk, request
+    ):
+        """A malformed output schema must not fail agent startup.
+
+        An output schema drives only best-effort features (not the core tool call),
+        so a dangling ``$ref`` (e.g. a .NET ``Nullableofdecimal`` with no ``$defs``)
+        must not raise ``AGENT_STARTUP.INVALID_TOOL_CONFIG``. The tool is still built;
+        the dangling-ref field is neutralized to a permissive placeholder while valid
+        sibling fields are preserved.
+        """
+        resource = request.getfixturevalue(resource_fixture)
+        _set_malformed_output_schema(resource)
+
+        # Must not raise (this previously threw AGENT_STARTUP.INVALID_TOOL_CONFIG).
+        tool = await _build_tool_for_resource(resource, AsyncMock(spec=BaseChatModel))
+
+        assert isinstance(tool, StructuredToolWithOutputType)
+        properties = tool.output_type.model_json_schema().get("properties", {})
+        # Valid sibling survives; dangling-ref field is neutralized (not dropped).
+        assert "status" in properties
+        assert properties["left"]["title"] == _UNRESOLVED_TYPE_TITLE

@@ -8,6 +8,8 @@ parity between the two guardrail flavors.
 Guardrails configured:
 - "Agent PII Detection"                — AGENT scope, PII (PERSON), PRE, BlockAction
 - "Agent Harmful Content Detection"    — AGENT scope, HarmfulContent (Violence), PRE, BlockAction
+- "Agent LLM Judge"                    — AGENT scope, LLMAsJudge, POST, BlockAction
+- "Agent BYOG Detection"               — AGENT scope, BYOG (byo validator), PRE, BlockAction
 - "LLM User Prompt Attacks Detection"  — LLM scope, UserPromptAttacks, PRE, BlockAction
 - "LLM PII Detection"                  — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
 - "LLM IP Detection"                   — LLM scope, IntellectualProperty (Text), POST, LogAction
@@ -36,12 +38,14 @@ from uipath.core.guardrails import (
 from uipath_langchain.chat.openai import UiPathChatOpenAI
 from uipath_langchain.guardrails import (
     BlockAction,
+    ByoValidator,
     CustomValidator,
     GuardrailAction,
     GuardrailExecutionStage,
     HarmfulContentEntity,
     HarmfulContentValidator,
     IntellectualPropertyValidator,
+    LLMAsJudgeValidator,
     LogAction,
     PIIDetectionEntity,
     PIIValidator,
@@ -239,6 +243,22 @@ llm = create_llm()
 # ---------------------------------------------------------------------------
 
 
+@guardrail(
+    validator=ByoValidator("my-harmful-content-guardrail"),
+    action=BlockAction(),
+    name="Agent BYOG Detection",
+    stage=GuardrailExecutionStage.PRE,
+)
+@guardrail(
+    validator=LLMAsJudgeValidator(
+        guardrail_text="The generated joke must be appropriate for children and families.",
+        model="gpt-4o-2024-08-06",
+        threshold=2,
+    ),
+    action=BlockAction(),
+    name="Agent LLM Judge",
+    stage=GuardrailExecutionStage.POST,
+)
 @guardrail(
     validator=HarmfulContentValidator(
         entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)],

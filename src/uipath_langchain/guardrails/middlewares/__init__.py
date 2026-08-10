@@ -1,20 +1,24 @@
 """Guardrail middlewares for LangChain agents."""
 
+from .byo import UiPathByoGuardrailMiddleware
 from .deterministic import (
     RuleFunction,
     UiPathDeterministicGuardrailMiddleware,
 )
 from .harmful_content import UiPathHarmfulContentMiddleware
 from .intellectual_property import UiPathIntellectualPropertyMiddleware
+from .llm_as_judge import UiPathLLMAsJudgeMiddleware
 from .pii_detection import UiPathPIIDetectionMiddleware
 from .prompt_injection import UiPathPromptInjectionMiddleware
 from .user_prompt_attacks import UiPathUserPromptAttacksMiddleware
 
 __all__ = [
     "RuleFunction",
+    "UiPathByoGuardrailMiddleware",
     "UiPathDeterministicGuardrailMiddleware",
     "UiPathHarmfulContentMiddleware",
     "UiPathIntellectualPropertyMiddleware",
+    "UiPathLLMAsJudgeMiddleware",
     "UiPathPIIDetectionMiddleware",
     "UiPathPromptInjectionMiddleware",
     "UiPathUserPromptAttacksMiddleware",

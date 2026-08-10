@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
+import openai
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import RunnableConfig
@@ -15,6 +16,7 @@ from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
 )
+from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -27,10 +29,10 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
     _config_with_llm_call_attachments,
-    _config_without_streaming,
     _is_pii_scope_for_files,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
+    resolve_attachments_to_file_infos,
 )
 
 
@@ -45,6 +47,25 @@ def _make_enriched_404() -> EnrichedException:
         headers={"content-type": "application/json"},
     )
     err = httpx.HTTPStatusError("404", request=req, response=resp)
+    enriched = EnrichedException(err)
+    enriched.__cause__ = err
+    return enriched
+
+
+def _make_enriched_403_1108() -> EnrichedException:
+    req = httpx.Request(
+        "GET", "https://cloud.uipath.com/orchestrator_/odata/Attachments(x)"
+    )
+    resp = httpx.Response(
+        403,
+        request=req,
+        content=(
+            b'{"message":"You don\'t have permissions to access this attachment.",'
+            b'"errorCode":1108}'
+        ),
+        headers={"content-type": "application/json"},
+    )
+    err = httpx.HTTPStatusError("403", request=req, response=resp)
     enriched = EnrichedException(err)
     enriched.__cause__ = err
     return enriched
@@ -102,6 +123,41 @@ class TestCreateAnalyzeFileTool:
             output_schema=output_schema,
             properties=properties,
         )
+
+    async def _invoke_with_llm_error(self, resource_config, mock_llm, error):
+        with (
+            patch(
+                "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+            ) as mock_resolve_attachments,
+            patch(
+                "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+            ) as mock_add_files,
+            patch(
+                "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+            ),
+        ):
+            mock_resolve_attachments.return_value = [
+                FileInfo(
+                    url="https://example.com/file.pdf",
+                    name="test.pdf",
+                    mime_type="application/pdf",
+                )
+            ]
+            mock_add_files.return_value = HumanMessage(content="Summarize the document")
+            mock_llm.ainvoke.side_effect = error
+
+            tool = create_analyze_file_tool(resource_config, mock_llm)
+            assert tool.coroutine is not None
+            return await tool.coroutine(
+                analysisTask="Summarize the document",
+                attachments=[
+                    MockAttachment(
+                        ID=str(uuid.uuid4()),
+                        FullName="test.pdf",
+                        MimeType="application/pdf",
+                    )
+                ],
+            )
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -183,6 +239,100 @@ class TestCreateAnalyzeFileTool:
         assert len(messages_arg) == 2
         assert messages_arg[0].content == ANALYZE_FILES_SYSTEM_MESSAGE
         assert messages_arg[1] == mock_message_with_files
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_provider_5xx_is_categorized_as_system(
+        self,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://example.com/file.pdf",
+                name="test.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="Summarize the document")
+        mock_get_wrapper.return_value = Mock()
+
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            500,
+            request=request,
+            json={
+                "error": {
+                    "message": (
+                        "Exception of type 'System.OutOfMemoryException' was thrown."
+                    )
+                }
+            },
+        )
+        mock_llm.ainvoke.side_effect = openai.InternalServerError(
+            "Internal server error",
+            response=response,
+            body=response.json(),
+        )
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        assert tool.coroutine is not None
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.coroutine(
+                analysisTask="Summarize the document",
+                attachments=[
+                    MockAttachment(
+                        ID=str(uuid.uuid4()),
+                        FullName="test.pdf",
+                        MimeType="application/pdf",
+                    )
+                ],
+            )
+
+        info = exc_info.value.error_info
+        assert info.status == 500
+        assert info.category == UiPathErrorCategory.SYSTEM
+        assert info.code.endswith(AgentRuntimeErrorCode.HTTP_ERROR.value)
+        assert info.title == "LLM provider returned HTTP 500"
+
+    async def test_normalized_provider_5xx_is_categorized_as_system(
+        self, resource_config, mock_llm
+    ):
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            500,
+            request=request,
+            json={"status": 500, "detail": "LLM gateway failed"},
+        )
+        error = UiPathAPIError.from_response(response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        info = exc_info.value.error_info
+        assert info.status == 500
+        assert info.category == UiPathErrorCategory.SYSTEM
+
+    async def test_unmapped_llm_client_error_propagates_unchanged(
+        self, resource_config, mock_llm
+    ):
+        error = UiPathError(error_code="SOME_OTHER_CODE", detail="unrelated")
+
+        with pytest.raises(UiPathError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        assert exc_info.value is error
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -591,6 +741,59 @@ class TestResolveJobAttachmentArguments:
         assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
         detail = exc_info.value.error_info.detail
         assert "document.pdf" in detail
+
+    async def test_resolve_attachment_permission_denied_raises(
+        self, mock_uipath_client
+    ):
+        """A 403/1108 from Orchestrator surfaces as a DEPLOYMENT error, not UNKNOWN."""
+        mock_attachment = MockAttachment(
+            ID="11111111-1111-1111-1111-111111111111",
+            FullName="document.pdf",
+            MimeType="application/pdf",
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            side_effect=_make_enriched_403_1108()
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _resolve_job_attachment_arguments([mock_attachment])
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+        assert "permissions" in exc_info.value.error_info.detail
+        assert "document.pdf" in exc_info.value.error_info.detail
+
+    async def test_resolve_accepts_dict_shaped_attachments(self, mock_uipath_client):
+        """The memory file-key path passes plain dicts (model_dump output)."""
+        attachment_id = uuid.uuid4()
+        attachment = {
+            "ID": str(attachment_id),
+            "FullName": "invoice.pdf",
+            "MimeType": "application/pdf",
+        }
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(
+                uri="https://blob.storage.com/files/invoice.pdf", name="invoice.pdf"
+            )
+        )
+
+        result = await resolve_attachments_to_file_infos([attachment])
+
+        assert len(result) == 1
+        assert result[0].url == "https://blob.storage.com/files/invoice.pdf"
+        assert result[0].mime_type == "application/pdf"
+        mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_called_once_with(
+            key=attachment_id
+        )
+
+    async def test_resolve_dict_without_id_skips(self, mock_uipath_client):
+        """A dict attachment missing the ID key is skipped, not errored."""
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock()
+
+        result = await resolve_attachments_to_file_infos(
+            [{"FullName": "x.pdf", "MimeType": "application/pdf"}]
+        )
+
+        assert result == []
+        mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_not_called()
 
     async def test_resolve_attachments_mixed_valid_and_invalid(
         self, mock_uipath_client
@@ -1015,31 +1218,6 @@ class TestIsPiiScopeForFiles:
         assert (
             _is_pii_scope_for_files({"data": {"pii-detection-scope": "both"}}) is False
         )
-
-
-class TestConfigWithoutStreaming:
-    """Tests for _config_without_streaming — ensures TAG_NOSTREAM is injected."""
-
-    def test_adds_nostream_tag_to_empty_config(self) -> None:
-        result = _config_without_streaming(None)
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_adds_nostream_tag_to_existing_config(self) -> None:
-        config: RunnableConfig = {"tags": ["existing_tag"]}
-        result = _config_without_streaming(config)
-        assert "existing_tag" in result["tags"]
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_preserves_other_config_keys(self) -> None:
-        config: RunnableConfig = {"metadata": {"key": "value"}, "tags": ["t"]}
-        result = _config_without_streaming(config)
-        assert result["metadata"] == {"key": "value"}
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_handles_config_without_tags(self) -> None:
-        config: RunnableConfig = {"metadata": {"key": "value"}}
-        result = _config_without_streaming(config)
-        assert result["tags"] == [TAG_NOSTREAM]
 
 
 class TestConfigWithLlmCallAttachments:

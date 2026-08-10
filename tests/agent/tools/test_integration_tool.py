@@ -1,7 +1,9 @@
 """Tests for integration_tool.py module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
@@ -19,6 +21,7 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
     AgentStartupError,
+    AgentStartupErrorCode,
 )
 from uipath_langchain.agent.tools.integration_tool import (
     _is_param_name_to_jsonpath,
@@ -563,6 +566,7 @@ class TestStripEnumsFromSchema:
         result = strip_enums_from_schema(schema, parameters)
 
         assert "enum" not in result["properties"]["title"]
+        assert "Custom title" in result["properties"]["title"]["description"]
 
     def test_handles_schema_without_properties(self):
         """A schema with no properties key is returned unchanged."""
@@ -737,6 +741,50 @@ class TestStripEnumsFromSchema:
 
         assert result == schema
 
+    def test_folds_oneof_const_value_into_description(self):
+        """A field whose fixed value is encoded as both `enum` and `oneOf`/`const`
+        gets its value folded into the description."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "engine": {
+                    "type": "string",
+                    "title": "Search Engine",
+                    "description": "The search engine to use",
+                    "oneOf": [
+                        {"const": "PlaceholderEngine", "title": "PlaceholderEngine"}
+                    ],
+                    "enum": ["PlaceholderEngine"],
+                },
+                "query": {
+                    "type": "string",
+                    "description": "The natural language query to search for",
+                },
+            },
+            "required": ["engine", "query"],
+        }
+        parameters = [
+            AgentIntegrationToolParameter(
+                name="engine",
+                type="string",
+                value="PlaceholderEngine",
+                field_location="body",
+                field_variant="static",
+            ),
+        ]
+
+        result = strip_enums_from_schema(schema, parameters)
+
+        engine_schema = result["properties"]["engine"]
+        assert "enum" not in engine_schema
+        assert engine_schema["oneOf"] == [
+            {"const": "PlaceholderEngine", "title": "PlaceholderEngine"}
+        ]
+        assert engine_schema["type"] == "string"
+        assert engine_schema["title"] == "Search Engine"
+        assert engine_schema["description"].startswith("The search engine to use")
+        assert "PlaceholderEngine" in engine_schema["description"]
+
 
 class TestCreateIntegrationToolWithArgumentProperties:
     """Test cases for create_integration_tool with argument_properties support."""
@@ -887,6 +935,32 @@ class TestCreateIntegrationToolWithArgumentProperties:
         assert isinstance(tool, StructuredToolWithArgumentProperties)
         assert tool.argument_properties == {}
 
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    @pytest.mark.parametrize("tool_path", ["", " \t\n"])
+    def test_empty_tool_path_fails_before_sdk_construction(
+        self, mock_uipath_cls, resource_factory, tool_path
+    ):
+        resource = resource_factory(tool_path=tool_path)
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            create_integration_tool(resource)
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
+        assert resource.name in exc_info.value.error_info.detail
+        assert "toolPath" in exc_info.value.error_info.detail
+        mock_uipath_cls.assert_not_called()
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    def test_non_empty_tool_path_is_accepted(self, mock_uipath_cls, resource_factory):
+        resource = resource_factory(tool_path="/api/test")
+
+        tool = create_integration_tool(resource)
+
+        assert isinstance(tool, StructuredToolWithArgumentProperties)
+        mock_uipath_cls.assert_called_once_with()
+
 
 class TestParseIsParamName:
     """Test cases for _parse_is_param_name helper."""
@@ -1013,7 +1087,43 @@ class TestIntegrationToolErrorHandling:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
-    async def test_non_400_enriched_exception_propagates(
+    async def test_422_raises_agent_runtime_error_with_user_category_and_detail(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        provider_message = (
+            "errorCode - INVALID_DATA, message - The data is invalid due to "
+            "validation restrictions, errors - [{fieldName=/contactId, "
+            "errorType=invalid, errorMessage=}]"
+        )
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=make_enriched_exception(
+                422,
+                json.dumps(
+                    {
+                        "providerErrorCode": "INVALID_DATA",
+                        "providerMessage": provider_message,
+                    }
+                ),
+                "https://cloud.uipath.com/test/elements_/v3/element/instances/1/create_ticket",
+            )
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+        assert exc_info.value.error_info.status == 422
+        assert provider_message in exc_info.value.error_info.detail
+        assert "/contactId" in exc_info.value.error_info.detail
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_500_enriched_exception_propagates(
         self, mock_uipath_cls, resource, make_enriched_exception
     ):
         original = make_enriched_exception(500, "Internal Server Error")
@@ -1023,8 +1133,56 @@ class TestIntegrationToolErrorHandling:
 
         tool = create_integration_tool(resource)
 
-        with pytest.raises(EnrichedException):
+        with pytest.raises(EnrichedException) as exc_info:
             await tool.ainvoke({"query": "test"})
+        assert exc_info.value is original
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_non_validation_422_enriched_exception_propagates(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        original = make_enriched_exception(
+            422,
+            json.dumps(
+                {
+                    "providerErrorCode": "CONNECTOR_ERROR",
+                    "providerMessage": "The connector could not process the request.",
+                }
+            ),
+            "https://cloud.uipath.com/test/elements_/v3/element/instances/1/action",
+        )
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(side_effect=original)
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(EnrichedException) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value is original
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_timeout_raises_agent_runtime_error_with_system_category(
+        self, mock_uipath_cls, resource
+    ):
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=httpx.ReadTimeout("")
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+        assert "test_tool" in exc_info.value.error_info.detail
+        assert isinstance(exc_info.value.__cause__, httpx.ReadTimeout)
 
 
 class TestRemoveAsteriskFromProperties:

@@ -102,6 +102,7 @@ class QueryExecutor:
             try:
                 records = await self._entities.query_entity_records_async(
                     sql_query=sql_query,
+                    relationships_as_scalar=True,
                 )
                 if span is not None:
                     span.set_attribute("df.record_count", len(records))

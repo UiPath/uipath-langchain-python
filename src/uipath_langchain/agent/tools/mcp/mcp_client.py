@@ -82,10 +82,11 @@ class McpClient(UiPathDisposableProtocol):
         """Initialize the MCP tool session.
 
         The MCP server URL and authorization headers are retrieved lazily
-        from the UiPath SDK on first use, using the config's slug and folder_path.
+        from the UiPath SDK on first use, using the config's display name and
+        folder_path.
 
         Args:
-            config: The MCP resource configuration containing slug and folder_path.
+            config: The MCP resource configuration containing name and folder_path.
             timeout: Optional timeout configuration for HTTP requests.
             max_retries: Maximum number of retries on session disconnect errors.
             session_info_factory: Factory for creating SessionInfo instances.
@@ -123,6 +124,11 @@ class McpClient(UiPathDisposableProtocol):
         self._session: ClientSession | None = None
         self._client_initialized: bool = False
 
+    @property
+    def server_slug(self) -> str:
+        """Slug of the configured MCP server."""
+        return self._config.slug
+
     async def get_session_id(self) -> str | None:
         """Get the current session ID from the SessionInfo."""
         if self._session_info is None:
@@ -147,7 +153,7 @@ class McpClient(UiPathDisposableProtocol):
         """
         folder_path = get_execution_folder_path()
         logger.debug(
-            f"Initializing MCP client for '{self._config.slug}' "
+            f"Initializing MCP client for '{self._config.name}' "
             f"in folder '{folder_path}'"
         )
 
@@ -157,11 +163,12 @@ class McpClient(UiPathDisposableProtocol):
         # Retrieve MCP server URL from SDK
         sdk = UiPath()
         mcp_server = await sdk.mcp.retrieve_async(
-            slug=self._config.slug, folder_path=folder_path
+            name=self._config.name,
+            folder_path=folder_path,
         )
 
         if mcp_server.mcp_url is None:
-            raise ValueError(f"MCP server '{self._config.slug}' has no URL configured")
+            raise ValueError(f"MCP server '{self._config.name}' has no URL configured")
 
         self._url = mcp_server.mcp_url
         self._headers = {"Authorization": f"Bearer {sdk._config.secret}"}

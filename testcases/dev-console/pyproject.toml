@@ -8,7 +8,7 @@ dependencies = [
     "langchain-core>=0.3.34",
     "python-dotenv>=1.0.1",
     "uipath-langchain",
-    "uipath-dev>=0.0.12",
+    "uipath-dev>=0.0.84",
     "pydantic>=2.10.6",
     "typing-extensions>=4.12.2",
     "pexpect>=4.9.0",
@@ -17,6 +17,19 @@ dependencies = [
     "pytest-asyncio>=0.24.0",
 ]
 requires-python = ">=3.11"
+
+[tool.uv]
+exclude-newer = "2 days"
+
+[tool.uv.exclude-newer-package]
+uipath = false
+uipath-core = false
+uipath-platform = false
+uipath-runtime = false
+uipath-dev = false
+uipath-langchain-client = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
 
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }

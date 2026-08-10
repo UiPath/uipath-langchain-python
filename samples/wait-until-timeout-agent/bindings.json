@@ -1,0 +1,26 @@
+{
+  "version": "2.0",
+  "resources": [
+    {
+      "resource": "process",
+      "key": "timeout-child-agent.Shared",
+      "value": {
+        "name": {
+          "defaultValue": "timeout-child-agent",
+          "isExpression": false,
+          "displayName": "Child Process Name"
+        },
+        "folderPath": {
+          "defaultValue": "Shared",
+          "isExpression": false,
+          "displayName": "Child Process Folder Path"
+        }
+      },
+      "metadata": {
+        "ActivityName": "InvokeProcess",
+        "BindingsVersion": "2.2",
+        "DisplayLabel": "timeout-child-agent"
+      }
+    }
+  ]
+}

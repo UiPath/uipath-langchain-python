@@ -28,6 +28,35 @@ def _parse(content: str) -> Any:
     return content
 
 
+def resolve_job_attachment_args(
+    tool: BaseTool,
+    call: ToolCall,
+    state: AgentGraphState,
+) -> dict[str, Any] | None:
+    """Replace job attachment ids in a tool call's arguments with full attachment objects.
+
+    Mutates ``call["args"]`` in place. Returns an error dict when a referenced id
+    is not a valid UUID or is absent from state, else None.
+    """
+    input_args = call["args"]
+    modified_input_args = input_args
+
+    schema = None
+    if isinstance(tool.args_schema, type) and issubclass(tool.args_schema, BaseModel):
+        schema = tool.args_schema
+        errors: list[str] = []
+        paths = get_job_attachment_paths(schema)
+        modified_input_args = replace_job_attachment_ids(
+            paths, input_args, state.inner_state.job_attachments, errors
+        )
+
+        if errors:
+            return {"error": "\n".join(errors)}
+
+    call["args"] = coerce_json_strings(modified_input_args, schema)
+    return None
+
+
 def get_job_attachment_wrapper(
     output_type: Any | None = None,
 ) -> AsyncToolWrapperWithState:
@@ -71,24 +100,10 @@ def get_job_attachment_wrapper(
             Command object with tool result message and updated job attachments in inner_state,
             or error dict if attachment validation fails
         """
-        input_args = call["args"]
-        modified_input_args = input_args
+        error = resolve_job_attachment_args(tool, call, state)
+        if error is not None:
+            return error
 
-        schema = None
-        if isinstance(tool.args_schema, type) and issubclass(
-            tool.args_schema, BaseModel
-        ):
-            schema = tool.args_schema
-            errors: list[str] = []
-            paths = get_job_attachment_paths(schema)
-            modified_input_args = replace_job_attachment_ids(
-                paths, input_args, state.inner_state.job_attachments, errors
-            )
-
-            if errors:
-                return {"error": "\n".join(errors)}
-
-        call["args"] = coerce_json_strings(modified_input_args, schema)
         tool_result = await tool.ainvoke(call)
         job_attachments_dict = {}
         if output_type is not None:

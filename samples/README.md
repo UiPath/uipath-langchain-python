@@ -15,6 +15,15 @@ This sample shows how to automate Outlook inbox organization with AI-powered rul
 ## [HITL inbox server](hitl-inbox-server)
 This sample demonstrates a FastAPI server for managing human-in-the-loop workflows with job submissions and inbox message approvals.
 
+## [Joke agent](joke-agent)
+This sample demonstrates a LangGraph agent that generates family-friendly jokes on a given topic, showcasing a middleware-based guardrails stack for PII detection, prompt injection prevention, and content validation, with human-in-the-loop escalation when PII is detected in the input.
+
+## [Joke agent (decorator-based guardrails)](joke-agent-decorator)
+This sample shows how to use the unified `@guardrail` decorator to apply guardrails to LLM factories, tools, agent factories, graph nodes, and plain Python functions — without a middleware stack.
+
+## [Joke agent (Bring Your Own Guardrail)](joke-agent-bring-your-own-guardrail)
+This sample guards a joke agent with a customer-managed validator (BYOG): your own guardrail vendor connected through Integration Service and referenced by validator name + connection id. It shows both flavors in one agent — `UiPathByoGuardrailMiddleware` logging on the agent scope, `ByoValidator` with the `@guardrail` decorator blocking on the LLM scope.
+
 ## [Multi agent supervisor, researcher, coder](multi-agent-supervisor-researcher-coder)
 This sample showcases a multi-agent system, involving a supervisor, a researcher, and a coder working in coordination to tackle complex tasks.
 
@@ -41,3 +50,6 @@ This sample shows how to build a LangGraph agent that connects to a remote UiPat
 
 ## [Ticket classification](ticket-classification)
 This sample demonstrates automatic classification of support tickets into categories. It includes a human approval step via UiPath Action Center.
+
+## [Wait until timeout agent](wait-until-timeout-agent)
+This sample demonstrates waiting for whichever happens first: a child UiPath process completes, or a timer expires.

@@ -157,10 +157,15 @@ SQL_CONSTRAINTS = """\
 
 ### 2. Multi-Entity Joins (≤4 adapters)
 - INNER JOIN chains via entity model (up to 4 tables)
+- Equi-joins only (ON left.col = right.col)
+- LEFT JOIN is allowed ONLY for relationship (foreign-key) joins on the related
+  entity's Id (see "Relationship fields" guidance) — use it for optional
+  relationships to keep parent rows
 - Shared intermediates
 
 **Examples:**
 - SELECT o.id, c.name FROM Order o INNER JOIN Customer c ON o.customer_id = c.id
+- SELECT o.id, a.Name FROM Order o LEFT JOIN Account a ON a.Id = o.account  -- relationship join, keeps orders with no account
 - Fields spanning 3-4 adapters with proper INNER JOIN chains
 
 ### 3. Predicate Distribution & Pushdown
@@ -253,7 +258,7 @@ SQL_CONSTRAINTS = """\
 - Common Table Expressions (WITH/CTE)
 - Window functions (ROW_NUMBER, RANK, PARTITION BY)
 - Self-joins
-- LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN (only INNER JOIN supported)
+- RIGHT JOIN, FULL OUTER JOIN (general joins must be INNER; LEFT JOIN only for relationship/foreign-key joins on Id)
 - CROSS JOIN
 
 **Examples:**
@@ -275,7 +280,7 @@ SQL_CONSTRAINTS = """\
 
 ### 4. ADVANCED_JOINS
 - More than 4 tables in JOIN chain
-- LEFT JOIN
+- LEFT JOIN for non-relationship joins (LEFT JOIN is allowed ONLY to join a relationship/foreign-key field to its related entity on Id)
 - RIGHT JOIN
 - FULL OUTER JOIN
 - CROSS JOIN
@@ -283,9 +288,9 @@ SQL_CONSTRAINTS = """\
 - Non-equi joins (theta joins)
 
 **Examples:**
-- SELECT * FROM t1 RIGHT JOIN t2  -- ❌
-- SELECT * FROM t1, t2  -- ❌ (implicit CROSS JOIN)
-- SELECT * FROM Employee e1 JOIN Employee e2 ON e1.manager_id = e2.id  -- ❌ (self-join)
+- SELECT c.id FROM t1 c RIGHT JOIN t2 d ON d.id = c.fk  -- ❌
+- SELECT c.id FROM t1 c, t2 d  -- ❌ (implicit CROSS JOIN)
+- SELECT e1.id FROM Employee e1 JOIN Employee e2 ON e1.manager_id = e2.id  -- ❌ (self-join)
 
 ### 5. UNSUPPORTED_FUNCTIONS
 - Date/time manipulation functions (DATE_ADD, DATE_SUB, DATEDIFF)
@@ -336,7 +341,7 @@ SQL_CONSTRAINTS = """\
 
 1. **ALWAYS use explicit column names** - Never use SELECT *
 2. **Use COUNT(column_name)** - Never use COUNT(*)
-3. **Only INNER JOIN** - No LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN, or CROSS JOIN
+3. **INNER JOIN by default; LEFT JOIN only for relationships** - General joins must be INNER JOIN (equi-join). LEFT JOIN is permitted ONLY to join a relationship (foreign-key) field to its related entity on Id — use it for optional relationships to keep parent rows, INNER JOIN when the related row must exist. No RIGHT JOIN, FULL OUTER JOIN, CROSS JOIN, or self-joins
 4. **Maximum 4 tables** - No more than 4 tables in a JOIN chain
 5. **No subqueries** - No subqueries in any clause
 6. **No CTEs** - No WITH clauses

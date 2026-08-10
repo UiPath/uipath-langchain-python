@@ -13,19 +13,24 @@ permissions:
 
 jobs:
   discover-testcases:
-    runs-on: ubuntu-latest
+    runs-on: uipath-ubuntu-latest
     outputs:
       testcases: ${{ steps.discover.outputs.testcases }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
     - name: Discover testcases
       # Skip common directory - it's shared utilities, not a testcase
       id: discover
       run: |
         # Find all testcase folders (excluding common folders like README, etc.)
-        testcase_dirs=$(find testcases -maxdepth 1 -type d -name "*-*" | sed 's|testcases/||' | sort)
+        # model-onboarding is intentionally excluded: it is run on demand via
+        # the dedicated model_onboarding.yml workflow, not on every push/PR.
+        testcase_dirs=$(find testcases -maxdepth 1 -type d -name "*-*" \
+          | sed 's|testcases/||' \
+          | grep -vx 'model-onboarding' \
+          | sort)
 
         echo "Found testcase directories:"
         echo "$testcase_dirs"
@@ -36,7 +41,7 @@ jobs:
 
   integration-tests:
     needs: [discover-testcases]
-    runs-on: ubuntu-latest
+    runs-on: uipath-ubuntu-latest
     timeout-minutes: 10
     container:
       image: ghcr.io/astral-sh/uv:python3.12-bookworm
@@ -53,7 +58,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
     - name: Install Dependencies
       run: uv sync

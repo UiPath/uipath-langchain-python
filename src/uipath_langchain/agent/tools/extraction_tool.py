@@ -1,18 +1,29 @@
 """Ixp extraction tool."""
 
-import uuid
-from typing import Any, Optional
+from typing import Any
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, Field
 from uipath.agent.models.agent import AgentIxpExtractionResourceConfig
 from uipath.eval.mocks import mockable
+from uipath.platform.attachments import Attachment
 from uipath.platform.common import DocumentExtraction
 from uipath.platform.documents import ExtractionResponseIXP
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
+from uipath_langchain.agent.react.job_attachments import (
+    get_job_attachment_paths,
+    get_job_attachments,
+    raise_for_job_attachment_error,
+)
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
@@ -27,62 +38,83 @@ class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
     pass
 
 
-class ExtractionToolInputSchema(BaseModel):
-    """Alias-free mirror of `Attachment` used as the tool's args_schema.
+def _single_attachment_input_schema() -> dict[str, Any]:
+    """Build the one-job-attachment input schema Agent Builder writes."""
+    attachment = Attachment.model_json_schema(by_alias=True)
+    attachment["required"] = ["ID"]
+    attachment["x-uipath-resource-kind"] = "JobAttachment"
+    return {
+        "type": "object",
+        "properties": {
+            "attachment": {
+                "description": "File to extract data from.",
+                "$ref": "#/definitions/job-attachment",
+            }
+        },
+        "required": ["attachment"],
+        "definitions": {"job-attachment": attachment},
+    }
 
-    We don't use `Attachment` directly because its fields carry aliases
-    (`id` -> `ID`, `full_name` -> `FullName`, ...) and LangChain mishandles
-    aliased fields in two places (see PR #796):
 
-    1. `BaseTool._parse_input()` extracts each field with `getattr(model, key)`,
-       where `key` is the alias. For aliases that collide with built-in model
-       attributes (e.g. `schema`), this returns the built-in instead of the
-       field value, so downstream `kwargs.get("id") / kwargs.get("full_name")`
-       came back as `None`.
-    2. `tool_call_schema` rebuilds a subset of the model by copying each field
-       but drops alias and serialization options, so the rebuilt schema no
-       longer matches what the LLM emits.
-
-    Until LangChain fixes both, exposing an alias-free schema with field
-    names matching `Attachment`'s python names sidesteps the issue. Keep the
-    fields here in sync with `Attachment` — the test
-    `test_extraction_tool_has_attachment_input_schema` enforces this.
-    """
-
-    id: uuid.UUID
-    full_name: str
-    mime_type: str
-    metadata: Optional[dict[str, Any]] = Field(None)
+def _create_input_model(input_schema: dict[str, Any]) -> Any:
+    model = create_model(input_schema)
+    if get_job_attachment_paths(model):
+        return model
+    return create_model(_single_attachment_input_schema())
 
 
 def create_ixp_extraction_tool(
     resource: AgentIxpExtractionResourceConfig,
 ) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until data is extracted (handled by runtime)."""
+    from uipath_langchain.agent.wrappers import resolve_job_attachment_args
+
     tool_name: str = sanitize_tool_name(resource.name)
     resource_name = resource.name
     project_name = resource.properties.project_name
     version_tag = resource.properties.version_tag
 
+    input_model: Any = _create_input_model(resource.input_schema)
+
     @mockable(
         name=resource.name,
         description=resource.description,
-        input_schema=ExtractionToolInputSchema.model_json_schema(),
+        input_schema=input_model.model_json_schema(),
         output_schema=ExtractionResponseIXP.model_json_schema(),
         example_calls=resource.properties.example_calls,
     )
-    async def extraction_tool_fn(**kwargs: Any) -> ExtractionResponseIXP:
+    async def extraction_tool_fn(**kwargs: Any) -> dict[str, Any]:
         from uipath.platform import UiPath
 
-        attachment = ExtractionToolInputSchema.model_validate(kwargs)
+        attachments = get_job_attachments(input_model, kwargs)
+        if not attachments:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
+                title="Missing job attachment",
+                detail=(
+                    f"Tool '{resource_name}' was called without a job attachment to "
+                    f"extract data from."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
+        attachment = attachments[0]
         uipath = UiPath()
 
         # TODO: current workaround. DocumentExtraction model should support attachment_id and use the
         # start_ixp_extraction_from_attachment sdk method once support is added
 
-        attachment_local_file_path = await uipath.attachments.download_async(
-            key=attachment.id, destination_path=attachment.full_name
-        )
+        try:
+            attachment_local_file_path = await uipath.attachments.download_async(
+                key=attachment.id, destination_path=attachment.full_name
+            )
+        except EnrichedException as e:
+            raise_for_job_attachment_error(
+                e,
+                title="Failed to download job attachment",
+                attachment_name=attachment.full_name,
+                attachment_id=attachment.id,
+            )
+            raise
         document_extraction_response = interrupt(
             DocumentExtraction(
                 project_name=project_name,
@@ -98,6 +130,10 @@ def create_ixp_extraction_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        error = resolve_job_attachment_args(tool, call, state)
+        if error is not None:
+            return error
+
         tool_result = await tool.ainvoke(call["args"])
         data_projection = tool_result["dataProjection"]
         # update the state with extraction response for later reuse in ixpVsEscalation
@@ -118,7 +154,7 @@ def create_ixp_extraction_tool(
     tool = StructuredToolWithWrapper(
         name=tool_name,
         description=resource.description,
-        args_schema=ExtractionToolInputSchema,
+        args_schema=input_model,
         coroutine=extraction_tool_fn,
         output_type=ExtractionResponseIXP,
         metadata={
@@ -126,6 +162,7 @@ def create_ixp_extraction_tool(
             "display_name": resource.name,
             "project_name": project_name,
             "version_tag": version_tag,
+            "args_schema": input_model,
         },
     )
     tool.set_tool_wrappers(awrapper=extraction_tool_wrapper)

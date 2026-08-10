@@ -1,8 +1,10 @@
 """Tool-related utility functions."""
 
 import re
-from typing import Any
+from typing import Any, cast
 
+from langchain_core.runnables.config import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from uipath.agent.models.agent import TaskTitle, TextBuilderTaskTitle
 from uipath.agent.utils.text_tokens import build_string_from_tokens
 
@@ -43,6 +45,19 @@ def sanitize_dict_for_serialization(args: dict[str, Any]) -> dict[str, Any]:
         else:
             converted_args[key] = value
     return converted_args
+
+
+def config_without_streaming(config: RunnableConfig | None) -> RunnableConfig:
+    """Return a RunnableConfig with `TAG_NOSTREAM` appended to its tags, so
+    LangGraph's StreamMessagesHandler skips this LLM call.
+
+    Used for internal LLM calls (e.g. structured-output extraction,
+    attachment analysis) to prevent their responses from leaking into
+    the conversation stream for conversational agents.
+    """
+    new_config = cast(RunnableConfig, dict(config) if config else {})
+    new_config["tags"] = [*(new_config.get("tags") or []), TAG_NOSTREAM]
+    return new_config
 
 
 def resolve_task_title(

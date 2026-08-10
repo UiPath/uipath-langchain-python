@@ -188,6 +188,11 @@ class UiPathChatMessagesMapper:
                                 )
                             )
                     elif isinstance(data, UiPathExternalValue):
+                        if uipath_message.role == "assistant":
+                            # Workspace files persisted by the advanced runtime
+                            # (hydrated into the file backend before the graph
+                            # runs); they are not attachments for the LLM.
+                            continue
                         attachment_id = self.parse_attachment_id_from_content_part_uri(
                             data.uri
                         )
@@ -368,6 +373,20 @@ class UiPathChatMessagesMapper:
 
         # For every new message_id, start a new message
         if message.id not in self.seen_message_ids:
+            # Edge-case: OpenAI Responses API (e.g. gpt-5.4) emits an initial envelope chunk
+            # of type `response.created` (id=`resp_...`) before any actual content;
+            # LangChain then streams the content under a different id (`lc_run--...`).
+            # This guard prevents emitting phantom startMessage/startContentPart events
+            # for envelope events like this. The `chunk_position != "last"` clause preserves the
+            # rare single-empty-chunk case (e.g. a refusal) so we still emit start + end.
+            if (
+                not message.content_blocks
+                and not message.tool_calls
+                and not (isinstance(message.content, str) and message.content)
+                and message.chunk_position != "last"
+            ):
+                return []
+
             self.current_message = message
             self.seen_message_ids.add(message.id)
             self._citation_stream_processor = CitationStreamProcessor()

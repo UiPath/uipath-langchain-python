@@ -3,6 +3,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
+from mcp.shared.exceptions import McpError
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
@@ -10,7 +11,12 @@ from uipath.agent.models.agent import (
     DynamicToolsConfig,
 )
 from uipath.eval.mocks import mockable
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -292,6 +298,35 @@ async def create_mcp_tools(
     return tools
 
 
+def _map_mcp_error(
+    error: McpError, tool_name: str, server_slug: str
+) -> AgentRuntimeError:
+    """Map a protocol-level McpError to a categorized AgentRuntimeError.
+
+    MCP tool execution failures come back as ``CallToolResult.isError`` results,
+    so an McpError raised during a call is a protocol/session/transport failure —
+    hence the SYSTEM category.
+    """
+    if error.error.code in McpClient.SESSION_ERROR_CODES:
+        detail = (
+            f"The connection to MCP server '{server_slug}' was terminated and "
+            f"could not be re-established while calling tool '{tool_name}'. "
+            "This is usually a transient issue; please retry the run later."
+        )
+    else:
+        detail = (
+            f"MCP server '{server_slug}' returned an error for tool "
+            f"'{tool_name}': {error.error.message}"
+        )
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.HTTP_ERROR,
+        title=f"MCP tool '{tool_name}' failed",
+        detail=detail,
+        category=UiPathErrorCategory.SYSTEM,
+        should_wrap=False,
+    )
+
+
 def _normalize_tool_result(result: Any) -> Any:
     """Normalize an MCP ``call_tool`` result into JSON-serializable content."""
     content = result.content if hasattr(result, "content") else result
@@ -339,7 +374,10 @@ def build_mcp_tool(
             retry_message = await _refresh_tool_schema(mcp_tool, mcpClient, tool_holder)
             if retry_message is not None:
                 return retry_message
-        result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
+        try:
+            result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
+        except McpError as e:
+            raise _map_mcp_error(e, mcp_tool.name, mcpClient.server_slug) from e
         logger.info(f"Tool call successful for {mcp_tool.name}")
         return _normalize_tool_result(result)
 

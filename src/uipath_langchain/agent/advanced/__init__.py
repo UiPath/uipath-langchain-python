@@ -4,8 +4,12 @@ from deepagents import CompiledSubAgent, SubAgent
 from deepagents.backends import BackendProtocol, FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
 
-from .agent import create_advanced_agent, create_advanced_agent_graph
-from .types import AdvancedAgentGraphState
+from .agent import (
+    create_advanced_agent,
+    create_advanced_agent_graph,
+    create_conversational_advanced_agent_graph,
+)
+from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
 from .utils import (
     MEMORY_DIR_NAME,
     MEMORY_INDEX_FILENAME,
@@ -21,9 +25,11 @@ __all__ = [
     "BackendFactory",
     "BackendProtocol",
     "CompiledSubAgent",
+    "ConversationalAdvancedAgentGraphState",
     "FilesystemBackend",
     "SubAgent",
     "create_advanced_agent",
     "create_advanced_agent_graph",
+    "create_conversational_advanced_agent_graph",
     "create_state_with_input",
 ]

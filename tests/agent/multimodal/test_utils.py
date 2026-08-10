@@ -231,10 +231,31 @@ class TestBuildFileContentBlocksFor:
         assert blocks[0]["type"] == "file"
         assert blocks[0]["mime_type"] == "text/csv"
 
+    async def test_unsupported_mime_type_returns_file_block(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """Format support is delegated to the LLM/provider (#842): an arbitrary
+        MIME type is wrapped in a file block here, not rejected. A provider that
+        cannot read it raises at the model-invocation boundary, where it is
+        translated into a USER error."""
+        content = b"\x00\x01\x02"
+        httpx_mock.add_response(url=FILE_URL, content=content)
+        file_info = FileInfo(
+            url=FILE_URL, name="blob.bin", mime_type="application/octet-stream"
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "application/octet-stream"
+
     async def test_empty_mime_type_defaults_to_octet_stream(
         self, httpx_mock: HTTPXMock
     ) -> None:
-        content = b"raw bytes"
+        """An attachment with no MIME type defaults to octet-stream and is passed
+        through as a file block (delegated to the LLM)."""
+        content = b"data"
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="blob.bin", mime_type="")
 

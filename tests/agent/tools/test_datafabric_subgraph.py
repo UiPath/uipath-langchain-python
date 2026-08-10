@@ -135,6 +135,20 @@ async def test_query_executor_success_no_otel() -> None:
     assert "error" not in result
 
 
+@pytest.mark.asyncio
+async def test_query_executor_requests_relationships_as_scalar() -> None:
+    """Relationship fields are requested as scalar ids for SQL joins."""
+    svc = _make_entities_service(records=[{"id": 1}])
+
+    result = await QueryExecutor(svc, [])("SELECT id FROM TaskEntity LIMIT 10")
+
+    svc.query_entity_records_async.assert_awaited_once_with(
+        sql_query="SELECT id FROM TaskEntity LIMIT 10",
+        relationships_as_scalar=True,
+    )
+    assert result["records"] == [{"id": 1}]
+
+
 # ---------------------------------------------------------------------------
 # QueryExecutor.__call__  — success path with OTEL span
 # ---------------------------------------------------------------------------
