@@ -10,7 +10,6 @@ from .types import FLOW_CONTROL_TOOLS, AgentGraphNode, AgentGraphState
 from .utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
-    has_reasoning_block,
 )
 
 
@@ -37,6 +36,11 @@ def create_route_agent(
         3. If current tool call is a flow control tool, route to TERMINATE
         4. Otherwise, route to the specific tool node
 
+        A tool-less turn with content always loops back to AGENT: the router can't
+        tell whether tool_choice was actually forced on the wire (handlers silently
+        downgrade it under thinking), so the LLM node owns stall accounting —
+        forcing, the extraction retry, and the deterministic failure.
+
         Returns:
             - str: Single tool node name for sequential execution
             - AgentGraphNode.AGENT: When all tool calls completed or no tool calls
@@ -56,20 +60,8 @@ def create_route_agent(
             )
 
         if not last_message.tool_calls:
-            # reasoning stall — loop so the next turn can force the extraction
-            if has_reasoning_block(last_message):
-                return AgentGraphNode.AGENT
-
-            # content but no tool call and no reasoning: the model ignored tool_choice
             if last_message.content:
-                raise AgentRuntimeError(
-                    code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
-                    title="Agent produced a response without calling a tool.",
-                    detail="The model returned content but no tool call and no reasoning, "
-                    "despite a forced tool_choice. If you are using a BYOM configuration, "
-                    "verify your model deployment respects tool_choice.",
-                    category=UiPathErrorCategory.SYSTEM,
-                )
+                return AgentGraphNode.AGENT
 
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.ROUTING_ERROR,

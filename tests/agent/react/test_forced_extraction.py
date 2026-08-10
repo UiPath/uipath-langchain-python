@@ -58,7 +58,9 @@ class TestWithoutThinking:
         assert result.additional_model_request_fields == {}
 
     def test_invoke_removes_thinking_from_model_kwargs(self) -> None:
-        model = _FakeInvoke(model_kwargs={"thinking": {"type": "enabled"}, "top_p": 0.9})
+        model = _FakeInvoke(
+            model_kwargs={"thinking": {"type": "enabled"}, "top_p": 0.9}
+        )
         result = _without_thinking(model)  # type: ignore[arg-type]
         assert result.model_kwargs == {"top_p": 0.9}
 
@@ -104,6 +106,17 @@ class TestStripReasoningBlocks:
         assert out[0].content == []
         assert out[0].tool_calls[0]["name"] == "end_execution"
 
+    def test_strips_redacted_thinking_blocks(self) -> None:
+        """redacted_thinking can't be replayed on a thinking-off call either."""
+        msg = AIMessage(
+            content=[
+                {"type": "redacted_thinking", "data": "opaque"},
+                {"type": "text", "text": "answer"},
+            ]
+        )
+        out = _strip_reasoning_blocks([msg])
+        assert out[0].content == [{"type": "text", "text": "answer"}]
+
     def test_string_content_untouched(self) -> None:
         msg = AIMessage(content="plain answer")
         out = _strip_reasoning_blocks([msg])
@@ -122,6 +135,9 @@ class TestExtractionNudge:
         msgs = [HumanMessage(content="q"), AIMessage(content="answer")]
         out = _with_extraction_nudge(msgs)
         assert isinstance(out[-1], HumanMessage)
+        # tool-neutral: mentions continuing, not only end_execution, so a mid-task
+        # stall isn't pushed to terminate early
+        assert "continue" in out[-1].content
         assert "end_execution" in out[-1].content
         assert isinstance(out[-2], AIMessage)
 

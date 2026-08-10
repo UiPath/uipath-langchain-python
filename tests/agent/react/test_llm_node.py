@@ -444,12 +444,19 @@ class TestLLMNodeProviderErrorHandling:
 
 
 class TestForcedExtractionEscalation:
-    """The forced-extraction fallback fires for any thinking model that stalls,
-    regardless of transport — including native-style handlers that don't downgrade."""
+    """Stall accounting in the LLM node. Anthropic thinking models get a buffer of
+    unforced turns (forcing is incompatible with their thinking) and a thinking-off
+    extraction retry on the first stall; every other provider forces from turn 1 and is
+    never extracted (forcing works for it, and the extraction's reasoning-strip would
+    break it, e.g. OpenAI 400s on a continuation with its reasoning removed). A stall
+    past the buffer + retry fails deterministically. Not gated on tool_choice='auto',
+    since forcing can be downgraded on the wire (Bedrock handlers, langchain_anthropic)."""
 
     def _thinking_model(self) -> Any:
         model = _StubAzureChatOpenAI.model_construct()
-        model.thinking = {"type": "adaptive"}  # thinking active; OpenAI MRO won't downgrade
+        model.thinking = {
+            "type": "adaptive"
+        }  # thinking active; OpenAI MRO won't downgrade
         model.bind_tools = Mock(return_value=model)
         model.bind = Mock(return_value=model)
         return model
@@ -460,16 +467,18 @@ class TestForcedExtractionEscalation:
         model.bind = Mock(return_value=model)
         return model
 
-    def _stalled_state(self) -> AgentGraphState:
+    def _stalled_state(self, stalls: int = 1) -> AgentGraphState:
         prior = AIMessage(
             content=[
                 {"type": "reasoning_content", "reasoning_content": {"text": "think"}},
                 {"type": "text", "text": "answer"},
             ]
         )
-        return AgentGraphState(messages=[HumanMessage(content="q"), prior])
+        return AgentGraphState(
+            messages=[HumanMessage(content="q"), *([prior] * stalls)]
+        )
 
-    async def _run_capture(self, model: Any) -> list[Any]:
+    async def _run_capture(self, model: Any, tool_choice: str = "auto") -> list[Any]:
         captured: dict[str, Any] = {}
 
         async def fake_ainvoke(msgs: Any) -> AIMessage:
@@ -484,7 +493,7 @@ class TestForcedExtractionEscalation:
         model.ainvoke = AsyncMock(side_effect=fake_ainvoke)
         tool = Mock(spec=BaseTool)
         tool.name = "t"
-        node = create_llm_node(model, [tool])
+        node = create_llm_node(model, [tool], tool_choice=tool_choice)
         await node(self._stalled_state())
         return captured["msgs"]
 
@@ -500,13 +509,34 @@ class TestForcedExtractionEscalation:
         assert "end_execution" in msgs[-1].content
 
     @pytest.mark.asyncio
-    async def test_non_thinking_model_does_not_escalate(self) -> None:
-        """No thinking => no escalation => history passed through untouched."""
-        msgs = await self._run_capture(self._plain_model())
-        assert msgs[-1].content == [
-            {"type": "reasoning_content", "reasoning_content": {"text": "think"}},
-            {"type": "text", "text": "answer"},
-        ]
+    async def test_plain_model_stall_is_forced_not_extracted(self) -> None:
+        """A non-Anthropic model that stalls is plain-forced, never extracted: forcing
+        works for it directly, and the extraction's reasoning-strip would break it."""
+        model = self._plain_model()
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+        )
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        with patch(
+            "uipath_langchain.agent.react.llm_node.build_extraction_call"
+        ) as spy:
+            await create_llm_node(model, [tool])(self._stalled_state())
+        spy.assert_not_called()
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
+
+    @pytest.mark.asyncio
+    async def test_escalates_when_tool_choice_configured_any(self) -> None:
+        """AgentGraphConfig(tool_choice='any') keeps the termination guarantee: the
+        extraction retry must not be gated on tool_choice starting as 'auto'."""
+        msgs = await self._run_capture(self._thinking_model(), tool_choice="any")
+        assert isinstance(msgs[-1], HumanMessage)
+        assert "end_execution" in msgs[-1].content
 
     @pytest.mark.asyncio
     async def test_no_stall_does_not_escalate(self) -> None:
@@ -523,13 +553,36 @@ class TestForcedExtractionEscalation:
         spy.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_non_thinking_model_forces_from_first_turn_despite_limit(
-        self,
-    ) -> None:
-        """A non-reasoning model ignores the thinking buffer: it forces tool_choice
-        from the first turn even when the configured limit is > 0."""
+    async def test_second_stall_after_extraction_raises_thinking_limit(self) -> None:
+        """A model that stalls again after the forced-extraction retry fails fast
+        with a SYSTEM diagnostic instead of looping to the max-iterations limit."""
+        model = self._thinking_model()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="still stalling"))
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        node = create_llm_node(model, [tool])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await node(self._stalled_state(stalls=2))
+
+        info = exc_info.value.error_info
+        assert info.code.endswith(AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value)
+        assert info.category == UiPathErrorCategory.SYSTEM
+        model.ainvoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_plain_model_forces_from_first_turn(self) -> None:
+        """A non-Anthropic model has no reasoning buffer (effective limit 0): it forces
+        tool_choice from turn 1 regardless of the configured limit."""
         model = self._plain_model()
-        model.ainvoke = AsyncMock(return_value=AIMessage(content="done"))
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+        )
         tool = Mock(spec=BaseTool)
         tool.name = "t"
         node = create_llm_node(model, [tool], thinking_messages_limit=2)
@@ -547,3 +600,19 @@ class TestForcedExtractionEscalation:
         node = create_llm_node(model, [tool], thinking_messages_limit=2)
         await node(AgentGraphState(messages=[HumanMessage(content="q")]))
         assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
+
+    @pytest.mark.asyncio
+    async def test_stall_within_buffer_does_not_force_or_escalate(self) -> None:
+        """One stalled turn under a limit of 2 stays unforced — the buffer is
+        consumed before any forcing or extraction happens."""
+        model = self._thinking_model()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="reasoning..."))
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        node = create_llm_node(model, [tool], thinking_messages_limit=2)
+        with patch(
+            "uipath_langchain.agent.react.llm_node.build_extraction_call"
+        ) as spy:
+            await node(self._stalled_state())
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
+        spy.assert_not_called()

@@ -18,7 +18,9 @@ from uipath_langchain.chat.handlers.bedrock import (
 # ---------------------------------------------------------------------------
 
 
-def make_invoke_model(model_id: str | None = None, **model_kwargs_override: object) -> object:
+def make_invoke_model(
+    model_id: str | None = None, **model_kwargs_override: object
+) -> object:
     """Return a ChatBedrock-like model with optional model_kwargs + model_id."""
     model = type("FakeChatBedrock", (), {"model_kwargs": {}})()
     model.model_kwargs = model_kwargs_override
@@ -27,7 +29,9 @@ def make_invoke_model(model_id: str | None = None, **model_kwargs_override: obje
     return model
 
 
-def make_converse_model(model_id: str | None = None, **fields_override: object) -> object:
+def make_converse_model(
+    model_id: str | None = None, **fields_override: object
+) -> object:
     """Return a ChatBedrockConverse-like model with optional request fields + model_id."""
     model = type(
         "FakeChatBedrockConverse", (), {"additional_model_request_fields": {}}
@@ -334,6 +338,18 @@ class TestBedrockThinkingDowngrade:
         handler = BedrockConversePayloadHandler(make_converse_model())  # type: ignore[arg-type]
         assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
 
+    def test_disabled_thinking_keeps_forcing_converse(self) -> None:
+        handler = BedrockConversePayloadHandler(
+            make_converse_model(thinking={"type": "disabled"})  # type: ignore[arg-type]
+        )
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
+
+    def test_disabled_thinking_keeps_forcing_invoke(self) -> None:
+        handler = BedrockInvokePayloadHandler(
+            make_invoke_model(thinking={"type": "disabled"})  # type: ignore[arg-type]
+        )
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
+
 
 class TestBedrockRejectsForcedToolChoice:
     """The downgrade predicate: forcing is rejected whenever thinking is active."""
@@ -344,6 +360,7 @@ class TestBedrockRejectsForcedToolChoice:
             ("enabled", True),
             ("adaptive", True),
             ("interleaved", True),
+            ("disabled", False),
             (None, False),
         ],
     )
@@ -371,6 +388,13 @@ class TestThinkingTypeDetection:
 
     def test_type_none_when_absent(self) -> None:
         assert anthropic_thinking_type(make_invoke_model()) is None
+
+    def test_type_none_when_disabled(self) -> None:
+        """'disabled' is Anthropic's explicit thinking-off value, not an active mode."""
+        assert (
+            anthropic_thinking_type(make_invoke_model(thinking={"type": "disabled"}))
+            is None
+        )
 
     def test_type_none_when_thinking_not_dict(self) -> None:
         assert anthropic_thinking_type(make_invoke_model(thinking="enabled")) is None

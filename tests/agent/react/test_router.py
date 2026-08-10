@@ -193,11 +193,11 @@ class TestRouteAgentBasicFunctionality:
         assert result == AgentGraphNode.TERMINATE
 
 
-class TestRouteAgentThinkingMessages:
-    """A tool-less turn loops back only when it carries a reasoning block (an
-    expected thinking stall, which the LLM node's extraction terminates next turn).
-    A tool-less turn with plain content and no reasoning means the model was forced
-    but didn't call a tool, which fails fast."""
+class TestRouteAgentToolLessTurns:
+    """Any tool-less content turn loops back to AGENT. The router can't tell whether
+    tool_choice was actually forced on the wire (Bedrock/native handlers silently
+    downgrade it under thinking), so stall accounting — forcing, the extraction
+    retry, and the deterministic failure — lives in the LLM node."""
 
     def test_reasoning_stall_routes_to_agent(self, route_function_no_limit):
         """A tool-less turn carrying a thinking block loops back to AGENT."""
@@ -212,16 +212,27 @@ class TestRouteAgentThinkingMessages:
         )
         assert route_function_no_limit(state) == AgentGraphNode.AGENT
 
-    def test_forced_tool_less_without_reasoning_raises(
+    def test_plain_content_without_reasoning_routes_to_agent(
         self, route_function_no_limit, state_no_tool_calls
     ):
-        """Content but no tool call and no reasoning block => the model ignored forced
-        tool_choice => THINKING_LIMIT_EXCEEDED, rather than looping to max iterations."""
-        with pytest.raises(AgentRuntimeError) as exc_info:
-            route_function_no_limit(state_no_tool_calls)
-        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
-            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
+        """A plain-text tool-less turn is a legal reply whenever forcing was
+        downgraded (Bedrock thinking, adaptive thinking after tool results), so it
+        loops back instead of failing the run."""
+        assert route_function_no_limit(state_no_tool_calls) == AgentGraphNode.AGENT
+
+    def test_redacted_thinking_turn_routes_to_agent(self, route_function_no_limit):
+        """Redacted thinking turns carry no plain reasoning block but are still
+        legitimate reasoning stalls."""
+        ai_message = AIMessage(
+            content=[
+                {"type": "redacted_thinking", "data": "opaque"},
+                {"type": "text", "text": "working on it"},
+            ]
         )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message]
+        )
+        assert route_function_no_limit(state) == AgentGraphNode.AGENT
 
 
 class TestRouteAgentErrorHandling:

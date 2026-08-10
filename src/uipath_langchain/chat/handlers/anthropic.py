@@ -12,12 +12,13 @@ from .base import ModelPayloadHandler
 
 
 def anthropic_thinking_type(model: Any) -> str | None:
-    """The Anthropic thinking mode for a model ("enabled"/"adaptive"/...), or None.
+    """The active Anthropic thinking mode for a model ("enabled"/"adaptive"/...), or None.
 
     Reads the `thinking` dict wherever the transport puts it: native `thinking`, Bedrock
     Invoke `model_kwargs`, Bedrock Converse `additional_model_request_fields`. Only
     Anthropic uses this shape — OpenAI/Gemini use other knobs — so non-Anthropic models
-    return None. Null-safe.
+    return None. `{"type": "disabled"}` is the provider's explicit thinking-off value,
+    so it also returns None: every caller means "is thinking active". Null-safe.
     """
     invoke = getattr(model, "model_kwargs", None) or {}
     converse = getattr(model, "additional_model_request_fields", None) or {}
@@ -28,7 +29,7 @@ def anthropic_thinking_type(model: Any) -> str | None:
     )
     for thinking in candidates:
         if isinstance(thinking, dict) and isinstance(thinking.get("type"), str):
-            return thinking["type"]
+            return None if thinking["type"] == "disabled" else thinking["type"]
     return None
 
 

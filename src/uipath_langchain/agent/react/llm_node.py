@@ -73,7 +73,13 @@ def create_llm_node(
     """Create LLM node with dynamic tool_choice enforcement.
 
     Controls when to force tool usage based on consecutive thinking steps
-    to prevent infinite loops and ensure progress.
+    to prevent infinite loops and ensure progress. Stall accounting is
+    provider-agnostic, because forcing can be silently downgraded on any
+    transport (Bedrock handlers under thinking, langchain_anthropic) or
+    ignored by a BYOM deployment: after `thinking_messages_limit` tool-less
+    turns tool_choice is forced, one more tool-less turn retries via the
+    forced-extraction call (thinking off, which every provider honors), and
+    a further stall raises THINKING_LIMIT_EXCEEDED.
 
     Args:
         model: The chat model to use
@@ -105,24 +111,29 @@ def create_llm_node(
         static_schema_tools = static_args_handler.initialize(
             bindable_tools, state, input_schema or type(state)
         )
+
         current_tool_choice: Literal["auto", "any"] = tool_choice
-        uses_anthropic_thinking = anthropic_thinking_type(model) is not None
         consecutive_thinking = count_consecutive_thinking_messages(messages)
+        uses_anthropic_thinking = anthropic_thinking_type(model) is not None
         effective_limit = thinking_messages_limit if uses_anthropic_thinking else 0
-        thinking_model_stalled = uses_anthropic_thinking and consecutive_thinking > 0
         call_model: BaseChatModel = model
         call_messages: list[AnyMessage] = messages
         handler = payload_handler
-        if (
-            current_tool_choice == "auto"
-            and not is_conversational
-            and bindable_tools
-            and consecutive_thinking >= effective_limit
-        ):
-            current_tool_choice = "any"
-            if thinking_model_stalled:
-                call_model, call_messages = build_extraction_call(model, messages)
-                handler = get_payload_handler(call_model)
+        if not is_conversational and bindable_tools:
+            if consecutive_thinking > effective_limit + 1:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
+                    title="Agent kept responding without calling a tool.",
+                    detail="The model produced consecutive responses without tool calls "
+                    "even after the forced extraction retry. If you are using a BYOM "
+                    "configuration, verify your model deployment respects tool_choice.",
+                    category=UiPathErrorCategory.SYSTEM,
+                )
+            if consecutive_thinking >= effective_limit:
+                current_tool_choice = "any"
+                if uses_anthropic_thinking and consecutive_thinking > 0:
+                    call_model, call_messages = build_extraction_call(model, messages)
+                    handler = get_payload_handler(call_model)
 
         binding_kwargs = handler.get_tool_binding_kwargs(
             tools=static_schema_tools,

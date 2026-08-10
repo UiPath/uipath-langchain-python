@@ -58,6 +58,9 @@ def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
     non_streaming.bind_tools = MagicMock(return_value=bound)
 
     model = MagicMock()
+    model.additional_model_request_fields = {}
+    model.model_kwargs = {}
+    model.thinking = None
     model.model_copy = MagicMock(return_value=non_streaming)
     return model, non_streaming, bound
 
@@ -145,6 +148,47 @@ class TestCreateConversationalOutputNode:
         assert update_arg.get("disable_streaming") is True
 
     @pytest.mark.asyncio
+    async def test_thinking_config_stripped_for_extraction_call(self):
+        """Providers silently drop forced tool_choice while thinking is on, and this
+        call has no retry fallback — so the node must run thinking-off so the
+        set_conversational_output forcing is honored everywhere."""
+        model, non_streaming, _bound = _make_mock_model()
+        non_streaming.model_copy = MagicMock(return_value=non_streaming)
+        model.additional_model_request_fields = {
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
+            "anthropic_beta": ["x"],
+        }
+
+        create_conversational_output_node(model, _OutputSchema)
+
+        first_update = model.model_copy.call_args_list[0].kwargs["update"]
+        assert first_update["additional_model_request_fields"] == {
+            "anthropic_beta": ["x"]
+        }
+
+    @pytest.mark.asyncio
+    async def test_reasoning_blocks_stripped_from_replayed_history(self):
+        """Thinking blocks from the agent loop can't be replayed on the
+        thinking-off extraction call — Anthropic rejects them."""
+        model, _non_streaming, bound = _make_mock_model()
+        thinking_turn = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "t", "signature": "s"},
+                {"type": "text", "text": "my reply"},
+            ]
+        )
+        state = _make_state(
+            [SystemMessage(content="sys"), HumanMessage(content="hi"), thinking_turn]
+        )
+
+        node = create_conversational_output_node(model, _OutputSchema)
+        await node(state)
+
+        invoked_messages = bound.ainvoke.await_args.args[0]
+        ai_turns = [m for m in invoked_messages if isinstance(m, AIMessage)]
+        assert ai_turns[0].content == [{"type": "text", "text": "my reply"}]
+
+    @pytest.mark.asyncio
     async def test_raises_when_llm_omits_set_conversational_output_call(self):
         """When the internal LLM returns an AIMessage without the expected
         set_conversational_output tool call, the node raises a structured
@@ -161,6 +205,9 @@ class TestCreateConversationalOutputNode:
         non_streaming = MagicMock()
         non_streaming.bind_tools = MagicMock(return_value=bound)
         model = MagicMock()
+        model.additional_model_request_fields = {}
+        model.model_kwargs = {}
+        model.thinking = None
         model.model_copy = MagicMock(return_value=non_streaming)
 
         node = create_conversational_output_node(model, _OutputSchema)
