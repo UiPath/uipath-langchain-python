@@ -97,9 +97,13 @@ MODELS_TO_TEST: list[ModelTestConfig] = [
 
 FILES_TO_TEST = [
     FileInfo(
-        url="https://www.w3schools.com/css/img_5terre.jpg",
-        name="img_5terre.jpg",
-        mime_type="image/jpeg",
+        url=(
+            "https://raw.githubusercontent.com/UiPath/uipath-langchain-python/"
+            "241b5addd4c040720c05f28d819dbc4b885b92eb/"
+            "docs/quick_start_images/invoke_output_light.png"
+        ),
+        name="invoke_output_light.png",
+        mime_type="image/png",
     ),
     FileInfo(
         url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
