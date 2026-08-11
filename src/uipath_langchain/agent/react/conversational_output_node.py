@@ -4,11 +4,6 @@ This intermediate node runs after AGENT for conversational agents whose
 output schema declares custom fields beyond `uipath__agent_response_messages`.
 It performs a focused LLM call with only the `set_conversational_output`
 tool bound and `tool_choice="any"` to extract the structured output for the turn.
-
-The call runs with thinking stripped (and reasoning blocks dropped from the
-replayed history): providers silently remove forced tool_choice while thinking
-is on, and this call has no retry fallback — thinking off is what guarantees
-the forcing is honored.
 """
 
 from typing import TypeVar
@@ -31,7 +26,6 @@ from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..exceptions.licensing import raise_for_provider_http_error
 from ..exceptions.llm import raise_for_llm_client_error
 from ..tools.utils import config_without_streaming
-from .forced_extraction import _strip_reasoning_blocks, _without_thinking
 from .tools.tools import create_set_conversational_output_tool
 from .types import AgentGraphState
 
@@ -55,9 +49,7 @@ def create_conversational_output_node(
         agent_output_schema
     )
     # Disable streaming on this internal LLM call
-    non_streaming_model = _without_thinking(model).model_copy(
-        update={"disable_streaming": True}
-    )
+    non_streaming_model = model.model_copy(update={"disable_streaming": True})
     payload_handler = get_payload_handler(non_streaming_model)
     binding_kwargs = payload_handler.get_tool_binding_kwargs(
         tools=[set_conversational_output_tool],
@@ -70,10 +62,7 @@ def create_conversational_output_node(
     output_prompt = get_generate_output_prompt()
 
     async def conversational_output_node(state: StateT):
-        messages = [
-            *_strip_reasoning_blocks(list(state.messages)),
-            HumanMessage(content=output_prompt),
-        ]
+        messages = [*state.messages, HumanMessage(content=output_prompt)]
         config = config_without_streaming(var_child_runnable_config.get(None))
 
         try:

@@ -16,20 +16,17 @@ from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.chat.handlers import get_payload_handler
-from uipath_langchain.chat.handlers.anthropic import anthropic_thinking_type
+from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..exceptions.licensing import raise_for_provider_http_error
 from ..exceptions.llm import raise_for_llm_client_error
 from ..messages.message_utils import replace_tool_calls
 from ..tools.static_args import StaticArgsHandler
-from .constants import (
-    DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
-    DEFAULT_MAX_LLM_MESSAGES,
-)
+from .constants import DEFAULT_MAX_LLM_MESSAGES
 from .forced_extraction import build_extraction_call
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
-from .utils import count_consecutive_thinking_messages
+from .utils import count_consecutive_tool_less_turns
 
 
 def _filter_control_flow_tool_calls(
@@ -65,29 +62,24 @@ def create_llm_node(
     input_schema: type[InputT] | None = None,
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
-    thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
     tool_choice: Literal["auto", "any"] = "auto",
     parallel_tool_calls: bool = True,
     strict_mode: bool = False,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
-    Controls when to force tool usage based on consecutive thinking steps
-    to prevent infinite loops and ensure progress. Stall accounting is
-    provider-agnostic, because forcing can be silently downgraded on any
-    transport (Bedrock handlers under thinking, langchain_anthropic) or
-    ignored by a BYOM deployment: after `thinking_messages_limit` tool-less
-    turns tool_choice is forced, one more tool-less turn retries via the
-    forced-extraction call (thinking off, which every provider honors), and
-    a further stall raises THINKING_LIMIT_EXCEEDED.
+    Forces tool usage every turn to keep the agent making progress. Forcing can
+    be silently downgraded on any transport (Bedrock handlers under thinking,
+    langchain_anthropic) or ignored by a BYOM deployment, so a tool-less turn is
+    tolerated: Anthropic thinking models retry it via the forced-extraction call
+    (thinking off, which every provider honors), and a second stall raises
+    THINKING_LIMIT_EXCEEDED.
 
     Args:
         model: The chat model to use
         tools: Available tools to bind
         is_conversational: Whether this is a conversational agent
         llm_messages_limit: Maximum number of LLM calls allowed per execution
-        thinking_messages_limit: Max consecutive LLM responses without tool calls
-            before enforcing tool usage. 0 = force tools every time.
     """
     bindable_tools = list(tools) if tools else []
     payload_handler = get_payload_handler(model)
@@ -113,14 +105,14 @@ def create_llm_node(
         )
 
         current_tool_choice: Literal["auto", "any"] = tool_choice
-        consecutive_thinking = count_consecutive_thinking_messages(messages)
-        uses_anthropic_thinking = anthropic_thinking_type(model) is not None
-        effective_limit = thinking_messages_limit if uses_anthropic_thinking else 0
+        consecutive_tool_less = count_consecutive_tool_less_turns(messages)
+        thinking_rejects_forcing = thinking_rejects_forced_tool_choice(model)
         call_model: BaseChatModel = model
         call_messages: list[AnyMessage] = messages
         handler = payload_handler
         if not is_conversational and bindable_tools:
-            if consecutive_thinking > effective_limit + 1:
+            # only one tool_choice=auto call that doesnt return tool is allowed
+            if consecutive_tool_less > 1:
                 raise AgentRuntimeError(
                     code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
                     title="Agent kept responding without calling a tool.",
@@ -129,11 +121,10 @@ def create_llm_node(
                     "configuration, verify your model deployment respects tool_choice.",
                     category=UiPathErrorCategory.SYSTEM,
                 )
-            if consecutive_thinking >= effective_limit:
-                current_tool_choice = "any"
-                if uses_anthropic_thinking and consecutive_thinking > 0:
-                    call_model, call_messages = build_extraction_call(model, messages)
-                    handler = get_payload_handler(call_model)
+            current_tool_choice = "any"
+            if thinking_rejects_forcing and consecutive_tool_less > 0:
+                call_model, call_messages = build_extraction_call(model, messages)
+                handler = get_payload_handler(call_model)
 
         binding_kwargs = handler.get_tool_binding_kwargs(
             tools=static_schema_tools,

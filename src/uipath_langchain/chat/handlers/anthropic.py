@@ -10,29 +10,6 @@ from uipath.runtime.errors import UiPathErrorCategory
 from ..exceptions import ChatModelError, ChatModelErrorCode
 from .base import ModelPayloadHandler
 
-
-def anthropic_thinking_type(model: Any) -> str | None:
-    """The active Anthropic thinking mode for a model ("enabled"/"adaptive"/...), or None.
-
-    Reads the `thinking` dict wherever the transport puts it: native `thinking`, Bedrock
-    Invoke `model_kwargs`, Bedrock Converse `additional_model_request_fields`. Only
-    Anthropic uses this shape — OpenAI/Gemini use other knobs — so non-Anthropic models
-    return None. `{"type": "disabled"}` is the provider's explicit thinking-off value,
-    so it also returns None: every caller means "is thinking active". Null-safe.
-    """
-    invoke = getattr(model, "model_kwargs", None) or {}
-    converse = getattr(model, "additional_model_request_fields", None) or {}
-    candidates = (
-        getattr(model, "thinking", None),
-        invoke.get("thinking") if isinstance(invoke, dict) else None,
-        converse.get("thinking") if isinstance(converse, dict) else None,
-    )
-    for thinking in candidates:
-        if isinstance(thinking, dict) and isinstance(thinking.get("type"), str):
-            return None if thinking["type"] == "disabled" else thinking["type"]
-    return None
-
-
 FAULTY_STOP_REASONS: set[str] = {
     "max_tokens",
     "refusal",

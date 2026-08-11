@@ -444,13 +444,14 @@ class TestLLMNodeProviderErrorHandling:
 
 
 class TestForcedExtractionEscalation:
-    """Stall accounting in the LLM node. Anthropic thinking models get a buffer of
-    unforced turns (forcing is incompatible with their thinking) and a thinking-off
-    extraction retry on the first stall; every other provider forces from turn 1 and is
-    never extracted (forcing works for it, and the extraction's reasoning-strip would
-    break it, e.g. OpenAI 400s on a continuation with its reasoning removed). A stall
-    past the buffer + retry fails deterministically. Not gated on tool_choice='auto',
-    since forcing can be downgraded on the wire (Bedrock handlers, langchain_anthropic)."""
+    """Stall accounting in the LLM node. Tool usage is forced every turn. Anthropic
+    thinking models can't be plain-forced (turn 1's forced `any` is downgraded to `auto`
+    by the handler so they reason), so their first stall retries via a thinking-off
+    extraction call; every other provider forces from turn 1 and is never extracted
+    (forcing works for it, and the extraction's reasoning-strip would break it, e.g.
+    OpenAI 400s on a continuation with its reasoning removed). A second stall fails
+    deterministically. Not gated on tool_choice='auto', since forcing can be downgraded
+    on the wire (Bedrock handlers, langchain_anthropic)."""
 
     def _thinking_model(self) -> Any:
         model = _StubAzureChatOpenAI.model_construct()
@@ -572,8 +573,8 @@ class TestForcedExtractionEscalation:
 
     @pytest.mark.asyncio
     async def test_plain_model_forces_from_first_turn(self) -> None:
-        """A non-Anthropic model has no reasoning buffer (effective limit 0): it forces
-        tool_choice from turn 1 regardless of the configured limit."""
+        """A non-Anthropic model forces tool_choice from turn 1 (it reasons and calls
+        the tool in the same forced turn), so no reasoning buffer is needed."""
         model = self._plain_model()
         model.ainvoke = AsyncMock(
             return_value=AIMessage(
@@ -585,34 +586,6 @@ class TestForcedExtractionEscalation:
         )
         tool = Mock(spec=BaseTool)
         tool.name = "t"
-        node = create_llm_node(model, [tool], thinking_messages_limit=2)
+        node = create_llm_node(model, [tool])
         await node(AgentGraphState(messages=[HumanMessage(content="q")]))
         assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
-
-    @pytest.mark.asyncio
-    async def test_thinking_model_gets_buffer_before_forcing(self) -> None:
-        """A thinking model keeps its configured buffer of tool-less turns before the
-        node forces tool_choice, so early reasoning turns aren't suppressed."""
-        model = self._thinking_model()
-        model.ainvoke = AsyncMock(return_value=AIMessage(content="reasoning..."))
-        tool = Mock(spec=BaseTool)
-        tool.name = "t"
-        node = create_llm_node(model, [tool], thinking_messages_limit=2)
-        await node(AgentGraphState(messages=[HumanMessage(content="q")]))
-        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
-
-    @pytest.mark.asyncio
-    async def test_stall_within_buffer_does_not_force_or_escalate(self) -> None:
-        """One stalled turn under a limit of 2 stays unforced — the buffer is
-        consumed before any forcing or extraction happens."""
-        model = self._thinking_model()
-        model.ainvoke = AsyncMock(return_value=AIMessage(content="reasoning..."))
-        tool = Mock(spec=BaseTool)
-        tool.name = "t"
-        node = create_llm_node(model, [tool], thinking_messages_limit=2)
-        with patch(
-            "uipath_langchain.agent.react.llm_node.build_extraction_call"
-        ) as spy:
-            await node(self._stalled_state())
-        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
-        spy.assert_not_called()

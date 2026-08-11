@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict
 from uipath_langchain.agent.react.forced_extraction import (
     _strip_reasoning_blocks,
     _with_extraction_nudge,
-    _without_thinking,
 )
+from uipath_langchain.chat.thinking import strip_thinking
 
 
 class _FakeConverse(BaseModel):
@@ -34,8 +34,8 @@ class _FakeNative(BaseModel):
     thinking: dict[str, Any] | None = None
 
 
-class TestWithoutThinking:
-    """_without_thinking removes reasoning config across transports, keeping the rest."""
+class TestStripThinking:
+    """strip_thinking removes reasoning config across transports, keeping the rest."""
 
     def test_converse_removes_thinking_keeps_others(self) -> None:
         model = _FakeConverse(
@@ -44,7 +44,7 @@ class TestWithoutThinking:
                 "anthropic_beta": ["x"],
             }
         )
-        result = _without_thinking(model)  # type: ignore[arg-type]
+        result = strip_thinking(model)  # type: ignore[arg-type]
         assert result.additional_model_request_fields == {"anthropic_beta": ["x"]}
 
     def test_converse_removes_thinking_and_output_config(self) -> None:
@@ -54,24 +54,24 @@ class TestWithoutThinking:
                 "output_config": {"effort": "high"},
             }
         )
-        result = _without_thinking(model)  # type: ignore[arg-type]
+        result = strip_thinking(model)  # type: ignore[arg-type]
         assert result.additional_model_request_fields == {}
 
     def test_invoke_removes_thinking_from_model_kwargs(self) -> None:
         model = _FakeInvoke(
             model_kwargs={"thinking": {"type": "enabled"}, "top_p": 0.9}
         )
-        result = _without_thinking(model)  # type: ignore[arg-type]
+        result = strip_thinking(model)  # type: ignore[arg-type]
         assert result.model_kwargs == {"top_p": 0.9}
 
     def test_native_clears_thinking_attribute(self) -> None:
         model = _FakeNative(thinking={"type": "adaptive"})
-        result = _without_thinking(model)  # type: ignore[arg-type]
+        result = strip_thinking(model)  # type: ignore[arg-type]
         assert result.thinking is None
 
     def test_no_thinking_returns_same_instance(self) -> None:
         model = _FakeConverse(additional_model_request_fields={"anthropic_beta": ["x"]})
-        assert _without_thinking(model) is model  # type: ignore[arg-type]
+        assert strip_thinking(model) is model  # type: ignore[arg-type]
 
 
 class TestStripReasoningBlocks:
