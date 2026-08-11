@@ -1,10 +1,13 @@
 """Tests for jsonschema_pydantic_converter — create_model() and create_output_model()."""
 
 import copy
+import importlib
 import logging
+import sys
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from uipath_langchain.agent.exceptions import AgentStartupError
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
@@ -502,3 +505,92 @@ class TestCreateOutputModel:
             create_output_model(schema, "my_tool")
         assert "my_tool" in caplog.text
         assert "#/$defs/Nullableofdecimal" in caplog.text
+
+
+# --- Dynamic module registration (checkpoint-deserialization safety) ---
+
+
+class TestDynamicModuleRegistration:
+    """Generated classes must resolve to themselves by (module, class name).
+
+    LangGraph checkpoint deserialization reconstructs pydantic values via
+    ``getattr(import_module(cls.__module__), cls.__name__)``; a same-named
+    class from another schema conversion must never shadow them.
+    """
+
+    @staticmethod
+    def _generated_classes(model: type) -> list[type]:
+        module = sys.modules[model.__module__]
+        return [
+            attr
+            for attr in vars(module).values()
+            if isinstance(attr, type) and issubclass(attr, BaseModel)
+        ]
+
+    def test_classes_from_different_schemas_resolve_by_qualified_name(self) -> None:
+        first = create_model(
+            {
+                "type": "object",
+                "properties": {"details": {"$ref": "#/$defs/Details"}},
+                "$defs": {
+                    "Details": {
+                        "type": "object",
+                        "properties": {"site": {"type": "string"}},
+                    }
+                },
+            }
+        )
+        second = create_model(
+            {
+                "type": "object",
+                "properties": {"topic": {"$ref": "#/$defs/Topic"}},
+                "$defs": {
+                    "Topic": {
+                        "type": "object",
+                        "properties": {"kind": {"type": "number"}},
+                    }
+                },
+            }
+        )
+
+        assert first.__module__ != second.__module__
+
+        for cls in [
+            *self._generated_classes(first),
+            *self._generated_classes(second),
+        ]:
+            resolved = getattr(importlib.import_module(cls.__module__), cls.__name__)
+            assert resolved is cls, (
+                f"{cls.__module__}.{cls.__name__} resolved to a different class"
+            )
+
+    def test_generated_models_validate_their_own_schema(self) -> None:
+        model = create_model(
+            {
+                "type": "object",
+                "properties": {"details": {"$ref": "#/$defs/Details"}},
+                "$defs": {
+                    "Details": {
+                        "type": "object",
+                        "properties": {"site": {"type": "string"}},
+                    }
+                },
+            }
+        )
+        # a later conversion with the same generic type names must not affect it
+        create_model(
+            {
+                "type": "object",
+                "properties": {"other": {"$ref": "#/$defs/Other"}},
+                "$defs": {
+                    "Other": {
+                        "type": "object",
+                        "properties": {"kind": {"type": "number"}},
+                        "required": ["kind"],
+                    }
+                },
+            }
+        )
+
+        instance = model.model_validate({"details": {"site": "syd"}})
+        assert model.model_validate(instance) is not None
