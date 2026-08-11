@@ -9,21 +9,10 @@ from langchain_core.tools import BaseTool
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
-from .anthropic import anthropic_thinking_type
+from ..thinking import thinking_rejects_forced_tool_choice
 from .base import ModelPayloadHandler
 
 logger = logging.getLogger(__name__)
-
-
-def bedrock_rejects_forced_tool_choice(thinking_type: str | None) -> bool:
-    """Whether to drop forced tool_choice to 'auto' on Bedrock.
-
-    Bedrock rejects forcing under any active thinking mode, so we downgrade whenever
-    thinking is on ("disabled" keeps forcing intact — Bedrock accepts it). Termination
-    is still guaranteed by the thinking-off extraction fallback (see
-    agent/react/forced_extraction.py).
-    """
-    return thinking_type is not None and thinking_type != "disabled"
 
 
 # --- Converse API constants ---
@@ -98,9 +87,7 @@ class BedrockInvokePayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool | None = None,
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        if tool_choice == "any" and bedrock_rejects_forced_tool_choice(
-            anthropic_thinking_type(self.model)
-        ):
+        if tool_choice == "any" and thinking_rejects_forced_tool_choice(self.model):
             logger.warning(
                 "Bedrock rejects forced tool_choice while thinking is active; "
                 "downgrading tool_choice 'any' -> 'auto'."
@@ -151,9 +138,7 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool | None = None,
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        if tool_choice == "any" and bedrock_rejects_forced_tool_choice(
-            anthropic_thinking_type(self.model)
-        ):
+        if tool_choice == "any" and thinking_rejects_forced_tool_choice(self.model):
             logger.warning(
                 "Bedrock rejects forced tool_choice while thinking is active; "
                 "downgrading tool_choice 'any' -> 'auto'."

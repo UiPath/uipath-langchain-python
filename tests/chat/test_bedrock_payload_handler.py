@@ -6,12 +6,11 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from uipath_langchain.chat.exceptions import ChatModelError
-from uipath_langchain.chat.handlers.anthropic import anthropic_thinking_type
 from uipath_langchain.chat.handlers.bedrock import (
     BedrockConversePayloadHandler,
     BedrockInvokePayloadHandler,
-    bedrock_rejects_forced_tool_choice,
 )
+from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
 
 # ---------------------------------------------------------------------------
 # Fake model factories
@@ -351,8 +350,9 @@ class TestBedrockThinkingDowngrade:
         assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
 
 
-class TestBedrockRejectsForcedToolChoice:
-    """The downgrade predicate: forcing is rejected whenever thinking is active."""
+class TestThinkingRejectsForcedToolChoice:
+    """The downgrade predicate: forcing is rejected iff active thinking is present,
+    read from whichever transport carries the thinking dict."""
 
     @pytest.mark.parametrize(
         "thinking_type,expected",
@@ -361,40 +361,23 @@ class TestBedrockRejectsForcedToolChoice:
             ("adaptive", True),
             ("interleaved", True),
             ("disabled", False),
-            (None, False),
         ],
     )
-    def test_rejects_when_thinking_active(
-        self, thinking_type: str | None, expected: bool
-    ) -> None:
-        assert bedrock_rejects_forced_tool_choice(thinking_type) is expected
+    def test_mode_decides_rejection(self, thinking_type: str, expected: bool) -> None:
+        model = make_invoke_model(thinking={"type": thinking_type})
+        assert thinking_rejects_forced_tool_choice(model) is expected
 
-
-class TestThinkingTypeDetection:
-    """Unit tests for anthropic_thinking_type across transports."""
-
-    def test_type_from_native_attribute(self) -> None:
+    def test_reads_native_thinking_attribute(self) -> None:
         model = type("FakeChatAnthropic", (), {"thinking": {"type": "adaptive"}})()
-        assert anthropic_thinking_type(model) == "adaptive"
+        assert thinking_rejects_forced_tool_choice(model) is True
 
-    def test_type_from_invoke_model_kwargs(self) -> None:
-        assert anthropic_thinking_type(
-            make_invoke_model(thinking={"type": "enabled"})
-        ) == ("enabled")
-
-    def test_type_from_converse_request_fields(self) -> None:
+    def test_reads_converse_request_fields(self) -> None:
         model = make_converse_model(thinking={"type": "enabled"})
-        assert anthropic_thinking_type(model) == "enabled"
+        assert thinking_rejects_forced_tool_choice(model) is True
 
-    def test_type_none_when_absent(self) -> None:
-        assert anthropic_thinking_type(make_invoke_model()) is None
+    def test_false_when_thinking_absent(self) -> None:
+        assert thinking_rejects_forced_tool_choice(make_invoke_model()) is False
 
-    def test_type_none_when_disabled(self) -> None:
-        """'disabled' is Anthropic's explicit thinking-off value, not an active mode."""
-        assert (
-            anthropic_thinking_type(make_invoke_model(thinking={"type": "disabled"}))
-            is None
-        )
-
-    def test_type_none_when_thinking_not_dict(self) -> None:
-        assert anthropic_thinking_type(make_invoke_model(thinking="enabled")) is None
+    def test_false_when_thinking_not_dict(self) -> None:
+        model = make_invoke_model(thinking="enabled")
+        assert thinking_rejects_forced_tool_choice(model) is False

@@ -11,42 +11,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from uipath.agent.react import END_EXECUTION_TOOL
 
-from .utils import _REASONING_BLOCK_TYPES
+from uipath_langchain.chat.thinking import is_reasoning_block, strip_thinking
 
 _END_EXECUTION_NAME = getattr(
     END_EXECUTION_TOOL.name, "value", str(END_EXECUTION_TOOL.name)
 )
-
-
-def _without_thinking(model: BaseChatModel) -> BaseChatModel:
-    """Copy of the model with thinking config stripped, so forcing is honored.
-
-    Thinking lives in a different place per transport: native `thinking`, Bedrock Invoke
-    `model_kwargs`, Bedrock Converse `additional_model_request_fields`.
-    """
-    updates: dict[str, object] = {}
-    request_fields = getattr(model, "additional_model_request_fields", None)
-    if isinstance(request_fields, dict) and (
-        "thinking" in request_fields or "output_config" in request_fields
-    ):
-        updates["additional_model_request_fields"] = {
-            k: v
-            for k, v in request_fields.items()
-            if k not in ("thinking", "output_config")
-        }
-    model_kwargs = getattr(model, "model_kwargs", None)
-    if isinstance(model_kwargs, dict) and "thinking" in model_kwargs:
-        updates["model_kwargs"] = {
-            k: v for k, v in model_kwargs.items() if k != "thinking"
-        }
-    if getattr(model, "thinking", None) is not None:
-        updates["thinking"] = None
-    if not updates:
-        return model
-    try:
-        return model.model_copy(update=updates)
-    except Exception:
-        return model
 
 
 def _strip_reasoning_blocks(messages: list[AnyMessage]) -> list[AnyMessage]:
@@ -58,12 +27,7 @@ def _strip_reasoning_blocks(messages: list[AnyMessage]) -> list[AnyMessage]:
     for message in messages:
         if isinstance(message, AIMessage) and isinstance(message.content, list):
             kept = [
-                block
-                for block in message.content
-                if not (
-                    isinstance(block, dict)
-                    and block.get("type") in _REASONING_BLOCK_TYPES
-                )
+                block for block in message.content if not is_reasoning_block(block)
             ]
             if len(kept) != len(message.content):
                 # a turn that was only reasoning is now empty — drop it
@@ -104,6 +68,6 @@ def build_extraction_call(
 ) -> tuple[BaseChatModel, list[AnyMessage]]:
     """The (model, messages) for the extraction call: thinking off, reasoning blocks
     dropped, and a nudge to call end_execution — the caller then forces tool_choice."""
-    return _without_thinking(model), _with_extraction_nudge(
+    return strip_thinking(model), _with_extraction_nudge(
         _strip_reasoning_blocks(messages)
     )
