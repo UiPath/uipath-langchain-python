@@ -19,8 +19,10 @@ from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from ..exceptions.licensing import raise_for_provider_http_error
-from ..exceptions.llm import raise_for_llm_client_error
+from ..exceptions.llm import (
+    raise_for_llm_client_error,
+    raise_for_provider_http_error,
+)
 from ..messages.message_utils import replace_tool_calls
 from ..tools.static_args import StaticArgsHandler
 from .constants import DEFAULT_MAX_LLM_MESSAGES
