@@ -9,6 +9,9 @@ This sample shows how to build an AI assistant using LangGraph and Tavily search
 ## [Company research agent](company-research-agent)
 This sample demonstrates how to create an agent that researches companies and develops outreach strategies using web search capabilities.
 
+## [Data Fabric coded agent](datafabric-coded-agent)
+This sample demonstrates a coded LangGraph agent using the same Data Fabric query-tool core as low-code entity-set contexts, including runtime entity and folder overrides.
+
 ## [Email organizer agent](email-organizer-agent)
 This sample shows how to automate Outlook inbox organization with AI-powered rule suggestions and human-in-the-loop approval.
 
