@@ -23,8 +23,10 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from ..exceptions.licensing import raise_for_provider_http_error
-from ..exceptions.llm import raise_for_llm_client_error
+from ..exceptions.llm import (
+    raise_for_llm_client_error,
+    raise_for_provider_http_error,
+)
 from ..tools.utils import config_without_streaming
 from .tools.tools import create_set_conversational_output_tool
 from .types import AgentGraphState

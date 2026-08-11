@@ -58,9 +58,6 @@ def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
     non_streaming.bind_tools = MagicMock(return_value=bound)
 
     model = MagicMock()
-    model.additional_model_request_fields = {}
-    model.model_kwargs = {}
-    model.thinking = None
     model.model_copy = MagicMock(return_value=non_streaming)
     return model, non_streaming, bound
 
@@ -164,9 +161,6 @@ class TestCreateConversationalOutputNode:
         non_streaming = MagicMock()
         non_streaming.bind_tools = MagicMock(return_value=bound)
         model = MagicMock()
-        model.additional_model_request_fields = {}
-        model.model_kwargs = {}
-        model.thinking = None
         model.model_copy = MagicMock(return_value=non_streaming)
 
         node = create_conversational_output_node(model, _OutputSchema)
