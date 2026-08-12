@@ -1,8 +1,8 @@
-# MCP Python SDK 2.0 upgrade review
+# Migrating to MCP Python SDK 2.0
 
 ## Outcome
 
-`uipath-langchain-python` now pins `mcp==2.0.0`, the latest stable MCP Python
+`uipath-langchain` 0.17.0 pins `mcp==2.0.0`, the latest stable MCP Python
 SDK in the local upstream checkout. The lockfile resolves its new `mcp-types`
 and `httpx2` dependencies. The unused `langchain-mcp-adapters==0.2.1` direct
 dependency was removed; the core package does not import it. Standalone samples
@@ -77,6 +77,25 @@ credential-leak risk without improving the structured error path.
 | Transport failures may surface through an `ExceptionGroup` | A request receives an `MCPError` | Retry logic catches `MCPError` directly. |
 | Recalling `ClientSession.initialize()` could be used as local recovery logic | Initialization is idempotent per `ClientSession` | Recovery now replaces the transport and `ClientSession`, then performs a fresh handshake. |
 | Experimental Tasks APIs | Removed | No UiPath code used them. |
+
+### `McpClient` result-model migration
+
+`McpClient` is a public low-level API and continues to return the MCP SDK's raw
+Pydantic result models. SDK 2.0 renamed their Python attributes to snake case.
+Callers upgrading to `uipath-langchain` 0.17.0 must update direct attribute
+access as follows:
+
+| SDK 1.x Python attribute | SDK 2.0 Python attribute |
+| --- | --- |
+| `ListToolsResult.nextCursor` | `ListToolsResult.next_cursor` |
+| `Tool.inputSchema` | `Tool.input_schema` |
+| `Tool.outputSchema` | `Tool.output_schema` |
+| `CallToolResult.structuredContent` | `CallToolResult.structured_content` |
+| `CallToolResult.isError` | `CallToolResult.is_error` |
+
+The JSON wire format and `model_dump(by_alias=True)` output remain camelCase.
+UiPath's higher-level LangChain tools perform this migration internally; only
+consumers that use exported `McpClient` results directly need code changes.
 
 ## Protocol-version and backward-compatibility behavior
 
