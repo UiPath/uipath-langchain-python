@@ -18,8 +18,12 @@ from mcp.types import (
     INVALID_REQUEST,
     METHOD_NOT_FOUND,
     CallToolResult,
+    Implementation,
+    InitializeResult,
     ListToolsResult,
+    ServerCapabilities,
 )
+from mcp.types.version import HANDSHAKE_PROTOCOL_VERSIONS
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
@@ -34,6 +38,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+LEGACY_STREAMABLE_HTTP_VERSIONS = tuple(
+    sorted(
+        version for version in HANDSHAKE_PROTOCOL_VERSIONS if version >= "2025-03-26"
+    )
+)
 
 
 class SessionInfoFactory:
@@ -252,17 +262,54 @@ class McpClient(UiPathDisposableProtocol):
             f"Initializing MCP session (session_info id: {existing_session_id})"
         )
 
-        if existing_session_id is None:
-            await self._session.initialize()
+        if existing_session_id is not None:
+            await self._resume_persisted_session()
+            return
 
-            # The transport calls set_session_id during initialize,
-            # so we just read the current value here.
-            new_session_id = (
-                await self._session_info.get_session_id()
-                if self._session_info
-                else None
+        await self._session.initialize()
+
+        # The transport calls set_session_id during initialize,
+        # so we just read the current value here.
+        new_session_id = (
+            await self._session_info.get_session_id() if self._session_info else None
+        )
+        logger.info(f"MCP session initialized with session ID: {new_session_id}")
+
+    async def _resume_persisted_session(self) -> None:
+        """Validate and adopt an externally restored legacy session."""
+        if self._session is None or self._session_info is None:
+            raise RuntimeError("Cannot resume MCP session: client not initialized")
+
+        # Probe oldest first. A 2025-03 server may ignore a newer, then-unknown
+        # protocol header and otherwise produce a false version match.
+        for protocol_version in LEGACY_STREAMABLE_HTTP_VERSIONS:
+            self._session_info.protocol_version = protocol_version
+            try:
+                await self._session.send_ping()
+            except MCPError as error:
+                if error.code == CONNECTION_CLOSED:
+                    raise
+                continue
+
+            self._session.adopt(
+                InitializeResult(
+                    protocolVersion=protocol_version,
+                    capabilities=ServerCapabilities(),
+                    serverInfo=Implementation(
+                        name="restored-session",
+                        version="unknown",
+                    ),
+                )
             )
-            logger.info(f"MCP session initialized with session ID: {new_session_id}")
+            logger.info(
+                "Reusing externally persisted MCP session at %s", protocol_version
+            )
+            return
+
+        logger.info("Persisted MCP session was rejected; initializing a new session")
+        self._session_info.protocol_version = None
+        await self._session_info.set_session_id(None)
+        await self._session.initialize()
 
     async def _ensure_session(self) -> ClientSession:
         """Ensure client and session are initialized, return the session.

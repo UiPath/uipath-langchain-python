@@ -4,6 +4,8 @@ The MCP SDK owns the transport implementation. UiPath only adds asynchronous,
 externally-persistable session ID storage through :class:`SessionInfo`.
 """
 
+import json
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,6 +16,9 @@ from mcp.client.streamable_http import (
 )
 
 MCP_SESSION_ID = "mcp-session-id"
+MCP_PROTOCOL_VERSION = "mcp-protocol-version"
+
+logger = logging.getLogger(__name__)
 
 
 class SessionInfo:
@@ -21,6 +26,7 @@ class SessionInfo:
 
     def __init__(self, session_id: str | None = None) -> None:
         self.session_id = session_id
+        self.protocol_version: str | None = None
 
     async def get_session_id(self) -> str | None:
         """Return the current session ID, or ``None`` when no session exists."""
@@ -51,6 +57,8 @@ async def streamable_http_client(
         follow_redirects=True,
         timeout=httpx2.Timeout(30, read=300),
     )
+    restored_session_id = await info.get_session_id()
+    sdk_session_id: str | None = None
 
     async def apply_session_id(request: httpx2.Request) -> None:
         session_id = await info.get_session_id()
@@ -58,11 +66,40 @@ async def streamable_http_client(
             request.headers.pop(MCP_SESSION_ID, None)
         else:
             request.headers[MCP_SESSION_ID] = session_id
+        if (
+            info.protocol_version is not None
+            and MCP_PROTOCOL_VERSION not in request.headers
+        ):
+            request.headers[MCP_PROTOCOL_VERSION] = info.protocol_version
 
     async def capture_session_id(response: httpx2.Response) -> None:
+        nonlocal sdk_session_id
         session_id = response.headers.get(MCP_SESSION_ID)
         if session_id is not None:
+            try:
+                request_body = json.loads(response.request.content)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                request_body = None
+            if (
+                isinstance(request_body, dict)
+                and request_body.get("method") == "initialize"
+            ):
+                sdk_session_id = session_id
             await info.set_session_id(session_id)
+
+    async def terminate_restored_session() -> None:
+        current_session_id = await info.get_session_id()
+        if (
+            not terminate_on_close
+            or restored_session_id is None
+            or current_session_id != restored_session_id
+            or current_session_id == sdk_session_id
+        ):
+            return
+        try:
+            await client.delete(url)
+        except Exception as error:  # pragma: no cover - best-effort cleanup
+            logger.warning("Persisted MCP session termination failed: %s", error)
 
     client.event_hooks["request"].append(apply_session_id)
     client.event_hooks["response"].append(capture_session_id)
@@ -74,14 +111,20 @@ async def streamable_http_client(
                     http_client=client,
                     terminate_on_close=terminate_on_close,
                 ) as streams:
-                    yield streams
+                    try:
+                        yield streams
+                    finally:
+                        await terminate_restored_session()
         else:
             async with sdk_streamable_http_client(
                 url,
                 http_client=client,
                 terminate_on_close=terminate_on_close,
             ) as streams:
-                yield streams
+                try:
+                    yield streams
+                finally:
+                    await terminate_restored_session()
     finally:
         client.event_hooks["request"].remove(apply_session_id)
         client.event_hooks["response"].remove(capture_session_id)

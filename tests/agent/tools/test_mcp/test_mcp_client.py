@@ -27,12 +27,14 @@ class LegacyMcpEndpoint:
         failed_tool_message: str | None = None,
         block_initialize_on: int | None = None,
         fail_initialize_on: set[int] | None = None,
+        rejected_session_ids: set[str] | None = None,
     ) -> None:
         self.protocol_version = protocol_version
         self.failed_tool_calls = failed_tool_calls
         self.failed_tool_message = failed_tool_message
         self.block_initialize_on = block_initialize_on
         self.fail_initialize_on = fail_initialize_on or set()
+        self.rejected_session_ids = rejected_session_ids or set()
         self.initialize_blocked = asyncio.Event()
         self.release_initialize = asyncio.Event()
         self.methods: list[str] = []
@@ -85,6 +87,34 @@ class LegacyMcpEndpoint:
             )
         if method == "notifications/initialized":
             return httpx2.Response(202)
+        if method == "ping":
+            if request.headers.get("mcp-session-id") in self.rejected_session_ids:
+                return httpx2.Response(
+                    404,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Session not found",
+                        },
+                    },
+                )
+            if request.headers.get("mcp-protocol-version") != self.protocol_version:
+                return httpx2.Response(
+                    400,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Unsupported protocol version",
+                        },
+                    },
+                )
+            return self._json_response(body["id"], {})
         if method == "tools/list":
             return self._json_response(
                 body["id"],
@@ -293,12 +323,14 @@ async def test_replaces_session_after_official_session_not_found_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("protocol_version", ["2025-03-26", "2025-06-18", "2025-11-25"])
 async def test_persisted_session_is_reused_without_initialize(
+    protocol_version: str,
     mcp_resource_config: AgentMcpResourceConfig,
     mock_uipath_sdk: MagicMock,
 ) -> None:
     """The UiPath SessionInfo extension injects an externally restored session ID."""
-    endpoint = LegacyMcpEndpoint()
+    endpoint = LegacyMcpEndpoint(protocol_version)
     session_info = SessionInfo("persisted-session")
 
     class PersistedFactory(SessionInfoFactory):
@@ -317,6 +349,43 @@ async def test_persisted_session_is_reused_without_initialize(
         assert endpoint.headers_for("tools/call")[0]["mcp-session-id"] == (
             "persisted-session"
         )
+        assert (
+            endpoint.headers_for("tools/call")[0]["mcp-protocol-version"]
+            == protocol_version
+        )
+
+    assert endpoint.delete_count == 1
+    assert endpoint.headers_for("DELETE")[0]["mcp-session-id"] == "persisted-session"
+    assert endpoint.headers_for("DELETE")[0]["mcp-protocol-version"] == protocol_version
+
+
+@pytest.mark.asyncio
+async def test_rejected_persisted_session_is_initialized_and_deleted_once(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A stale restored ID is replaced and only the fresh SDK session is deleted."""
+    endpoint = LegacyMcpEndpoint(rejected_session_ids={"expired-session"})
+    session_info = SessionInfo("expired-session")
+
+    class PersistedFactory(SessionInfoFactory):
+        def create_session(self, mcp_server: Any) -> SessionInfo:
+            return session_info
+
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        session_info_factory=PersistedFactory(),
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 1
+        assert await client.get_session_id() == "session-1"
+
+    assert endpoint.delete_count == 1
+    assert endpoint.headers_for("DELETE")[0]["mcp-session-id"] == "session-1"
 
 
 @pytest.mark.asyncio
