@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx2
 import pytest
 from mcp.shared.exceptions import MCPError
-from mcp.types import INVALID_REQUEST, METHOD_NOT_FOUND
+from mcp.types import CONNECTION_CLOSED, INVALID_REQUEST, METHOD_NOT_FOUND
 from uipath.agent.models.agent import AgentMcpResourceConfig, AgentMcpTool
 
 from uipath_langchain.agent.tools.mcp import McpClient, SessionInfo, SessionInfoFactory
@@ -319,13 +319,14 @@ async def test_concurrent_recovery_does_not_replace_a_new_session(
     client._client_initialized = True
     client._session = replacement_session
     client._session_info = SessionInfo("replacement-id")
-    client._open_connection = AsyncMock()
+    open_connection = AsyncMock()
 
-    await client._reinitialize_session(failed_session)
+    with patch.object(client, "_open_connection", open_connection):
+        await client._reinitialize_session(failed_session)
 
     assert client._session is replacement_session
     assert await client.get_session_id() == "replacement-id"
-    client._open_connection.assert_not_awaited()
+    open_connection.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -385,8 +386,43 @@ async def test_raises_on_missing_mcp_url(
             await client.call_tool("test_tool", {"query": "test"})
 
 
+@pytest.mark.asyncio
+async def test_initialization_failure_cleans_state_and_allows_retry(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A failed handshake releases both stacks and leaves the client reusable."""
+    endpoint = LegacyMcpEndpoint()
+
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        with patch.object(
+            client,
+            "_initialize_session",
+            AsyncMock(side_effect=RuntimeError("initialize failed")),
+        ):
+            with pytest.raises(RuntimeError, match="initialize failed"):
+                await client.call_tool("test_tool", {"query": "first"})
+
+        assert client._stack is None
+        assert client._connection_stack is None
+        assert client._http_client is None
+        assert client._session_info is None
+        assert client._session is None
+        assert not client.is_client_initialized
+
+        result = await client.call_tool("test_tool", {"query": "second"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 1
+
+
 def test_only_session_specific_invalid_request_is_retryable() -> None:
     """Ordinary INVALID_REQUEST errors must not be mislabeled as disconnects."""
+    assert McpClient.is_session_error(
+        MCPError(code=CONNECTION_CLOSED, message="Connection closed")
+    )
     assert McpClient.is_session_error(
         MCPError(code=INVALID_REQUEST, message="Session terminated")
     )
