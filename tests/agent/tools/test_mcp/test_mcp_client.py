@@ -1,5 +1,6 @@
 """Tests for the MCP 2 Streamable HTTP client integration."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,10 +25,16 @@ class LegacyMcpEndpoint:
         *,
         failed_tool_calls: int = 0,
         failed_tool_message: str | None = None,
+        block_initialize_on: int | None = None,
+        fail_initialize_on: set[int] | None = None,
     ) -> None:
         self.protocol_version = protocol_version
         self.failed_tool_calls = failed_tool_calls
         self.failed_tool_message = failed_tool_message
+        self.block_initialize_on = block_initialize_on
+        self.fail_initialize_on = fail_initialize_on or set()
+        self.initialize_blocked = asyncio.Event()
+        self.release_initialize = asyncio.Event()
         self.methods: list[str] = []
         self.request_headers: list[tuple[str, httpx2.Headers]] = []
         self.initialize_count = 0
@@ -51,6 +58,22 @@ class LegacyMcpEndpoint:
 
         if method == "initialize":
             self.initialize_count += 1
+            if self.initialize_count == self.block_initialize_on:
+                self.initialize_blocked.set()
+                await self.release_initialize.wait()
+            if self.initialize_count in self.fail_initialize_on:
+                return httpx2.Response(
+                    400,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Replacement initialization failed",
+                        },
+                    },
+                )
             return self._json_response(
                 body["id"],
                 {
@@ -363,6 +386,90 @@ async def test_concurrent_recovery_does_not_replace_a_new_session(
     assert client._session is replacement_session
     assert await client.get_session_id() == "replacement-id"
     open_connection.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_continues_when_failed_connection_cleanup_raises(
+    mcp_resource_config: AgentMcpResourceConfig,
+) -> None:
+    """Closing the failed stack cannot mask recovery of the MCP connection."""
+    client = McpClient(config=mcp_resource_config)
+    failed_session = MagicMock()
+    failed_stack = MagicMock()
+    failed_stack.aclose = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+    client._client_initialized = True
+    client._session = failed_session
+    client._connection_stack = failed_stack
+    client._session_info = SessionInfo("failed-session")
+    client._session_info.protocol_version = "2025-03-26"
+    open_connection = AsyncMock()
+
+    with patch.object(client, "_open_connection", open_connection):
+        await client._reinitialize_session(failed_session)
+
+    failed_stack.aclose.assert_awaited_once()
+    open_connection.assert_awaited_once()
+    assert await client.get_session_id() is None
+    assert client._session_info.protocol_version is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_call_waits_for_recovery_initialization(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A caller cannot use a replacement session before its handshake finishes."""
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        block_initialize_on=2,
+    )
+
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        recovery_call = asyncio.create_task(
+            client.call_tool("test_tool", {"query": "recover"})
+        )
+        await asyncio.wait_for(endpoint.initialize_blocked.wait(), timeout=2)
+
+        concurrent_list = asyncio.create_task(client.list_tools(force_refresh=True))
+        await asyncio.sleep(0)
+        assert not concurrent_list.done()
+
+        endpoint.release_initialize.set()
+        call_result, list_result = await asyncio.gather(
+            recovery_call,
+            concurrent_list,
+        )
+
+        assert call_result.structured_content == {"result": "Success from test_tool"}
+        assert list_result.tools[0].name == "test_tool"
+
+
+@pytest.mark.asyncio
+async def test_later_call_recovers_after_replacement_initialization_failure(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A failed replacement does not strand the client without a session."""
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        fail_initialize_on={2},
+    )
+
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        with pytest.raises(MCPError, match="Replacement initialization failed"):
+            await client.call_tool("test_tool", {"query": "first"})
+
+        assert client.is_client_initialized
+        assert client._session is None
+
+        result = await client.call_tool("test_tool", {"query": "second"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 3
 
 
 @pytest.mark.asyncio

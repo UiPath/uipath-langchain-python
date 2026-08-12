@@ -273,14 +273,32 @@ class McpClient(UiPathDisposableProtocol):
         Returns:
             The initialized ClientSession.
         """
-        if not self._client_initialized:
-            async with self._lock:
-                if not self._client_initialized:
-                    await self._initialize_client()
+        # Always cross the lifecycle lock. Recovery creates the replacement
+        # ClientSession before its initialize handshake completes, so a lock-free
+        # fast path could expose a half-initialized session to another operation.
+        async with self._lock:
+            if not self._client_initialized:
+                await self._initialize_client()
+            elif self._session is None:
+                # A failed replacement leaves the reusable HTTP client intact.
+                # Reopen on the next operation instead of poisoning the client.
+                await self._open_connection()
 
-        if self._session is None:
-            raise RuntimeError("MCP client initialized without a session")
-        return self._session
+            if self._session is None:
+                raise RuntimeError("MCP client initialized without a session")
+            return self._session
+
+    async def _close_connection_for_recovery(self) -> None:
+        """Detach and best-effort close the current connection stack."""
+        connection_stack = self._connection_stack
+        self._connection_stack = None
+        self._session = None
+        if connection_stack is None:
+            return
+        try:
+            await connection_stack.aclose()
+        except Exception as error:
+            logger.debug("Error closing failed MCP connection: %s", error)
 
     async def _reinitialize_session(
         self, failed_session: ClientSession | None = None
@@ -301,11 +319,9 @@ class McpClient(UiPathDisposableProtocol):
                         "MCP session was already replaced by another operation"
                     )
                     return
-                if self._connection_stack is not None:
-                    await self._connection_stack.aclose()
-                    self._connection_stack = None
-                    self._session = None
+                await self._close_connection_for_recovery()
                 if self._session_info:
+                    self._session_info.protocol_version = None
                     await self._session_info.set_session_id(None)
                 await self._open_connection()
 
