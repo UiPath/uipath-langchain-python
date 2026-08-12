@@ -23,9 +23,11 @@ class LegacyMcpEndpoint:
         protocol_version: str = "2025-11-25",
         *,
         failed_tool_calls: int = 0,
+        failed_tool_message: str | None = None,
     ) -> None:
         self.protocol_version = protocol_version
         self.failed_tool_calls = failed_tool_calls
+        self.failed_tool_message = failed_tool_message
         self.methods: list[str] = []
         self.request_headers: list[tuple[str, httpx2.Headers]] = []
         self.initialize_count = 0
@@ -84,6 +86,19 @@ class LegacyMcpEndpoint:
         if method == "tools/call":
             self.tool_call_count += 1
             if self.tool_call_count <= self.failed_tool_calls:
+                if self.failed_tool_message is not None:
+                    return httpx2.Response(
+                        404,
+                        headers={"content-type": "application/json"},
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": body["id"],
+                            "error": {
+                                "code": INVALID_REQUEST,
+                                "message": self.failed_tool_message,
+                            },
+                        },
+                    )
                 return httpx2.Response(404)
             result = {"result": f"Success from {body['params']['name']}"}
             return self._json_response(
@@ -231,6 +246,27 @@ async def test_replaces_transport_and_session_after_404(
             "session-1",
             "session-2",
         ]
+
+
+@pytest.mark.asyncio
+async def test_replaces_session_after_official_session_not_found_error(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """The SDK server's canonical expired-session response triggers recovery."""
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        failed_tool_message="Session not found",
+    )
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 2
+        assert endpoint.tool_call_count == 2
+        assert await client.get_session_id() == "session-2"
 
 
 @pytest.mark.asyncio
@@ -425,6 +461,9 @@ def test_only_session_specific_invalid_request_is_retryable() -> None:
     )
     assert McpClient.is_session_error(
         MCPError(code=INVALID_REQUEST, message="Session terminated")
+    )
+    assert McpClient.is_session_error(
+        MCPError(code=INVALID_REQUEST, message="Session not found")
     )
     assert not McpClient.is_session_error(
         MCPError(code=INVALID_REQUEST, message="Invalid request parameters")

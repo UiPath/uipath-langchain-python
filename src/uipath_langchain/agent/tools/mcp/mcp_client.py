@@ -326,7 +326,8 @@ class McpClient(UiPathDisposableProtocol):
             error.code in (32600, INVALID_REQUEST)
             and "session" in message
             and any(
-                marker in message for marker in ("terminated", "expired", "invalid")
+                marker in message
+                for marker in ("terminated", "expired", "invalid", "not found")
             )
         )
 
