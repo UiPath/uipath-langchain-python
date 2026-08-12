@@ -44,7 +44,7 @@ The workflow follows a ReAct pattern:
 
 - Python 3.11+
 - `langchain-anthropic`
-- `langchain-mcp-adapters`
+- MCP Python SDK 2.0
 - `langgraph`
 - Anthropic API key set as an environment variable
 
@@ -91,5 +91,5 @@ For debugging issues:
 To add a new tool:
 
 1. Create a new MCP-compatible server (similar to math_server.py)
-2. Add it to the MultiServerMCPClient configuration dictionary
+2. Add its script to the server list in `make_graph`
 3. The agent will automatically discover and use the new tool's capabilities

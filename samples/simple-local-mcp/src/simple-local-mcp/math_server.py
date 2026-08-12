@@ -1,11 +1,11 @@
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("Math")
+mcp = MCPServer("Math")
 
 @mcp.tool()
 def add(a: int, b: int) -> int:

@@ -4,9 +4,9 @@
 
 `uipath-langchain` 0.17.0 pins `mcp==2.0.0`, the latest stable MCP Python
 SDK in the local upstream checkout. The lockfile resolves its new `mcp-types`
-and `httpx2` dependencies. The unused `langchain-mcp-adapters==0.2.1` direct
-dependency was removed; the core package does not import it. Standalone samples
-that use the adapter declare it in their own `pyproject.toml` files.
+and `httpx2` dependencies. `langchain-mcp-adapters` does not support MCP 2, so
+the direct dependency was removed and the in-repository consumers now use
+UiPath's session-to-LangChain tool converter.
 
 The UiPath client continues to use the SDK's low-level `ClientSession` and
 Streamable HTTP transport. Its externally persisted session-ID extension is
