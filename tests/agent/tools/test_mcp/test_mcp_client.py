@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import httpx2
 import pytest
 from mcp.shared.exceptions import MCPError
@@ -285,6 +286,31 @@ async def test_negotiates_supported_legacy_protocol_versions(
             endpoint.headers_for("tools/call")[0]["mcp-protocol-version"]
             == protocol_version
         )
+
+
+@pytest.mark.asyncio
+async def test_legacy_httpx_timeout_is_normalized_for_final_client(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """The pre-upgrade public timeout type remains accepted by McpClient."""
+    endpoint = LegacyMcpEndpoint()
+    legacy_timeout = httpx.Timeout(20, connect=1, read=2, write=3, pool=4)
+
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        timeout=legacy_timeout,
+    ) as client:
+        await client.call_tool("test_tool", {"query": "test"})
+
+        assert client._http_client is not None
+        final_timeout = client._http_client.timeout
+        assert final_timeout.connect == 1
+        assert final_timeout.read == 2
+        assert final_timeout.write == 3
+        assert final_timeout.pool == 4
 
 
 @pytest.mark.asyncio

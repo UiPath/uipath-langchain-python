@@ -71,7 +71,7 @@ credential-leak risk without improving the structured error path.
 | Python model fields such as `inputSchema` and `outputSchema` | `input_schema` and `output_schema` | Updated all attribute reads. Wire JSON remains camelCase. |
 | JSON-RPC root-model wrappers and `.root` | Plain discriminated message unions | The old copied transport was removed, eliminating these accesses locally. |
 | `httpx` plus `httpx-sse` | `httpx2`, including SSE support | MCP connection and timeout types now use `httpx2`. |
-| `timedelta` session timeout values | Seconds as `float` (or `None`) | The UiPath HTTP timeout is represented by `httpx2.Timeout`. |
+| `httpx.Timeout` or seconds as `float` | `httpx2.Timeout` | `McpClient` continues to accept the old `httpx.Timeout` type and converts all four phase values for the MCP 2 transport. |
 | Transport `get_session_id` callback | No callback | Replaced with request/response event hooks. |
 | `StreamableHTTPTransport.protocol_version` | Removed | Version handling is left to `ClientSession` and the transport. |
 | Transport failures may surface through an `ExceptionGroup` | A request receives an `MCPError` | Retry logic catches `MCPError` directly. |

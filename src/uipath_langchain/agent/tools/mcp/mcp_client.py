@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import httpx
 import httpx2
 from mcp import ClientSession
 from mcp.shared.exceptions import MCPError
@@ -44,6 +45,22 @@ LEGACY_STREAMABLE_HTTP_VERSIONS = tuple(
         version for version in HANDSHAKE_PROTOCOL_VERSIONS if version >= "2025-03-26"
     )
 )
+
+
+def _normalize_timeout(
+    timeout: httpx.Timeout | httpx2.Timeout | float | None,
+) -> httpx2.Timeout | float:
+    """Convert the pre-upgrade HTTPX timeout type for the MCP 2 transport."""
+    if timeout is None:
+        return httpx2.Timeout(600)
+    if isinstance(timeout, httpx.Timeout):
+        return httpx2.Timeout(
+            connect=timeout.connect,
+            read=timeout.read,
+            write=timeout.write,
+            pool=timeout.pool,
+        )
+    return timeout
 
 
 class SessionInfoFactory:
@@ -86,7 +103,7 @@ class McpClient(UiPathDisposableProtocol):
     def __init__(
         self,
         config: "AgentMcpResourceConfig",
-        timeout: httpx2.Timeout | float | None = None,
+        timeout: httpx.Timeout | httpx2.Timeout | float | None = None,
         max_retries: int = 1,
         session_info_factory: SessionInfoFactory | None = None,
         terminate_on_close: bool = True,
@@ -105,7 +122,7 @@ class McpClient(UiPathDisposableProtocol):
                 Defaults to ``SessionInfoFactory`` which returns a plain SessionInfo.
         """
         self._config = config
-        self._timeout = timeout or httpx2.Timeout(600)
+        self._timeout = _normalize_timeout(timeout)
         self._max_retries = max_retries
         self._session_info_factory = session_info_factory or SessionInfoFactory()
         self._terminate_on_close = terminate_on_close
