@@ -28,6 +28,7 @@ class LegacyMcpEndpoint:
         block_initialize_on: int | None = None,
         fail_initialize_on: set[int] | None = None,
         rejected_session_ids: set[str] | None = None,
+        repeat_session_header: bool = False,
     ) -> None:
         self.protocol_version = protocol_version
         self.failed_tool_calls = failed_tool_calls
@@ -35,6 +36,7 @@ class LegacyMcpEndpoint:
         self.block_initialize_on = block_initialize_on
         self.fail_initialize_on = fail_initialize_on or set()
         self.rejected_session_ids = rejected_session_ids or set()
+        self.repeat_session_header = repeat_session_header
         self.initialize_blocked = asyncio.Event()
         self.release_initialize = asyncio.Event()
         self.methods: list[str] = []
@@ -135,6 +137,7 @@ class LegacyMcpEndpoint:
                         }
                     ]
                 },
+                headers=self._repeated_session_header(),
             )
         if method == "tools/call":
             self.tool_call_count += 1
@@ -161,6 +164,7 @@ class LegacyMcpEndpoint:
                     "structuredContent": result,
                     "isError": False,
                 },
+                headers=self._repeated_session_header(),
             )
         return httpx2.Response(
             404,
@@ -189,6 +193,11 @@ class LegacyMcpEndpoint:
     def headers_for(self, method: str) -> list[httpx2.Headers]:
         """Return captured headers for one protocol or HTTP method."""
         return [headers for name, headers in self.request_headers if name == method]
+
+    def _repeated_session_header(self) -> dict[str, str] | None:
+        if not self.repeat_session_header or self.initialize_count == 0:
+            return None
+        return {"mcp-session-id": f"session-{self.initialize_count}"}
 
 
 @pytest.fixture
@@ -386,6 +395,42 @@ async def test_rejected_persisted_session_is_initialized_and_deleted_once(
 
     assert endpoint.delete_count == 1
     assert endpoint.headers_for("DELETE")[0]["mcp-session-id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_repeated_session_headers_do_not_repeat_external_persistence(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """An unchanged response header is not persisted after every MCP call."""
+
+    class CountingSessionInfo(SessionInfo):
+        def __init__(self) -> None:
+            super().__init__()
+            self.persisted_values: list[str | None] = []
+
+        async def set_session_id(self, session_id: str | None) -> None:
+            self.persisted_values.append(session_id)
+            await super().set_session_id(session_id)
+
+    session_info = CountingSessionInfo()
+
+    class CountingFactory(SessionInfoFactory):
+        def create_session(self, mcp_server: Any) -> SessionInfo:
+            return session_info
+
+    endpoint = LegacyMcpEndpoint(repeat_session_header=True)
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        session_info_factory=CountingFactory(),
+    ) as client:
+        await client.list_tools()
+        await client.call_tool("test_tool", {"query": "first"})
+        await client.call_tool("test_tool", {"query": "second"})
+
+        assert session_info.persisted_values == ["session-1"]
 
 
 @pytest.mark.asyncio

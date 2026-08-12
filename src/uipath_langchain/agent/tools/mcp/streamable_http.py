@@ -4,6 +4,7 @@ The MCP SDK owns the transport implementation. UiPath only adds asynchronous,
 externally-persistable session ID storage through :class:`SessionInfo`.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -59,6 +60,7 @@ async def streamable_http_client(
     )
     restored_session_id = await info.get_session_id()
     sdk_session_id: str | None = None
+    session_persistence_lock = asyncio.Lock()
 
     async def apply_session_id(request: httpx2.Request) -> None:
         session_id = await info.get_session_id()
@@ -85,7 +87,9 @@ async def streamable_http_client(
                 and request_body.get("method") == "initialize"
             ):
                 sdk_session_id = session_id
-            await info.set_session_id(session_id)
+            async with session_persistence_lock:
+                if await info.get_session_id() != session_id:
+                    await info.set_session_id(session_id)
 
     async def terminate_restored_session() -> None:
         current_session_id = await info.get_session_id()
