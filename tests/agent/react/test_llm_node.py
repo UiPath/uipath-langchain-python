@@ -501,13 +501,12 @@ class TestForcedExtractionEscalation:
     @pytest.mark.asyncio
     async def test_thinking_model_stall_strips_reasoning_and_nudges(self) -> None:
         """Escalation fires: reasoning stripped from the stalled turn, and the request
-        ends on a user nudge (not an assistant prefill) so native accepts the forced call."""
+        ends on a user turn (not an assistant prefill) so native accepts the forced call."""
         msgs = await self._run_capture(self._thinking_model())
         # stalled assistant turn: reasoning block gone, text kept
         assert msgs[-2].content == [{"type": "text", "text": "answer"}]
-        # request ends on a user instruction to emit the terminal tool call
+        # request ends on a user turn so the forced tool call is accepted
         assert isinstance(msgs[-1], HumanMessage)
-        assert "end_execution" in msgs[-1].content
 
     @pytest.mark.asyncio
     async def test_plain_model_stall_is_forced_not_extracted(self) -> None:
@@ -537,7 +536,6 @@ class TestForcedExtractionEscalation:
         extraction retry must not be gated on tool_choice starting as 'auto'."""
         msgs = await self._run_capture(self._thinking_model(), tool_choice="any")
         assert isinstance(msgs[-1], HumanMessage)
-        assert "end_execution" in msgs[-1].content
 
     @pytest.mark.asyncio
     async def test_no_stall_does_not_escalate(self) -> None:

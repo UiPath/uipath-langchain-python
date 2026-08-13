@@ -5,6 +5,8 @@ The LLM client normalizes provider HTTP errors into a ``UiPathAPIError`` carryin
 agent's error taxonomy and surfaces the gateway ``detail``.
 """
 
+import traceback
+
 import httpx
 import pytest
 from uipath.llm_client import UiPathAPIError
@@ -46,6 +48,8 @@ def test_5xx_maps_to_system_http_error():
     assert info.status == 500
     assert info.category == UiPathErrorCategory.SYSTEM
     assert info.code.endswith(AgentRuntimeErrorCode.HTTP_ERROR.value)
+    # SYSTEM-category errors are wrapped with a generic prefix by AgentRuntimeError,
+    # but the original gateway detail is preserved within.
     assert "boom" in info.detail
 
 
@@ -82,12 +86,37 @@ def test_legacy_raw_provider_error_is_normalized_and_mapped():
     assert info.detail == _DETAIL
 
 
-def test_detail_falls_back_when_body_has_none():
-    # Body without a "detail" key -> fall back to the error message, not crash.
-    err = _api_error(403, {"status": 403})
+def test_vendor_message_never_in_detail():
+    # A vendor passthrough message can echo request content, so it never lands in the
+    # run detail (which reaches App Insights) — it stays on the trace span only.
+    err = _api_error(400, {"message": "`temperature` may only be set to 1"})
     with pytest.raises(AgentRuntimeError) as exc_info:
         raise_for_provider_http_error(err)
 
     info = exc_info.value.error_info
-    assert info.status == 403
-    assert info.detail  # non-empty (message / str fallback)
+    assert info.status == 400
+    assert "temperature" not in info.detail
+    assert info.detail  # non-empty generic message
+
+
+def test_gateway_detail_always_shown():
+    # The gateway's own {"detail": ...} (e.g. licensing) is UiPath text, always shown.
+    err = _api_error(403, {"detail": _DETAIL})
+    with pytest.raises(AgentRuntimeError) as exc_info:
+        raise_for_provider_http_error(err)
+
+    assert exc_info.value.error_info.detail == _DETAIL
+
+
+def test_provider_body_absent_from_traceback():
+    # format_exc() is logged to App Insights as ErrorTraceback; the vendor body must
+    # not ride along via the chained UiPathAPIError string. from None suppresses it.
+    err = _api_error(400, {"message": "secret PII in the model error"})
+    try:
+        try:
+            raise err
+        except UiPathAPIError as caught:
+            raise_for_provider_http_error(caught)
+    except AgentRuntimeError:
+        tb = traceback.format_exc()
+    assert "secret PII in the model error" not in tb
