@@ -1,9 +1,14 @@
 """Tests that direct construction of UiPathChat / UiPathChatOpenAI /
 UiPathAzureChatOpenAI / UiPathChatBedrock / UiPathChatBedrockConverse /
 UiPathChatAnthropicBedrock / UiPathChatGoogleGenerativeAI / UiPathChatVertex
-defaults ``client_settings.agenthub_config`` to None and omits the
-``x-uipath-agenthub-config`` header on the outgoing httpx client unless
-``UIPATH_AGENTHUB_CONFIG`` is set."""
+defaults ``client_settings.agenthub_config`` based on the execution context.
+
+Since ``uipath-llm-client`` 1.18.0, a design-time run (local, Studio Web, or a
+debug session) defaults ``agenthub_config`` to ``codedagentsplayground`` so coded
+agents draw the CodedAgents.Playground licensing pool, while a deployed run (a real
+Orchestrator job that is not a Studio Web project and not rooted to a debug session)
+keeps it ``None`` and omits the ``x-uipath-agenthub-config`` header. An explicit
+``UIPATH_AGENTHUB_CONFIG`` always wins."""
 
 import pytest
 
@@ -24,6 +29,8 @@ _FAKE_JWT = (
     "signature"
 )
 
+_CODED_PLAYGROUND = "codedagentsplayground"
+
 
 @pytest.fixture(autouse=True)
 def _platform_env(monkeypatch):
@@ -33,6 +40,9 @@ def _platform_env(monkeypatch):
     monkeypatch.setenv("UIPATH_ORGANIZATION_ID", "org")
     monkeypatch.delenv("UIPATH_AGENTHUB_CONFIG", raising=False)
     monkeypatch.delenv("UIPATH_MODEL_NAME", raising=False)
+    # No job key by default -> design-time context.
+    monkeypatch.delenv("UIPATH_JOB_KEY", raising=False)
+    monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
 
 
 _DIRECT_CTOR_CASES = [
@@ -49,7 +59,14 @@ _DIRECT_CTOR_CASES = [
 
 @pytest.mark.parametrize("cls", _DIRECT_CTOR_CASES)
 class TestDirectConstructorAgentHubConfig:
-    def test_default_is_none(self, cls):
+    def test_default_is_coded_playground_at_design_time(self, cls):
+        """No job key -> design-time -> codedagentsplayground."""
+        llm = cls()
+        assert llm.client_settings.agenthub_config == _CODED_PLAYGROUND
+
+    def test_default_is_none_when_deployed(self, cls, monkeypatch):
+        """Deployed job (not a studio project, not a debug session) -> None."""
+        monkeypatch.setenv("UIPATH_JOB_KEY", "deployed-job")
         llm = cls()
         assert llm.client_settings.agenthub_config is None
 
@@ -58,7 +75,20 @@ class TestDirectConstructorAgentHubConfig:
         llm = cls()
         assert llm.client_settings.agenthub_config == "agentsplayground"
 
-    def test_no_agenthub_header_on_inner_http_client(self, cls):
+    def test_coded_playground_header_on_inner_http_client_at_design_time(self, cls):
+        """Design-time run emits the coded-playground header on the httpx client."""
+        llm = cls()
+        client = getattr(llm, "uipath_sync_client", None)
+        if client is None:
+            pytest.skip(f"{cls.__name__} has no uipath_sync_client to inspect")
+        normalized = {key.lower(): value for key, value in client.headers.items()}
+        assert normalized.get("x-uipath-agenthub-config") == _CODED_PLAYGROUND
+
+    def test_no_agenthub_header_on_inner_http_client_when_deployed(
+        self, cls, monkeypatch
+    ):
+        """Deployed run omits the agenthub-config header."""
+        monkeypatch.setenv("UIPATH_JOB_KEY", "deployed-job")
         llm = cls()
         client = getattr(llm, "uipath_sync_client", None)
         if client is None:
