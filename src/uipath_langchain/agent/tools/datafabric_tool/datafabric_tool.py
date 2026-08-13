@@ -13,6 +13,8 @@ Sub-graph definition is in ``datafabric_subgraph.py``.
 
 import asyncio
 import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -28,6 +30,21 @@ from .models import DataFabricQueryInput
 logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
+
+
+@dataclass(frozen=True, slots=True)
+class _DataFabricToolConfig:
+    """Framework-neutral configuration for a Data Fabric query tool.
+
+    Low-code contexts and coded-agent calls are normalized into this model before
+    the LangChain tool and its lazy query handler are created.
+    """
+
+    name: str
+    description: str
+    entities: tuple[DataFabricEntityItem, ...]
+    resource_description: str = ""
+    base_system_prompt: str = ""
 
 
 class DataFabricTextQueryHandler:
@@ -139,49 +156,119 @@ class DataFabricTextQueryHandler:
         )
 
 
+def _normalize_entities(
+    entities: Sequence[DataFabricEntityItem],
+) -> tuple[DataFabricEntityItem, ...]:
+    """Copy entity references so caller mutations cannot change a built tool."""
+    return tuple(
+        DataFabricEntityItem.model_validate(entity.model_dump(by_alias=True))
+        for entity in entities
+    )
+
+
+def _default_tool_description(entities: Sequence[DataFabricEntityItem]) -> str:
+    entity_lines = []
+    for entity in entities:
+        line = f"- {entity.name}"
+        if entity.description:
+            line += f": {entity.description}"
+        entity_lines.append(line)
+    entity_summary = "\n".join(entity_lines)
+    return (
+        "Query the following Data Fabric entities using natural language:\n"
+        f"{entity_summary}\n"
+        "Describe what data you need and the tool will translate it to SQL, "
+        "execute the query, and return a natural language answer."
+    )
+
+
+def _build_datafabric_tool(
+    config: _DataFabricToolConfig,
+    llm: BaseChatModel,
+) -> BaseTool:
+    """Build the shared LangChain tool used by coded and low-code agents."""
+    handler = DataFabricTextQueryHandler(
+        entity_set=list(config.entities),
+        llm=llm,
+        resource_description=config.resource_description,
+        base_system_prompt=config.base_system_prompt,
+    )
+    return BaseUiPathStructuredTool(
+        name=config.name,
+        description=config.description,
+        args_schema=DataFabricQueryInput,
+        coroutine=handler.__call__,
+        metadata={"tool_type": "datafabric_sql"},
+    )
+
+
 def create_datafabric_query_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel,
     tool_name: str = "query_datafabric",
     agent_config: dict[str, str] | None = None,
 ) -> BaseTool:
-    """Create the ``query_datafabric`` agentic tool.
+    """Create the low-code Data Fabric query tool from a context resource.
+
+    Entity schemas and runtime binding overrides are resolved lazily on the first
+    invocation. Keep the resulting tool scoped to one agent execution so its
+    cached schema and routing cannot cross execution contexts.
 
     Args:
-        resource: The Data Fabric context resource configuration.
-        llm: The language model for the inner SQL generation loop.
-        tool_name: Sanitized tool name from the resource.
-        agent_config: Optional dict with agent-level config.
-            Key ``base_system_prompt`` carries the outer agent's system prompt.
+        resource: Low-code Data Fabric context resource.
+        llm: Language model for the inner SQL generation loop.
+        tool_name: LangChain tool name exposed to the agent.
+        agent_config: Optional agent-level configuration. Key
+            ``base_system_prompt`` carries the outer agent's system prompt.
     """
     config = agent_config or {}
-    entity_set = [
-        DataFabricEntityItem.model_validate(item.model_dump(by_alias=True))
-        for item in (resource.entity_set or [])
-    ]
-    handler = DataFabricTextQueryHandler(
-        entity_set=entity_set,
-        llm=llm,
-        resource_description=resource.description or "",
-        base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
-    )
-    entity_lines = []
-    for e in entity_set:
-        line = f"- {e.name}"
-        if e.description:
-            line += f": {e.description}"
-        entity_lines.append(line)
-    entity_summary = "\n".join(entity_lines)
+    entity_set = _normalize_entities(resource.entity_set or [])
 
-    return BaseUiPathStructuredTool(
-        name=tool_name,
-        description=(
-            "Query the following Data Fabric entities using natural language:\n"
-            f"{entity_summary}\n"
-            "Describe what data you need and the tool will translate it to SQL, "
-            "execute the query, and return a natural language answer."
+    return _build_datafabric_tool(
+        _DataFabricToolConfig(
+            name=tool_name,
+            description=_default_tool_description(entity_set),
+            entities=entity_set,
+            resource_description=resource.description or "",
+            base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
         ),
-        args_schema=DataFabricQueryInput,
-        coroutine=handler,
-        metadata={"tool_type": "datafabric_sql"},
+        llm,
+    )
+
+
+def create_datafabric_tool(
+    *,
+    llm: BaseChatModel,
+    name: str,
+    description: str,
+    entities: Sequence[DataFabricEntityItem],
+    base_system_prompt: str,
+) -> BaseTool:
+    """Create a Data Fabric query tool for a coded agent.
+
+    Entity schemas are resolved lazily on the first invocation. Keep the tool
+    scoped to one agent execution so its cached schema and routing cannot cross
+    execution contexts.
+
+    Pass the same outer-agent system prompt used to construct the coded agent so
+    its instructions are also available to the inner SQL-generation graph.
+
+    Args:
+        llm: Language model for the inner SQL generation loop.
+        name: LangChain tool name exposed to the coded agent.
+        description: Description used by the outer agent to select the tool.
+        entities: Data Fabric entity references available to the tool.
+        base_system_prompt: Outer coded-agent system prompt forwarded to the
+            inner SQL-generation graph.
+    """
+    entity_set = _normalize_entities(entities)
+    return _build_datafabric_tool(
+        _DataFabricToolConfig(
+            name=name,
+            description=description,
+            entities=entity_set,
+            resource_description=description,
+            base_system_prompt=base_system_prompt,
+        ),
+        llm,
     )

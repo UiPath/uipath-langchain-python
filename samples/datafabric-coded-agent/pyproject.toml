@@ -1,0 +1,14 @@
+[project]
+name = "datafabric-coded-agent"
+version = "0.0.1"
+description = "Coded agent that queries a UiPath Data Fabric entity"
+authors = [{ name = "UiPath" }]
+dependencies = [
+    "uipath-langchain",
+]
+requires-python = ">=3.11"
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]

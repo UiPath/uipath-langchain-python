@@ -125,6 +125,14 @@ def test_v1_prompt_documents_left_vs_inner_join_intent():
     assert "INNER JOIN" in prompt
 
 
+def test_v1_prompt_does_not_require_limit_for_scalar_aggregates():
+    prompt = build([_fake_entity(_fake_field())])
+
+    assert "Scalar aggregate queries do not require LIMIT" in prompt
+    assert "This applies to aggregates too" not in prompt
+    assert "SELECT COUNT(col) FROM table LIMIT 1" not in prompt
+
+
 def test_relationship_subsection_absent_when_no_foreign_keys():
     prompt = build([_fake_entity(_fake_field())])
 
