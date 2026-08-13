@@ -12,21 +12,22 @@ import asyncio
 import json
 from contextlib import AsyncExitStack, asynccontextmanager
 from logging import getLogger
-from typing import AsyncGenerator
-from uuid import uuid4
+from typing import Any, AsyncGenerator
+from urllib.parse import urlparse
 
 import httpx
 from a2a.client import Client
+from a2a.helpers import get_artifact_text, get_message_text, new_text_message
 from a2a.types import (
     AgentCard,
+    AgentInterface,
     Message,
-    Part,
     Role,
+    SendMessageRequest,
     Task,
-    TaskArtifactUpdateEvent,
     TaskState,
-    TextPart,
 )
+from google.protobuf.json_format import ParseDict
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
@@ -52,10 +53,10 @@ logger = getLogger(__name__)
 # The A2A terminal task states
 _TERMINAL_TASK_STATES = frozenset(
     {
-        TaskState.completed.value,
-        TaskState.canceled.value,
-        TaskState.failed.value,
-        TaskState.rejected.value,
+        "completed",
+        "canceled",
+        "failed",
+        "rejected",
     }
 )
 
@@ -78,9 +79,15 @@ class A2aClient:
     pool when done.
     """
 
-    def __init__(self, agent_card: AgentCard, resource_name: str) -> None:
+    def __init__(
+        self,
+        agent_card: AgentCard,
+        resource_name: str,
+        protocol_version: str | None = "1.0",
+    ) -> None:
         self._agent_card = agent_card
         self._resource_name = resource_name
+        self._protocol_version = protocol_version
         self._lock = asyncio.Lock()
         self._client: Client | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -93,6 +100,12 @@ class A2aClient:
                     from a2a.client import ClientConfig, ClientFactory
                     from uipath.platform import UiPath
 
+                    if self._protocol_version is None:
+                        raise ValueError(
+                            f"Remote A2A agent '{self._resource_name}' has no compatible "
+                            "JSON-RPC endpoint for A2A 1.0 or 0.3"
+                        )
+
                     sdk = UiPath()
                     folder_path = get_execution_folder_path()
                     agent = await sdk.remote_a2a.retrieve_async(
@@ -103,20 +116,31 @@ class A2aClient:
                         raise ValueError(
                             f"Remote A2A agent '{self._resource_name}' has no a2a_url configured"
                         )
-                    self._agent_card.url = agent.a2a_url
+                    runtime_card = AgentCard()
+                    runtime_card.CopyFrom(self._agent_card)
+                    runtime_card.ClearField("supported_interfaces")
+                    runtime_card.supported_interfaces.append(
+                        AgentInterface(
+                            url=agent.a2a_url,
+                            protocol_binding="JSONRPC",
+                            protocol_version=self._protocol_version,
+                        )
+                    )
 
                     client_kwargs = get_httpx_client_kwargs(
                         headers={"Authorization": f"Bearer {sdk._config.secret}"},
                     )
                     client_kwargs["timeout"] = httpx.Timeout(300.0, connect=10.0)
                     self._http_client = httpx.AsyncClient(**client_kwargs)
-                    self._client = await ClientFactory.connect(
-                        self._agent_card,
-                        client_config=ClientConfig(
+                    self._client = ClientFactory(
+                        ClientConfig(
                             httpx_client=self._http_client,
                             streaming=False,
-                        ),
-                    )
+                            accepted_output_modes=list(
+                                runtime_card.default_output_modes
+                            ),
+                        )
+                    ).create(runtime_card)
         return self._client
 
     async def dispose(self) -> None:
@@ -133,31 +157,28 @@ class A2aClient:
 
 def _extract_text(obj: Task | Message) -> str:
     """Extract text content from a Task or Message response."""
-    parts: list[Part] = []
-
     if isinstance(obj, Message):
-        parts = obj.parts or []
-    elif isinstance(obj, Task):
-        if obj.status and obj.status.state == TaskState.input_required:
-            if obj.status.message:
-                parts = obj.status.message.parts or []
-        else:
-            if obj.artifacts:
-                for artifact in obj.artifacts:
-                    parts.extend(artifact.parts or [])
-            if not parts and obj.status and obj.status.message:
-                parts = obj.status.message.parts or []
-            if not parts and obj.history:
-                for msg in reversed(obj.history):
-                    if msg.role == Role.agent:
-                        parts = msg.parts or []
-                        break
+        return get_message_text(obj)
+    if (
+        obj.HasField("status")
+        and obj.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        and obj.status.HasField("message")
+    ):
+        return get_message_text(obj.status.message)
+    if obj.artifacts:
+        return "\n".join(filter(None, (get_artifact_text(a) for a in obj.artifacts)))
+    if obj.HasField("status") and obj.status.HasField("message"):
+        return get_message_text(obj.status.message)
+    for message in reversed(obj.history):
+        if message.role == Role.ROLE_AGENT:
+            return get_message_text(message)
+    return ""
 
-    texts = []
-    for part in parts:
-        if isinstance(part.root, TextPart):
-            texts.append(part.root.text)
-    return "\n".join(texts) if texts else ""
+
+def _task_state_name(state: int) -> str:
+    """Return the stable lowercase task-state value used by tool state."""
+    name = TaskState.Name(state).removeprefix("TASK_STATE_").lower()
+    return "unknown" if name == "unspecified" else name
 
 
 def _format_response(text: str, state: str) -> str:
@@ -184,6 +205,75 @@ def _build_description(card: AgentCard) -> str:
     return f"Remote A2A agent: {card.name}" if card.name else "Remote A2A agent"
 
 
+def _build_metadata_card(config: AgentA2aResourceConfig) -> AgentCard:
+    """Build v1 card metadata without retaining cached transport endpoints."""
+    card = AgentCard()
+    if config.cached_agent_card:
+        ParseDict(config.cached_agent_card, card, ignore_unknown_fields=True)
+
+    if not card.name:
+        card.name = config.name
+    if not card.description and config.description:
+        card.description = config.description
+    if not card.default_input_modes:
+        card.default_input_modes.append("text/plain")
+    if not card.default_output_modes:
+        card.default_output_modes.append("text/plain")
+
+    # Cached cards may point directly at third-party agents. Invocation must
+    # always go through the binding-aware AgentHub proxy resolved at runtime.
+    card.ClearField("supported_interfaces")
+    return card
+
+
+def _select_protocol_version(cached_card: dict[str, Any] | None) -> str | None:
+    """Select the best JSON-RPC protocol advertised by a cached agent card."""
+    if not isinstance(cached_card, dict):
+        return None
+
+    interfaces = cached_card.get("supportedInterfaces")
+    if isinstance(interfaces, list):
+        for interface in interfaces:
+            if (
+                isinstance(interface, dict)
+                and _is_http_endpoint(interface.get("url"))
+                and _is_jsonrpc(interface.get("protocolBinding"))
+                and _is_protocol_version(interface.get("protocolVersion"), 1, 0)
+            ):
+                return "1.0"
+
+    if (
+        _is_http_endpoint(cached_card.get("url"))
+        and _is_jsonrpc(cached_card.get("preferredTransport", "JSONRPC"))
+        and _is_protocol_version(cached_card.get("protocolVersion", "0.3.0"), 0, 3)
+    ):
+        return "0.3"
+
+    return None
+
+
+def _is_http_endpoint(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+def _is_jsonrpc(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().upper() == "JSONRPC"
+
+
+def _is_protocol_version(value: Any, major: int, minor: int) -> bool:
+    if not isinstance(value, str):
+        return False
+    parts = value.strip().split(".")
+    if not 2 <= len(parts) <= 4 or not all(
+        part.isascii() and part.isdigit() for part in parts
+    ):
+        return False
+    return int(parts[0]) == major and int(parts[1]) == minor
+
+
 async def _send_a2a_message(
     client: Client,
     agent_label: str,
@@ -204,10 +294,9 @@ async def _send_a2a_message(
     else:
         logger.info("A2A new message to %s", agent_label)
 
-    a2a_message = Message(
-        role=Role.user,
-        parts=[Part(root=TextPart(text=message))],
-        message_id=str(uuid4()),
+    a2a_message = new_text_message(
+        message,
+        role=Role.ROLE_USER,
         task_id=task_id,
         context_id=context_id,
     )
@@ -218,24 +307,22 @@ async def _send_a2a_message(
         new_task_id = task_id
         new_context_id = context_id
 
-        async for event in client.send_message(a2a_message):
-            if isinstance(event, Message):
-                text = _extract_text(event)
-                new_context_id = event.context_id
+        async for response in client.send_message(
+            SendMessageRequest(message=a2a_message)
+        ):
+            if response.HasField("message"):
+                text = _extract_text(response.message)
+                new_context_id = response.message.context_id or new_context_id
                 state = "completed"
                 break
-            else:
-                task, update = event
-                new_task_id = task.id
-                new_context_id = task.context_id
-                state = task.status.state.value if task.status else "unknown"
-                if update is None:
-                    text = _extract_text(task)
-                    break
-                elif isinstance(update, TaskArtifactUpdateEvent):
-                    for part in update.artifact.parts or []:
-                        if isinstance(part.root, TextPart):
-                            text += part.root.text
+            if response.HasField("task"):
+                task = response.task
+                text = _extract_text(task)
+                new_task_id = task.id or new_task_id
+                new_context_id = task.context_id or new_context_id
+                if task.HasField("status"):
+                    state = _task_state_name(task.status.state)
+                break
 
         return (text or "No response received.", state, new_task_id, new_context_id)
 
@@ -391,21 +478,13 @@ def create_a2a_tools_and_clients(
 
         logger.info("Creating A2A tool for resource '%s'", resource.name)
 
-        if resource.cached_agent_card:
-            agent_card = AgentCard(**resource.cached_agent_card)
-        else:
-            agent_card = AgentCard(
-                url="",
-                name=resource.name,
-                description=resource.description or "",
-                version="1.0.0",
-                skills=[],
-                capabilities={},
-                default_input_modes=["text/plain"],
-                default_output_modes=["text/plain"],
-            )
+        agent_card = _build_metadata_card(resource)
 
-        a2a_client = A2aClient(agent_card, resource.name)
+        a2a_client = A2aClient(
+            agent_card,
+            resource.name,
+            protocol_version=_select_protocol_version(resource.cached_agent_card),
+        )
         tool = _create_a2a_tool(resource, a2a_client, agent_card)
         tools.append(tool)
         clients.append(a2a_client)
