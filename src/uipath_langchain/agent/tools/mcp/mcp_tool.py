@@ -21,6 +21,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 
+from ..static_args import wrap_tools_with_static_args
 from ..utils import sanitize_tool_name
 from .mcp_client import McpClient, SessionInfoFactory
 
@@ -436,4 +437,4 @@ async def create_mcp_tools_and_clients(
             f"Created {len(resource_tools)} tools for MCP resource '{resource.name}'"
         )
 
-    return tools, clients
+    return wrap_tools_with_static_args(tools), clients

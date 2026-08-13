@@ -31,6 +31,8 @@ from uipath_langchain.agent.tools.schema_editing import (
     InvalidStaticArgError,
     SchemaNavigationError,
     apply_static_value_to_schema,
+    parse_jsonpath_segments,
+    remove_fields_from_schema,
 )
 
 from .utils import sanitize_dict_for_serialization
@@ -358,3 +360,127 @@ class StaticArgsHandler:
             static_values = self._sanitized_static_values.get(tool_call["name"])
             if static_values:
                 tool_call["args"] = apply_static_args(static_values, tool_call["args"])
+
+
+def wrap_tool_with_static_args(tool: BaseTool) -> BaseTool:
+    """Wrap a tool so its *static* parameters are hidden from the model and
+    injected just before the underlying tool runs.
+
+    The returned tool exposes only the non-static parameters in its
+    ``args_schema``; on invocation the configured static values are merged back
+    into the arguments before the original tool's ``coroutine`` / ``func`` runs.
+    The hidden static values are appended to the tool ``description`` (sensitive
+    values redacted) so the model can still distinguish otherwise-identical tools
+    by their configured values.
+
+    This is a per-tool, agent-state-independent counterpart to
+    ``StaticArgsHandler``: static values are constants
+    (``AgentToolStaticArgumentProperties``), so no agent input is needed to
+    resolve them. Tools without static ``argument_properties`` are returned
+    unchanged, and the original tool is never mutated.
+    """
+    properties: dict[str, AgentToolArgumentProperties] | None = getattr(
+        tool, "argument_properties", None
+    )
+    if not isinstance(tool, StructuredTool) or not properties:
+        return tool
+
+    static_properties = {
+        json_path: props
+        for json_path, props in properties.items()
+        if isinstance(props, AgentToolStaticArgumentProperties)
+    }
+    if not static_properties:
+        return tool
+
+    static_values = {
+        json_path: static_arg.value
+        for json_path, static_arg in _resolve_argument_properties(
+            static_properties, {}
+        ).items()
+    }
+
+    args_schema = tool.args_schema
+    if isinstance(args_schema, dict):
+        schema = copy.deepcopy(args_schema)
+    elif args_schema is not None and issubclass(args_schema, BaseModel):
+        schema = args_schema.model_json_schema()
+    else:
+        return tool
+
+    removed = remove_fields_from_schema(schema, list(static_values))
+    if not removed:
+        return tool
+
+    inject_values = {
+        json_path: value
+        for json_path, value in static_values.items()
+        if json_path in removed
+    }
+
+    # Surface the now-hidden static values in the tool description so the model
+    # can still tell otherwise-identical tools apart (e.g. one send-email tool
+    # configured for Bob and another for Alice) without the user having to encode
+    # it in the tool name. Sensitive values are redacted.
+    preconfigured_lines: list[str] = []
+    for json_path in sorted(removed):
+        static_prop = static_properties[json_path]
+        segments = parse_jsonpath_segments(json_path)
+        name = ".".join(segments) if segments else json_path
+        if static_prop.is_sensitive:
+            preconfigured_lines.append(f"- {name}: <sensitive>")
+        else:
+            value_text = str(static_prop.value)
+            if len(value_text) > 200:
+                value_text = value_text[:200] + "..."
+            preconfigured_lines.append(f"- {name}: {value_text}")
+
+    description = tool.description
+    if preconfigured_lines:
+        description = (
+            f"{tool.description}\n\n"
+            "Pre-configured parameters (set automatically, do not provide):\n"
+            + "\n".join(preconfigured_lines)
+        )
+
+    update: dict[str, Any] = {
+        "args_schema": create_model(schema),
+        "description": description,
+        # Drop the static argument properties now baked into the wrapper so the
+        # StaticArgsHandler still running in the ReAct llm_node does not also
+        # process them; non-static variants are left for it (back-compat).
+        "argument_properties": {
+            json_path: props
+            for json_path, props in properties.items()
+            if json_path not in removed
+        },
+    }
+
+    coroutine = tool.coroutine
+    if coroutine is not None:
+        _coroutine = coroutine
+
+        async def _acall(**kwargs: Any) -> Any:
+            return await _coroutine(**apply_static_args(inject_values, kwargs))
+
+        update["coroutine"] = _acall
+
+    func = tool.func
+    if func is not None:
+        _func = func
+
+        def _call(**kwargs: Any) -> Any:
+            return _func(**apply_static_args(inject_values, kwargs))
+
+        update["func"] = _call
+
+    return tool.model_copy(update=update)
+
+
+def wrap_tools_with_static_args(tools: Sequence[BaseTool]) -> list[BaseTool]:
+    """Hide and inject each tool's static parameters.
+
+    See :func:`wrap_tool_with_static_args`. Tools without static parameters pass
+    through unchanged.
+    """
+    return [wrap_tool_with_static_args(tool) for tool in tools]
