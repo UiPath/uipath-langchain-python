@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.16.3"
+version = "0.16.4"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -25,7 +25,7 @@ dependencies = [
     "langchain-mcp-adapters==0.2.1",
     "pillow>=12.1.1",
     "rdflib>=7.0.0, <8.0.0",
-    "a2a-sdk>=0.2.0,<1.0.0",
+    "a2a-sdk>=1.1.2,<2.0.0",
     "uipath-langchain-client[openai]>=1.17.3,<1.18.0",
 ]
 
@@ -89,6 +89,7 @@ dev = [
     "numpy>=1.24.0",
     "pytest_httpx>=0.35.0",
     "rust-just>=1.39.0",
+    "types-protobuf<7",
 ]
 
 [tool.hatch.build.targets.wheel]
