@@ -2,13 +2,13 @@
 
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.messages.content import create_tool_call
 from pydantic import BaseModel, ConfigDict
 
 from uipath_langchain.agent.react.forced_extraction import (
+    _ensure_trailing_user_turn,
     _strip_reasoning_blocks,
-    _with_extraction_nudge,
 )
 from uipath_langchain.chat.thinking import strip_thinking
 
@@ -128,30 +128,36 @@ class TestStripReasoningBlocks:
         assert out == [human]
 
 
-class TestExtractionNudge:
-    """_with_extraction_nudge ends on a user turn without creating consecutive user turns."""
+class TestEnsureTrailingUserTurn:
+    """_ensure_trailing_user_turn ends the request on a user turn without doubling up."""
 
     def test_appends_user_turn_after_assistant(self) -> None:
+        """A surviving stalled assistant turn gets a terse, tool-neutral user turn."""
         msgs = [HumanMessage(content="q"), AIMessage(content="answer")]
-        out = _with_extraction_nudge(msgs)
-        assert isinstance(out[-1], HumanMessage)
-        # tool-neutral: mentions continuing, not only end_execution, so a mid-task
-        # stall isn't pushed to terminate early
-        assert "continue" in out[-1].content
-        assert "end_execution" in out[-1].content
+        out = _ensure_trailing_user_turn(msgs)
+        assert len(out) == 3
         assert isinstance(out[-2], AIMessage)
-
-    def test_merges_into_trailing_user_turn(self) -> None:
-        msgs = [HumanMessage(content="the task")]
-        out = _with_extraction_nudge(msgs)
-        assert len(out) == 1
         assert isinstance(out[-1], HumanMessage)
-        assert "the task" in out[-1].content
-        assert "end_execution" in out[-1].content
+        # a terse, non-empty user turn so the forced call is accepted; wording stays
+        # tool-neutral (no "finished"/"result" framing that makes the model reply to it)
+        assert isinstance(out[-1].content, str) and out[-1].content
+        assert "tool" in out[-1].content.lower()
 
-    def test_merges_into_list_content_user_turn(self) -> None:
-        msgs = [HumanMessage(content=[{"type": "text", "text": "the task"}])]
-        out = _with_extraction_nudge(msgs)
-        assert len(out) == 1
-        assert out[-1].content[-1]["type"] == "text"
-        assert "end_execution" in out[-1].content[-1]["text"]
+    def test_no_turn_added_when_already_user(self) -> None:
+        """Stripping left a user turn last (reasoning-only stall dropped) — add nothing."""
+        msgs = [HumanMessage(content="the task")]
+        out = _ensure_trailing_user_turn(msgs)
+        assert out == msgs
+
+    def test_no_turn_added_when_ends_on_tool_result(self) -> None:
+        """A trailing tool result is already user-role — don't append a second user turn."""
+        msgs = [
+            HumanMessage(content="q"),
+            AIMessage(
+                content="",
+                tool_calls=[create_tool_call(name="t", args={}, id="c1")],
+            ),
+            ToolMessage(content="result", tool_call_id="c1"),
+        ]
+        out = _ensure_trailing_user_turn(msgs)
+        assert out == msgs
