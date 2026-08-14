@@ -12,7 +12,10 @@ from uipath.platform.errors import EnrichedException
 from uipath.platform.orchestrator import JobState
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils import (
+    get_execution_folder_key,
+    get_execution_folder_path,
+)
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.exceptions import raise_for_enriched
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
@@ -52,7 +55,11 @@ def create_process_tool(
 
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
-    folder_path = get_execution_folder_path()
+    # Eval serverless jobs expose UIPATH_FOLDER_KEY but not UIPATH_FOLDER_PATH;
+    # without a folder header StartJobs returns 404 for a deployed process.
+    # invoke_async accepts only one of folder_path/folder_key, so resolve one.
+    folder_path = get_execution_folder_path() or resource.properties.folder_path
+    folder_key = get_execution_folder_key() if not folder_path else None
 
     input_model: Any = create_model(resource.input_schema)
     output_model: Any = create_output_model(resource.output_schema, resource.name)
@@ -82,6 +89,7 @@ def create_process_tool(
                     job = await client.processes.invoke_async(
                         name=process_name,
                         input_arguments=input_arguments,
+                        folder_key=folder_key,
                         folder_path=folder_path,
                         attachments=attachments,
                         parent_span_id=parent_span_id,
@@ -136,6 +144,7 @@ def create_process_tool(
             "tool_type": resource.type.lower(),
             "display_name": process_name,
             "folder_path": folder_path,
+            "folder_key": folder_key,
             "args_schema": input_model,
             "output_schema": output_model,
             "_span_context": _span_context,
