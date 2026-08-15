@@ -34,6 +34,10 @@ from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
+from ...tools.escalation_jit import (
+    resolve_is_debug_run_safely,
+    resolve_jit_escalation_app,
+)
 from ...tools.escalation_recipient import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
@@ -211,6 +215,24 @@ class EscalateAction(GuardrailAction):
                 data["ToolInputs"] = input_content
                 data["ToolOutputs"] = output_content
 
+            # Resolve inline (JIT) app targeting for a not-yet-deployed app in a
+            # debug run, mirroring the escalation tool's inline-app flow. The
+            # guardrail escalate app config carries no app_type/action_schema, so
+            # both are resolved from the solution at runtime when applicable.
+            is_debug = await resolve_is_debug_run_safely()
+            (
+                app_project_key,
+                app_type,
+                action_schema,
+            ) = await resolve_jit_escalation_app(
+                app_name=self.app_name,
+                app_version=self.version,
+                app_type=None,
+                action_schema=None,
+                folder_path=self.app_folder_path,
+                is_debug=is_debug,
+            )
+
             # Create the escalation task via API
             client = UiPath()
             created_task = await client.tasks.create_async(
@@ -219,6 +241,9 @@ class EscalateAction(GuardrailAction):
                 app_name=self.app_name,
                 app_folder_path=self.app_folder_path,
                 recipient=task_recipient,
+                app_project_key=app_project_key,
+                app_type=app_type,
+                action_schema=action_schema,
             )
 
             # Store task URL in metadata for observability — before interrupt

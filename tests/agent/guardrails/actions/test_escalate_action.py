@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -2293,3 +2294,151 @@ class TestHelperFunctions:
         data = [1, 2, 3]
         result = _parse_reviewed_data(data)
         assert result is data
+
+
+class TestEscalateActionJit:
+    """Just-in-time (JIT) inline-app resolution in the create-task node.
+
+    Mirrors the escalation tool's inline-app flow: for a not-yet-deployed app in
+    a debug run with the feature flag on, the create-task node resolves the app
+    project key, app type and action schema at runtime and forwards them to
+    ``tasks.create_async``.
+    """
+
+    def _make_jit_action(self):
+        return EscalateAction(
+            app_name="ApprovalApp",
+            app_folder_path="Shared",
+            version=0,  # inline (not-yet-deployed) app
+            recipient=DEFAULT_RECIPIENT,
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FEATURE_EnableJITEscalationApps": "true"})
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_action_schema",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
+    )
+    async def test_create_task_node_resolves_jit_fields_in_debug(
+        self,
+        mock_resolve_recipient,
+        mock_uipath_class,
+        mock_jit_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        mock_resolve_schema,
+        mock_config,
+    ) -> None:
+        """In a debug run with the flag on, the app project key, app type and
+        action schema are resolved at runtime and forwarded to create_async."""
+        mock_resolve_recipient.return_value = TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
+        mock_config.base_url = None
+        mock_config.tenant_name = "TestTenant"
+
+        mock_task = _make_mock_task(recipient=MOCK_TASK_RECIPIENT)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=mock_task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_resolve_debug.return_value = True
+        mock_resolve_project.return_value = {
+            "designId": "proj-key-abc",
+            "id": "proj-id",
+            "projectType": "Process",  # -> Custom (low-code)
+        }
+        schema = {
+            "key": "schema-key",
+            "inOuts": [],
+            "inputs": [],
+            "outputs": [],
+            "outcomes": [],
+        }
+        mock_resolve_schema.return_value = schema
+
+        action = self._make_jit_action()
+        guardrail = _make_default_guardrail()
+        create_task_name, create_task_fn, _, _ = _get_action_nodes(
+            action, guardrail, GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION
+        )
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_validation_details="Validation failed"
+            ),
+        )
+
+        await create_task_fn(state)
+
+        call_kwargs = mock_client.tasks.create_async.call_args[1]
+        assert call_kwargs["app_project_key"] == "proj-key-abc"
+        assert call_kwargs["app_type"] == "Custom"
+        assert call_kwargs["action_schema"] == schema
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
+    )
+    async def test_create_task_node_skips_jit_when_flag_disabled(
+        self,
+        mock_resolve_recipient,
+        mock_uipath_class,
+        mock_resolve_debug,
+        mock_config,
+    ) -> None:
+        """With the feature flag off, no JIT resolution happens and the JIT
+        fields are forwarded as None (a deployed app is targeted by name)."""
+        os.environ.pop("UIPATH_FEATURE_EnableJITEscalationApps", None)
+        mock_resolve_recipient.return_value = TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
+        mock_config.base_url = None
+        mock_config.tenant_name = "TestTenant"
+
+        mock_task = _make_mock_task(recipient=MOCK_TASK_RECIPIENT)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=mock_task)
+        mock_uipath_class.return_value = mock_client
+
+        # Even if the run were debug, the disabled flag short-circuits JIT.
+        mock_resolve_debug.return_value = True
+
+        action = self._make_jit_action()
+        guardrail = _make_default_guardrail()
+        create_task_name, create_task_fn, _, _ = _get_action_nodes(
+            action, guardrail, GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION
+        )
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_validation_details="Validation failed"
+            ),
+        )
+
+        await create_task_fn(state)
+
+        call_kwargs = mock_client.tasks.create_async.call_args[1]
+        assert call_kwargs["app_project_key"] is None
+        assert call_kwargs["app_type"] is None
+        assert call_kwargs["action_schema"] is None
