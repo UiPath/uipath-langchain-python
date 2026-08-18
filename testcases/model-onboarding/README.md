@@ -5,18 +5,22 @@ Web's "Clone as Coded Agent" of the low-code FileProcessingAgent — against
 **one runtime-specified model**, once per `api_flavor × file`.
 
 Each file is uploaded as a real platform attachment and read by the agent's
-*Analyze Files* tool, then asked a question with **one deterministic answer
-that only the file's contents reveal**:
+*Analyze Files* tool, then asked a question whose answer is **unguessable** —
+see [`fixtures/README.md`](fixtures/README.md):
 
 | file | question | answer |
 |---|---|---|
-| `image` (`animal.jpg`, a photo of a dog) | "What animal is in this image? Answer with one word only." | `dog` |
-| `pdf` (`document.pdf`, reading "Dummy PDF file") | "What is the first word of the text inside this document?" | `dummy` |
+| `image` ([`fixtures/shape.png`](fixtures/shape.png), a purple square) | "What colour is the large shape in the centre of this image?" | `purple` |
+| `pdf` ([`fixtures/document.pdf`](fixtures/document.pdf), one line of text) | "What is the verification code written in this document?" | `PDF-CODE-74915` |
 
-The answer word appears nowhere in the file name, so a model that never opened
-the file cannot produce it. A wrong or missing answer fails the cell and flips
-the single `success` boolean, asserted alongside the emitted traces — which
-also require an `Analyze Files` TOOL span.
+Unguessable is the point: a random code and an arbitrary colour give a model
+that never opened the file nothing to fall back on. Earlier fixtures asked
+"what animal is in this image?" over `dog.jpg` — "dog" is the most likely
+answer to that question with no image at all, and the file name is visible in
+the prompt, so a model that skipped the file still scored correct.
+
+A wrong or missing answer fails the cell and flips the single `success`
+boolean, asserted alongside the emitted traces.
 
 There is no fallback: if the attachment can't be created (the CI principal
 needs permission to `POST /odata/Attachments`), the cell fails, because the
@@ -130,6 +134,13 @@ default/example spec — dispatch inputs override it at runtime.
 3. `success is True` and `result_summary` is non-empty.
 4. `"Successful execution."` appears in `local_run_output.log` (the second,
    empty-`UIPATH_JOB_KEY` run).
-5. Traces contain the `probe_file_processing` CHAIN span, an `Analyze Files`
-   TOOL span (proof the agent read the file), and at least one `LLM` span from
-   a reachable client class (`expected_traces.json`).
+5. Traces contain the `probe_file_processing` CHAIN span, the
+   `attachments_upload` and `attachments_get_blob_uri` spans (the file really
+   was uploaded and its bytes fetched), the `agent` AGENT span, and at least
+   one `LLM` span from a reachable client class (`expected_traces.json`).
+
+   Note there is no `Analyze Files` TOOL span: internal tools do not emit one
+   (span kinds are AGENT/CHAIN/LLM only), and the span name would be sanitized
+   to `Analyze_Files` in any case. Proof that the file was read comes from the
+   answer itself — unguessable, per the table above — plus the attachment
+   spans.
