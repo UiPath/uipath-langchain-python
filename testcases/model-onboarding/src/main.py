@@ -28,6 +28,7 @@ Each ``api_flavors`` entry is a ``vendor_type:api_flavor`` pair forwarded to
 """
 
 import logging
+import os
 import re
 
 from langgraph.graph import END, START, StateGraph
@@ -38,6 +39,7 @@ from uipath_langchain.agent.multimodal.types import FileInfo
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 
 from agents.file_processing.agent import run as run_file_processing
+from agents.judge_guardrail.agent import run as run_judge_guardrail
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +242,27 @@ async def probe_file_processing(state: GraphInput) -> GraphOutput:
                 record(
                     f"  {file_name}: ✗ expected '{case.expected}', got: {answer}"[:300]
                 )
+
+        # The model under test in the *judge* role, behind a real LLM-as-judge
+        # guardrail. Skipped without a user-identity token: the validator lives
+        # on `agentsruntime_`, which the client-credentials app cannot reach —
+        # the OAuth resource catalog has no `agentsruntime` entry, so an S2S
+        # token comes back 401. Skipping rather than failing keeps the default
+        # CI path (S2S secrets, no PAT) green; see run.sh for the PAT wiring.
+        #
+        # UIPATH_PAT's presence is only the *signal* that run.sh swapped a PAT
+        # into .env as UIPATH_ACCESS_TOKEN — the probe authenticates with
+        # whatever token the CLI loaded from .env. Running with the env var set
+        # but without the .env swap yields six 401 ✗ cells, not a skip.
+        if os.environ.get("UIPATH_PAT"):
+            try:
+                verdict = await run_judge_guardrail(model, spec.model_name)
+                record(f"  judge_guardrail: ✓ {verdict}"[:200])
+            except Exception as e:
+                failed = True
+                record(f"  judge_guardrail: ✗ {type(e).__name__}: {_one_line(e)}"[:300])
+        else:
+            record("  judge_guardrail: – skipped (no UIPATH_PAT; needs user identity)")
 
     if not spec.api_flavors:
         failed = True

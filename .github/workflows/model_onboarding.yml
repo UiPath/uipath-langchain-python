@@ -116,6 +116,11 @@ jobs:
         CLIENT_ID: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_ID || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_ID || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_ID }}
         CLIENT_SECRET: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_SECRET || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_SECRET || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_SECRET }}
         BASE_URL: ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
+        # Optional. Only alpha has a PAT wired up; without it the judge
+        # guardrail 401s (see the note in run.sh) and everything else still runs.
+        # The secret must be a dedicated service-user PAT with minimal scope and
+        # short expiry — run.sh makes it the ambient token for the whole run.
+        UIPATH_PAT: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_PAT || '' }}
       working-directory: testcases/model-onboarding
       run: |
         echo "Running model-onboarding"
