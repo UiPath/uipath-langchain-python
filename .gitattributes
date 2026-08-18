@@ -1,2 +1,7 @@
 *.db filter=lfs diff=lfs merge=lfs -text
 **/cached_embeddings/** filter=lfs diff=lfs merge=lfs -text
+
+# Test fixtures are binary: the assertion compares bytes the model read back,
+# so any EOL translation on checkout would corrupt them.
+*.pdf -text
+*.png -text
