@@ -1,8 +1,15 @@
 """Tests for the forced-extraction helpers."""
 
+import logging
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+import pytest
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.messages.content import create_tool_call
 from pydantic import BaseModel, ConfigDict
 
@@ -72,6 +79,29 @@ class TestStripThinking:
     def test_no_thinking_returns_same_instance(self) -> None:
         model = _FakeConverse(additional_model_request_fields={"anthropic_beta": ["x"]})
         assert strip_thinking(model) is model  # type: ignore[arg-type]
+
+    def test_copy_failure_returns_original_and_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A model_copy failure degrades to the original model but is logged, not
+        swallowed silently — otherwise the extraction call goes out thinking-on."""
+
+        class _CopyFails:
+            additional_model_request_fields = {"thinking": {"type": "enabled"}}
+            model_kwargs: dict[str, Any] = {}
+            thinking = None
+
+            def model_copy(self, update: Any) -> Any:
+                raise RuntimeError("copy blew up")
+
+        model = _CopyFails()
+        with caplog.at_level(logging.WARNING):
+            result = strip_thinking(model)  # type: ignore[arg-type]
+
+        assert result is model
+        assert any(
+            "strip thinking config" in r.getMessage().lower() for r in caplog.records
+        )
 
 
 class TestStripReasoningBlocks:
@@ -161,3 +191,10 @@ class TestEnsureTrailingUserTurn:
         ]
         out = _ensure_trailing_user_turn(msgs)
         assert out == msgs
+
+    def test_appends_after_non_user_terminal_message(self) -> None:
+        """A trailing non-user-role message (e.g. system) still gets a user turn."""
+        msgs = [SystemMessage(content="sys")]
+        out = _ensure_trailing_user_turn(msgs)
+        assert len(out) == 2
+        assert isinstance(out[-1], HumanMessage)
