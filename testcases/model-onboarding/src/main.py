@@ -92,9 +92,14 @@ FILE_REGISTRY: dict[str, FileCase] = {
             name="document.pdf",
             mime_type="application/pdf",
         ),
+        # "Answer with the code only" alone was not enough: one run replied
+        # "Extracted verification code from document via Analyze_Files." —
+        # describing the action instead of reporting the value. Naming the
+        # failure mode explicitly is what stops it.
         question=(
             "What is the verification code written in this document? "
-            "Answer with the code only."
+            "Reply with the code itself and nothing else. Do not describe "
+            "what you did or which tool you used."
         ),
         expected="PDF-CODE-74915",
     ),
