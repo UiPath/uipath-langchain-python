@@ -45,14 +45,14 @@ _VALID_TARGETS: list[str] = [
 
 @pytest.fixture
 def route_function_no_limit():
-    """Fixture for routing function with no thinking messages limit."""
-    return create_route_agent(valid_targets=_VALID_TARGETS, thinking_messages_limit=0)
+    """Routing function. Tool-less turns loop back; llm_messages_limit bounds them."""
+    return create_route_agent(valid_targets=_VALID_TARGETS)
 
 
 @pytest.fixture
 def route_function_with_limit():
-    """Fixture for routing function with thinking messages limit of 2."""
-    return create_route_agent(valid_targets=_VALID_TARGETS, thinking_messages_limit=2)
+    """Alias kept for existing tests; routing no longer takes a thinking limit."""
+    return create_route_agent(valid_targets=_VALID_TARGETS)
 
 
 @pytest.fixture
@@ -142,18 +142,6 @@ def state_no_tool_calls():
 
 
 @pytest.fixture
-def state_excessive_thinking():
-    """Fixture for state with excessive consecutive thinking messages."""
-    messages = [
-        HumanMessage(content="query"),
-        AIMessage(content="thinking 1"),
-        AIMessage(content="thinking 2"),
-        AIMessage(content="thinking 3"),
-    ]
-    return MockAgentGraphState(messages=messages)
-
-
-@pytest.fixture
 def empty_state():
     """Fixture for state with no messages."""
     return MockAgentGraphState(messages=[])
@@ -205,62 +193,46 @@ class TestRouteAgentBasicFunctionality:
         assert result == AgentGraphNode.TERMINATE
 
 
-class TestRouteAgentThinkingMessages:
-    """Test thinking messages and consecutive completions logic."""
+class TestRouteAgentToolLessTurns:
+    """Any tool-less content turn loops back to AGENT. The router can't tell whether
+    tool_choice was actually forced on the wire (Bedrock/native handlers silently
+    downgrade it under thinking), so stall accounting — forcing, the extraction
+    retry, and the deterministic failure — lives in the LLM node."""
 
-    def test_no_tool_calls_within_limit_routes_to_agent(
-        self, route_function_with_limit, state_no_tool_calls
-    ):
-        """Should route to AGENT when no tool calls and within thinking limit."""
-        result = route_function_with_limit(state_no_tool_calls)
-        assert result == AgentGraphNode.AGENT
-
-    def test_excessive_thinking_messages_raises_exception(
-        self, route_function_with_limit, state_excessive_thinking
-    ):
-        """Should raise exception when exceeding thinking messages limit."""
-        with pytest.raises(AgentRuntimeError) as exc_info:
-            route_function_with_limit(state_excessive_thinking)
-
-        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
-            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
+    def test_reasoning_stall_routes_to_agent(self, route_function_no_limit):
+        """A tool-less turn carrying a thinking block loops back to AGENT."""
+        ai_message = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "", "signature": "sig"},
+                {"type": "text", "text": "the answer is 42"},
+            ]
         )
-
-    def test_thinking_messages_limit_zero_forbids_thinking(self):
-        """Should not allow any thinking messages when limit is 0."""
-        route_func = create_route_agent(
-            valid_targets=_VALID_TARGETS, thinking_messages_limit=0
-        )
-        ai_message = AIMessage(content="thinking")
         state = MockAgentGraphState(
             messages=[HumanMessage(content="query"), ai_message]
         )
+        assert route_function_no_limit(state) == AgentGraphNode.AGENT
 
-        with pytest.raises(AgentRuntimeError) as exc_info:
-            route_func(state)
+    def test_plain_content_without_reasoning_routes_to_agent(
+        self, route_function_no_limit, state_no_tool_calls
+    ):
+        """A plain-text tool-less turn is a legal reply whenever forcing was
+        downgraded (Bedrock thinking, adaptive thinking after tool results), so it
+        loops back instead of failing the run."""
+        assert route_function_no_limit(state_no_tool_calls) == AgentGraphNode.AGENT
 
-        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
-            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
+    def test_redacted_thinking_turn_routes_to_agent(self, route_function_no_limit):
+        """Redacted thinking turns carry no plain reasoning block but are still
+        legitimate reasoning stalls."""
+        ai_message = AIMessage(
+            content=[
+                {"type": "redacted_thinking", "data": "opaque"},
+                {"type": "text", "text": "working on it"},
+            ]
         )
-
-    def test_thinking_messages_after_tool_execution_resets_count(self):
-        """Should reset thinking count after tool execution."""
-        route_func = create_route_agent(
-            valid_targets=_VALID_TARGETS, thinking_messages_limit=1
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message]
         )
-        messages = [
-            HumanMessage(content="query"),
-            AIMessage(
-                content="using tool",
-                tool_calls=[{"name": "test_tool", "args": {}, "id": "call_1"}],
-            ),
-            ToolMessage(content="result", tool_call_id="call_1"),
-            AIMessage(content="thinking after tool"),  # This should be allowed
-        ]
-        state = MockAgentGraphState(messages=messages)
-
-        result = route_func(state)
-        assert result == AgentGraphNode.AGENT
+        assert route_function_no_limit(state) == AgentGraphNode.AGENT
 
 
 class TestRouteAgentErrorHandling:
@@ -310,7 +282,6 @@ class TestRouteAgentTargetValidation:
         """Should raise ROUTING_ERROR (SYSTEM) when the routed tool is unwired."""
         route_func = create_route_agent(
             valid_targets=[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE, "real_tool"],
-            thinking_messages_limit=0,
         )
         ai_message = AIMessage(
             content="routing",
@@ -330,7 +301,6 @@ class TestRouteAgentTargetValidation:
         """Should return the tool name when it is in the valid target set."""
         route_func = create_route_agent(
             valid_targets=[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE, "real_tool"],
-            thinking_messages_limit=0,
         )
         ai_message = AIMessage(
             content="routing",
@@ -346,7 +316,7 @@ class TestRouteAgentTargetValidation:
         Backwards-compatible contract: callers predating valid_targets must keep
         the old unguarded behavior, returning any routed tool name as-is.
         """
-        route_func = create_route_agent(thinking_messages_limit=0)
+        route_func = create_route_agent()
         ai_message = AIMessage(
             content="routing",
             tool_calls=[{"name": "unwired_tool", "args": {}, "id": "call_1"}],

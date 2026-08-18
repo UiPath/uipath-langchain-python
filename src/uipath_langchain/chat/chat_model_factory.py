@@ -10,6 +10,8 @@ passed through as the ``use_new_llm_clients`` argument of :func:`get_chat_model`
   before the ``uipath_langchain_client`` migration.
 """
 
+import logging
+from collections.abc import Mapping
 from typing import Any, Final
 
 from langchain_core.callbacks import BaseCallbackHandler, Callbacks
@@ -34,6 +36,8 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupError,
     AgentStartupErrorCode,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _TraceContextHeadersCallback(BaseCallbackHandler):
@@ -87,6 +91,7 @@ def get_chat_model(
     callbacks: Callbacks = _UNSET,
     agenthub_config: str | None = None,
     use_new_llm_clients: bool = True,
+    model_settings: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create and configure a chat model, dispatching legacy vs new clients.
@@ -134,6 +139,13 @@ def get_chat_model(
 
     try:
         if not use_new_llm_clients:
+            if model_settings:
+                logger.warning(
+                    "model_settings %s are not supported by the legacy LLM clients "
+                    "and will be ignored; the EnabledNewLlmClients feature flag must "
+                    "be on for them to apply.",
+                    sorted(model_settings),
+                )
             return _legacy_chat_model(
                 model,
                 temperature=temperature,
@@ -164,6 +176,7 @@ def get_chat_model(
             api_flavor=api_flavor,
             custom_class=custom_class,
             agenthub_config=agenthub_config,
+            model_settings=model_settings,
             **optional_kwargs,
             **kwargs,
         )

@@ -1,11 +1,32 @@
-"""Map normalized LLM-client errors into agent runtime errors."""
+"""Map normalized LLM-client errors into agent runtime errors.
 
-from uipath.llm_client import UiPathError, UiPathLLMErrorCode
+The LLM client (uipath-llm-client / uipath-langchain-client) surfaces two shapes:
+a ``UiPathError`` carrying a semantic ``error_code`` (handled by
+``raise_for_llm_client_error``), and a ``UiPathAPIError`` carrying an HTTP
+``status_code`` + ``body`` for provider passthrough failures (handled by
+``raise_for_provider_http_error``). Both are mapped to ``AgentRuntimeError`` so
+upstream handling can categorise without provider-specific logic.
+"""
+
+from typing import NoReturn
+
+from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+)
+
+# Maps known LLM Gateway status codes to specific error codes.
+# Unknown status codes fall back to HTTP_ERROR.
+_LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
+    403: AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
+}
+
+# fixed, provider-free fallback when the gateway gives no ``detail``
+_GENERIC_HTTP_DETAIL = (
+    "The request to the model provider failed. See the execution trace for details."
 )
 
 
@@ -22,3 +43,36 @@ def raise_for_llm_client_error(error: UiPathError) -> None:
             ),
             category=UiPathErrorCategory.USER,
         ) from error
+
+
+def _category_for_status(status_code: int) -> UiPathErrorCategory:
+    """Map LLM provider HTTP statuses to their runtime error category."""
+    if status_code == 403:
+        return UiPathErrorCategory.DEPLOYMENT
+    if status_code >= 500:
+        return UiPathErrorCategory.SYSTEM
+    return UiPathErrorCategory.UNKNOWN
+
+
+def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
+    """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
+
+    Reads the HTTP status code and the gateway's own ``detail`` (from ``error.body``)
+    and re-raises. Only the gateway ``detail`` is surfaced; when it's absent a fixed
+    generic message is used instead of any provider/body content. The vendor's
+    passthrough message can echo request content, so it stays on the trace span
+    (excluded from App Insights), never the run record. ``from None`` keeps the chained
+    ``UiPathAPIError`` string (which embeds the raw body) out of ``format_exc()`` too.
+    """
+    status_code = error.status_code
+    code = _LLM_STATUS_CODE_MAP.get(status_code, AgentRuntimeErrorCode.HTTP_ERROR)
+    category = _category_for_status(status_code)
+    detail = error.body.get("detail") if isinstance(error.body, dict) else None
+
+    raise AgentRuntimeError(
+        code=code,
+        title=f"LLM provider returned HTTP {status_code}",
+        detail=detail or _GENERIC_HTTP_DETAIL,
+        category=category,
+        status=status_code,
+    ) from None

@@ -105,8 +105,12 @@ def extract_input_data_from_state(
     return input_model.model_validate(filtered_state, from_attributes=True).model_dump()
 
 
-def count_consecutive_thinking_messages(messages: Sequence[BaseMessage]) -> int:
-    """Count consecutive AIMessages without tool calls at end of message history."""
+def count_consecutive_tool_less_turns(messages: Sequence[BaseMessage]) -> int:
+    """Count trailing AI turns that produced content but called no tool.
+
+    This is the stall counter: consecutive AIMessages at the end of the history with
+    content and no tool_calls, i.e. the model answered without making progress via a tool.
+    """
     if not messages:
         return 0
 

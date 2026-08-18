@@ -10,25 +10,34 @@ from uipath_langchain.chat.handlers.bedrock import (
     BedrockConversePayloadHandler,
     BedrockInvokePayloadHandler,
 )
+from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
 
 # ---------------------------------------------------------------------------
 # Fake model factories
 # ---------------------------------------------------------------------------
 
 
-def make_invoke_model(**model_kwargs_override: object) -> object:
-    """Return a ChatBedrock-like model with optional model_kwargs."""
+def make_invoke_model(
+    model_id: str | None = None, **model_kwargs_override: object
+) -> object:
+    """Return a ChatBedrock-like model with optional model_kwargs + model_id."""
     model = type("FakeChatBedrock", (), {"model_kwargs": {}})()
     model.model_kwargs = model_kwargs_override
+    if model_id is not None:
+        model.model_id = model_id
     return model
 
 
-def make_converse_model(**fields_override: object) -> object:
-    """Return a ChatBedrockConverse-like model with optional additional_model_request_fields."""
+def make_converse_model(
+    model_id: str | None = None, **fields_override: object
+) -> object:
+    """Return a ChatBedrockConverse-like model with optional request fields + model_id."""
     model = type(
         "FakeChatBedrockConverse", (), {"additional_model_request_fields": {}}
     )()
     model.additional_model_request_fields = fields_override
+    if model_id is not None:
+        model.model_id = model_id
     return model
 
 
@@ -298,3 +307,77 @@ class TestBedrockConverseThinkingNullSafety:
         handler = BedrockConversePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
+
+
+# ---------------------------------------------------------------------------
+# Bedrock downgrades forced tool_choice whenever thinking is active — any mode,
+# any version (no version check). The ReAct loop's forced-extraction fallback then
+# guarantees termination. Native keeps forcing; see test_tool_binding_kwargs.py.
+# ---------------------------------------------------------------------------
+
+
+class TestBedrockThinkingDowngrade:
+    """Any thinking mode downgrades forced 'any' -> 'auto' on both Bedrock APIs."""
+
+    @pytest.mark.parametrize("mode", ["enabled", "adaptive"])
+    def test_converse_downgrades(self, mode: str) -> None:
+        handler = BedrockConversePayloadHandler(
+            make_converse_model(thinking={"type": mode})  # type: ignore[arg-type]
+        )
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "auto"
+
+    @pytest.mark.parametrize("mode", ["enabled", "adaptive"])
+    def test_invoke_downgrades(self, mode: str) -> None:
+        handler = BedrockInvokePayloadHandler(
+            make_invoke_model(thinking={"type": mode})  # type: ignore[arg-type]
+        )
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "auto"
+
+    def test_no_thinking_keeps_forcing(self) -> None:
+        handler = BedrockConversePayloadHandler(make_converse_model())  # type: ignore[arg-type]
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
+
+    def test_disabled_thinking_keeps_forcing_converse(self) -> None:
+        handler = BedrockConversePayloadHandler(
+            make_converse_model(thinking={"type": "disabled"})  # type: ignore[arg-type]
+        )
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
+
+    def test_disabled_thinking_keeps_forcing_invoke(self) -> None:
+        handler = BedrockInvokePayloadHandler(
+            make_invoke_model(thinking={"type": "disabled"})  # type: ignore[arg-type]
+        )
+        assert handler.get_tool_binding_kwargs([], "any")["tool_choice"] == "any"
+
+
+class TestThinkingRejectsForcedToolChoice:
+    """The downgrade predicate: forcing is rejected iff active thinking is present,
+    read from whichever transport carries the thinking dict."""
+
+    @pytest.mark.parametrize(
+        "thinking_type,expected",
+        [
+            ("enabled", True),
+            ("adaptive", True),
+            ("interleaved", True),
+            ("disabled", False),
+        ],
+    )
+    def test_mode_decides_rejection(self, thinking_type: str, expected: bool) -> None:
+        model = make_invoke_model(thinking={"type": thinking_type})
+        assert thinking_rejects_forced_tool_choice(model) is expected
+
+    def test_reads_native_thinking_attribute(self) -> None:
+        model = type("FakeChatAnthropic", (), {"thinking": {"type": "adaptive"}})()
+        assert thinking_rejects_forced_tool_choice(model) is True
+
+    def test_reads_converse_request_fields(self) -> None:
+        model = make_converse_model(thinking={"type": "enabled"})
+        assert thinking_rejects_forced_tool_choice(model) is True
+
+    def test_false_when_thinking_absent(self) -> None:
+        assert thinking_rejects_forced_tool_choice(make_invoke_model()) is False
+
+    def test_false_when_thinking_not_dict(self) -> None:
+        model = make_invoke_model(thinking="enabled")
+        assert thinking_rejects_forced_tool_choice(model) is False
