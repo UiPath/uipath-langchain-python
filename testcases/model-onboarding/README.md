@@ -58,6 +58,35 @@ Unlike `multimodal-invoke` (which hardcodes its model matrix), the model here is
 Every file in `FILE_REGISTRY` (`src/main.py`) is exercised — add a case there
 to cover another format.
 
+## The judge probe (`judge_guardrail`) — needs a PAT, skips without one
+
+After the file cells, each flavor also runs the model under test in the
+**judge** role: a ReAct agent runs behind a real LLM-as-judge guardrail whose
+judge model is the one being onboarded
+([`src/agents/judge_guardrail/agent.py`](src/agents/judge_guardrail/agent.py)).
+Two prompts run per flavor — one steered to violate the rule (the judge must
+block) and one compliant (the judge must stay quiet) — each sampled 3 times and
+decided by majority; the observed counts are always in the cell, e.g.
+`judge_guardrail: ✓ judge discriminated (violating blocked 3/3, compliant allowed 3/3)`.
+
+Note the guardrail is evaluated on **both** the incoming request and the
+answer (that is how `create_agent` wires AGENT-scope guardrails — there is no
+POST-only option), which is why the rule is phrased about "the text" rather
+than "the answer".
+
+The hosted validator lives on `agentsruntime_`, which client-credentials (S2S)
+tokens cannot reach, so the probe needs a **user-identity PAT**:
+
+- **Without `UIPATH_PAT`** (the default CI path): the cell records
+  `judge_guardrail: – skipped (no UIPATH_PAT; needs user identity)` and does
+  not fail the run.
+- **With `UIPATH_PAT`** exported before `run.sh`: the script swaps the PAT into
+  `.env` as `UIPATH_ACCESS_TOKEN` (it must go into the file — the CLI loads
+  `.env` with `override=True`, so an exported env var would be silently
+  ignored). The PAT then authenticates **everything** in the run, so use a
+  dedicated service-user PAT with minimal scope and short expiry. In CI only
+  the alpha leg has one (`ALPHA_TEST_PAT`).
+
 ## Prerequisites (external to the repo)
 
 - Model IDs per flavor you list.

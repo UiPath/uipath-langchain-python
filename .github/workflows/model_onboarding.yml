@@ -118,6 +118,8 @@ jobs:
         BASE_URL: ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
         # Optional. Only alpha has a PAT wired up; without it the judge
         # guardrail 401s (see the note in run.sh) and everything else still runs.
+        # The secret must be a dedicated service-user PAT with minimal scope and
+        # short expiry — run.sh makes it the ambient token for the whole run.
         UIPATH_PAT: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_PAT || '' }}
       working-directory: testcases/model-onboarding
       run: |

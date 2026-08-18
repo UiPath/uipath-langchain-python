@@ -16,12 +16,17 @@ uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --b
 # `agentsruntime` entry, so the S2S token is rejected with 401. A PAT carries a
 # user identity and is accepted. Swap it in when one is supplied.
 #
+# The PAT then becomes the ambient token for EVERYTHING below — init, pack,
+# and both runs, not just the judge probe — so supply a dedicated
+# service-user PAT with minimal scope and a short expiry, never a personal
+# one.
+#
 # This MUST be written into .env rather than exported: the CLI loads .env with
 # `override=True` (uipath/_cli/__init__.py), so a process env var loses to
 # whatever `uipath auth` just wrote, and the PAT would be silently ignored.
 if [ -n "$UIPATH_PAT" ]; then
   echo "Overriding the S2S token with the supplied PAT..."
-  python3 - <<'PY'
+  uv run python - <<'PY'
 import os
 from pathlib import Path
 
