@@ -6,7 +6,7 @@ turn with thinking off and the tool call forced, which every provider honors.
 """
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
 from uipath_langchain.chat.thinking import is_reasoning_block, strip_thinking
 
@@ -30,9 +30,13 @@ def _strip_reasoning_blocks(messages: list[AnyMessage]) -> list[AnyMessage]:
 
 
 def _ensure_trailing_user_turn(messages: list[AnyMessage]) -> list[AnyMessage]:
-    if messages and not isinstance(messages[-1], AIMessage):
+    if messages and isinstance(messages[-1], (HumanMessage, ToolMessage)):
         return messages
-    return list(messages) + [HumanMessage(content="Call a tool to continue. Terminal tool calls must contain the final output.")]
+    return list(messages) + [
+        HumanMessage(
+            content="Call a tool to continue. Terminal tool calls must contain the final output."
+        )
+    ]
 
 
 def build_extraction_call(

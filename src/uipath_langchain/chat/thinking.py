@@ -6,9 +6,12 @@ Where the thinking config lives depends on the transport: native ChatAnthropic e
 ReAct loop don't each reimplement it.
 """
 
+import logging
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+
+logger = logging.getLogger(__name__)
 
 _REASONING_BLOCK_TYPES = frozenset(
     {"reasoning_content", "reasoning", "thinking", "redacted_thinking"}
@@ -23,9 +26,14 @@ def is_reasoning_block(block: Any) -> bool:
 def thinking_rejects_forced_tool_choice(model: Any) -> bool:
     """True if forcing a tool call is incompatible with this model's active thinking.
 
-    Anthropic models (native + Bedrock) reject a forced tool_choice while extended or
-    adaptive thinking is on, so callers downgrade forcing to 'auto' and rely on the
-    thinking-off extraction retry (agent/react/forced_extraction.py). OpenAI/Gemini
+    Anthropic (native + Bedrock) can't honor a forced tool_choice while extended or
+    adaptive thinking is on. The fact is the same across transports; how it's handled
+    differs, so this predicate reports it uniformly:
+      - Bedrock: the payload handler downgrades tool_choice 'any' -> 'auto'.
+      - native ``ChatAnthropic``: langchain_anthropic strips the forced choice itself,
+        so our handler leaves tool_choice as-is.
+    Either way llm_node uses this to run the thinking-off extraction retry
+    (agent/react/forced_extraction.py) for the tool-less turn that results. OpenAI/Gemini
     reasoning tolerate forcing, so they return False. `{"type": "disabled"}` is thinking
     off. Extend here if another provider shows the same conflict.
     """
@@ -62,6 +70,11 @@ def strip_thinking(model: BaseChatModel) -> BaseChatModel:
     try:
         return model.model_copy(update=updates)
     except Exception:
+        logger.warning(
+            "Failed to strip thinking config for the forced-extraction call; "
+            "using the original model.",
+            exc_info=True,
+        )
         return model
 
 

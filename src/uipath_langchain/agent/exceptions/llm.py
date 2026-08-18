@@ -24,6 +24,11 @@ _LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
     403: AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
 }
 
+# fixed, provider-free fallback when the gateway gives no ``detail``
+_GENERIC_HTTP_DETAIL = (
+    "The request to the model provider failed. See the execution trace for details."
+)
+
 
 def raise_for_llm_client_error(error: UiPathError) -> None:
     """Raise a structured agent error for known LLM-client error codes."""
@@ -52,10 +57,11 @@ def _category_for_status(status_code: int) -> UiPathErrorCategory:
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
 
-    Reads the HTTP status code and the gateway's ``detail`` (from ``error.body``) and
-    re-raises. Only the gateway ``detail`` is surfaced — the vendor's passthrough
-    message can echo request content, so it stays on the trace span (excluded from
-    App Insights), never the run record. ``from None`` keeps the chained
+    Reads the HTTP status code and the gateway's own ``detail`` (from ``error.body``)
+    and re-raises. Only the gateway ``detail`` is surfaced; when it's absent a fixed
+    generic message is used instead of any provider/body content. The vendor's
+    passthrough message can echo request content, so it stays on the trace span
+    (excluded from App Insights), never the run record. ``from None`` keeps the chained
     ``UiPathAPIError`` string (which embeds the raw body) out of ``format_exc()`` too.
     """
     status_code = error.status_code
@@ -66,7 +72,7 @@ def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     raise AgentRuntimeError(
         code=code,
         title=f"LLM provider returned HTTP {status_code}",
-        detail=detail or error.message,
+        detail=detail or _GENERIC_HTTP_DETAIL,
         category=category,
         status=status_code,
     ) from None
