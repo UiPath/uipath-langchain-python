@@ -217,6 +217,7 @@ class TestProcessToolInvocation:
 
         tool = create_process_tool(process_resource)
 
+        assert tool.metadata is not None
         assert tool.metadata["entry_point_path"] == "Workflows/Main.xaml"
 
     @pytest.mark.asyncio
