@@ -22,3 +22,15 @@ def raise_for_llm_client_error(error: UiPathError) -> None:
             ),
             category=UiPathErrorCategory.USER,
         ) from error
+
+    if error.error_code == UiPathLLMErrorCode.EXECUTION_DEADLINE_EXCEEDED:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.EXECUTION_DEADLINE_EXCEEDED,
+            title="Agent run reached its execution time limit.",
+            detail=(
+                error.detail
+                or "The run's execution time limit was reached before the LLM call could complete."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+            should_wrap=False,
+        ) from error
