@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
+env:
+  SAFE_CHAIN_MINIMUM_PACKAGE_AGE_EXCLUSIONS: uipath,uipath-core,uipath-dev,uipath-langchain,uipath-langchain-client,uipath-llm-client,uipath-platform,uipath-robot,uipath-runtime,jsonschema-pydantic-converter
+
 jobs:
   publish-dev:
     runs-on: uipath-ubuntu-latest
