@@ -13,9 +13,8 @@ dependencies = [
     "pydantic>=2.10.6",
     "aiohttp>=3.11.12",
     "typing-extensions>=4.12.2",
-    "langchain-mcp-adapters>=0.1.0",
     "ipython>=8.32.0",
-    "mcp>=1.4.1",
+    "mcp==2.0.0",
 ]
 requires-python = ">=3.11"
 
