@@ -87,12 +87,16 @@ def create_advanced_agent(
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    skills: Sequence[str] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
     ``memory`` is a list of file paths loaded via deepagents' ``MemoryMiddleware``:
     each is read from ``backend`` and injected into the system prompt every turn,
     and the model maintains them with ``edit_file``. Empty disables the middleware.
+
+    ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
+    ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
     """
     return _create_deep_agent(
         model=model,
@@ -103,6 +107,7 @@ def create_advanced_agent(
         response_format=response_format,
         memory=list(memory) or None,
         middleware=list(middleware),
+        skills=list(skills) if skills else None,
     )
 
 
@@ -115,6 +120,7 @@ def create_advanced_agent_graph(
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
+    skills: Sequence[str] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -153,6 +159,7 @@ def create_advanced_agent_graph(
             if runtime_system_prompt_key is not None
             else []
         ),
+        skills=skills,
     )
 
     wrapper_state = create_state_with_input(input_schema)
@@ -215,6 +222,7 @@ def create_conversational_advanced_agent_graph(
     tools: Sequence[BaseTool],
     system_prompt: str,
     backend: BackendProtocol | BackendFactory | None,
+    skills: Sequence[str] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -237,6 +245,7 @@ def create_conversational_advanced_agent_graph(
         system_prompt=system_prompt,
         backend=backend,
         memory=memory_sources,
+        skills=skills,
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
