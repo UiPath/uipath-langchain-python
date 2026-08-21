@@ -29,6 +29,9 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from .utils import sanitize_tool_name
 
+# Mirrors SOLUTION_FOLDER_SENTINEL in the agents packager (bindings/handlers/common.ts).
+_SOLUTION_FOLDER_SENTINEL = "solution_folder"
+
 _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
     (404, "1002"): (
         "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
@@ -58,7 +61,12 @@ def create_process_tool(
     # Eval serverless jobs expose UIPATH_FOLDER_KEY but not UIPATH_FOLDER_PATH;
     # without a folder header StartJobs returns 404 for a deployed process.
     # invoke_async accepts only one of folder_path/folder_key, so resolve one.
-    folder_path = get_execution_folder_path() or resource.properties.folder_path
+    # "solution_folder" is the packager sentinel for solution-local resources
+    # ("no folder", same as null/empty) — never send it as a real folder path.
+    configured_folder_path = resource.properties.folder_path
+    if configured_folder_path == _SOLUTION_FOLDER_SENTINEL:
+        configured_folder_path = None
+    folder_path = get_execution_folder_path() or configured_folder_path
     folder_key = get_execution_folder_key() if not folder_path else None
 
     input_model: Any = create_model(resource.input_schema)
