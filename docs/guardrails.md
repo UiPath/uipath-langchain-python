@@ -219,9 +219,13 @@ agent = create_agent(
 
 ### Bring Your Own Guardrail (BYOG)
 
+<!-- REMOVE WHEN: BYOG feature flag is enabled on all rings -->
+!!! info "Platform Availability"
+    `UiPathByoGuardrailMiddleware` ships in the `uipath-langchain` package on PyPI and works on any tenant where Bring Your Own Guardrail is enabled. The admin step it depends on — configuring a guardrail connection from a guardrail connection template under **Admin → AI Trust Layer → Guardrails Configurations** — is still rolling out and isn't enabled on every tenant yet. If that page isn't in your Admin panel, BYOG isn't enabled on yours — watch the UiPath product release notes for when it lands.
+
 `UiPathByoGuardrailMiddleware` runs a **customer-managed** validator instead of a UiPath-managed one — for example a cloud content-safety subscription, a vendor validation service, or a custom Integration Service connector wrapping an internal classifier.
 
-**Admin prerequisite.** An Org Admin first creates the BYOG configuration under **Admin → AI Trust Layer → Guardrails Configurations**: pick a guardrail connector (a UiPath-shipped one or a custom one wrapping your own vendor), create an Integration Service connection with your credentials, and save the configuration with a validator name. If the Guardrails Configurations page is not available, Bring Your Own Guardrail is not enabled on your tenant yet.
+**Admin prerequisite.** An Org Admin first creates the BYOG configuration under **Admin → AI Trust Layer → Guardrails Configurations**: pick a guardrail connector (a UiPath-shipped one or a custom one wrapping your own vendor), create an Integration Service connection with your credentials, and save the configuration with a validator name.
 
 The middleware references that configuration by name:
 
@@ -483,6 +487,10 @@ agent = create_my_agent()
 
 ### LLM-as-judge
 
+<!-- REMOVE WHEN: LLM-as-judge feature flag is enabled on all rings -->
+!!! info "Platform Availability"
+    `UiPathLLMAsJudgeMiddleware` and `LLMAsJudgeValidator` ship in the `uipath-langchain` package on PyPI, but the LLM-as-judge guardrail they call is still rolling out on the platform side and isn't enabled on every tenant yet — regardless of which judge models your governance policy permits. Watch the UiPath product release notes for when it lands.
+
 Use `LLMAsJudgeValidator` to check content against a plain-language rule via a judge LLM. Scope is inferred from the decorated target (here, the agent factory → AGENT scope). See the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/#llm-as-judge) for the full parameter reference (`threshold`, `positive_examples`, `negative_examples`, and their limits).
 
 ```python
@@ -527,6 +535,10 @@ async def my_node(state: Input) -> Output:
 ```
 
 ### Bring Your Own Guardrail (BYOG)
+
+<!-- REMOVE WHEN: BYOG feature flag is enabled on all rings -->
+!!! info "Platform Availability"
+    Same rollout as the middleware flavor — the guardrail connection template configuration isn't enabled on every tenant yet. See [Bring Your Own Guardrail (BYOG)](#bring-your-own-guardrail-byog) under the middleware pattern.
 
 `ByoValidator` is the decorator equivalent of [`UiPathByoGuardrailMiddleware`](#bring-your-own-guardrail-byog): it runs a **customer-managed** validator instead of a UiPath-managed one — your own content-safety subscription, a vendor validation service, or a custom Integration Service connector wrapping an internal classifier.
 
