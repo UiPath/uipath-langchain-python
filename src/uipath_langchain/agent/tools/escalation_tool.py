@@ -203,6 +203,13 @@ def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
     )
 
 
+def _resolve_channel_folder_path(channel: EscalationChannel) -> str | None:
+    """Return the folder the channel's task must be created in"""
+    if isinstance(channel, AgentEscalationChannel):
+        return channel.properties.folder_name
+    return get_execution_folder_path()
+
+
 async def create_task_for_channel(
     client: UiPath,
     channel: EscalationChannel,
@@ -292,7 +299,7 @@ def create_escalation_tool(
         agent_input: dict[str, Any] = (
             tool.metadata.get("agent_input") if tool.metadata else None
         ) or {}
-        folder_path = get_execution_folder_path()
+        folder_path = _resolve_channel_folder_path(channel)
 
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
@@ -322,7 +329,7 @@ def create_escalation_tool(
             cached_result = await _check_escalation_memory_cache(
                 _memory_space_id,
                 serialized_data,
-                folder_path=_memory_folder_path or folder_path,
+                folder_path=_memory_folder_path or get_execution_folder_path(),
                 memory_settings=_memory_settings,
                 memory_space_name=_memory_space_name,
             )
@@ -436,7 +443,7 @@ def create_escalation_tool(
                 parent_span_id=parent_span_id,
                 trace_id=trace_id,
                 user_id=user_id,
-                folder_path=_memory_folder_path or folder_path,
+                folder_path=_memory_folder_path or get_execution_folder_path(),
                 memory_space_name=_memory_space_name,
             )
             if user_id is None:
