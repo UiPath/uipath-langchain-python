@@ -18,6 +18,19 @@ dependencies = [
 ]
 requires-python = ">=3.11"
 
+[tool.uv]
+exclude-newer = "2 days"
+
+[tool.uv.exclude-newer-package]
+uipath = false
+uipath-core = false
+uipath-platform = false
+uipath-runtime = false
+uipath-dev = false
+uipath-langchain-client = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
+
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }
 

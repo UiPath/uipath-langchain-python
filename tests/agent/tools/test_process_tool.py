@@ -175,6 +175,7 @@ class TestProcessToolInvocation:
         mock_client.processes.invoke_async.assert_called_once_with(
             name="MyProcess",
             input_arguments={},
+            folder_key=None,
             folder_path="/Shared/MyFolder",
             attachments=[],
             parent_span_id=None,
@@ -487,6 +488,104 @@ class TestProcessToolRunAsMe:
         assert call_kwargs["run_as_me"] is None
 
 
+class TestProcessToolFolderResolution:
+    """Test folder context resolution: env folder path, resource folder path, env folder key."""
+
+    @staticmethod
+    def _mock_client(mock_uipath_class, mock_interrupt):
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+        return mock_client
+
+    @pytest.fixture
+    def resource_without_folder_path(self):
+        """A process resource with no design-time folder path (solution deployments)."""
+        return AgentProcessToolResourceConfig(
+            type=AgentToolType.PROCESS,
+            name="test_process",
+            description="Test process description",
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            properties=AgentProcessToolProperties(process_name="MyProcess"),
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_falls_back_to_resource_folder_path_when_env_unset(
+        self, mock_uipath_class, mock_interrupt, process_resource
+    ):
+        """Without UIPATH_FOLDER_PATH, the resource's folderPath is used."""
+        mock_client = self._mock_client(mock_uipath_class, mock_interrupt)
+
+        tool = create_process_tool(process_resource)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["folder_path"] == "/Shared/MyFolder"
+        assert call_kwargs["folder_key"] is None
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "env-folder-key"}, clear=True)
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_falls_back_to_env_folder_key_when_no_folder_path(
+        self, mock_uipath_class, mock_interrupt, resource_without_folder_path
+    ):
+        """Eval serverless jobs only expose UIPATH_FOLDER_KEY: it must reach invoke_async."""
+        mock_client = self._mock_client(mock_uipath_class, mock_interrupt)
+
+        tool = create_process_tool(resource_without_folder_path)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["folder_path"] is None
+        assert call_kwargs["folder_key"] == "env-folder-key"
+
+    @pytest.mark.asyncio
+    @patch.dict(
+        os.environ,
+        {"UIPATH_FOLDER_PATH": "/Env/Folder", "UIPATH_FOLDER_KEY": "env-folder-key"},
+        clear=True,
+    )
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_env_folder_path_wins_and_folder_key_is_omitted(
+        self, mock_uipath_class, mock_interrupt, process_resource
+    ):
+        """When a folder path is available only one of path/key may be sent."""
+        mock_client = self._mock_client(mock_uipath_class, mock_interrupt)
+
+        tool = create_process_tool(process_resource)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["folder_path"] == "/Env/Folder"
+        assert call_kwargs["folder_key"] is None
+
+    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "env-folder-key"}, clear=True)
+    def test_metadata_has_folder_key_when_resolved_from_env(
+        self, resource_without_folder_path
+    ):
+        """Span metadata exposes the resolved folder key for observability."""
+        tool = create_process_tool(resource_without_folder_path)
+        assert tool.metadata is not None
+        assert tool.metadata["folder_path"] is None
+        assert tool.metadata["folder_key"] == "env-folder-key"
+
+
 class TestProcessToolFlowType:
     """Test that a Flow-type resource flows through create_process_tool correctly."""
 
@@ -530,6 +629,7 @@ class TestProcessToolFlowType:
         mock_client.processes.invoke_async.assert_called_once_with(
             name="MyFlow",
             input_arguments={},
+            folder_key=None,
             folder_path="/Shared/Flows",
             attachments=[],
             parent_span_id=None,
@@ -611,6 +711,7 @@ class TestProcessToolFunctionType:
         mock_client.processes.invoke_async.assert_called_once_with(
             name="MyFunction",
             input_arguments={},
+            folder_key=None,
             folder_path="/Shared/Functions",
             attachments=[],
             parent_span_id=None,

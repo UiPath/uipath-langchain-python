@@ -1,4 +1,5 @@
 import inspect
+import itertools
 import logging
 import sys
 from types import ModuleType
@@ -18,20 +19,25 @@ logger = logging.getLogger(__name__)
 # via ``title == _UNRESOLVED_TYPE_TITLE``. See create_output_model.
 _UNRESOLVED_TYPE_TITLE = "UiPathUnresolvedType"
 
-# Shared pseudo-module for all dynamically created types
-# This allows get_type_hints() to resolve forward references
-_DYNAMIC_MODULE_NAME = "jsonschema_pydantic_converter._dynamic"
+# Prefix for the per-conversion pseudo-modules that let get_type_hints()
+# resolve each schema's forward references.
+_DYNAMIC_MODULE_PREFIX = "jsonschema_pydantic_converter._dynamic"
+
+_dynamic_module_counter = itertools.count()
 
 
-def _get_or_create_dynamic_module() -> ModuleType:
-    """Get or create the shared pseudo-module for dynamic types."""
-    if _DYNAMIC_MODULE_NAME not in sys.modules:
-        pseudo_module = ModuleType(_DYNAMIC_MODULE_NAME)
-        pseudo_module.__doc__ = (
-            "Shared module for dynamically generated Pydantic models from JSON schemas"
-        )
-        sys.modules[_DYNAMIC_MODULE_NAME] = pseudo_module
-    return sys.modules[_DYNAMIC_MODULE_NAME]
+def _create_dynamic_module() -> ModuleType:
+    """Create a pseudo-module unique to one schema conversion.
+
+    The converter reuses generic class names (``DynamicType_0``, ...) across
+    schemas, so a shared module would let qualified-name lookups (e.g.
+    LangGraph checkpoint deserialization) resolve to a class generated from a
+    different schema.
+    """
+    module_name = f"{_DYNAMIC_MODULE_PREFIX}_{next(_dynamic_module_counter)}"
+    pseudo_module = ModuleType(module_name)
+    sys.modules[module_name] = pseudo_module
+    return pseudo_module
 
 
 def create_model(
@@ -57,17 +63,21 @@ def create_model(
             ),
         ) from e
 
-    pseudo_module = _get_or_create_dynamic_module()
+    pseudo_module = _create_dynamic_module()
 
     for type_name, type_def in namespace.items():
         setattr(pseudo_module, type_name, type_def)
         if inspect.isclass(type_def) and issubclass(type_def, BaseModel):
-            type_def.__module__ = _DYNAMIC_MODULE_NAME
-            # per-class marker; survives the shared module being overwritten.
+            type_def.__module__ = pseudo_module.__name__
+            # the namespace key is a forward-ref alias, not the class's
+            # __name__; register under __name__ too so qualified-name lookups
+            # (e.g. checkpoint deserialization) resolve.
+            setattr(pseudo_module, type_def.__name__, type_def)
+            # per-class marker for lookups by the schema's original type name.
             cast(Any, type_def).__uipath_marker_name__ = type_name
 
     setattr(pseudo_module, model.__name__, model)
-    model.__module__ = _DYNAMIC_MODULE_NAME
+    model.__module__ = pseudo_module.__name__
 
     return model
 

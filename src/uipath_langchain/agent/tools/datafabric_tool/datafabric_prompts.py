@@ -349,4 +349,4 @@ SQL_CONSTRAINTS = """\
 8. **Explicit GROUP BY** - All non-aggregated columns in SELECT must be in GROUP BY
 9. **Simple aggregations only** - No DISTINCT in aggregates
 10. **ORDER BY only selected columns** - Cannot ORDER BY columns not in SELECT list
-11. **ALWAYS include LIMIT** - Queries without WHERE must include a LIMIT clause (e.g., LIMIT 100). This applies to aggregates too (e.g., SELECT COUNT(col) FROM table LIMIT 1)"""
+11. **Limit unbounded row queries** - Queries without WHERE that could return many rows must include a LIMIT clause (e.g., LIMIT 100). Scalar aggregate queries do not require LIMIT"""

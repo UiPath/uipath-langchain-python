@@ -1,7 +1,8 @@
-"""Tool creation and management for LowCode agents."""
+"""Tool creation and management for low-code and coded agents."""
 
 from .a2a import A2aClient, create_a2a_tools_and_clients, open_a2a_tools
 from .context_tool import create_context_tool
+from .datafabric_tool import create_datafabric_tool
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
@@ -26,6 +27,7 @@ __all__ = [
     "create_tools_from_resources",
     "create_tool_node",
     "create_context_tool",
+    "create_datafabric_tool",
     "open_mcp_tools",
     "create_process_tool",
     "create_integration_tool",

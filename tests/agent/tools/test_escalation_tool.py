@@ -821,10 +821,16 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    async def test_creates_task_with_execution_folder_path(
+    async def test_creates_task_with_channel_folder_path(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
-        """Test that tasks.create_async receives app_folder_path from the execution environment."""
+        """Test that tasks.create_async receives app_folder_path from the channel.
+
+        The app channel carries the folder its app is deployed in, so that
+        folder is used rather than the agent's own execution folder
+        (``UIPATH_FOLDER_PATH``).
+        """
+        escalation_resource.channels[0].properties.folder_name = "/Apps/Approvals"
         task = _make_mock_task(id=555)
         mock_client = MagicMock()
         mock_client.tasks.create_async = AsyncMock(return_value=task)
@@ -843,7 +849,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         create_call_kwargs = mock_client.tasks.create_async.call_args[1]
-        assert create_call_kwargs["app_folder_path"] == "/Test/Folder"
+        assert create_call_kwargs["app_folder_path"] == "/Apps/Approvals"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")

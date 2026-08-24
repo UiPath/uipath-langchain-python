@@ -33,8 +33,10 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
     content-safety subscription, a vendor validation service, or a custom
     Integration Service connector) into UiPath guardrails. An admin first
     creates the configuration under ``Admin -> AI Trust Layer -> Guardrails
-    Configurations``; this middleware then references it by its validator name
-    and (recommended) Integration Service connection id.
+    Configurations``; this middleware then references it purely by its validator
+    name, which is unique per tenant. The Integration Service connection to use
+    is resolved server-side from the configuration, so an admin rebind is always
+    honored.
 
     Example:
         ```python

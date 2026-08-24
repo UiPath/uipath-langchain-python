@@ -17,10 +17,11 @@ from a2a.types import (
     Message,
     Part,
     Role,
+    SendMessageRequest,
+    StreamResponse,
     Task,
     TaskState,
     TaskStatus,
-    TextPart,
 )
 from opentelemetry import trace as otel_trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -139,11 +140,14 @@ def _patch_runtime(monkeypatch: pytest.MonkeyPatch, sdk: Any) -> dict[str, Any]:
 
     connected = SimpleNamespace(value="connected")
 
-    async def _fake_connect(agent_card, *, client_config):
+    captured: dict[str, AgentCard] = {}
+
+    def _fake_create(self: ClientFactory, agent_card: AgentCard):
+        captured["card"] = agent_card
         return connected
 
-    monkeypatch.setattr(ClientFactory, "connect", staticmethod(_fake_connect))
-    return {"connected": connected}
+    monkeypatch.setattr(ClientFactory, "create", _fake_create)
+    return {"connected": connected, "captured": captured}
 
 
 async def test_client_resolves_proxy_url_via_retrieve(
@@ -153,7 +157,6 @@ async def test_client_resolves_proxy_url_via_retrieve(
     handles = _patch_runtime(monkeypatch, sdk)
 
     card = AgentCard(
-        url=CACHED_URL,
         name="Remote Agent",
         description="cached",
         version="1.0.0",
@@ -168,7 +171,10 @@ async def test_client_resolves_proxy_url_via_retrieve(
 
     assert result is handles["connected"]
     # URL resolved from the retrieved agent's a2a_url, not the cached card URL.
-    assert card.url == PROXY_URL
+    runtime_card = handles["captured"]["card"]
+    assert runtime_card.supported_interfaces[0].url == PROXY_URL
+    assert runtime_card.supported_interfaces[0].protocol_binding == "JSONRPC"
+    assert runtime_card.supported_interfaces[0].protocol_version == "1.0"
     assert sdk.remote_a2a.calls == [("Remote Agent", "Shared")]
 
     await client.dispose()
@@ -181,7 +187,6 @@ async def test_client_raises_when_agent_has_no_proxy_url(
     _patch_runtime(monkeypatch, sdk)
 
     card = AgentCard(
-        url="",
         name="Remote Agent",
         description="",
         version="1.0.0",
@@ -196,37 +201,38 @@ async def test_client_raises_when_agent_has_no_proxy_url(
         await client.get()
 
 
-def _agent_message(text: str, context_id: str | None = None) -> Message:
-    return Message(
-        role=Role.agent,
-        parts=[Part(root=TextPart(text=text))],
-        message_id="msg-1",
-        context_id=context_id,
+def _agent_message(text: str, context_id: str | None = None) -> StreamResponse:
+    return StreamResponse(
+        message=Message(
+            role=Role.ROLE_AGENT,
+            parts=[Part(text=text)],
+            message_id="msg-1",
+            context_id=context_id or "",
+        )
     )
 
 
 class _FakeA2aClient:
     """Minimal stand-in for the a2a Client whose send_message yields events."""
 
-    def __init__(self, events: list[object]) -> None:
+    def __init__(self, events: list[StreamResponse]) -> None:
         self._events = events
-        self.sent: list[Message] = []
+        self.sent: list[SendMessageRequest] = []
 
-    async def send_message(self, message: Message):
-        self.sent.append(message)
+    async def send_message(self, request: SendMessageRequest):
+        self.sent.append(request)
         for event in self._events:
             yield event
 
 
 class _RaisingA2aClient:
-    async def send_message(self, message: Message):
+    async def send_message(self, request: SendMessageRequest):
         raise RuntimeError("boom")
         yield  # pragma: no cover - marks this as an async generator
 
 
 def test_build_description_falls_back_to_name() -> None:
     card = AgentCard(
-        url="",
         name="Finance Agent",
         description="",
         version="1.0.0",
@@ -240,7 +246,6 @@ def test_build_description_falls_back_to_name() -> None:
 
 def test_build_description_generic_when_no_name() -> None:
     card = AgentCard(
-        url="",
         name="",
         description="",
         version="1.0.0",
@@ -278,7 +283,7 @@ async def test_send_a2a_message_continues_existing_task() -> None:
     assert text == "again"
     assert context_id == "ctx-2"
     # The continued message carries the prior task/context ids.
-    assert client.sent[0].task_id == "task-1"
+    assert client.sent[0].message.task_id == "task-1"
 
 
 async def test_send_a2a_message_handles_error() -> None:
@@ -334,34 +339,38 @@ async def test_tool_wrapper_persists_conversation(
 
 def _completed_task(
     *, task_id: str = "task-1", context_id: str = "ctx-1", text: str = "done"
-) -> Task:
-    return Task(
-        id=task_id,
-        context_id=context_id,
-        status=TaskStatus(state=TaskState.completed),
-        artifacts=[
-            Artifact(
-                artifact_id="artifact-1",
-                parts=[Part(root=TextPart(text=text))],
-            )
-        ],
+) -> StreamResponse:
+    return StreamResponse(
+        task=Task(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+            artifacts=[
+                Artifact(
+                    artifact_id="artifact-1",
+                    parts=[Part(text=text)],
+                )
+            ],
+        )
     )
 
 
 def _input_required_task(
     *, task_id: str = "task-1", context_id: str = "ctx-1", text: str = "need more"
-) -> Task:
-    return Task(
-        id=task_id,
-        context_id=context_id,
-        status=TaskStatus(
-            state=TaskState.input_required,
-            message=Message(
-                role=Role.agent,
-                parts=[Part(root=TextPart(text=text))],
-                message_id="status-msg",
+) -> StreamResponse:
+    return StreamResponse(
+        task=Task(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(
+                state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                message=Message(
+                    role=Role.ROLE_AGENT,
+                    parts=[Part(text=text)],
+                    message_id="status-msg",
+                ),
             ),
-        ),
+        )
     )
 
 
@@ -373,9 +382,7 @@ async def test_tool_wrapper_drops_task_id_after_terminal_state(
     resource = _make_resource(cached_agent_card=_cached_card())
     tools, clients = create_a2a_tools_and_clients([resource])
     tool = cast(A2aStructuredToolWithWrapper, tools[0])
-    fake = _FakeA2aClient(
-        [(_completed_task(task_id="task-1", context_id="ctx-1"), None)]
-    )
+    fake = _FakeA2aClient([_completed_task(task_id="task-1", context_id="ctx-1")])
 
     async def _get():
         return fake
@@ -400,9 +407,7 @@ async def test_tool_wrapper_keeps_task_id_when_not_terminal(
     resource = _make_resource(cached_agent_card=_cached_card())
     tools, clients = create_a2a_tools_and_clients([resource])
     tool = cast(A2aStructuredToolWithWrapper, tools[0])
-    fake = _FakeA2aClient(
-        [(_input_required_task(task_id="task-1", context_id="ctx-1"), None)]
-    )
+    fake = _FakeA2aClient([_input_required_task(task_id="task-1", context_id="ctx-1")])
 
     async def _get():
         return fake
