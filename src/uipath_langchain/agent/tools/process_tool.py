@@ -60,10 +60,8 @@ def create_process_tool(
     # invoke_async accepts only one of folder_path/folder_key, so resolve one.
     folder_path = get_execution_folder_path() or resource.properties.folder_path
     folder_key = get_execution_folder_key() if not folder_path else None
-    # getattr because the attribute is genuinely optional at runtime: BaseResourceProperties sets
-    # extra="allow", so against a uipath release predating the declared field the value is present
-    # only when the stored JSON carried it. None is also the meaningful value -- it is how
-    # Orchestrator is told to use the release's configured entry point.
+    # getattr, not attribute access: BaseResourceProperties sets extra="allow", so against a uipath
+    # release predating the declared field the value is present only if the stored JSON carried it.
     entry_point_path = getattr(resource.properties, "entry_point_path", None)
 
     input_model: Any = create_model(resource.input_schema)
