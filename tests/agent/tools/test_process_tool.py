@@ -585,6 +585,55 @@ class TestProcessToolFolderResolution:
         assert tool.metadata["folder_path"] is None
         assert tool.metadata["folder_key"] == "env-folder-key"
 
+    @pytest.fixture
+    def resource_with_solution_folder_sentinel(self):
+        """A solution-local resource: folderPath carries the packager sentinel."""
+        return AgentProcessToolResourceConfig(
+            type=AgentToolType.PROCESS,
+            name="test_process",
+            description="Test process description",
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            properties=AgentProcessToolProperties(
+                process_name="MyProcess", folder_path="solution_folder"
+            ),
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "env-folder-key"}, clear=True)
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_solution_folder_sentinel_is_not_a_folder_path(
+        self, mock_uipath_class, mock_interrupt, resource_with_solution_folder_sentinel
+    ):
+        """The packager's "solution_folder" sentinel means "no folder": it must not
+        be sent as a folder path, and must not shadow the env folder key."""
+        mock_client = self._mock_client(mock_uipath_class, mock_interrupt)
+
+        tool = create_process_tool(resource_with_solution_folder_sentinel)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["folder_path"] is None
+        assert call_kwargs["folder_key"] == "env-folder-key"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Env/Folder"}, clear=True)
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_env_folder_path_still_wins_over_sentinel(
+        self, mock_uipath_class, mock_interrupt, resource_with_solution_folder_sentinel
+    ):
+        """UIPATH_FOLDER_PATH keeps precedence when the resource carries the sentinel."""
+        mock_client = self._mock_client(mock_uipath_class, mock_interrupt)
+
+        tool = create_process_tool(resource_with_solution_folder_sentinel)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["folder_path"] == "/Env/Folder"
+        assert call_kwargs["folder_key"] is None
+
 
 class TestProcessToolFlowType:
     """Test that a Flow-type resource flows through create_process_tool correctly."""
