@@ -946,6 +946,44 @@ class TestMapMessages:
             }
         ]
 
+    def test_map_messages_preserves_assistant_external_value(self):
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:00000000-0000-0000-0000-000000000000"
+                    ),
+                    name="result.pdf",
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        message = result[0]
+        assert isinstance(message, AIMessage)
+        assert "<uip:attachments>" in message.content
+        assert message.additional_kwargs["attachments"] == [
+            {
+                "id": "00000000-0000-0000-0000-000000000000",
+                "full_name": "result.pdf",
+                "mime_type": "application/pdf",
+            }
+        ]
+
     def test_map_messages_external_value_with_empty_uri_skips_attachment(self):
         """Should skip attachment when external value has an empty URI."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
