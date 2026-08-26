@@ -153,14 +153,20 @@ class PiiMasker:
         return rehydrated
 
     def _entity_thresholds_from_policy(self) -> list[PiiEntityThreshold]:
-        """Extract enabled entity thresholds from the policy's ``pii-entity-table``."""
+        """Extract entity thresholds from the policy's ``pii-entity-table``.
+
+        Every row in the table is requested. ``pii-entity-is-enabled`` is not
+        consulted: built-in categories carry it as ``true`` while custom rows
+        (e.g. ``FINationalID`` at 0.8) omit it entirely, so keying off it dropped
+        those rows from ``entityThresholds``. The service treats that list as an
+        allowlist, meaning a dropped row is never detected and its PII reaches
+        the model unmasked.
+        """
         if not self._policy:
             return []
         table = self._policy.get("data", {}).get("pii-entity-table", [])
         thresholds: list[PiiEntityThreshold] = []
         for entry in table:
-            if not entry.get("pii-entity-is-enabled", False):
-                continue
             category = entry.get("pii-entity-category")
             confidence = entry.get("pii-entity-confidence-threshold")
             if category is None or confidence is None:

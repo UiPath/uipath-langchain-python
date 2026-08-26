@@ -99,7 +99,15 @@ class TestEntityThresholdsFromPolicy:
         masker = PiiMasker(Mock(), {"data": {}})
         assert masker._entity_thresholds_from_policy() == []
 
-    def test_filters_disabled_entries(self):
+    def test_ignores_the_enabled_flag(self):
+        """``pii-entity-is-enabled`` is not consulted, even when explicitly false.
+
+        Deliberate: the flag is absent on custom rows, so honouring it dropped
+        those categories from ``entityThresholds`` and, since the service treats
+        that list as an allowlist, left their PII unmasked. Presence in
+        ``pii-entity-table`` is the only signal, so an explicit ``false`` no
+        longer disables a category — de-selecting one must remove its row.
+        """
         policy = {
             "data": {
                 "pii-entity-table": [
@@ -111,7 +119,31 @@ class TestEntityThresholdsFromPolicy:
                 ]
             }
         }
-        assert PiiMasker(Mock(), policy)._entity_thresholds_from_policy() == []
+        assert PiiMasker(Mock(), policy)._entity_thresholds_from_policy() == [
+            PiiEntityThreshold(category="Email", confidence_threshold=0.5),
+        ]
+
+    def test_includes_entry_without_enabled_flag(self):
+        """Custom rows omit ``pii-entity-is-enabled`` entirely and must survive.
+
+        Regression: such rows were dropped from ``entityThresholds``, and since
+        the service treats that list as an allowlist the category was then never
+        detected.
+        """
+        policy = {
+            "data": {
+                "pii-entity-table": [
+                    {
+                        "identifier": "FINationalID0.8",
+                        "pii-entity-category": "FINationalID",
+                        "pii-entity-confidence-threshold": 0.8,
+                    },
+                ]
+            }
+        }
+        assert PiiMasker(Mock(), policy)._entity_thresholds_from_policy() == [
+            PiiEntityThreshold(category="FINationalID", confidence_threshold=0.8),
+        ]
 
     def test_filters_entries_with_missing_category_or_confidence(self):
         policy = {
@@ -130,7 +162,7 @@ class TestEntityThresholdsFromPolicy:
         }
         assert PiiMasker(Mock(), policy)._entity_thresholds_from_policy() == []
 
-    def test_returns_enabled_entries_as_thresholds(self):
+    def test_returns_every_table_row_as_a_threshold(self):
         policy = {
             "data": {
                 "pii-entity-table": [
@@ -157,6 +189,7 @@ class TestEntityThresholdsFromPolicy:
 
         assert thresholds == [
             PiiEntityThreshold(category="Email", confidence_threshold=0.5),
+            PiiEntityThreshold(category="Phone", confidence_threshold=0.7),
             PiiEntityThreshold(category="SSN", confidence_threshold=0.9),
         ]
 
