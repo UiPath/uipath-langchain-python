@@ -100,7 +100,14 @@ class TestEntityThresholdsFromPolicy:
         assert masker._entity_thresholds_from_policy() == []
 
     def test_ignores_the_enabled_flag(self):
-        """The ``pii-entity-is-enabled`` flag is not consulted; the row still counts."""
+        """``pii-entity-is-enabled`` is not consulted, even when explicitly false.
+
+        Deliberate: the flag is absent on custom rows, so honouring it dropped
+        those categories from ``entityThresholds`` and, since the service treats
+        that list as an allowlist, left their PII unmasked. Presence in
+        ``pii-entity-table`` is the only signal, so an explicit ``false`` no
+        longer disables a category — de-selecting one must remove its row.
+        """
         policy = {
             "data": {
                 "pii-entity-table": [
