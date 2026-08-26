@@ -9,26 +9,12 @@ from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
 )
-from uipath.core.feature_flags import (
-    DEEP_RAG_FROM_ATTACHMENTS_FEATURE_FLAG,
-    FeatureFlags,
-)
 from uipath.eval.mocks import mockable
-from uipath.platform import UiPath
-from uipath.platform.common import CreateDeepRag, UiPathConfig, WaitEphemeralIndex
-from uipath.platform.context_grounding import (
-    CitationMode,
-    EphemeralIndexUsage,
-)
-from uipath.platform.context_grounding.context_grounding_index import (
-    ContextGroundingIndex,
-)
+from uipath.platform.common import CreateDeepRag, UiPathConfig
+from uipath.platform.context_grounding import CitationMode
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils.durable_interrupt import (
-    SkipInterruptValue,
-    durable_interrupt,
-)
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
@@ -41,17 +27,6 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
-
-
-class ReadyEphemeralIndex(SkipInterruptValue):
-    """An ephemeral index that is already ready (no wait needed)."""
-
-    def __init__(self, index: ContextGroundingIndex):
-        self.index = index
-
-    @property
-    def resume_value(self) -> Any:
-        return self.index.model_dump()
 
 
 def create_deeprag_tool(
@@ -118,56 +93,17 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag(**_tool_kwargs: Any):
-            if FeatureFlags.is_flag_enabled(
-                DEEP_RAG_FROM_ATTACHMENTS_FEATURE_FLAG, default=False
-            ):
-
-                @durable_interrupt
-                async def create_deeprag_from_attachments():
-                    return CreateDeepRag(
-                        name=f"task-{uuid.uuid4()}",
-                        prompt=query,
-                        attachments=[attachment_id],
-                        citation_mode=citation_mode,
-                        index_folder_key=UiPathConfig.folder_key,
-                    )
-
-                return await create_deeprag_from_attachments()
-
-            @durable_interrupt
-            async def create_ephemeral_index():
-                uipath = UiPath()
-                ephemeral_index = (
-                    await uipath.context_grounding.create_ephemeral_index_async(
-                        usage=EphemeralIndexUsage.DEEP_RAG,
-                        attachments=[attachment_id],
-                        folder_key=UiPathConfig.folder_key,
-                    )
-                )
-                if ephemeral_index.in_progress_ingestion():
-                    return WaitEphemeralIndex(index=ephemeral_index)
-                return ReadyEphemeralIndex(index=ephemeral_index)
-
-            index_result = await create_ephemeral_index()
-            if isinstance(index_result, dict):
-                ephemeral_index = ContextGroundingIndex(**index_result)
-            else:
-                ephemeral_index = index_result
-
             @durable_interrupt
             async def create_deeprag():
                 return CreateDeepRag(
                     name=f"task-{uuid.uuid4()}",
-                    index_name=ephemeral_index.name,
-                    index_id=ephemeral_index.id,
                     prompt=query,
+                    attachments=[attachment_id],
                     citation_mode=citation_mode,
-                    is_ephemeral_index=True,
+                    index_folder_key=UiPathConfig.folder_key,
                 )
 
-            result = await create_deeprag()
-
-            return result
+            return await create_deeprag()
 
         return await invoke_deeprag(**kwargs)
 
