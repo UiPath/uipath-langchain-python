@@ -37,7 +37,10 @@ from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentA2aResourceConfig
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 
-from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils import (
+    get_execution_folder_path,
+    resolve_resource_folder_path,
+)
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -84,10 +87,12 @@ class A2aClient:
         agent_card: AgentCard,
         resource_name: str,
         protocol_version: str | None = "1.0",
+        resource_folder_path: str | None = None,
     ) -> None:
         self._agent_card = agent_card
         self._resource_name = resource_name
         self._protocol_version = protocol_version
+        self._resource_folder_path = resource_folder_path
         self._lock = asyncio.Lock()
         self._client: Client | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -107,7 +112,14 @@ class A2aClient:
                         )
 
                     sdk = UiPath()
-                    folder_path = get_execution_folder_path()
+                    # The agent is retrieved from the folder recorded on the
+                    # resource — an external reference living in its own folder,
+                    # not necessarily the job's. The solution_folder sentinel
+                    # falls back to the execution folder.
+                    folder_path = (
+                        resolve_resource_folder_path(self._resource_folder_path)
+                        or get_execution_folder_path()
+                    )
                     agent = await sdk.remote_a2a.retrieve_async(
                         name=self._resource_name,
                         folder_path=folder_path,
@@ -484,6 +496,7 @@ def create_a2a_tools_and_clients(
             agent_card,
             resource.name,
             protocol_version=_select_protocol_version(resource.cached_agent_card),
+            resource_folder_path=resource.folder_path,
         )
         tool = _create_a2a_tool(resource, a2a_client, agent_card)
         tools.append(tool)

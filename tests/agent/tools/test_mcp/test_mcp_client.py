@@ -846,13 +846,10 @@ class TestMcpClient:
         await client.dispose()
         assert client._tools_cache is None
 
-    @pytest.mark.asyncio
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    @patch("httpx.AsyncClient")
-    async def test_retrieve_async_uses_name_and_execution_folder_path(
-        self, mock_async_client_class, mcp_resource_config
-    ):
-        """Test that name resolution receives both identities and the execution folder."""
+    async def _call_tool_and_capture_retrieve(
+        self, config: AgentMcpResourceConfig
+    ) -> AsyncMock:
+        """Run one tool call with mocked transport; return the retrieve_async mock."""
         mock_sdk = MagicMock()
         mock_server = MagicMock()
         mock_server.mcp_url = "https://test.uipath.com/mcp"
@@ -860,24 +857,65 @@ class TestMcpClient:
         mock_sdk._config = MagicMock()
         mock_sdk._config.secret = "test-secret-token"
 
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
+        MockStreamResponse = self.create_mock_stream_response([], [0], [0])
         mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
 
-        session = McpClient(config=mcp_resource_config)
-
-        with patch("uipath.platform.UiPath", return_value=mock_sdk):
+        session = McpClient(config=config)
+        with (
+            patch("httpx.AsyncClient", return_value=mock_http_client),
+            patch("uipath.platform.UiPath", return_value=mock_sdk),
+        ):
             await session.call_tool("test_tool", {"query": "test"})
+        await session.dispose()
+        return mock_sdk.mcp.retrieve_async
 
-        mock_sdk.mcp.retrieve_async.assert_called_once_with(
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Exec/JobFolder"})
+    async def test_retrieve_uses_resource_folder_not_execution_folder(
+        self, mcp_resource_config
+    ):
+        """The server is retrieved from the folder recorded on the resource, not
+        the folder the job executes in (a debug run executes in the personal
+        workspace while the server lives in its registration folder)."""
+        retrieve_async = await self._call_tool_and_capture_retrieve(mcp_resource_config)
+
+        retrieve_async.assert_called_once_with(
             name="test_server",
             folder_path="/Shared/TestFolder",
         )
 
-        await session.dispose()
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Exec/JobFolder"})
+    async def test_retrieve_falls_back_to_execution_folder_for_sentinel(
+        self, mcp_resource_config
+    ):
+        """The packager's ``solution_folder`` sentinel means "same folder as the
+        deployed solution" and must never be sent as a real folder path."""
+        config = mcp_resource_config.model_copy(
+            update={"folder_path": "solution_folder"}
+        )
+
+        retrieve_async = await self._call_tool_and_capture_retrieve(config)
+
+        retrieve_async.assert_called_once_with(
+            name="test_server",
+            folder_path="/Exec/JobFolder",
+        )
+
+    @pytest.mark.asyncio
+    async def test_retrieve_passes_none_when_sentinel_and_no_execution_folder(
+        self, mcp_resource_config, monkeypatch
+    ):
+        """With the sentinel and no execution folder path, folder_path is None so
+        the SDK falls back to the ambient folder key."""
+        monkeypatch.delenv("UIPATH_FOLDER_PATH", raising=False)
+        config = mcp_resource_config.model_copy(
+            update={"folder_path": "solution_folder"}
+        )
+
+        retrieve_async = await self._call_tool_and_capture_retrieve(config)
+
+        retrieve_async.assert_called_once_with(
+            name="test_server",
+            folder_path=None,
+        )

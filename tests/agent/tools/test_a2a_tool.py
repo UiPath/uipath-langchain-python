@@ -52,6 +52,7 @@ def _make_resource(
     *,
     cached_agent_card: dict[str, Any] | None = None,
     is_enabled: bool = True,
+    folder_path: str = "Shared",
 ) -> AgentA2aResourceConfig:
     """Build an A2A resource config for tests."""
     return AgentA2aResourceConfig(
@@ -60,7 +61,7 @@ def _make_resource(
         description="A remote A2A agent",
         is_enabled=is_enabled,
         slug="remote-agent-slug",
-        folder_path="Shared",
+        folder_path=folder_path,
         cached_agent_card=cached_agent_card,
     )
 
@@ -178,6 +179,46 @@ async def test_client_resolves_proxy_url_via_retrieve(
     assert sdk.remote_a2a.calls == [("Remote Agent", "Shared")]
 
     await client.dispose()
+
+
+async def test_client_retrieves_agent_from_resource_folder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The remote agent is retrieved from the folder recorded on the resource,
+    not the folder the job executes in."""
+    sdk = _FakeSdk(a2a_url=PROXY_URL)
+    _patch_runtime(monkeypatch, sdk)
+    monkeypatch.setattr(a2a_tool, "get_execution_folder_path", lambda: "ExecFolder")
+
+    resource = _make_resource(cached_agent_card=_cached_card(), folder_path="Shared")
+    _, clients = create_a2a_tools_and_clients([resource])
+
+    await clients[0].get()
+
+    assert sdk.remote_a2a.calls == [("remote-agent", "Shared")]
+
+    await clients[0].dispose()
+
+
+async def test_client_falls_back_to_execution_folder_for_sentinel_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The packager's ``solution_folder`` sentinel means "same folder as the
+    deployed solution" and must never be sent as a real folder path."""
+    sdk = _FakeSdk(a2a_url=PROXY_URL)
+    _patch_runtime(monkeypatch, sdk)
+    monkeypatch.setattr(a2a_tool, "get_execution_folder_path", lambda: "ExecFolder")
+
+    resource = _make_resource(
+        cached_agent_card=_cached_card(), folder_path="solution_folder"
+    )
+    _, clients = create_a2a_tools_and_clients([resource])
+
+    await clients[0].get()
+
+    assert sdk.remote_a2a.calls == [("remote-agent", "ExecFolder")]
+
+    await clients[0].dispose()
 
 
 async def test_client_raises_when_agent_has_no_proxy_url(

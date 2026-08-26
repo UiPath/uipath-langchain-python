@@ -19,7 +19,10 @@ from mcp.types import CallToolResult, ListToolsResult
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
-from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils import (
+    get_execution_folder_path,
+    resolve_resource_folder_path,
+)
 
 from .streamable_http import SessionInfo, streamable_http_client
 
@@ -150,8 +153,18 @@ class McpClient(UiPathDisposableProtocol):
         - ClientSession
 
         Then calls _initialize_session() to complete the MCP handshake.
+
+        The server is retrieved from the folder recorded on the resource config —
+        an MCP registration is an external reference that lives in its own folder,
+        not necessarily the one the job executes in (debug runs execute in the
+        personal workspace). Solution-local resources carry the ``solution_folder``
+        sentinel instead of a folder, so they fall back to the execution folder;
+        binding overwrites, when present, replace both name and folder in the SDK.
         """
-        folder_path = get_execution_folder_path()
+        folder_path = (
+            resolve_resource_folder_path(self._config.folder_path)
+            or get_execution_folder_path()
+        )
         logger.debug(
             f"Initializing MCP client for '{self._config.name}' "
             f"in folder '{folder_path}'"

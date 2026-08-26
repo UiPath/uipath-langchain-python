@@ -41,7 +41,10 @@ tests/agent/tools/test_mcp/
 │       ├── test_session_can_be_reused_after_dispose
 │       ├── test_list_tools_caches_result_across_calls   ← list_tools fetched once per lifetime
 │       ├── test_list_tools_force_refresh_bypasses_cache
-│       └── test_dispose_clears_tools_cache
+│       ├── test_dispose_clears_tools_cache
+│       ├── test_retrieve_uses_resource_folder_not_execution_folder  ← folder resolution
+│       ├── test_retrieve_falls_back_to_execution_folder_for_sentinel
+│       └── test_retrieve_passes_none_when_sentinel_and_no_execution_folder
 │
 └── test_mcp_tool.py           # Tool factory tests (17 tests)
     ├── TestMcpToolMetadata (class)
@@ -83,6 +86,22 @@ tests/agent/tools/test_mcp/
         ├── test_nonbreaking_change_executes_without_retry
         └── test_schema_change_message_lists_param_types
 ```
+
+### Folder resolution tests (`test_retrieve_*`)
+
+Cover which folder `McpClient._initialize_client` passes to
+`sdk.mcp.retrieve_async`. The server must be retrieved from the folder recorded
+on the resource config (`/Shared/TestFolder` in the fixture), **not** the job's
+execution folder (`UIPATH_FOLDER_PATH`) — a debug run executes in the personal
+workspace while the server lives in its registration folder, and AgentHub's
+lookup is folder-scoped. The packager's `solution_folder` sentinel (and empty
+values) must fall back to the execution folder, and with neither available
+`folder_path=None` is passed so the SDK uses the ambient folder key. These use
+the shared `_call_tool_and_capture_retrieve` helper, which runs one tool call
+with mocked transport and returns the `retrieve_async` mock for call-args
+assertions. Mirrored for A2A in `tests/agent/tools/test_a2a_tool.py`
+(`test_client_retrieves_agent_from_resource_folder`,
+`test_client_falls_back_to_execution_folder_for_sentinel_resource`).
 
 ### TestCachedRefreshSchemaBeforeCall
 

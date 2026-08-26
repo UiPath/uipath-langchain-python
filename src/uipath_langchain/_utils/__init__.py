@@ -1,4 +1,4 @@
-from ._environment import get_execution_folder_path
+from ._environment import get_execution_folder_path, resolve_resource_folder_path
 from ._otel import (
     get_current_span_and_trace_ids,
     set_current_span_error,
@@ -12,6 +12,7 @@ __all__ = [
     "get_current_span_and_trace_ids",
     "get_execution_folder_path",
     "get_unique_model_field_name",
+    "resolve_resource_folder_path",
     "set_current_span_error",
     "set_span_attribute",
 ]

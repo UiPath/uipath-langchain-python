@@ -443,9 +443,14 @@ The MCP server URL and authorization headers are loaded lazily on first tool cal
 async def _initialize_client(self) -> None:
     from uipath.platform import UiPath
 
+    folder_path = (
+        resolve_resource_folder_path(self._config.folder_path)
+        or get_execution_folder_path()
+    )
     sdk = UiPath()
     mcp_server = await sdk.mcp.retrieve_async(
-        slug=self._config.slug, folder_path=self._config.folder_path
+        name=self._config.name,
+        folder_path=folder_path,
     )
     self._url = mcp_server.mcp_url
     self._headers = {"Authorization": f"Bearer {sdk._config.secret}"}
@@ -460,6 +465,18 @@ The `uipath debug` command loads resource bindings (which can override MCP serve
 **after** the LangGraph agent graph is built. This means bindings are only available at
 execution time, not at graph construction time. By deferring the SDK call to the first
 tool invocation, we ensure the bindings are properly loaded and applied.
+
+**Folder resolution:** the server is retrieved from the folder recorded on the
+resource config (`config.folder_path`) — an MCP registration is an external
+reference that lives in its own folder, not necessarily the one the job executes
+in (debug runs execute in the personal workspace, so AgentHub's folder-scoped
+`GET api/servers/{name}` would 404 for any tenant-folder server otherwise).
+`resolve_resource_folder_path` (in `_utils/_environment.py`) maps the packager's
+`solution_folder` sentinel and empty values to `None`, which falls back to the
+execution folder (`UIPATH_FOLDER_PATH`), and from there the SDK falls back to
+the ambient folder key. Binding overwrites, when present, still win — the
+`@resource_override` decorators on `retrieve_async` replace both name and
+folder. The same resolution is used by `a2a_tool.py` for Remote A2A agents.
 
 ### 2. HTTP Client Configuration
 
