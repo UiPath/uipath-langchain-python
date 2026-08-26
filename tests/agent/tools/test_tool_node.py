@@ -304,6 +304,26 @@ class TestUiPathToolNode:
             AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
         )
 
+    def test_shipped_wrapper_state_annotation_resolves_to_a_class(self, mock_tool):
+        """The job attachment wrapper's state annotation must resolve to a model.
+
+        A wrapper module that defers its imports (``TYPE_CHECKING`` plus PEP 563
+        annotations) leaves the state parameter as a bare name, which used to
+        reach ``issubclass`` and raise ``TypeError`` on the first tool call.
+        """
+        from uipath_langchain.agent.react.types import AgentGraphState
+        from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
+            resolve_job_attachment_args,
+        )
+
+        node = UiPathToolNode(mock_tool, wrapper=resolve_job_attachment_args)
+
+        filtered_state = node._filter_state(
+            AgentGraphState(messages=[]), resolve_job_attachment_args
+        )
+
+        assert isinstance(filtered_state, AgentGraphState)
+
     def test_tool_error_propagates(self, mock_state):
         """Test that tool errors propagate from UiPathToolNode."""
         failing_tool = MockFailingTool()

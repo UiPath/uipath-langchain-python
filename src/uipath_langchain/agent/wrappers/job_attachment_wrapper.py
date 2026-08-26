@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
@@ -14,10 +12,8 @@ from uipath_langchain.agent.attachments.job_attachments import (
     replace_job_attachment_ids,
 )
 from uipath_langchain.agent.attachments.pydantic_json import coerce_json_strings
-
-if TYPE_CHECKING:
-    from uipath_langchain.agent.react.types import AgentGraphState
-    from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperWithState
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperWithState
 
 
 def _parse(content: str) -> Any:
