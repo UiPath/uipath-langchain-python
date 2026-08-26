@@ -9,6 +9,10 @@ from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
 )
+from uipath.core.feature_flags import (
+    DEEP_RAG_FROM_ATTACHMENTS_FEATURE_FLAG,
+    FeatureFlags,
+)
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import CreateDeepRag, UiPathConfig, WaitEphemeralIndex
@@ -114,6 +118,22 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag(**_tool_kwargs: Any):
+            if FeatureFlags.is_flag_enabled(
+                DEEP_RAG_FROM_ATTACHMENTS_FEATURE_FLAG, default=False
+            ):
+
+                @durable_interrupt
+                async def create_deeprag_from_attachments():
+                    return CreateDeepRag(
+                        name=f"task-{uuid.uuid4()}",
+                        prompt=query,
+                        attachments=[attachment_id],
+                        citation_mode=citation_mode,
+                        index_folder_key=UiPathConfig.folder_key,
+                    )
+
+                return await create_deeprag_from_attachments()
+
             @durable_interrupt
             async def create_ephemeral_index():
                 uipath = UiPath()
