@@ -14,8 +14,8 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.attachments.job_attachments import get_job_attachments
 from uipath_langchain.agent.exceptions import raise_for_enriched
-from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,

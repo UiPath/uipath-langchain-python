@@ -40,7 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain.agent.contracts.client_side_tools import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ._citations import (
@@ -188,11 +188,6 @@ class UiPathChatMessagesMapper:
                                 )
                             )
                     elif isinstance(data, UiPathExternalValue):
-                        if uipath_message.role == "assistant":
-                            # Workspace files persisted by the advanced runtime
-                            # (hydrated into the file backend before the graph
-                            # runs); they are not attachments for the LLM.
-                            continue
                         attachment_id = self.parse_attachment_id_from_content_part_uri(
                             data.uri
                         )

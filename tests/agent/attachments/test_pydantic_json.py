@@ -2,8 +2,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, RootModel
 
-from uipath_langchain.agent.react.job_attachments import get_job_attachments
-from uipath_langchain.agent.react.json_utils import (
+from uipath_langchain.agent.attachments.job_attachments import get_job_attachments
+from uipath_langchain.agent.attachments.pydantic_json import (
     coerce_json_strings,
     extract_values_by_paths,
     get_json_paths_by_type,

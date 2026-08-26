@@ -32,6 +32,9 @@ from uipath.tracing import (
     SpanAttachment,
 )
 
+from uipath_langchain.agent.attachments.job_attachments import (
+    raise_for_job_attachment_error,
+)
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -42,7 +45,6 @@ from uipath_langchain.agent.multimodal import (
     FileInfo,
     build_file_content_blocks_for,
 )
-from uipath_langchain.agent.react.job_attachments import raise_for_job_attachment_error
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,
