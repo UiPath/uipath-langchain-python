@@ -7,6 +7,12 @@ from uipath._cli.middlewares import MiddlewareResult
 
 console = ConsoleLogger()
 
+# The `uipath-langchain` minor release that scaffolded projects are pinned to.
+# Deliberately a constant: the guard test in tests/cli/test_new.py fails on
+# every minor bump so the scaffold (pin, template, hints) gets reviewed
+# alongside the release rather than drifting silently.
+UIPATH_LANGCHAIN_SCAFFOLD_MINOR = "0.16"
+
 
 def generate_script(target_directory):
     template_script_path = os.path.join(
@@ -25,13 +31,14 @@ def generate_script(target_directory):
 
 def generate_pyproject(target_directory, project_name):
     project_toml_path = os.path.join(target_directory, "pyproject.toml")
+    major, minor = (int(part) for part in UIPATH_LANGCHAIN_SCAFFOLD_MINOR.split("."))
     toml_content = f"""[project]
 name = "{project_name}"
 version = "0.0.1"
 description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
-    "uipath-langchain[bedrock,vertex]>=0.10.0, <0.11.0",
+    "uipath-langchain[bedrock,vertex]>={major}.{minor}.0, <{major}.{minor + 1}.0",
 ]
 requires-python = ">=3.11"
 """
@@ -52,12 +59,16 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
             console.success("Created 'langgraph.json' file.")
             generate_pyproject(directory, name)
             console.success("Created 'pyproject.toml' file.")
+            sync_command = """uv sync"""
             init_command = """uipath init"""
             run_command = """uipath run agent '{"topic": "UiPath"}'"""
             console.hint(
-                f""" Initialize project: {click.style(init_command, fg="cyan")}"""
+                f"""Install dependencies: {click.style(sync_command, fg="cyan")}"""
             )
-            console.hint(f""" Run agent: {click.style(run_command, fg="cyan")}""")
+            console.hint(
+                f"""Initialize project: {click.style(init_command, fg="cyan")}"""
+            )
+            console.hint(f"""Run agent: {click.style(run_command, fg="cyan")}""")
         return MiddlewareResult(should_continue=False)
     except Exception as e:
         console.error(f"Error creating demo agent {str(e)}")

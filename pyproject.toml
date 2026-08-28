@@ -90,6 +90,7 @@ dev = [
     "pytest_httpx>=0.35.0",
     "rust-just>=1.39.0",
     "types-protobuf<7",
+    "packaging>=24.0",
 ]
 
 [tool.hatch.build.targets.wheel]
