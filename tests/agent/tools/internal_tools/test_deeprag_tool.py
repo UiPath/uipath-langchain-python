@@ -17,9 +17,7 @@ from uipath.agent.models.agent import (
     DeepRagFileExtension,
     DeepRagFileExtensionSetting,
 )
-from uipath.platform.context_grounding.context_grounding_index import (
-    ContextGroundingIndex,
-)
+from uipath.platform.common import CreateDeepRag
 
 from uipath_langchain.agent.tools.internal_tools.deeprag_tool import (
     create_deeprag_tool,
@@ -122,142 +120,47 @@ class TestCreateDeepRagTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
-    async def test_create_deeprag_tool_static_query_index_ready(
+    async def test_create_deeprag_tool_static_query(
         self,
         mock_interrupt,
-        mock_uipath_class,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
     ):
-        """Test DeepRAG tool with static query when index is immediately ready."""
-        # Setup mocks
-        mock_uipath = AsyncMock()
-        mock_uipath_class.return_value = mock_uipath
+        """Static-query path emits a single CreateDeepRag interrupt with the configured prompt."""
+        mock_interrupt.side_effect = [{"text": "Deep RAG analysis result"}]
+        mock_get_wrapper.return_value = Mock()
 
-        mock_index = ContextGroundingIndex(
-            id=str(uuid.uuid4()),
-            name="ephemeral-index-123",
-            last_ingestion_status="Successful",
-        )
-
-        mock_uipath.context_grounding.create_ephemeral_index_async = AsyncMock(
-            return_value=mock_index
-        )
-
-        # Index is ready → ReadyEphemeralIndex skips interrupt() (no scratchpad in tests).
-        # Only create_deeprag calls interrupt().
-        mock_interrupt.side_effect = [
-            {"text": "Deep RAG analysis result"},
-        ]
-
-        mock_wrapper = Mock()
-        mock_get_wrapper.return_value = mock_wrapper
-
-        # Create tool
         tool = create_deeprag_tool(resource_config_static, mock_llm)
 
-        # Verify tool creation
         assert tool.name == "deeprag_static"
         assert tool.description == "Analyze document with DeepRAG (static query)"
 
-        # Test tool execution
+        attachment_id = str(uuid.uuid4())
         mock_attachment = MockAttachment(
-            ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
+            ID=attachment_id, FullName="test.pdf", MimeType="application/pdf"
         )
 
         assert tool.coroutine is not None
         result = await tool.coroutine(attachment=mock_attachment)
 
-        # Verify result
         assert result == {"text": "Deep RAG analysis result"}
 
-        # Verify ephemeral index was created
-        mock_uipath.context_grounding.create_ephemeral_index_async.assert_called_once()
-        call_kwargs = (
-            mock_uipath.context_grounding.create_ephemeral_index_async.call_args.kwargs
-        )
-        assert call_kwargs["usage"] == "DeepRAG"
-        assert mock_attachment.ID in call_kwargs["attachments"]
-
-        # Only create_deeprag calls interrupt(); index was instant-resumed
         assert mock_interrupt.call_count == 1
+        create_payload = mock_interrupt.call_args.args[0]
+        assert isinstance(create_payload, CreateDeepRag)
+        assert create_payload.attachments == [attachment_id]
+        assert create_payload.prompt == "What are the main points?"
+        assert create_payload.citation_mode == CitationMode.INLINE
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch(
-        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
-        lambda **kwargs: lambda f: f,
-    )
-    async def test_create_deeprag_tool_static_query_wait_for_ingestion(
-        self,
-        mock_interrupt,
-        mock_uipath_class,
-        mock_get_wrapper,
-        resource_config_static,
-        mock_llm,
-    ):
-        """Test DeepRAG tool with static query when index needs to wait for ingestion."""
-        # Setup mocks
-        mock_uipath = AsyncMock()
-        mock_uipath_class.return_value = mock_uipath
-
-        pending_id = str(uuid.uuid4())
-        mock_index_pending = ContextGroundingIndex(
-            id=pending_id,
-            name="ephemeral-index-456",
-            last_ingestion_status="InProgress",
-        )
-
-        mock_index_complete = {
-            "id": mock_index_pending.id,
-            "name": mock_index_pending.name,
-            "last_ingestion_status": "Successful",
-        }
-
-        mock_uipath.context_grounding.create_ephemeral_index_async = AsyncMock(
-            return_value=mock_index_pending
-        )
-
-        # First interrupt returns completed index, second returns DeepRAG result
-        mock_interrupt.side_effect = [
-            mock_index_complete,
-            {"text": "Deep RAG analysis after waiting"},
-        ]
-
-        mock_wrapper = Mock()
-        mock_get_wrapper.return_value = mock_wrapper
-
-        # Create tool
-        tool = create_deeprag_tool(resource_config_static, mock_llm)
-
-        # Test tool execution
-        mock_attachment = MockAttachment(
-            ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
-        )
-
-        assert tool.coroutine is not None
-        result = await tool.coroutine(attachment=mock_attachment)
-
-        # Verify result
-        assert result == {"text": "Deep RAG analysis after waiting"}
-
-        # Verify interrupt was called twice (WaitEphemeralIndex + CreateDeepRag)
-        assert mock_interrupt.call_count == 2
-
-    @patch(
-        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
-    )
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
@@ -266,40 +169,19 @@ class TestCreateDeepRagTool:
     async def test_create_deeprag_tool_dynamic_query(
         self,
         mock_interrupt,
-        mock_uipath_class,
         mock_get_wrapper,
         resource_config_dynamic,
         mock_llm,
     ):
-        """Test DeepRAG tool with dynamic query."""
-        # Setup mocks
-        mock_uipath = AsyncMock()
-        mock_uipath_class.return_value = mock_uipath
+        """Dynamic-query path threads the caller's query into the CreateDeepRag prompt."""
+        mock_interrupt.side_effect = [{"content": "Dynamic query result"}]
+        mock_get_wrapper.return_value = Mock()
 
-        mock_index = ContextGroundingIndex(
-            id=str(uuid.uuid4()),
-            name="ephemeral-index-789",
-            last_ingestion_status="Successful",
-        )
-
-        mock_uipath.context_grounding.create_ephemeral_index_async = AsyncMock(
-            return_value=mock_index
-        )
-
-        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_deeprag fires.
-        mock_interrupt.side_effect = [
-            {"content": "Dynamic query result"},
-        ]
-
-        mock_wrapper = Mock()
-        mock_get_wrapper.return_value = mock_wrapper
-
-        # Create tool
         tool = create_deeprag_tool(resource_config_dynamic, mock_llm)
 
-        # Test tool execution with dynamic query
+        attachment_id = str(uuid.uuid4())
         mock_attachment = MockAttachment(
-            ID=str(uuid.uuid4()), FullName="test.txt", MimeType="text/plain"
+            ID=attachment_id, FullName="test.txt", MimeType="text/plain"
         )
 
         assert tool.coroutine is not None
@@ -307,8 +189,14 @@ class TestCreateDeepRagTool:
             attachment=mock_attachment, query="What is the summary?"
         )
 
-        # Verify result
         assert result == {"content": "Dynamic query result"}
+
+        assert mock_interrupt.call_count == 1
+        create_payload = mock_interrupt.call_args.args[0]
+        assert isinstance(create_payload, CreateDeepRag)
+        assert create_payload.attachments == [attachment_id]
+        assert create_payload.prompt == "What is the summary?"
+        assert create_payload.citation_mode == CitationMode.SKIP
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -373,37 +261,22 @@ class TestCreateDeepRagTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
     @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "test-folder-key"})
-    async def test_create_ephemeral_index_passes_folder_key(
+    async def test_create_deeprag_passes_folder_key(
         self,
         mock_interrupt,
-        mock_uipath_class,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
     ):
-        """Test that create_ephemeral_index_async receives folder_key from the execution environment."""
-        mock_uipath = AsyncMock()
-        mock_uipath_class.return_value = mock_uipath
-
-        mock_index = ContextGroundingIndex(
-            id=str(uuid.uuid4()),
-            name="ephemeral-index-folder",
-            last_ingestion_status="Successful",
-        )
-        mock_uipath.context_grounding.create_ephemeral_index_async = AsyncMock(
-            return_value=mock_index
-        )
+        """CreateDeepRag.index_folder_key resolves from UIPATH_FOLDER_KEY at invoke time."""
         mock_interrupt.side_effect = [{"text": "result"}]
-
-        mock_wrapper = Mock()
-        mock_get_wrapper.return_value = mock_wrapper
+        mock_get_wrapper.return_value = Mock()
 
         tool = create_deeprag_tool(resource_config_static, mock_llm)
         mock_attachment = MockAttachment(
@@ -413,7 +286,6 @@ class TestCreateDeepRagTool:
         assert tool.coroutine is not None
         await tool.coroutine(attachment=mock_attachment)
 
-        call_kwargs = (
-            mock_uipath.context_grounding.create_ephemeral_index_async.call_args.kwargs
-        )
-        assert call_kwargs["folder_key"] == "test-folder-key"
+        create_payload = mock_interrupt.call_args.args[0]
+        assert isinstance(create_payload, CreateDeepRag)
+        assert create_payload.index_folder_key == "test-folder-key"
