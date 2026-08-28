@@ -129,6 +129,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableDeepRagFromAttachments": "1"})
     async def test_create_deeprag_tool_static_query_index_ready(
         self,
         mock_interrupt,
@@ -199,6 +200,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableDeepRagFromAttachments": "1"})
     async def test_create_deeprag_tool_static_query_wait_for_ingestion(
         self,
         mock_interrupt,
@@ -264,6 +266,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableDeepRagFromAttachments": "1"})
     async def test_create_deeprag_tool_dynamic_query(
         self,
         mock_interrupt,
@@ -380,7 +383,13 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
-    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "test-folder-key"})
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_FOLDER_KEY": "test-folder-key",
+            "UIPATH_FEATURE_DisableDeepRagFromAttachments": "1",
+        },
+    )
     async def test_create_ephemeral_index_passes_folder_key(
         self,
         mock_interrupt,
@@ -427,15 +436,14 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
-    @patch.dict(os.environ, {"UIPATH_FEATURE_DeepRagFromAttachments": "1"})
-    async def test_create_deeprag_tool_from_attachments_flag_on(
+    async def test_create_deeprag_tool_from_attachments_default(
         self,
         mock_interrupt,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
     ):
-        """When the DeepRagFromAttachments flag is on, emit a single CreateDeepRag interrupt."""
+        """Default (kill switch off) emits a single CreateDeepRag from-attachments interrupt."""
         mock_interrupt.side_effect = [{"text": "Deep RAG analysis result"}]
         mock_get_wrapper.return_value = Mock()
 

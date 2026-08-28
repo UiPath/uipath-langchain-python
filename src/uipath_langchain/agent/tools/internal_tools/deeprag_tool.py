@@ -39,7 +39,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
-DEEP_RAG_FROM_ATTACHMENTS_FEATURE_FLAG = "DeepRagFromAttachments"
+DEEP_RAG_FROM_ATTACHMENTS_KILL_SWITCH = "DisableDeepRagFromAttachments"
 
 
 class ReadyEphemeralIndex(SkipInterruptValue):
@@ -117,8 +117,8 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag(**_tool_kwargs: Any):
-            if FeatureFlags.is_flag_enabled(
-                DEEP_RAG_FROM_ATTACHMENTS_FEATURE_FLAG, default=False
+            if not FeatureFlags.is_flag_enabled(
+                DEEP_RAG_FROM_ATTACHMENTS_KILL_SWITCH, default=False
             ):
 
                 @durable_interrupt
