@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-26T20:05:23.6501197Z"
+exclude-newer = "2026-08-26T20:22:33.9044027Z"
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
@@ -4546,7 +4546,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.16.12"
+version = "0.16.13"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
