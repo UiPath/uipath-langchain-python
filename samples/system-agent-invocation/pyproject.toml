@@ -1,0 +1,9 @@
+[project]
+name = "system-agent-invocation"
+version = "0.0.1"
+description = "system-agent-invocation"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "uipath>=2.5.12",
+    "uipath-langchain>=0.2.0",
+]
