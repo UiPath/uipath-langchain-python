@@ -16,11 +16,23 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.tools.escalation_jit import (
+    _app_type_from_project_type,
+    _find_schema_file_id,
+    _has_app_name_override,
+    _is_inline_app,
+    _resolve_app_action_schema,
+    _resolve_app_project,
+    _resolve_is_debug_run,
+    _resolve_solution_id,
+)
 from uipath_langchain.agent.tools.escalation_memory import (
     EscalationMemoryCachedResult,
 )
 from uipath_langchain.agent.tools.escalation_tool import (
     _build_escalation_memory_payload,
+    _channel_app_prop,
     _parse_task_data,
     create_escalation_tool,
 )
@@ -212,6 +224,200 @@ class TestEscalationToolMetadata:
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] is None
+
+    @pytest.fixture
+    def escalation_resource_jit(self):
+        """Escalation resource carrying JIT (debug) project key and app type."""
+        return AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                        project_key="proj-key-abc",
+                        app_type="Custom",
+                    ),
+                    recipients=[
+                        StandardRecipient(
+                            type=AgentEscalationRecipientType.USER_EMAIL,
+                            value="user@example.com",
+                        )
+                    ],
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_PROJECT_ID": "proj-1",
+            "UIPATH_FEATURE_EnableJITEscalationApps": "true",
+        },
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_action_schema",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_resolves_jit_fields_in_debug(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_jit_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        mock_resolve_schema,
+        escalation_resource_jit,
+    ):
+        """In a debug run with the flag on, the app project key, app type and action
+        schema are resolved at runtime and forwarded; is_debug is NOT passed."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        mock_resolve_debug.return_value = True
+        mock_resolve_project.return_value = {
+            "designId": "proj-key-abc",
+            "id": "proj-id",
+            "projectType": "Process",  # -> Custom
+        }
+        schema = {
+            "key": "schema-key",
+            "inOuts": [],
+            "inputs": [],
+            "outputs": [],
+            "outcomes": [],
+        }
+        mock_resolve_schema.return_value = schema
+
+        tool = create_escalation_tool(escalation_resource_jit)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        kwargs = mock_client.tasks.create_async.call_args.kwargs
+        assert kwargs["app_project_key"] == "proj-key-abc"
+        assert kwargs["app_type"] == "Custom"
+        assert kwargs["action_schema"] == schema
+        # is_debug is sourced from UiPathConfig inside the SDK, never passed here.
+        assert "is_debug" not in kwargs
+
+    @pytest.mark.asyncio
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_PROJECT_ID": "proj-1",
+            "UIPATH_FEATURE_EnableJITEscalationApps": "true",
+        },
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_raises_in_debug_when_app_unresolvable(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        escalation_resource_jit,
+    ):
+        """A low-code app in debug that can't be resolved from the solution raises a
+        USER error and does not create a task."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        mock_resolve_debug.return_value = True
+        mock_resolve_project.return_value = None  # cannot resolve the app
+
+        tool = create_escalation_tool(escalation_resource_jit)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        mock_client.tasks.create_async.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_PROJECT_ID": "proj-1"}, clear=False)
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_skips_jit_when_flag_disabled(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        escalation_resource_jit,
+    ):
+        """With the feature flag off, no JIT resolution happens even in debug."""
+        monkeypatch_env = os.environ.pop("UIPATH_FEATURE_EnableJITEscalationApps", None)
+        assert monkeypatch_env is None  # flag not set → disabled
+
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        mock_resolve_debug.return_value = True
+
+        tool = create_escalation_tool(escalation_resource_jit)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        # JIT app resolution is never attempted when the flag is off.
+        mock_resolve_project.assert_not_called()
+        kwargs = mock_client.tasks.create_async.call_args.kwargs
+        assert kwargs["app_project_key"] is None
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
@@ -1372,3 +1578,512 @@ class TestQuickFormEscalation:
 
         mock_client.tasks.create_async.assert_called_once()
         mock_client.tasks.create_quickform_async.assert_not_called()
+
+
+def _app_channel(**props):
+    """Build an AgentEscalationChannel with the given app properties."""
+    return AgentEscalationChannel(
+        name="action_center",
+        type="actionCenter",
+        description="Action Center channel",
+        input_schema={"type": "object", "properties": {}},
+        output_schema={"type": "object", "properties": {}},
+        properties=AgentEscalationChannelProperties(
+            app_name=props.get("app_name", "ApprovalApp"),
+            app_version=props.get("app_version", 0),
+            resource_key="test-key",
+            app_type=props.get("app_type"),
+        ),
+        recipients=[],
+    )
+
+
+class TestAppTypeFromProjectType:
+    @pytest.mark.parametrize(
+        "project_type,expected",
+        [
+            ("AppV2", "Coded"),
+            ("Process", "Custom"),
+            (None, None),
+            ("", None),
+            ("Unknown", None),
+        ],
+    )
+    def test_mapping(self, project_type, expected):
+        assert _app_type_from_project_type(project_type) == expected
+
+
+class TestChannelAppProp:
+    def test_reads_property_from_agent_channel(self):
+        channel = _app_channel(app_name="MyApp", app_version=2, app_type="Coded")
+        assert _channel_app_prop(channel, "app_name") == "MyApp"
+        assert _channel_app_prop(channel, "app_version") == 2
+        assert _channel_app_prop(channel, "app_type") == "Coded"
+
+    def test_returns_none_for_non_agent_channel(self):
+        # A non-AgentEscalationChannel object carries no app properties.
+        assert _channel_app_prop(object(), "app_name") is None
+
+
+class TestFindSchemaFileId:
+    def test_finds_schema_file_at_top_level(self):
+        node = {"files": [{"name": "schema-abc.json", "id": "file-1"}], "folders": []}
+        assert _find_schema_file_id(node) == "file-1"
+
+    def test_finds_schema_file_in_nested_folder(self):
+        node = {
+            "files": [{"name": "other.json", "id": "x"}],
+            "folders": [
+                {"files": [{"name": "schema-xyz.json", "id": "file-2"}], "folders": []}
+            ],
+        }
+        assert _find_schema_file_id(node) == "file-2"
+
+    def test_returns_none_when_no_schema_file(self):
+        node = {"files": [{"name": "data.json", "id": "x"}], "folders": []}
+        assert _find_schema_file_id(node) is None
+
+    def test_returns_none_for_non_dict(self):
+        assert _find_schema_file_id(None) is None
+        assert _find_schema_file_id("not-a-node") is None
+
+
+class TestHasAppNameOverride:
+    def _set_overwrites(self, overwrites):
+        from uipath.platform.common._bindings import _resource_overwrites
+
+        return _resource_overwrites, _resource_overwrites.set(overwrites)
+
+    def test_false_when_no_app_name(self):
+        assert _has_app_name_override(None, None) is False
+
+    def test_false_when_no_overwrites_context(self):
+        assert _has_app_name_override("MyApp", None) is False
+
+    def test_true_when_app_key_present(self):
+        var, token = self._set_overwrites({"app.MyApp": object()})
+        try:
+            assert _has_app_name_override("MyApp", None) is True
+        finally:
+            var.reset(token)
+
+    def test_true_when_folder_qualified_key_present(self):
+        var, token = self._set_overwrites({"app.MyApp.Shared": object()})
+        try:
+            assert _has_app_name_override("MyApp", "Shared") is True
+        finally:
+            var.reset(token)
+
+    def test_false_when_key_absent(self):
+        var, token = self._set_overwrites({"app.OtherApp": object()})
+        try:
+            assert _has_app_name_override("MyApp", None) is False
+        finally:
+            var.reset(token)
+
+
+class TestIsInlineApp:
+    @pytest.mark.parametrize(
+        "app_type,app_version,expected",
+        [
+            ("Custom", 0, True),
+            (None, 0, True),
+            ("Custom", 1, True),  # v1 low-code, no binding override -> inline
+            ("Coded", 0, False),  # coded is never inline
+            ("Custom", 2, False),  # only v0/v1 qualify
+        ],
+    )
+    def test_predicate(self, app_type, app_version, expected):
+        assert _is_inline_app(app_type, app_version, "MyApp", None) is expected
+
+    def test_v1_with_binding_override_is_not_inline(self):
+        from uipath.platform.common._bindings import _resource_overwrites
+
+        token = _resource_overwrites.set({"app.MyApp": object()})
+        try:
+            assert _is_inline_app("Custom", 1, "MyApp", None) is False
+        finally:
+            _resource_overwrites.reset(token)
+
+
+class TestResolveIsDebugRun:
+    @pytest.mark.asyncio
+    async def test_returns_false_when_no_job_key(self, monkeypatch):
+        monkeypatch.delenv("UIPATH_JOB_KEY", raising=False)
+        assert await _resolve_is_debug_run() is False
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_JOB_KEY": "job-1"})
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    async def test_true_sets_config(self, mock_uipath_class):
+        from uipath.platform.common import UiPathConfig
+
+        UiPathConfig.reset()
+        try:
+            job = MagicMock()
+            job.parent_context = '{"IsDebug": true}'
+            mock_client = MagicMock()
+            mock_client.jobs.retrieve_async = AsyncMock(return_value=job)
+            mock_uipath_class.return_value = mock_client
+
+            result = await _resolve_is_debug_run()
+
+            assert result is True
+            assert UiPathConfig.is_rooted_to_debug_job is True
+        finally:
+            UiPathConfig.reset()
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_JOB_KEY": "job-1"})
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    async def test_false_does_not_set_config(self, mock_uipath_class):
+        from uipath.platform.common import UiPathConfig
+
+        UiPathConfig.reset()
+        try:
+            job = MagicMock()
+            job.parent_context = '{"IsDebug": false}'
+            mock_client = MagicMock()
+            mock_client.jobs.retrieve_async = AsyncMock(return_value=job)
+            mock_uipath_class.return_value = mock_client
+
+            result = await _resolve_is_debug_run()
+
+            assert result is False
+            assert UiPathConfig.is_rooted_to_debug_job is False
+        finally:
+            UiPathConfig.reset()
+
+
+class TestJitResolutionHelpers:
+    """Runtime resolution of the app project / solution / action schema."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_config(self):
+        from uipath.platform.common import UiPathConfig
+
+        UiPathConfig.reset()
+        yield
+        UiPathConfig.reset()
+
+    def _client_returning(self, by_url):
+        """MagicMock client whose api_client.request_async returns a canned
+        ``.json()`` payload chosen by substring match on the request url."""
+
+        def _side_effect(method, url=None, **kwargs):
+            for needle, payload in by_url.items():
+                if needle in url:
+                    resp = MagicMock()
+                    resp.json.return_value = payload
+                    return resp
+            raise AssertionError(f"unexpected url: {url}")
+
+        client = MagicMock()
+        client.api_client.request_async = AsyncMock(side_effect=_side_effect)
+        return client
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_PROJECT_ID": "proj-1"})
+    async def test_resolve_solution_id_from_project(self):
+        from uipath.platform.common import UiPathConfig
+
+        client = self._client_returning({"/Project/proj-1": {"solutionId": "sol-9"}})
+        assert await _resolve_solution_id(client) == "sol-9"
+        # Cached on the config for subsequent lookups.
+        assert UiPathConfig.studio_solution_id == "sol-9"
+
+    @pytest.mark.asyncio
+    async def test_resolve_solution_id_none_without_project(self, monkeypatch):
+        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
+        client = MagicMock()
+        assert await _resolve_solution_id(client) is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_app_project_matches_by_name(self):
+        from uipath.platform.common import UiPathConfig
+
+        UiPathConfig.studio_solution_id = "sol-9"
+        client = self._client_returning(
+            {
+                "/Solution/sol-9": {
+                    "projects": [
+                        {"name": "Other", "isApp": True, "designId": "d0", "id": "i0"},
+                        {
+                            "name": "ApprovalApp",
+                            "isApp": True,
+                            "designId": "d1",
+                            "id": "i1",
+                            "projectType": "Process",
+                        },
+                        {"name": "NotAnApp", "isApp": False},
+                    ]
+                }
+            }
+        )
+        app = await _resolve_app_project(client, "ApprovalApp")
+        assert app is not None
+        assert app["designId"] == "d1"
+        assert app["projectType"] == "Process"
+
+    @pytest.mark.asyncio
+    async def test_resolve_app_project_none_when_no_match(self):
+        from uipath.platform.common import UiPathConfig
+
+        UiPathConfig.studio_solution_id = "sol-9"
+        client = self._client_returning(
+            {"/Solution/sol-9": {"projects": [{"name": "X", "isApp": True}]}}
+        )
+        assert await _resolve_app_project(client, "ApprovalApp") is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_app_project_none_without_solution(self, monkeypatch):
+        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
+        client = MagicMock()
+        assert await _resolve_app_project(client, "ApprovalApp") is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_app_action_schema(self):
+        client = self._client_returning(
+            {
+                "/FileOperations/Structure": {
+                    "files": [{"name": "schema-1.json", "id": "f1"}],
+                    "folders": [],
+                },
+                "/FileOperations/File/f1": {"key": "schema-1", "inputs": []},
+            }
+        )
+        schema = await _resolve_app_action_schema(client, "proj-id")
+        assert schema is not None
+        assert schema["key"] == "schema-1"
+
+    @pytest.mark.asyncio
+    async def test_resolve_app_action_schema_none_when_no_schema_file(self):
+        client = self._client_returning(
+            {"/FileOperations/Structure": {"files": [], "folders": []}}
+        )
+        assert await _resolve_app_action_schema(client, "proj-id") is None
+
+
+class TestEscalationJitFallbacks:
+    """Failure/fallback paths in the debug + JIT resolution flow."""
+
+    @pytest.fixture
+    def jit_resource(self):
+        return AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                        app_type="Custom",
+                    ),
+                    recipients=[],
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_PROJECT_ID": "proj-1"}, clear=False)
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_debug_resolution_failure_falls_back_to_release(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        jit_resource,
+    ):
+        """If debug resolution raises, treat as release: skip JIT, still create."""
+        os.environ.pop("UIPATH_FEATURE_EnableJITEscalationApps", None)
+        os.environ["UIPATH_FEATURE_EnableJITEscalationApps"] = "true"
+        try:
+            mock_client = MagicMock()
+            mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+            mock_uipath_class.return_value = mock_client
+            mock_result = MagicMock()
+            mock_result.action = None
+            mock_result.data = {}
+            mock_result.is_deleted = False
+            mock_interrupt.return_value = mock_result
+
+            mock_resolve_debug.side_effect = RuntimeError("job lookup failed")
+
+            tool = create_escalation_tool(jit_resource)
+            call = ToolCall(args={}, id="test-call", name=tool.name)
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+            # Debug unknown -> release: no JIT resolution, task still created.
+            mock_resolve_project.assert_not_called()
+            mock_client.tasks.create_async.assert_called_once()
+        finally:
+            os.environ.pop("UIPATH_FEATURE_EnableJITEscalationApps", None)
+
+    @pytest.mark.asyncio
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_PROJECT_ID": "proj-1",
+            "UIPATH_FEATURE_EnableJITEscalationApps": "true",
+        },
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_app_resolution_failure_raises_user_error(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        jit_resource,
+    ):
+        """If app resolution raises, the exception is logged and the missing-fields
+        USER error is raised (no task created)."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        mock_resolve_debug.return_value = True
+        mock_resolve_project.side_effect = RuntimeError("studio backend 500")
+
+        tool = create_escalation_tool(jit_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        mock_client.tasks.create_async.assert_not_called()
+
+
+class TestResolveIsDebugRunEdgeCases:
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_JOB_KEY": "job-1"})
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    async def test_empty_parent_context_returns_false(self, mock_uipath_class):
+        job = MagicMock()
+        job.parent_context = None
+        mock_client = MagicMock()
+        mock_client.jobs.retrieve_async = AsyncMock(return_value=job)
+        mock_uipath_class.return_value = mock_client
+        assert await _resolve_is_debug_run() is False
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_JOB_KEY": "job-1"})
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    async def test_invalid_json_parent_context_returns_false(self, mock_uipath_class):
+        job = MagicMock()
+        job.parent_context = "not-valid-json"
+        mock_client = MagicMock()
+        mock_client.jobs.retrieve_async = AsyncMock(return_value=job)
+        mock_uipath_class.return_value = mock_client
+        assert await _resolve_is_debug_run() is False
+
+
+class TestEscalationJitAppTypeDerivation:
+    @pytest.mark.asyncio
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_PROJECT_ID": "proj-1",
+            "UIPATH_FEATURE_EnableJITEscalationApps": "true",
+        },
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_action_schema",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_app_project",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "uipath_langchain.agent.tools.escalation_jit._resolve_is_debug_run",
+        new_callable=AsyncMock,
+    )
+    @patch("uipath_langchain.agent.tools.escalation_jit.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_app_type_derived_from_project_type_when_absent(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_jit_uipath_class,
+        mock_resolve_debug,
+        mock_resolve_project,
+        mock_resolve_schema,
+    ):
+        """When the channel carries no app_type, it is derived from the resolved
+        project's projectType (Process -> Custom)."""
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=0,  # inline
+                        resource_key="test-key",
+                        app_type=None,  # not provided by the frontend
+                    ),
+                    recipients=[],
+                )
+            ],
+        )
+
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        mock_resolve_debug.return_value = True
+        mock_resolve_project.return_value = {
+            "designId": "d1",
+            "id": "i1",
+            "projectType": "Process",
+        }
+        mock_resolve_schema.return_value = {"key": "schema-1"}
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        kwargs = mock_client.tasks.create_async.call_args.kwargs
+        assert kwargs["app_type"] == "Custom"
+        assert kwargs["app_project_key"] == "d1"
