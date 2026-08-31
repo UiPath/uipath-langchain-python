@@ -21,13 +21,17 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
+    GlobResult,
     GrepMatch,
+    GrepResult,
+    LsResult,
+    ReadResult,
     WriteResult,
 )
 from deepagents.backends.utils import (
     check_empty_content,
-    format_content_with_line_numbers,
     perform_string_replacement,
+    slice_read_response,
 )
 from uipath.platform import UiPath
 from uipath.platform.common import PagedResult
@@ -49,6 +53,26 @@ class UiPathBucketConfig:
     bucket_name: str
     folder_path: str | None = None
     prefix: str = ""
+
+
+def _content_str(data: dict[str, Any]) -> str:
+    """File content as a single string.
+
+    Current `FileData` stores `content` as one string. Blobs written by earlier
+    versions of this sample stored a list of lines, so both are accepted.
+    """
+    content = data.get("content", "")
+    if isinstance(content, list):
+        return "\n".join(content)
+    return content
+
+
+def _content_lines(data: dict[str, Any]) -> list[str]:
+    """File content split into lines, for either stored shape."""
+    content = data.get("content", "")
+    if isinstance(content, list):
+        return content
+    return content.splitlines()
 
 
 class UiPathBucketBackend(BackendProtocol):
@@ -148,8 +172,7 @@ class UiPathBucketBackend(BackendProtocol):
         try:
             return json.loads(content.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            lines = content.decode("utf-8", errors="replace").splitlines()
-            return {"content": lines}
+            return {"content": content.decode("utf-8", errors="replace")}
 
     async def _aget_file_data(self, path: str) -> dict[str, Any] | None:
         """Get file data dict from bucket asynchronously."""
@@ -159,8 +182,7 @@ class UiPathBucketBackend(BackendProtocol):
         try:
             return json.loads(content.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            lines = content.decode("utf-8", errors="replace").splitlines()
-            return {"content": lines}
+            return {"content": content.decode("utf-8", errors="replace")}
 
     def _put_file_data(
         self, path: str, data: dict[str, Any], *, update_modified: bool = True
@@ -256,7 +278,7 @@ class UiPathBucketBackend(BackendProtocol):
 
         return results
 
-    def ls_info(self, path: str) -> list[FileInfo]:
+    def ls(self, path: str) -> LsResult:
         """List files in a directory."""
         prefix = path.lstrip("/")
         if prefix and not prefix.endswith("/"):
@@ -277,17 +299,19 @@ class UiPathBucketBackend(BackendProtocol):
                     seen_dirs.add(dir_path)
                     results.append({"path": dir_path, "is_dir": True})
             else:
-                results.append({
-                    "path": vpath,
-                    "is_dir": False,
-                    "size": file.size or 0,
-                    "modified_at": file.last_modified,
-                })
+                results.append(
+                    {
+                        "path": vpath,
+                        "is_dir": False,
+                        "size": file.size or 0,
+                        "modified_at": file.last_modified,
+                    }
+                )
 
         results.sort(key=lambda x: x.get("path", ""))
-        return results
+        return LsResult(entries=results)
 
-    async def als_info(self, path: str) -> list[FileInfo]:
+    async def als(self, path: str) -> LsResult:
         """List files in a directory asynchronously."""
         prefix = path.lstrip("/")
         if prefix and not prefix.endswith("/"):
@@ -308,89 +332,79 @@ class UiPathBucketBackend(BackendProtocol):
                     seen_dirs.add(dir_path)
                     results.append({"path": dir_path, "is_dir": True})
             else:
-                results.append({
-                    "path": vpath,
-                    "is_dir": False,
-                    "size": file.size or 0,
-                    "modified_at": file.last_modified,
-                })
+                results.append(
+                    {
+                        "path": vpath,
+                        "is_dir": False,
+                        "size": file.size or 0,
+                        "modified_at": file.last_modified,
+                    }
+                )
 
         results.sort(key=lambda x: x.get("path", ""))
-        return results
+        return LsResult(entries=results)
 
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
-        """Read file content with line numbers."""
+    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        """Read file content for the requested line range.
+
+        Returns the raw window plus pagination metadata; the filesystem
+        middleware adds the line-number gutter, so this must not format.
+        """
         data = self._get_file_data(file_path)
         if data is None:
-            return f"Error: File '{file_path}' not found"
+            return ReadResult(error=f"Error: File '{file_path}' not found")
 
-        lines = data.get("content", [])
-        if not lines:
+        if not data.get("content"):
             empty_msg = check_empty_content("")
             if empty_msg:
-                return empty_msg
+                return ReadResult(error=empty_msg)
 
-        if offset >= len(lines):
-            return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
+        return slice_read_response(data, offset, limit)
 
-        selected = lines[offset : offset + limit]
-        return format_content_with_line_numbers(selected, start_line=offset + 1)
+    async def aread(
+        self, file_path: str, offset: int = 0, limit: int = 2000
+    ) -> ReadResult:
+        """Read file content for the requested line range.
 
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
-        """Read file content with line numbers asynchronously."""
+        Returns the raw window plus pagination metadata; the filesystem
+        middleware adds the line-number gutter, so this must not format.
+        """
         data = await self._aget_file_data(file_path)
         if data is None:
-            return f"Error: File '{file_path}' not found"
+            return ReadResult(error=f"Error: File '{file_path}' not found")
 
-        lines = data.get("content", [])
-        if not lines:
+        if not data.get("content"):
             empty_msg = check_empty_content("")
             if empty_msg:
-                return empty_msg
+                return ReadResult(error=empty_msg)
 
-        if offset >= len(lines):
-            return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
-
-        selected = lines[offset : offset + limit]
-        return format_content_with_line_numbers(selected, start_line=offset + 1)
+        return slice_read_response(data, offset, limit)
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        """Create a new file."""
-        if self._exists(file_path):
-            return WriteResult(
-                error=f"Cannot write to {file_path} because it already exists. "
-                "Read and then make an edit, or write to a new path."
-            )
-
+        """Create a file, replacing it if the path already exists."""
         now = datetime.now(timezone.utc).isoformat()
         data = {
-            "content": content.splitlines(),
+            "content": content,
             "created_at": now,
             "modified_at": now,
         }
         try:
             self._put_file_data(file_path, data, update_modified=False)
-            return WriteResult(path=file_path, files_update=None)
+            return WriteResult(path=file_path)
         except Exception as e:
             return WriteResult(error=f"Error writing file '{file_path}': {e}")
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        """Create a new file asynchronously."""
-        if await self._aexists(file_path):
-            return WriteResult(
-                error=f"Cannot write to {file_path} because it already exists. "
-                "Read and then make an edit, or write to a new path."
-            )
-
+        """Create a file asynchronously, replacing it if the path already exists."""
         now = datetime.now(timezone.utc).isoformat()
         data = {
-            "content": content.splitlines(),
+            "content": content,
             "created_at": now,
             "modified_at": now,
         }
         try:
             await self._aput_file_data(file_path, data, update_modified=False)
-            return WriteResult(path=file_path, files_update=None)
+            return WriteResult(path=file_path)
         except Exception as e:
             return WriteResult(error=f"Error writing file '{file_path}': {e}")
 
@@ -406,20 +420,20 @@ class UiPathBucketBackend(BackendProtocol):
         if data is None:
             return EditResult(error=f"Error: File '{file_path}' not found")
 
-        content = "\n".join(data.get("content", []))
-        result = perform_string_replacement(content, old_string, new_string, replace_all)
+        content = _content_str(data)
+        result = perform_string_replacement(
+            content, old_string, new_string, replace_all
+        )
 
         if isinstance(result, str):
             return EditResult(error=result)
 
         new_content, occurrences = result
-        data["content"] = new_content.splitlines()
+        data["content"] = new_content
 
         try:
             self._put_file_data(file_path, data)
-            return EditResult(
-                path=file_path, files_update=None, occurrences=int(occurrences)
-            )
+            return EditResult(path=file_path, occurrences=int(occurrences))
         except Exception as e:
             return EditResult(error=f"Error editing file '{file_path}': {e}")
 
@@ -435,31 +449,36 @@ class UiPathBucketBackend(BackendProtocol):
         if data is None:
             return EditResult(error=f"Error: File '{file_path}' not found")
 
-        content = "\n".join(data.get("content", []))
-        result = perform_string_replacement(content, old_string, new_string, replace_all)
+        content = _content_str(data)
+        result = perform_string_replacement(
+            content, old_string, new_string, replace_all
+        )
 
         if isinstance(result, str):
             return EditResult(error=result)
 
         new_content, occurrences = result
-        data["content"] = new_content.splitlines()
+        data["content"] = new_content
 
         try:
             await self._aput_file_data(file_path, data)
-            return EditResult(
-                path=file_path, files_update=None, occurrences=int(occurrences)
-            )
+            return EditResult(path=file_path, occurrences=int(occurrences))
         except Exception as e:
             return EditResult(error=f"Error editing file '{file_path}': {e}")
 
-    def grep_raw(
-        self, pattern: str, path: str | None = None, glob: str | None = None
-    ) -> list[GrepMatch] | str:
+    def grep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
         """Search for pattern in files."""
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            return f"Invalid regex pattern: {e}"
+            return GrepResult(error=f"Invalid regex pattern: {e}")
 
         search_prefix = (path or "/").lstrip("/")
         files = self._list_files(search_prefix)
@@ -476,20 +495,27 @@ class UiPathBucketBackend(BackendProtocol):
             if data is None:
                 continue
 
-            for line_num, line in enumerate(data.get("content", []), 1):
+            for line_num, line in enumerate(_content_lines(data), 1):
                 if regex.search(line):
                     matches.append({"path": vpath, "line": line_num, "text": line})
+                    if max_count is not None and len(matches) >= max_count:
+                        return GrepResult(matches=matches, truncated=True)
 
-        return matches
+        return GrepResult(matches=matches)
 
-    async def agrep_raw(
-        self, pattern: str, path: str | None = None, glob: str | None = None
-    ) -> list[GrepMatch] | str:
+    async def agrep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
         """Search for pattern in files asynchronously."""
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            return f"Invalid regex pattern: {e}"
+            return GrepResult(error=f"Invalid regex pattern: {e}")
 
         search_prefix = (path or "/").lstrip("/")
         files = await self._alist_files(search_prefix)
@@ -506,14 +532,17 @@ class UiPathBucketBackend(BackendProtocol):
             if data is None:
                 continue
 
-            for line_num, line in enumerate(data.get("content", []), 1):
+            for line_num, line in enumerate(_content_lines(data), 1):
                 if regex.search(line):
                     matches.append({"path": vpath, "line": line_num, "text": line})
+                    if max_count is not None and len(matches) >= max_count:
+                        return GrepResult(matches=matches, truncated=True)
 
-        return matches
+        return GrepResult(matches=matches)
 
-    def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
+    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         """Find files matching a glob pattern."""
+        path = path or "/"
         search_prefix = path.lstrip("/")
         files = self._list_files(search_prefix)
         results: list[FileInfo] = []
@@ -523,18 +552,21 @@ class UiPathBucketBackend(BackendProtocol):
             rel_path = vpath[len(path) :].lstrip("/") if path != "/" else vpath[1:]
 
             if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(vpath, pattern):
-                results.append({
-                    "path": vpath,
-                    "is_dir": False,
-                    "size": file.size or 0,
-                    "modified_at": file.last_modified,
-                })
+                results.append(
+                    {
+                        "path": vpath,
+                        "is_dir": False,
+                        "size": file.size or 0,
+                        "modified_at": file.last_modified,
+                    }
+                )
 
         results.sort(key=lambda x: x.get("path", ""))
-        return results
+        return GlobResult(matches=results)
 
-    async def aglob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
+    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
         """Find files matching a glob pattern asynchronously."""
+        path = path or "/"
         search_prefix = path.lstrip("/")
         files = await self._alist_files(search_prefix)
         results: list[FileInfo] = []
@@ -544,15 +576,17 @@ class UiPathBucketBackend(BackendProtocol):
             rel_path = vpath[len(path) :].lstrip("/") if path != "/" else vpath[1:]
 
             if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(vpath, pattern):
-                results.append({
-                    "path": vpath,
-                    "is_dir": False,
-                    "size": file.size or 0,
-                    "modified_at": file.last_modified,
-                })
+                results.append(
+                    {
+                        "path": vpath,
+                        "is_dir": False,
+                        "size": file.size or 0,
+                        "modified_at": file.last_modified,
+                    }
+                )
 
         results.sort(key=lambda x: x.get("path", ""))
-        return results
+        return GlobResult(matches=results)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """Upload multiple files."""
@@ -570,7 +604,9 @@ class UiPathBucketBackend(BackendProtocol):
             except LookupError:
                 responses.append(FileUploadResponse(path=path, error="file_not_found"))
             except PermissionError:
-                responses.append(FileUploadResponse(path=path, error="permission_denied"))
+                responses.append(
+                    FileUploadResponse(path=path, error="permission_denied")
+                )
             except Exception:
                 responses.append(FileUploadResponse(path=path, error="invalid_path"))
 
@@ -594,7 +630,9 @@ class UiPathBucketBackend(BackendProtocol):
             except LookupError:
                 responses.append(FileUploadResponse(path=path, error="file_not_found"))
             except PermissionError:
-                responses.append(FileUploadResponse(path=path, error="permission_denied"))
+                responses.append(
+                    FileUploadResponse(path=path, error="permission_denied")
+                )
             except Exception:
                 responses.append(FileUploadResponse(path=path, error="invalid_path"))
 
@@ -609,7 +647,9 @@ class UiPathBucketBackend(BackendProtocol):
                 content = self._download_content(path)
                 if content is None:
                     responses.append(
-                        FileDownloadResponse(path=path, content=None, error="file_not_found")
+                        FileDownloadResponse(
+                            path=path, content=None, error="file_not_found"
+                        )
                     )
                 else:
                     responses.append(
@@ -617,7 +657,9 @@ class UiPathBucketBackend(BackendProtocol):
                     )
             except PermissionError:
                 responses.append(
-                    FileDownloadResponse(path=path, content=None, error="permission_denied")
+                    FileDownloadResponse(
+                        path=path, content=None, error="permission_denied"
+                    )
                 )
             except Exception:
                 responses.append(
@@ -635,7 +677,9 @@ class UiPathBucketBackend(BackendProtocol):
                 content = await self._adownload_content(path)
                 if content is None:
                     responses.append(
-                        FileDownloadResponse(path=path, content=None, error="file_not_found")
+                        FileDownloadResponse(
+                            path=path, content=None, error="file_not_found"
+                        )
                     )
                 else:
                     responses.append(
@@ -643,7 +687,9 @@ class UiPathBucketBackend(BackendProtocol):
                     )
             except PermissionError:
                 responses.append(
-                    FileDownloadResponse(path=path, content=None, error="permission_denied")
+                    FileDownloadResponse(
+                        path=path, content=None, error="permission_denied"
+                    )
                 )
             except Exception:
                 responses.append(
