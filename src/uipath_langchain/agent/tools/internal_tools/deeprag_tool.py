@@ -5,6 +5,7 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import StructuredTool
+from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
@@ -21,8 +22,6 @@ from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
 from uipath.runtime.errors import UiPathErrorCategory
-
-from langgraph.types import interrupt
 
 from uipath_langchain._utils.durable_interrupt import (
     SkipInterruptValue,
