@@ -94,6 +94,41 @@ def _inject_resume(scratchpad: Any, value: Any) -> Any:
     return value
 
 
+SUSPENDS_RUN = "suspends_run"
+"""Tool-metadata key marking a tool that can suspend the run instead of returning.
+
+Such a tool may raise ``GraphInterrupt`` rather than produce a value: the run
+checkpoints, and the node is replayed from that checkpoint on resume. Callers that
+invoke tools *outside* the graph's tool node -- the QuickJS code interpreter's
+programmatic tool calling, for one -- must not offer these, because a replayed
+node re-runs every call made before the interrupt, and because such bridges
+bypass approval hooks.
+
+The flag describes that behaviour rather than how it is reached. It covers both
+``durable_interrupt`` and a bare ``interrupt()``, and it is set unconditionally on
+a tool that suspends only sometimes -- one returning a ``SkipInterruptValue`` on
+its fast path, say -- since the safe answer for a caller outside the tool node is
+the same either way.
+
+Set it in the tool's ``metadata`` in every factory that can suspend;
+``tests/agent/tools/test_suspends_run_metadata.py`` fails if one forgets.
+"""
+
+
+def suspends_run(tool: Any) -> bool:
+    """Whether ``tool`` suspends the run instead of returning a value.
+
+    Reads :data:`SUSPENDS_RUN` from the tool's metadata, so it is accurate
+    per-tool even where one factory builds both suspending and non-suspending
+    variants (``context_tool`` does, by retrieval mode).
+
+    Fails closed only where the flag is present: an unstamped tool reports
+    ``False``. ``tests/agent/tools/test_suspends_run_metadata.py`` is what keeps
+    that safe, by failing when a suspending factory ships without the stamp.
+    """
+    return bool((getattr(tool, "metadata", None) or {}).get(SUSPENDS_RUN))
+
+
 def durable_interrupt(fn: F) -> F:
     """Decorator that executes a side-effecting function exactly once and interrupts.
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 from deepagents.backends import BackendProtocol, FilesystemBackend
-from deepagents.backends.protocol import BackendFactory
 from jsonpath_ng import parse as jsonpath_parse  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict
 from uipath.platform import UiPath
@@ -59,7 +58,7 @@ class _AttachmentDownload(NamedTuple):
 
 
 async def resolve_input_attachments(
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     attachment_paths: list[str],
     input_args: dict[str, Any],
 ) -> dict[str, Any]:

@@ -1,5 +1,6 @@
 """Tests for the conversational advanced agent wrapper builder."""
 
+from collections.abc import Sequence
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -77,6 +78,21 @@ def test_wrapper_graph_has_conversational_nodes() -> None:
     } <= set(graph.nodes)
 
 
+def _runtime_prompt_middleware(
+    middleware: Sequence[Any],
+) -> _RuntimeSystemPromptMiddleware | None:
+    """The runtime-prompt middleware in the stack handed to deepagents, if any.
+
+    Located by type rather than by index: ``create_advanced_agent`` also prepends
+    ``TodoListMiddleware``, and callers may append middleware of their own.
+    """
+    found = [m for m in middleware if isinstance(m, _RuntimeSystemPromptMiddleware)]
+    assert len(found) <= 1, (
+        f"expected at most one runtime-prompt middleware, got {found}"
+    )
+    return found[0] if found else None
+
+
 def test_callable_system_prompt_enables_runtime_middleware() -> None:
     with patch(
         "uipath_langchain.agent.advanced.agent._create_deep_agent",
@@ -92,9 +108,8 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
 
     call_kwargs = create_deep_agent.call_args.kwargs
     assert call_kwargs["system_prompt"] is None
-    assert len(call_kwargs["middleware"]) == 1
-    middleware = call_kwargs["middleware"][0]
-    assert isinstance(middleware, _RuntimeSystemPromptMiddleware)
+    middleware = _runtime_prompt_middleware(call_kwargs["middleware"])
+    assert middleware is not None
     assert middleware.state_key == "uipath__system_prompt"
 
 
@@ -113,7 +128,7 @@ def test_static_system_prompt_skips_runtime_middleware() -> None:
 
     call_kwargs = create_deep_agent.call_args.kwargs
     assert call_kwargs["system_prompt"] == "sys"
-    assert call_kwargs["middleware"] == []
+    assert _runtime_prompt_middleware(call_kwargs["middleware"]) is None
 
 
 @pytest.mark.asyncio
@@ -259,7 +274,8 @@ async def test_runtime_prompt_reaches_deep_agent_model_request() -> None:
     captured_requests: list[ModelRequest[Any]] = []
 
     def create_inner_graph(**kwargs: Any) -> Any:
-        middleware = kwargs["middleware"][0]
+        middleware = _runtime_prompt_middleware(kwargs["middleware"])
+        assert middleware is not None
 
         def respond(state: BaseModel) -> dict[str, Any]:
             state_data = state.model_dump()

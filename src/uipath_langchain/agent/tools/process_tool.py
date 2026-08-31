@@ -13,7 +13,10 @@ from uipath.platform.orchestrator import JobState
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
-from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
+    durable_interrupt,
+)
 from uipath_langchain.agent.attachments.job_attachments import get_job_attachments
 from uipath_langchain.agent.exceptions import raise_for_enriched
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
@@ -134,6 +137,7 @@ def create_process_tool(
         output_type=output_model,
         metadata={
             "tool_type": resource.type.lower(),
+            SUSPENDS_RUN: True,
             "display_name": process_name,
             "folder_path": folder_path,
             "args_schema": input_model,

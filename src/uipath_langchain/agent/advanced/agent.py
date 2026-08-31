@@ -6,14 +6,13 @@ from typing import Any, NotRequired, cast
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
-from deepagents.backends import BackendProtocol
-from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.backends.protocol import BackendFactory
+from deepagents.backends import BackendProtocol, FilesystemBackend
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
     ModelRequest,
     ModelResponse,
+    TodoListMiddleware,
 )
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
@@ -129,7 +128,7 @@ def create_advanced_agent(
     system_prompt: str | SystemMessage | None = "",
     tools: Sequence[BaseTool] = (),
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
-    backend: BackendProtocol | BackendFactory | None = None,
+    backend: BackendProtocol | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
@@ -143,6 +142,10 @@ def create_advanced_agent(
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
+
+    ``TodoListMiddleware`` is prepended so ``write_todos`` stays available: it left
+    the deepagents default stack in 0.7.0. Callers may replace it by passing their
+    own instance, which deepagents matches on ``.name``.
     """
     return _create_deep_agent(
         model=model,
@@ -152,7 +155,7 @@ def create_advanced_agent(
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=list(middleware),
+        middleware=[TodoListMiddleware(), *middleware],
         skills=list(skills) if skills else None,
     )
 
@@ -161,12 +164,13 @@ def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str | Callable[[dict[str, Any]], str],
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     response_format: ResponseFormat[Any] | None,
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
     skills: Sequence[str] | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -190,7 +194,7 @@ def create_advanced_agent_graph(
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=[*runtime_prompt.middleware, *middleware],
         skills=skills,
     )
 
@@ -249,9 +253,10 @@ def create_conversational_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str | Callable[[dict[str, Any]], str],
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     skills: Sequence[str] | None = None,
     input_schema: type[BaseModel] | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -279,7 +284,7 @@ def create_conversational_advanced_agent_graph(
         system_prompt=runtime_prompt.static_prompt,
         backend=backend,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=[*runtime_prompt.middleware, *middleware],
         skills=skills,
     )
 
