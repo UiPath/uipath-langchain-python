@@ -59,12 +59,8 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
             console.success("Created 'langgraph.json' file.")
             generate_pyproject(directory, name)
             console.success("Created 'pyproject.toml' file.")
-            sync_command = """uv sync"""
             init_command = """uipath init"""
             run_command = """uipath run agent '{"topic": "UiPath"}'"""
-            console.hint(
-                f"""Install dependencies: {click.style(sync_command, fg="cyan")}"""
-            )
             console.hint(
                 f"""Initialize project: {click.style(init_command, fg="cyan")}"""
             )

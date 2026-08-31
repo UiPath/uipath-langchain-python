@@ -72,8 +72,8 @@ Activate with: source .venv/bin/activate
 # For Windows Bash: source .venv/Scripts/activate
 > source .venv/bin/activate
 
-# Install the uipath package
-> uv add uipath-langchain
+# Install the uipath package and extras
+> uv add "uipath-langchain[bedrock,vertex]"
 
 # Verify the uipath installation
 > uipath -lv
@@ -98,8 +98,8 @@ uipath-langchain version 0.1.0
 # Upgrade pip to the latest version
 > python -m pip install --upgrade pip
 
-# Install the uipath package
-> pip install uipath-langchain
+# Install the uipath package and extras
+> pip install "uipath-langchain[bedrock,vertex]"
 
 # Verify the uipath installation
 > uipath -lv
@@ -120,8 +120,8 @@ Generate your first UiPath LangChain agent:
 ✓  Created 'main.py' file.
 ✓  Created 'langgraph.json' file.
 ✓  Created 'pyproject.toml' file.
-💡  Initialize project: uipath init
-💡  Run agent: uipath run agent '{"topic": "UiPath"}'
+💡 Initialize project: uipath init
+💡 Run agent: uipath run agent '{"topic": "UiPath"}'
 ```
 
 This command creates the following files:
