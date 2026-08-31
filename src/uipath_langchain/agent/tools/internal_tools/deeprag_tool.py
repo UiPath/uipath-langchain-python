@@ -22,6 +22,8 @@ from uipath.platform.context_grounding.context_grounding_index import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
+from langgraph.types import interrupt
+
 from uipath_langchain._utils.durable_interrupt import (
     SkipInterruptValue,
     durable_interrupt,
@@ -120,18 +122,15 @@ def create_deeprag_tool(
             if not FeatureFlags.is_flag_enabled(
                 DEEP_RAG_FROM_ATTACHMENTS_KILL_SWITCH, default=False
             ):
-
-                @durable_interrupt
-                async def create_deeprag_from_attachments():
-                    return CreateDeepRag(
+                return interrupt(
+                    CreateDeepRag(
                         name=f"task-{uuid.uuid4()}",
                         prompt=query,
                         attachments=[attachment_id],
                         citation_mode=citation_mode,
                         index_folder_key=UiPathConfig.folder_key,
                     )
-
-                return await create_deeprag_from_attachments()
+                )
 
             @durable_interrupt
             async def create_ephemeral_index():
