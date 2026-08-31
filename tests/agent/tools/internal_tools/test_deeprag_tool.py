@@ -17,6 +17,7 @@ from uipath.agent.models.agent import (
     DeepRagFileExtension,
     DeepRagFileExtensionSetting,
 )
+from uipath.platform.common import CreateDeepRag
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
@@ -128,6 +129,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableDeepRagFromAttachments": "1"})
     async def test_create_deeprag_tool_static_query_index_ready(
         self,
         mock_interrupt,
@@ -198,6 +200,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableDeepRagFromAttachments": "1"})
     async def test_create_deeprag_tool_static_query_wait_for_ingestion(
         self,
         mock_interrupt,
@@ -263,6 +266,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableDeepRagFromAttachments": "1"})
     async def test_create_deeprag_tool_dynamic_query(
         self,
         mock_interrupt,
@@ -379,7 +383,13 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
-    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "test-folder-key"})
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_FOLDER_KEY": "test-folder-key",
+            "UIPATH_FEATURE_DisableDeepRagFromAttachments": "1",
+        },
+    )
     async def test_create_ephemeral_index_passes_folder_key(
         self,
         mock_interrupt,
@@ -417,3 +427,40 @@ class TestCreateDeepRagTool:
             mock_uipath.context_grounding.create_ephemeral_index_async.call_args.kwargs
         )
         assert call_kwargs["folder_key"] == "test-folder-key"
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
+    async def test_create_deeprag_tool_from_attachments_default(
+        self,
+        mock_interrupt,
+        mock_get_wrapper,
+        resource_config_static,
+        mock_llm,
+    ):
+        """Default (kill switch off) emits a single CreateDeepRag from-attachments interrupt."""
+        mock_interrupt.side_effect = [{"text": "Deep RAG analysis result"}]
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_deeprag_tool(resource_config_static, mock_llm)
+
+        attachment_id = str(uuid.uuid4())
+        mock_attachment = MockAttachment(
+            ID=attachment_id, FullName="test.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        result = await tool.coroutine(attachment=mock_attachment)
+
+        assert result == {"text": "Deep RAG analysis result"}
+
+        assert mock_interrupt.call_count == 1
+        create_payload = mock_interrupt.call_args.args[0]
+        assert isinstance(create_payload, CreateDeepRag)
+        assert create_payload.attachments == [attachment_id]
+        assert create_payload.prompt == "What are the main points?"
