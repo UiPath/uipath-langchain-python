@@ -35,7 +35,10 @@ from uipath.platform.errors import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
-from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
+    durable_interrupt,
+)
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -471,6 +474,7 @@ def handle_deep_rag(
             "display_name": resource.name,
             "index_name": resource.index_name,
             "context_retrieval_mode": resource.settings.retrieval_mode,
+            SUSPENDS_RUN: True,
         },
     )
     tool.set_tool_wrappers(awrapper=context_deep_rag_wrapper)
@@ -624,6 +628,7 @@ def handle_batch_transform(
             "index_name": resource.index_name,
             "context_retrieval_mode": resource.settings.retrieval_mode,
             "output_schema": output_model,
+            SUSPENDS_RUN: True,
         },
     )
     tool.set_tool_wrappers(awrapper=job_attachment_wrapper)

@@ -1,5 +1,6 @@
 """Tests for the create_advanced_agent_graph wrapper builder."""
 
+from collections.abc import Sequence
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,6 +40,21 @@ class _PromptNamedInput(BaseModel):
     uipath__system_prompt_1: str
 
 
+def _runtime_prompt_middleware(
+    middleware: Sequence[Any],
+) -> _RuntimeSystemPromptMiddleware | None:
+    """The runtime-prompt middleware in the stack handed to deepagents, if any.
+
+    Located by type rather than by index: ``create_advanced_agent`` also prepends
+    ``TodoListMiddleware``, and callers may append middleware of their own.
+    """
+    found = [m for m in middleware if isinstance(m, _RuntimeSystemPromptMiddleware)]
+    assert len(found) <= 1, (
+        f"expected at most one runtime-prompt middleware, got {found}"
+    )
+    return found[0] if found else None
+
+
 def _mock_model() -> MagicMock:
     model = MagicMock(spec=BaseChatModel)
     model.profile = None
@@ -76,9 +92,9 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system_prompt"] is None
-    assert len(call_kwargs["middleware"]) == 1
-    assert isinstance(call_kwargs["middleware"][0], _RuntimeSystemPromptMiddleware)
-    assert call_kwargs["middleware"][0].state_key == "uipath__system_prompt"
+    runtime_middleware = _runtime_prompt_middleware(call_kwargs["middleware"])
+    assert runtime_middleware is not None
+    assert runtime_middleware.state_key == "uipath__system_prompt"
 
 
 def test_static_system_prompt_skips_runtime_middleware() -> None:
@@ -91,7 +107,7 @@ def test_static_system_prompt_skips_runtime_middleware() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system_prompt"] == "sys"
-    assert call_kwargs["middleware"] == []
+    assert _runtime_prompt_middleware(call_kwargs["middleware"]) is None
 
 
 @pytest.mark.asyncio
@@ -182,7 +198,8 @@ async def test_runtime_system_prompt_crosses_into_deep_agent_once() -> None:
         return f"runtime:{args['question']}"
 
     def create_inner_graph(**kwargs: Any) -> Any:
-        middleware = kwargs["middleware"][0]
+        middleware = _runtime_prompt_middleware(kwargs["middleware"])
+        assert middleware is not None
         runtime_key = middleware.state_key
 
         def capture_model_request(state: BaseModel) -> dict[str, Any]:
