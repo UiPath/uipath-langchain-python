@@ -26,20 +26,35 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from .utils import sanitize_tool_name
 
-_START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
-    (404, "1002"): (
-        "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
-        UiPathErrorCategory.DEPLOYMENT,
-    ),
-    (400, "1100"): (
-        "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
-        UiPathErrorCategory.DEPLOYMENT,
-    ),
-    (409, None): (
-        "Cannot start process for tool '{tool}': {message}",
-        UiPathErrorCategory.DEPLOYMENT,
-    ),
+_START_JOBS_404_TEMPLATES: dict[str, str] = {
+    "AssociatedProcessNotFound": "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
+    "AttachmentNotFound": "Could not find an attachment passed to tool '{tool}'. Please check that the attachments provided to the tool still exist.",
 }
+
+_START_JOBS_404_FALLBACK_TEMPLATE = "Could not start process for tool '{tool}': an item required to start the job was not found. Server message: {message}"
+
+
+def _start_jobs_errors(
+    e: EnrichedException,
+) -> dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]]:
+    server_message = (e.error_info.message if e.error_info else None) or ""
+    not_found_template = _START_JOBS_404_TEMPLATES.get(
+        server_message, _START_JOBS_404_FALLBACK_TEMPLATE
+    )
+    return {
+        (404, "1002"): (
+            not_found_template,
+            UiPathErrorCategory.DEPLOYMENT,
+        ),
+        (400, "1100"): (
+            "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
+            UiPathErrorCategory.DEPLOYMENT,
+        ),
+        (409, None): (
+            "Cannot start process for tool '{tool}': {message}",
+            UiPathErrorCategory.DEPLOYMENT,
+        ),
+    }
 
 
 def create_process_tool(
@@ -91,7 +106,7 @@ def create_process_tool(
                 except EnrichedException as e:
                     raise_for_enriched(
                         e,
-                        _START_JOBS_ERRORS,
+                        _start_jobs_errors(e),
                         title=f"Failed to execute tool '{resource.name}'",
                         tool=resource.name,
                     )
