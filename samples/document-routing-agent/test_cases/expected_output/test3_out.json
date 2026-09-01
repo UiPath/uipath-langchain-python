@@ -1,0 +1,18 @@
+{
+  "document_id": "DOC-2025-003",
+  "routing_id": "RTG-6590DEFC",
+  "assigned_department": "legal",
+  "routing_confidence": "high",
+  "priority_score": 100,
+  "routing_reasons": [
+    "Document received at 2025-01-02T10:00:00Z",
+    "Analyzed 335 characters of content",
+    "Top departments: legal:0.80, finance:0.10, hr:0.00",
+    "Matched keywords: contract, agreement, compliance",
+    "Document type 'contract' matches department",
+    "Priority score: 100 (2-4 hours)"
+  ],
+  "secondary_departments": [],
+  "processing_timestamp": "2025-01-02T10:00:00Z",
+  "estimated_processing_time": "2-4 hours"
+}

@@ -1,0 +1,13 @@
+[project]
+name = "document-routing-agent"
+version = "0.0.1"
+description = "Intelligent document routing agent that classifies and routes documents to appropriate departments"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "langgraph>=0.6.5",
+    "python-dotenv>=1.0.1",
+    "uipath-langchain==0.0.124",
+    "pydantic>=2.10.6",
+    "typing-extensions>=4.12.2"
+]
+requires-python = ">=3.10"
