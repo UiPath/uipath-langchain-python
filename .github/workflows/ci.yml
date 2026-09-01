@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - main
+      - 'release/**'
     paths-ignore:
       - pyproject.toml
   pull_request:
     branches:
       - main
+      - 'release/**'
 
 jobs:
   commit-lint:
