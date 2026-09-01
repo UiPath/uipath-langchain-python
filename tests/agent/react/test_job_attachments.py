@@ -2,7 +2,6 @@ import uuid
 from typing import Any
 
 import pytest
-from jsonschema_pydantic_converter import transform_with_modules
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
@@ -354,7 +353,7 @@ class TestGetJobAttachments:
                 }
             },
         }
-        model, _ = transform_with_modules(schema)
+        model = create_model(schema)
         test_uuid = "550e8400-e29b-41d4-a716-446655440200"
         data = {
             "result": {
@@ -532,9 +531,9 @@ class TestGetJobAttachments:
 
     def test_accepts_attachment_field_as_nested_model_instance(self):
         """Regression: at runtime tool args are coerced into the generated input
-        model, so an attachment arrives as a model instance whose ``Metadata``
-        object is a nested sub-model (``DynamicType_*``), not a dict. This must
-        not raise (previously failed with "Input should be a valid dictionary").
+        model, so an attachment arrives as a model instance rather than a plain
+        dict. This must not raise (previously failed with "Input should be a
+        valid dictionary").
         """
         schema = {
             "type": "object",
@@ -561,7 +560,7 @@ class TestGetJobAttachments:
 
         # Coerce raw input through the generated model exactly as the runtime
         # does, then pass it inside kwargs (a dict holding a model instance) as
-        # process_tool_fn does. Metadata is now a nested model, not a dict.
+        # process_tool_fn does.
         validated: Any = model.model_validate(
             {
                 "newArgument": {
@@ -572,7 +571,6 @@ class TestGetJobAttachments:
                 }
             }
         )
-        assert isinstance(validated.newArgument.Metadata, BaseModel)
         kwargs = {"newArgument": validated.newArgument}
 
         result = get_job_attachments(model, kwargs)
