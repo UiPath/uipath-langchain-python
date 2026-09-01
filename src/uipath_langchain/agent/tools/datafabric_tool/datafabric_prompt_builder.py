@@ -10,11 +10,13 @@ backend deny-lists.
 """
 
 import logging
+from collections import defaultdict
 
-from uipath.platform.entities import Entity
+from uipath.platform.entities import EntitiesService, Entity
 
 from .datafabric_prompts import SQL_CONSTRAINTS
 from .models import (
+    ChoiceSetValueSchema,
     EntitySchema,
     EntitySQLContext,
     FieldSchema,
@@ -26,13 +28,78 @@ from .prompts import build_prompt_context, get_prompt_version
 logger = logging.getLogger(__name__)
 
 
-def build_entity_context(entity: Entity) -> EntitySQLContext:
+def _resolve_choiceset_values(
+    entities_service: EntitiesService | None,
+    choiceset_id: str,
+) -> list[ChoiceSetValueSchema]:
+    """Fetch choice-set values and return as schema objects.
+
+    Falls back to an empty list on any error so prompt building never fails.
+    """
+    if entities_service is None:
+        return []
+    try:
+        values = entities_service.get_choiceset_values(choiceset_id)
+        return [
+            ChoiceSetValueSchema(label=v.display_name, number_id=v.number_id)
+            for v in values
+        ]
+    except Exception:
+        logger.warning(
+            "Failed to fetch choice-set values for %s", choiceset_id, exc_info=True
+        )
+        return []
+
+
+def _fetch_entity_choiceset_ids(
+    entities_service: EntitiesService | None,
+    entity_id: str | None,
+) -> dict[str, str]:
+    """Fetch the full entity schema to get ChoiceSetId per field.
+
+    The ``resolve_entity_set`` API does not populate ``choiceset_id`` on
+    fields, but the entity GET endpoint returns ``choiceSetId`` (camelCase).
+    This helper bridges the gap by making a raw HTTP GET to the entity
+    endpoint and parsing the response.
+
+    Returns a dict ``{field_name: choiceset_id}``.
+    """
+    if entities_service is None or not entity_id:
+        return {}
+    try:
+        from uipath.platform.common._models import Endpoint
+
+        response = entities_service._data.request(
+            "GET", Endpoint(f"datafabric_/api/Entity/{entity_id}")
+        )
+        data = response.json()
+        result: dict[str, str] = {}
+        for field in data.get("fields", []):
+            cs_id = field.get("choiceSetId")
+            name = field.get("name")
+            if cs_id and name:
+                result[name] = cs_id
+        return result
+    except Exception:
+        logger.debug(
+            "Could not fetch entity metadata for CS IDs: %s", entity_id, exc_info=True
+        )
+        return {}
+
+
+def build_entity_context(
+    entity: Entity,
+    entities_service: EntitiesService | None = None,
+) -> EntitySQLContext:
     """Convert an Entity SDK object to schema + derived query patterns.
 
     Auto-added system/audit fields (Id, CreateTime, UpdateTime, CreatedBy,
     UpdatedBy) are surfaced in the schema, tagged ``system`` via
     :attr:`FieldSchema.is_system_field`, but are always excluded from the
     derived query patterns so the examples reference only business fields.
+
+    When ``entities_service`` is provided, choice-set fields are enriched
+    with their label↔NumberId mappings.
     """
     field_schemas: list[FieldSchema] = []
     # Query patterns are derived from business fields only — system fields,
@@ -40,6 +107,13 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
     business_field_names: list[str] = []
     numeric_field: str | None = None
     text_field: str | None = None
+    # Cache choice-set values by choiceset_id to avoid duplicate fetches
+    # when multiple fields share the same choice set.
+    _cs_cache: dict[str, list[ChoiceSetValueSchema]] = {}
+    # Fetch entity-level choice-set IDs from the full entity schema.
+    # resolve_entity_set doesn't populate choiceset_id on fields due to
+    # a casing mismatch (API returns choiceSetId, model expects choicesetId).
+    _entity_cs_ids = _fetch_entity_choiceset_ids(entities_service, entity.id)
 
     for field in entity.fields or []:
         if field.is_hidden_field:
@@ -61,6 +135,26 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             ref_field = getattr(field, "reference_field", None)
             ref_definition = getattr(ref_field, "definition", None)
             ref_field_name = getattr(ref_definition, "name", None)
+
+        # Detect choice-set fields and resolve their choiceset_id.
+        # Priority order: (1) SDK field.choiceset_id, (2) entity-level fetch,
+        # (3) reference_choiceset, (4) field_display_type detection.
+        cs_id = getattr(field, "choiceset_id", None)
+        if not cs_id:
+            cs_id = _entity_cs_ids.get(field.name)
+        if not cs_id:
+            ref_cs = getattr(field, "reference_choiceset", None)
+            if ref_cs:
+                cs_id = getattr(ref_cs, "id", None)
+
+        cs_values: list[ChoiceSetValueSchema] = []
+        if cs_id:
+            if cs_id not in _cs_cache:
+                _cs_cache[cs_id] = _resolve_choiceset_values(
+                    entities_service, cs_id
+                )
+            cs_values = _cs_cache[cs_id]
+
         fs = FieldSchema(
             name=field.name,
             display_name=field.display_name,
@@ -73,6 +167,8 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             is_system_field=is_system,
             ref_entity_table=ref_entity_table,
             ref_field_name=ref_field_name,
+            choiceset_id=cs_id,
+            choiceset_values=cs_values,
         )
         field_schemas.append(fs)
 
@@ -86,6 +182,9 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
 
     field_names = business_field_names
     table = entity.name
+
+    # Pick a choice-set field for the filter example if one exists.
+    cs_field = next((f for f in field_schemas if f.is_choice_set and f.choiceset_values), None)
 
     group_field = text_field or (field_names[0] if field_names else "Category")
     agg_field = numeric_field or (field_names[1] if len(field_names) > 1 else "Amount")
@@ -120,6 +219,20 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
         ),
     ]
 
+    # Add a choice-set filter example if applicable.
+    if cs_field and cs_field.choiceset_values:
+        first_val = cs_field.choiceset_values[0]
+        query_patterns.append(
+            QueryPattern(
+                intent=f"Filter by {cs_field.name}",
+                sql=(
+                    f"SELECT {fields_sample} FROM {table} "
+                    f"WHERE {cs_field.name} = {first_val.number_id} LIMIT 100"
+                    f"  -- {first_val.number_id} = {first_val.label}"
+                ),
+            )
+        )
+
     schema = EntitySchema(
         id=entity.id,
         entity_name=entity.name,
@@ -131,11 +244,54 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
     return EntitySQLContext(entity_schema=schema, query_patterns=query_patterns)
 
 
+def _build_shared_choicesets(
+    entity_contexts: list[EntitySQLContext],
+) -> dict[str, list[str]]:
+    """Detect choice-set fields shared across entities.
+
+    Returns a dict from choiceset_id → list of ``"Entity.Field"`` refs.
+    Only includes entries where 2+ fields across different entities share
+    the same choice set (same-entity duplicates are excluded).
+    """
+    cs_to_fields: dict[str, list[str]] = defaultdict(list)
+    for ectx in entity_contexts:
+        entity_name = ectx.entity_schema.entity_name
+        for field in ectx.entity_schema.fields:
+            if field.choiceset_id:
+                cs_to_fields[field.choiceset_id].append(f"{entity_name}.{field.name}")
+    # Keep only those shared across entities.
+    shared: dict[str, list[str]] = {}
+    for cs_id, refs in cs_to_fields.items():
+        entity_set = {r.split(".")[0] for r in refs}
+        if len(entity_set) >= 2:
+            shared[cs_id] = refs
+    return shared
+
+
+def _build_choiceset_label_maps(
+    entity_contexts: list[EntitySQLContext],
+) -> dict[str, dict[int, str]]:
+    """Build NumberId→label maps for all choice-set fields across all entities.
+
+    Returns ``{ "Entity.Field": { 0: "Critical", 1: "High", ... } }``.
+    """
+    maps: dict[str, dict[int, str]] = {}
+    for ectx in entity_contexts:
+        entity_name = ectx.entity_schema.entity_name
+        for field in ectx.entity_schema.fields:
+            if field.choiceset_values:
+                maps[f"{entity_name}.{field.name}"] = {
+                    v.number_id: v.label for v in field.choiceset_values
+                }
+    return maps
+
+
 def build_sql_context(
     entities: list[Entity],
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    entities_service: EntitiesService | None = None,
 ) -> SQLContext:
     """Build the full SQL context from entities, prompts, and constraints.
 
@@ -147,6 +303,9 @@ def build_sql_context(
             ``## Agent Instructions``.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        entities_service: Optional platform service for fetching choice-set
+            values. When provided, choice-set fields are enriched with their
+            label↔NumberId mappings.
     """
     version = get_prompt_version(prompt_version)
     ctx = build_prompt_context(
@@ -155,12 +314,18 @@ def build_sql_context(
     )
     rendered_prompt = version.render(ctx)
 
+    entity_contexts = [
+        build_entity_context(e, entities_service=entities_service) for e in entities
+    ]
+
     return SQLContext(
         base_system_prompt=base_system_prompt or None,
         resource_description=None,
         sql_expert_system_prompt=rendered_prompt,
         constraints=SQL_CONSTRAINTS,
-        entity_contexts=[build_entity_context(e) for e in entities],
+        entity_contexts=entity_contexts,
+        shared_choicesets=_build_shared_choicesets(entity_contexts),
+        choiceset_label_maps=_build_choiceset_label_maps(entity_contexts),
     )
 
 
@@ -212,6 +377,43 @@ def _format_relationships(entity: EntitySchema, entity_tables: set[str]) -> list
     return lines
 
 
+def _format_choiceset_values(entity: EntitySchema) -> list[str]:
+    """Render the choice-set value mappings for an entity's CS fields."""
+    cs_fields = [f for f in entity.fields if f.is_choice_set and f.choiceset_values]
+    if not cs_fields:
+        return []
+
+    lines = [
+        f"**Choice-set value mappings for {entity.entity_name}:**",
+        "_These fields store integer NumberIds, not labels. "
+        "Use the integer value in WHERE/JOIN clauses._",
+        "",
+    ]
+    for field in cs_fields:
+        mapping = field.choiceset_mapping_str
+        lines.append(f"- `{field.name}`: {mapping}")
+    lines.append("")
+    return lines
+
+
+def _format_shared_choicesets(shared: dict[str, list[str]]) -> list[str]:
+    """Render cross-entity shared choice-set join hints."""
+    if not shared:
+        return []
+
+    lines = [
+        "## Shared Choice-Set Join Paths",
+        "_The following fields across different entities use the same choice set "
+        "and share the same integer value space. They can be directly compared "
+        "in JOIN ON or WHERE clauses._",
+        "",
+    ]
+    for cs_id, refs in shared.items():
+        lines.append(f"- {' = '.join(f'`{r}`' for r in refs)} (same choice set)")
+    lines.append("")
+    return lines
+
+
 def _format_entity(entity_ctx: EntitySQLContext, entity_tables: set[str]) -> list[str]:
     """Render one entity's schema table, relationships, and query patterns."""
     entity = entity_ctx.entity_schema
@@ -223,9 +425,16 @@ def _format_entity(entity_ctx: EntitySQLContext, entity_tables: set[str]) -> lis
     lines.append("|-------|------|-------------|")
     for field in entity.fields:
         desc = (field.description or "").replace("|", r"\|").replace("\n", " ")
+        # Append choice-set mapping inline in the description column.
+        if field.is_choice_set and field.choiceset_mapping_str:
+            if desc:
+                desc += f" — values: {field.choiceset_mapping_str}"
+            else:
+                desc = f"values: {field.choiceset_mapping_str}"
         lines.append(f"| {field.name} | {field.display_type} | {desc} |")
     lines.append("")
 
+    lines.extend(_format_choiceset_values(entity))
     lines.extend(_format_relationships(entity, entity_tables))
 
     lines.append(f"**Query Patterns for {entity.entity_name}:**")
@@ -255,6 +464,9 @@ def format_sql_context(ctx: SQLContext) -> str:
     for entity_ctx in ctx.entity_contexts:
         lines.extend(_format_entity(entity_ctx, entity_tables))
 
+    # Shared choice-set join hints (cross-entity).
+    lines.extend(_format_shared_choicesets(ctx.shared_choicesets))
+
     return "\n".join(lines)
 
 
@@ -263,6 +475,7 @@ def build(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    entities_service: EntitiesService | None = None,
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
@@ -276,6 +489,8 @@ def build(
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        entities_service: Optional platform service for fetching choice-set
+            values. When provided, choice-set fields are enriched.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -288,5 +503,6 @@ def build(
         resource_description,
         base_system_prompt,
         prompt_version=prompt_version,
+        entities_service=entities_service,
     )
     return format_sql_context(ctx)

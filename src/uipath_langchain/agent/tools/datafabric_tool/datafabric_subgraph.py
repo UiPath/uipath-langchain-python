@@ -60,7 +60,10 @@ class QueryExecutor:
     """Executes SQL queries against Data Fabric."""
 
     def __init__(
-        self, entities_service: EntitiesService, entities: list[Entity]
+        self,
+        entities_service: EntitiesService,
+        entities: list[Entity],
+        choiceset_label_maps: dict[str, dict[int, str]] | None = None,
     ) -> None:
         self._entities = entities_service
         native = [e.name for e in entities if not e.external_fields]
@@ -72,6 +75,37 @@ class QueryExecutor:
             "df.native_entities": ", ".join(native) if native else "",
             "df.federated_entities": ", ".join(federated) if federated else "",
         }
+        # { "Entity.Field": { 0: "Critical", 1: "High", ... } }
+        self._cs_maps = choiceset_label_maps or {}
+        # Build a flattened lookup keyed by column name as it appears in results:
+        # both "Entity.Field" (qualified) and "Field" (unqualified) point to the map.
+        self._result_cs_lookup: dict[str, dict[int, str]] = {}
+        for qualified, mapping in self._cs_maps.items():
+            self._result_cs_lookup[qualified] = mapping
+            # Unqualified: "Field" — may collide across entities, last wins is fine
+            # since the values are the same when backed by the same choice set.
+            unqualified = qualified.split(".")[-1]
+            self._result_cs_lookup[unqualified] = mapping
+
+    def _enrich_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Add human-readable labels for choice-set NumberId values in results.
+
+        For each record, if a column matches a known choice-set field, adds a
+        sibling key ``<column>_label`` with the display name. The original
+        NumberId is preserved for the LLM to reference in its answer.
+        """
+        if not self._result_cs_lookup or not records:
+            return records
+
+        enriched = []
+        for record in records:
+            new_record = dict(record)
+            for col, value in record.items():
+                mapping = self._result_cs_lookup.get(col)
+                if mapping and isinstance(value, int) and value in mapping:
+                    new_record[f"{col}_label"] = mapping[value]
+            enriched.append(new_record)
+        return enriched
 
     async def __call__(self, sql_query: str) -> dict[str, Any]:
         logger.debug("execute_sql called with SQL: %s", sql_query)
@@ -104,11 +138,12 @@ class QueryExecutor:
                     sql_query=sql_query,
                     relationships_as_scalar=True,
                 )
+                enriched = self._enrich_records(records)
                 if span is not None:
                     span.set_attribute("df.record_count", len(records))
                     span.set_attribute("df.success", True)
                 return {
-                    "records": records,
+                    "records": enriched,
                     "total_count": len(records),
                     "sql_query": sql_query,
                 }
@@ -190,13 +225,21 @@ class DataFabricGraph:
         base_system_prompt: str = "",
     ) -> None:
         self._max_iterations = max_iterations
+
+        # Build the SQL context (with choice-set enrichment) and keep the
+        # label maps for result post-processing.
+        sql_context = datafabric_prompt_builder.build_sql_context(
+            entities,
+            resource_description,
+            base_system_prompt,
+            entities_service=entities_service,
+        )
+        self._choiceset_label_maps = sql_context.choiceset_label_maps
         self._execute_sql_tool = self._create_execute_sql_tool(
-            entities_service, entities
+            entities_service, entities, self._choiceset_label_maps
         )
         self._system_message = SystemMessage(
-            content=datafabric_prompt_builder.build(
-                entities, resource_description, base_system_prompt
-            )
+            content=datafabric_prompt_builder.format_sql_context(sql_context)
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
             [self._execute_sql_tool]
@@ -329,6 +372,7 @@ class DataFabricGraph:
         self,
         entities_service: EntitiesService,
         entities: list[Entity],
+        choiceset_label_maps: dict[str, dict[int, str]] | None = None,
     ) -> BaseTool:
         """Create the inner ``execute_sql`` tool."""
         entity_names = ", ".join(e.name for e in entities)
@@ -340,7 +384,9 @@ class DataFabricGraph:
                 "tables and columns. Retry with a corrected query on errors."
             ),
             args_schema=DataFabricExecuteSqlInput,
-            coroutine=QueryExecutor(entities_service, entities),
+            coroutine=QueryExecutor(
+                entities_service, entities, choiceset_label_maps
+            ),
             metadata={"tool_type": "datafabric_sql"},
         )
 

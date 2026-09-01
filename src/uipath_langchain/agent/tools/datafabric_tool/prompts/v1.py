@@ -64,12 +64,22 @@ refers to; when a business (non-system) field overlaps a system field's \
 concept and it is unclear which to use — prefer the BUSINESS field.
 4. WHERE FILTERS — What predicates belong in WHERE? What are the exact values \
 to filter on?
-5. VALUE RESOLUTION — Before finalising any equality / IN filter on a textual \
-field:
+5. VALUE RESOLUTION — Before finalising any equality / IN filter:
    {value_resolution_strategy}
    Match the stored casing and punctuation exactly. Do NOT lowercase, \
 titlecase, or normalise the filter value. If the question uses a synonym or \
 abbreviation, look at the entity schema above for the canonical form.
+   **CHOICE-SET FIELDS** (tagged ``choice_set`` in the Type column):
+   - These fields store integer NumberIds, NOT string labels.
+   - The value mapping is shown in the Description column (e.g. Critical=0, High=1).
+   - ALWAYS use the integer NumberId in WHERE, JOIN ON, and HAVING clauses.
+   - Example: to filter for "Critical" priority, use ``WHERE Priority = 0`` \
+(NOT ``WHERE Priority = 'Critical'`` or ``WHERE Priority = 4``).
+   - For GROUP BY on a choice-set field, the result will contain integer \
+NumberIds. The ``_label`` suffix in results provides the human-readable name.
+   - When two entities share the same choice set (listed under "Shared \
+Choice-Set Join Paths"), their integer columns can be directly joined: \
+``ON EntityA.Field = EntityB.Field``.
 6. AGGREGATION INTENT — Match aggregation to the question:
    - "how many" -> COUNT
    - "how many distinct" / "unique X" / "different X" -> COUNT(DISTINCT field)
@@ -173,7 +183,7 @@ targeted fix:
 | SYNTAX_ERROR      | "syntax error near"             | Check commas, parentheses, keyword spelling, and clause ordering (SELECT / FROM / WHERE / GROUP BY / ORDER BY / LIMIT). |
 | TYPE_MISMATCH     | "type mismatch"                 | Use ``CAST(... AS <type>)`` to coerce the operand.                                                       |
 | AGGREGATION_ERROR | "not an aggregate"              | Ensure every non-aggregated SELECT field appears in GROUP BY.                                           |
-| EMPTY_RESULT      | Query returns 0 rows            | Re-check each WHERE literal against the entity metadata (allowed_values, examples). Verify case, spacing, punctuation. Check whether a JOIN is filtering rows out — verify join conditions match the foreign-key relationships in the entity schemas. |
+| EMPTY_RESULT      | Query returns 0 rows            | Re-check each WHERE literal against the entity metadata (allowed_values, examples). For choice-set fields, verify you used the correct integer NumberId from the mapping (e.g. Critical=0, not 4). Check whether a JOIN is filtering rows out — verify join conditions match the foreign-key relationships in the entity schemas. |
 
 CONVERGENCE RULES:
 1. Never repeat the exact same failing query.

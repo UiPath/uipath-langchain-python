@@ -6,6 +6,13 @@ NUMERIC_TYPES = frozenset({"int", "decimal", "float", "double", "bigint"})
 TEXT_TYPES = frozenset({"varchar", "nvarchar", "text", "string", "ntext"})
 
 
+class ChoiceSetValueSchema(BaseModel):
+    """A single choice-set value with its display label and stored NumberId."""
+
+    label: str
+    number_id: int
+
+
 class FieldSchema(BaseModel):
     """Structured representation of a Data Fabric entity field."""
 
@@ -24,6 +31,15 @@ class FieldSchema(BaseModel):
     ref_entity_table: str | None = None
     ref_join_key: str = "Id"
     ref_field_name: str | None = None
+    # Choice-set metadata: populated when the field is CHOICE_SET_SINGLE or
+    # CHOICE_SET_MULTIPLE so the prompt can include the label↔NumberId mapping.
+    choiceset_id: str | None = None
+    choiceset_values: list[ChoiceSetValueSchema] = []
+
+    @property
+    def is_choice_set(self) -> bool:
+        """True when this field is backed by a choice set."""
+        return bool(self.choiceset_id)
 
     @property
     def display_type(self) -> str:
@@ -35,6 +51,8 @@ class FieldSchema(BaseModel):
             modifiers.append("fk")
         if self.is_system_field:
             modifiers.append("system")
+        if self.is_choice_set:
+            modifiers.append("choice_set")
         if modifiers:
             return f"{self.type}, {', '.join(modifiers)}"
         return self.type
@@ -46,11 +64,23 @@ class FieldSchema(BaseModel):
 
     @property
     def is_numeric(self) -> bool:
+        # Choice-set fields are stored as INT but are categorical, not numeric.
+        if self.is_choice_set:
+            return False
         return self.type.lower() in NUMERIC_TYPES
 
     @property
     def is_text(self) -> bool:
         return self.type.lower() in TEXT_TYPES
+
+    @property
+    def choiceset_mapping_str(self) -> str:
+        """Formatted label=NumberId mapping for prompt injection, or empty."""
+        if not self.choiceset_values:
+            return ""
+        return ", ".join(
+            f"{v.label}={v.number_id}" for v in self.choiceset_values
+        )
 
 
 class EntitySchema(BaseModel):
@@ -86,6 +116,12 @@ class SQLContext(BaseModel):
     sql_expert_system_prompt: str | None = None
     constraints: str | None = None
     entity_contexts: list[EntitySQLContext]
+    # Cross-entity shared choice sets: choiceset_id → list of "Entity.Field" refs.
+    # Used to emit join hints when two entities share the same choice set.
+    shared_choicesets: dict[str, list[str]] = {}
+    # Complete NumberId→label mapping for result post-processing:
+    # { "Entity.Field": { 0: "Critical", 1: "High", ... } }
+    choiceset_label_maps: dict[str, dict[int, str]] = {}
 
 
 class DataFabricQueryInput(BaseModel):
