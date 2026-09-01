@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-26T20:22:33.9044027Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
@@ -4546,7 +4546,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.16.13"
+version = "0.16.14"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4596,6 +4596,7 @@ dev = [
     { name = "filelock" },
     { name = "mypy" },
     { name = "numpy" },
+    { name = "packaging" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -4647,6 +4648,7 @@ dev = [
     { name = "filelock", specifier = ">=3.20.3" },
     { name = "mypy", specifier = ">=1.14.1" },
     { name = "numpy", specifier = ">=1.24.0" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", specifier = ">=1.0.0" },
