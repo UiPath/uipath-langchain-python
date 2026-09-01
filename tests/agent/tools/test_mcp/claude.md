@@ -4,7 +4,7 @@
 >
 > When you modify `test_mcp_client.py` or `test_mcp_tool.py`, you MUST update this document to reflect:
 > - New test cases (add to Test File Structure and create explanation section)
-> - Changes to MockStreamResponse (update Handled MCP Methods table and examples)
+> - Changes to LegacyMcpEndpoint (update Handled MCP Methods table and examples)
 > - New mocking patterns (add to Common Patterns section)
 > - New assertion patterns (add to Guidelines for Adding New Tests)
 > - Changes to test tracking variables (update Tracking Test State section)
@@ -17,31 +17,40 @@ This document explains the testing strategy for MCP-related code. Use this as a 
 
 ## Testing Philosophy
 
-The tests mock **only the HTTP layer** (`httpx.AsyncClient`), allowing the real MCP SDK to process messages. This approach:
+The client tests run the real MCP SDK 2.0 `ClientSession` and Streamable HTTP
+transport over `httpx2.MockTransport`. Only the remote endpoint is simulated.
+This approach:
 
 - Tests the actual MCP protocol flow
-- Validates error handling with real `McpError` exceptions
-- Ensures `ClientSession.initialize()` behaves correctly when called multiple times
+- Validates error handling with real `MCPError` exceptions
+- Verifies that recovery replaces an idempotently initialized `ClientSession`
+- Exercises persisted-session request/response hooks
 - Catches integration issues between our code and the SDK
 
 ## Test File Structure
 
 ```
 tests/agent/tools/test_mcp/
-├── test_mcp_client.py         # McpClient session + tool-list caching tests
-│   └── TestMcpClient (class)
-│       ├── create_mock_stream_response()
-│       ├── create_mock_http_client()
-│       ├── test_session_initializes_on_first_call
-│       ├── test_session_reused_across_calls
-│       ├── test_session_reinitializes_on_404_error  ← Key test
-│       ├── test_max_retries_exceeded
-│       ├── test_dispose_releases_resources
-│       ├── test_client_initialized_property
-│       ├── test_session_can_be_reused_after_dispose
-│       ├── test_list_tools_caches_result_across_calls   ← list_tools fetched once per lifetime
-│       ├── test_list_tools_force_refresh_bypasses_cache
-│       └── test_dispose_clears_tools_cache
+├── test_mcp_client.py         # Real SDK 2 transport/session integration
+│   ├── LegacyMcpEndpoint      # httpx2.MockTransport request handler
+│   ├── test_negotiates_supported_legacy_protocol_versions
+│   ├── test_replaces_transport_and_session_after_404  ← Key test
+│   ├── test_persisted_session_is_reused_without_initialize
+│   ├── test_expired_persisted_session_falls_back_to_fresh_initialize
+│   ├── test_max_retries_exceeded_raises_mcp_error
+│   ├── test_concurrent_recovery_does_not_replace_a_new_session
+│   ├── test_list_tools_cache_and_force_refresh
+│   ├── test_dispose_allows_client_reuse
+│   ├── test_raises_on_missing_mcp_url
+│   └── test_only_session_specific_invalid_request_is_retryable
+│
+├── test_session_info.py       # SessionInfo + SessionInfoFactory contract
+│
+├── test_protocol_version_support.py  # SDK protocol-version constraints (tripwires)
+│   ├── test_low_level_session_cannot_choose_a_protocol_version
+│   ├── test_sdk_client_rejects_a_handshake_era_mode_pin
+│   ├── test_modern_versions_are_outside_the_handshake_set
+│   └── test_restored_sessions_cover_every_handshake_version_but_the_oldest
 │
 └── test_mcp_tool.py           # Tool factory tests (17 tests)
     ├── TestMcpToolMetadata (class)
@@ -64,8 +73,8 @@ tests/agent/tools/test_mcp/
     │   ├── test_raises_on_missing_mcp_url
     │   └── test_tools_have_correct_metadata
     │
-    ├── TestMcpToolInvocation (class)
-    │   └── test_tool_invocation_initializes_session_and_returns_result
+    ├── TestMcpToolResultSerialization (class)
+    ├── TestMcpToolErrorHandling (class)
     │
     ├── TestMcpToolNameSanitization (class)
     │   ├── test_tool_name_with_spaces
@@ -105,29 +114,35 @@ tool.
 `tool_fn` tests mock `mcpClient.list_tools` directly, so they exercise the refresh
 logic per invocation independent of the client's caching. The once-per-run caching
 itself lives in `McpClient.list_tools` and is covered in `test_mcp_client.py`
-(`test_list_tools_caches_result_across_calls`, `..._force_refresh_bypasses_cache`,
-`test_dispose_clears_tools_cache`).
+(`test_list_tools_cache_and_force_refresh`; disposal/reuse is covered separately).
 
 ## Mocking Strategy
 
 ### What We Mock
 
-Only `httpx.AsyncClient` is mocked at the module level:
+`LegacyMcpEndpoint` is an async handler installed on a real
+`httpx2.AsyncClient` through `httpx2.MockTransport`:
 
 ```python
-@patch("httpx.AsyncClient")
-async def test_something(self, mock_async_client_class):
-    # mock_async_client_class is the patched class
-    # We configure it to return our mock client
-    mock_http_client = self.create_mock_http_client(MockStreamResponse)
-    mock_async_client_class.return_value = mock_http_client
+endpoint = LegacyMcpEndpoint(protocol_version="2025-06-18")
+http_kwargs = {
+    "headers": {"Authorization": "Bearer test-secret-token"},
+    "transport": endpoint.transport,
+    "follow_redirects": True,
+}
+with patch(
+    "uipath_langchain.agent.tools.mcp.mcp_client.get_httpx_client_kwargs",
+    return_value=http_kwargs,
+):
+    result = await client.call_tool("test_tool", {"query": "test"})
 ```
 
 ### What We DON'T Mock
 
 - `mcp.ClientSession` - Real SDK session handling
 - `mcp.client.streamable_http.streamable_http_client` - Real transport setup
-- `mcp.shared.exceptions.McpError` - Real error types
+- `mcp.shared.exceptions.MCPError` - Real error types
+- UiPath's `streamable_http_client` event hooks - Real session persistence adapter
 
 ### Why This Approach?
 
@@ -137,7 +152,7 @@ async def test_something(self, mock_async_client_class):
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
-│  │ McpClient   │ ──► │ MCP SDK     │ ──► │ HTTP Mock   │   │
+│  │ McpClient   │ ──► │ MCP SDK 2   │ ──► │ MockTransport│  │
 │  │             │     │ (real)      │     │ (mocked)    │   │
 │  └─────────────┘     └─────────────┘     └─────────────┘   │
 │        ▲                   │                   │            │
@@ -148,62 +163,72 @@ async def test_something(self, mock_async_client_class):
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## MockStreamResponse Class
+## LegacyMcpEndpoint Class
 
-The core of our mocking - simulates an MCP server's HTTP responses.
+The core test endpoint simulates an MCP legacy Streamable HTTP server while
+recording methods, headers, initialization count, tool calls, and DELETEs.
 
 ### Structure
 
 ```python
-class MockStreamResponse:
-    def __init__(self, method: str, url: str, **kwargs):
-        # method: "GET" or "POST"
-        # url: The endpoint URL
-        # kwargs: Contains json (request body), headers, etc.
+class LegacyMcpEndpoint:
+    def __init__(
+        self,
+        protocol_version: str = "2025-11-25",
+        *,
+        failed_tool_calls: int = 0,
+    ) -> None:
+        self.protocol_version = protocol_version
+        self.failed_tool_calls = failed_tool_calls
+        self.methods: list[str] = []
+        self.request_headers: list[tuple[str, httpx2.Headers]] = []
+        self.initialize_count = 0
+        self.tool_call_count = 0
+        self.delete_count = 0
+        self.transport = httpx2.MockTransport(self.handle)
 
-    def _build_response(self) -> tuple[int, Any, dict[str, str] | None]:
-        # Returns: (status_code, json_body, headers)
-
-    async def __aenter__(self): ...   # Context manager entry
-    async def __aexit__(self, ...): ...  # Context manager exit
-    async def aread(self) -> bytes: ...  # Read response body
-    def raise_for_status(self): ...  # Check HTTP status
+    async def handle(self, request: httpx2.Request) -> httpx2.Response: ...
 ```
 
 ### Handled MCP Methods
 
 | Method | Response | Notes |
 |--------|----------|-------|
-| `initialize` | 200 + session ID | Returns different IDs for each call |
-| `notifications/initialized` | 204 No Content | Notification, no body |
+| `initialize` | 200 + session ID | Returns selected legacy version and a new ID |
+| `notifications/initialized` | 202 Accepted | Notification, no body |
 | `tools/list` | 200 + tool definitions | For SDK output validation |
-| `tools/call` | 200 + result OR 404 | Configurable via `fail_first_tool_call` |
+| `tools/call` | 200 + result OR bare 404 | Configurable via `failed_tool_calls` |
 | GET requests | 405 | Server doesn't support GET streaming |
+| DELETE requests | 204 | Records session termination |
 
 ### Response Format Examples
 
 **Initialize response:**
 ```python
-return (
+return httpx2.Response(
     200,
-    {
+    headers={
+        "content-type": "application/json",
+        "mcp-session-id": f"session-{self.initialize_count}",
+    },
+    json={
         "jsonrpc": "2.0",
         "id": request_id,
         "result": {
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": self.protocol_version,
             "capabilities": {"tools": {}},
             "serverInfo": {"name": "test-server", "version": "1.0.0"},
         },
     },
-    {"mcp-session-id": session_id},  # Header with session ID
 )
 ```
 
 **Tool call success:**
 ```python
-return (
+return httpx2.Response(
     200,
-    {
+    headers={"content-type": "application/json"},
+    json={
         "jsonrpc": "2.0",
         "id": request_id,
         "result": {
@@ -212,149 +237,80 @@ return (
             "isError": False,
         },
     },
-    {},
 )
 ```
 
 **Tool call 404 (session terminated):**
 ```python
-return (404, None, None)
+return httpx2.Response(404)
 ```
 
 ## Tracking Test State
 
-Tests use mutable lists to track state across mock calls:
+Tests inspect state recorded directly on `LegacyMcpEndpoint`:
 
 ```python
-method_call_sequence: list[str] = []  # Order of MCP methods called
-initialize_count = [0]                 # How many times initialize was called
-tool_call_count = [0]                  # How many times tools/call was called
-```
-
-Why lists? Because they're mutable and can be modified inside the mock class closure:
-
-```python
-def create_mock_stream_response(self, method_call_sequence, initialize_count, ...):
-    class MockStreamResponse:
-        def _build_response(self):
-            if self.method == "initialize":
-                initialize_count[0] += 1  # Modifies outer list
-            method_call_sequence.append(self.method)  # Tracks call order
+assert endpoint.initialize_count == 2
+assert endpoint.tool_call_count == 2
+assert endpoint.delete_count == 1
+assert endpoint.methods.count("tools/list") == 2
+assert endpoint.headers_for("tools/call")[0]["mcp-session-id"] == "session-1"
 ```
 
 ## Test Cases Explained
 
 ### TestMcpClient Tests
 
-#### test_session_initializes_on_first_call
+#### test_negotiates_supported_legacy_protocol_versions
 
-**Purpose:** Verify lazy initialization on first `call_tool()`
+Parameterizes `2025-03-26`, `2025-06-18`, and `2025-11-25`. It verifies the
+real SDK accepts each server-selected handshake version and stamps the selected
+version plus session ID on the subsequent tool request.
 
-**Assertions:**
+#### test_replaces_transport_and_session_after_404 ⭐
+
+The first tool request returns a bare HTTP 404. The test verifies two
+initializations, two tool calls, one DELETE for the old session, a new session
+ID, and correct session headers on both attempts. This catches the SDK 2
+idempotent-`initialize()` breaking change: recovery must create a fresh
+`ClientSession`, not call `initialize()` again on the old one.
+
 ```python
-assert session.session_id is None           # Before call
-result = await session.call_tool(...)
-assert session.session_id == "test-session-first"  # After call
-assert session.is_client_initialized
-assert mock_async_client_class.call_count == 1     # HTTP client created
+assert endpoint.initialize_count == 2
+assert endpoint.tool_call_count == 2
+assert endpoint.delete_count == 1
+assert await client.get_session_id() == "session-2"
 ```
 
-#### test_session_reused_across_calls
+#### Persisted-session tests
 
-**Purpose:** Verify session persists across multiple tool calls
+`test_persisted_session_is_reused_without_initialize` verifies an ID restored
+through a custom `SessionInfoFactory` is injected into `tools/call` without a
+new handshake.
 
-**Assertions:**
-```python
-await session.call_tool(...)  # First call
-assert initialize_count[0] == 1
+`test_expired_persisted_session_falls_back_to_fresh_initialize` verifies the
+special bare-404 path: the SDK transport does not know an externally injected
+ID, so UiPath recognizes `METHOD_NOT_FOUND`/`"Not Found"` while the ID is still
+present, clears it, initializes a new session, and retries.
 
-await session.call_tool(...)  # Second call
-assert initialize_count[0] == 1  # Still 1! No reinit
-assert tool_call_count[0] == 2   # But 2 tool calls
-```
+#### Retry and concurrency tests
 
-#### test_session_reinitializes_on_404_error ⭐
+- `test_max_retries_exceeded_raises_mcp_error` expects the real `MCPError`
+  after the configured retry is consumed.
+- `test_concurrent_recovery_does_not_replace_a_new_session` verifies a late
+  failure from an old `ClientSession` cannot tear down a replacement created by
+  another operation.
+- `test_only_session_specific_invalid_request_is_retryable` verifies an ordinary
+  `INVALID_REQUEST` is not misclassified as a disconnect.
 
-**Purpose:** THE KEY TEST - verify client reuse on session reinit
+#### Cache, disposal, and configuration tests
 
-**Setup:**
-```python
-MockStreamResponse = self.create_mock_stream_response(
-    ...,
-    fail_first_tool_call=True,  # First tools/call returns 404
-)
-```
-
-**Critical Assertions:**
-```python
-# Session was reinitialized (initialize called twice)
-assert initialize_count[0] == 2
-
-# Tool call was retried
-assert tool_call_count[0] == 2
-
-# Session ID changed
-assert session.session_id == "test-session-retry"
-
-# KEY: HTTP client created only ONCE (not recreated)
-assert mock_async_client_class.call_count == 1
-```
-
-#### test_max_retries_exceeded
-
-**Purpose:** Verify `McpError` is raised after max retries
-
-**Setup:** Custom mock that ALWAYS returns 404 for tool calls
-
-**Assertions:**
-```python
-with pytest.raises(McpError):
-    await session.call_tool(...)
-
-assert initialize_count[0] == 2  # Tried to reinit
-assert tool_call_count[0] == 2   # Tried twice
-assert mock_async_client_class.call_count == 1  # Still only one client
-```
-
-#### test_dispose_releases_resources
-
-**Purpose:** Verify `dispose()` cleans up properly
-
-**Assertions:**
-```python
-await session.dispose()
-assert session.session_id is None
-assert session._session is None
-assert session._stack is None
-assert not session.is_client_initialized
-```
-
-#### test_client_initialized_property
-
-**Purpose:** Verify `is_client_initialized` property accuracy
-
-**Assertions:**
-```python
-assert not session.is_client_initialized  # Before
-await session.call_tool(...)
-assert session.is_client_initialized      # After call
-await session.dispose()
-assert not session.is_client_initialized  # After dispose
-```
-
-#### test_session_can_be_reused_after_dispose
-
-**Purpose:** Verify session can be fully reinitialized after `dispose()`
-
-**Assertions:**
-```python
-await session.call_tool(...)
-await session.dispose()
-await session.call_tool(...)  # Should work!
-
-# HTTP client created TWICE (once before dispose, once after)
-assert mock_async_client_class.call_count == 2
-```
+- `test_list_tools_cache_and_force_refresh` verifies normal caching and explicit
+  refresh over the real protocol path.
+- `test_dispose_allows_client_reuse` verifies disposal resets the state and a
+  later call creates another HTTP client/session stack.
+- `test_raises_on_missing_mcp_url` verifies endpoint validation happens before
+  HTTP resources are allocated.
 
 ### TestCreateMcpToolsFromAgent Tests
 
@@ -432,47 +388,50 @@ for tool in tools:
 
 ## Guidelines for Adding New Tests
 
-### 1. Use the Factory Methods
+### 1. Use the Shared Endpoint and Client Context
 
-Always use the provided factory methods:
+Use `LegacyMcpEndpoint` and `configured_client` so tests keep the real SDK
+transport/session path:
 
 ```python
-MockStreamResponse = self.create_mock_stream_response(
-    method_call_sequence,
-    initialize_count,
-    tool_call_count,
-    fail_first_tool_call=False,  # Configure behavior
+endpoint = LegacyMcpEndpoint(
+    protocol_version="2025-11-25",
+    failed_tool_calls=0,
 )
-mock_http_client = self.create_mock_http_client(MockStreamResponse)
-mock_async_client_class.return_value = mock_http_client
+async with configured_client(config, mock_uipath_sdk, endpoint) as client:
+    await client.call_tool("test_tool", {"query": "test"})
 ```
 
-### 2. Add New MCP Methods to MockStreamResponse
+### 2. Add New MCP Methods to LegacyMcpEndpoint
 
-If testing a new MCP method, add it to `_build_response()`:
+If testing a new MCP method, add it to `handle()` and return an
+`httpx2.Response` with wire-format JSON:
 
 ```python
-elif self.method == "resources/list":
-    return (
+if method == "resources/list":
+    return httpx2.Response(
         200,
-        {
+        headers={"content-type": "application/json"},
+        json={
             "jsonrpc": "2.0",
-            "id": request_id,
+            "id": body["id"],
             "result": {"resources": [...]},
         },
-        {},
     )
 ```
 
 ### 3. Always Verify Client Reuse
 
-For any retry-related test, assert HTTP client count:
+For retry tests, assert the base client is reused while connection/session state
+is replaced. The endpoint counters and headers are the observable contract:
 
 ```python
-# After retry logic
-assert mock_async_client_class.call_count == 1, (
-    "HTTP client should be created only once"
-)
+assert endpoint.initialize_count == 2
+assert endpoint.delete_count == 1
+assert [h["mcp-session-id"] for h in endpoint.headers_for("tools/call")] == [
+    "session-1",
+    "session-2",
+]
 ```
 
 ### 4. Track Method Sequences
@@ -480,7 +439,7 @@ assert mock_async_client_class.call_count == 1, (
 For protocol flow tests, verify the sequence:
 
 ```python
-assert method_call_sequence == [
+assert endpoint.methods == [
     "initialize",
     "notifications/initialized",
     "tools/call",
@@ -493,33 +452,26 @@ assert method_call_sequence == [
 When adding error tests:
 
 ```python
-# Create custom mock for specific error
-class CustomErrorMock:
-    def _build_response(self):
-        if self.method == "tools/call":
-            return (
-                200,
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {"code": -32000, "message": "Custom error"},
-                },
-                {},
-            )
+# Add a branch to LegacyMcpEndpoint.handle().
+if method == "tools/call":
+    return httpx2.Response(
+        400,
+        headers={"content-type": "application/json"},
+        json={
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "error": {"code": -32602, "message": "Invalid parameters"},
+        },
+    )
 ```
 
 ### 6. Clean Up After Tests
 
-Always dispose the session:
+Prefer `configured_client`, which disposes in `finally`:
 
 ```python
-try:
-    # ... test logic ...
-finally:
-    await session.dispose()
-
-# Or simply:
-await session.dispose()  # At end of test
+async with configured_client(config, sdk, endpoint) as client:
+    await client.call_tool("test_tool", {})
 ```
 
 ### 7. Use Proper AgentSettings
@@ -543,25 +495,19 @@ agent = LowCodeAgentDefinition(
 
 ### Testing Different Session IDs
 
-The mock returns different session IDs based on initialize count:
+The endpoint returns `session-{initialize_count}`. Verify both the external
+store and request headers:
 
 ```python
-session_id = (
-    session_guid_1 if initialize_count[0] == 1 else session_guid_2
-)
-```
-
-Use this to verify session ID changes:
-
-```python
-assert session.session_id == "test-session-first"   # After first init
-# ... trigger reinit ...
-assert session.session_id == "test-session-retry"   # After reinit
+assert await client.get_session_id() == "session-2"
+assert endpoint.headers_for("tools/call")[1]["mcp-session-id"] == "session-2"
 ```
 
 ### Testing Structured Content
 
-The SDK validates `structuredContent` against `outputSchema`. Ensure mock returns matching data:
+The SDK validates `structuredContent` against `outputSchema`. Ensure mock returns
+matching data. Wire JSON stays camelCase; SDK 2 Python attributes are snake_case
+(`tool.input_schema`, `tool.output_schema`).
 
 ```python
 # In tools/list response
@@ -583,8 +529,8 @@ await session.call_tool("tool1", {...})
 await session.call_tool("tool2", {...})
 await session.call_tool("tool1", {...})
 
-assert tool_call_count[0] == 3
-assert initialize_count[0] == 1  # Session reused
+assert endpoint.tool_call_count == 3
+assert endpoint.initialize_count == 1  # Session reused
 ```
 
 ### Testing create_mcp_tools_and_clients
@@ -627,7 +573,7 @@ uv run pytest tests/agent/tools/test_mcp/ -v -s --log-cli-level=DEBUG
 Print the sequence to understand what happened:
 
 ```python
-logger.info(f"Method sequence: {method_call_sequence}")
+logger.info(f"Method sequence: {endpoint.methods}")
 # Output: ['initialize', 'notifications/initialized', 'tools/call', ...]
 ```
 
@@ -636,8 +582,9 @@ logger.info(f"Method sequence: {method_call_sequence}")
 Add debug logging in mock:
 
 ```python
-def _build_response(self):
-    logger.debug(f"Building response for {self.method}, id={request_id}")
+async def handle(self, request: httpx2.Request):
+    body = json.loads(request.content)
+    logger.debug(f"Building response for {body['method']}, id={body.get('id')}")
     # ...
 ```
 
@@ -645,8 +592,10 @@ def _build_response(self):
 
 | File | Purpose |
 |------|---------|
-| `test_mcp_client.py` | McpClient session tests (7 tests) |
-| `test_mcp_tool.py` | Tool factory tests (17 tests) |
+| `test_mcp_client.py` | SDK 2 transport, legacy versions, session persistence/recovery, caching, disposal |
+| `test_session_info.py` | Async session ID store and factory |
+| `test_protocol_version_support.py` | Guards the SDK version constraints that dictate what `McpClient` can negotiate; each failure names the follow-up it unblocks |
+| `test_mcp_tool.py` | Tool factories, schemas, result/error mapping, metadata |
 | `src/.../mcp/mcp_client.py` | McpClient implementation |
 | `src/.../mcp/mcp_tool.py` | Tool factory implementation |
 | `src/.../mcp/claude.md` | Implementation documentation |

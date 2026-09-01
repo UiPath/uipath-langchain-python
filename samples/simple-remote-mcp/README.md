@@ -42,7 +42,7 @@ The workflow follows a ReAct pattern:
 
 - Python 3.11+
 - `langchain-anthropic`
-- `langchain-mcp-adapters`
+- MCP Python SDK 2.0
 - `langgraph`
 - Anthropic API key set as an environment variable
 
@@ -69,5 +69,4 @@ For debugging issues:
    ```bash
    uipath run agent --debug '{"messages": [{"type": "human", "content": "What is 2+2"}]}'
    ```
-
 
