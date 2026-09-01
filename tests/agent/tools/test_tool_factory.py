@@ -38,9 +38,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.connections import Connection
 
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
-    _UNRESOLVED_TYPE_TITLE,
-)
+from uipath_langchain.agent.react._schema_refs import UNRESOLVED_TYPE_TITLE
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
@@ -503,4 +501,4 @@ class TestCreateToolsFromResources:
         properties = tool.output_type.model_json_schema().get("properties", {})
         # Valid sibling survives; dangling-ref field is neutralized (not dropped).
         assert "status" in properties
-        assert properties["left"]["title"] == _UNRESOLVED_TYPE_TITLE
+        assert properties["left"]["title"] == UNRESOLVED_TYPE_TITLE
