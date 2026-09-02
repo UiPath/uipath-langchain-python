@@ -36,6 +36,12 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
+from uipath_langchain.agent.react.conversational_output_node import (
+    create_conversational_output_extractor,
+)
+from uipath_langchain.agent.react.utils import (
+    has_custom_conversational_output_fields,
+)
 from uipath_langchain.agent.tools.internal_tools.output_file_tool import (
     OUTPUT_FILE_TOOL_NAME,
 )
@@ -330,6 +336,7 @@ def create_conversational_advanced_agent_graph(
     backend: BackendProtocol | BackendFactory | None,
     skills: Sequence[str] | None = None,
     input_schema: type[BaseModel] | None = None,
+    output_schema: type[BaseModel] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -338,6 +345,11 @@ def create_conversational_advanced_agent_graph(
     messages as ``uipath__agent_response_messages``. Callable system prompts
     are resolved once from the exchange input and used by the deep agent for
     that invocation.
+
+    When ``output_schema`` declares fields beyond the response messages, they are
+    filled the same way the standard conversational agent fills them: a focused
+    extraction call over the exchange's messages, after the loop has finished.
+    The loop itself produces messages, so nothing in it can produce those fields.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -366,6 +378,13 @@ def create_conversational_advanced_agent_graph(
             default_factory=list
         )
 
+    with_output_extraction = has_custom_conversational_output_fields(output_schema)
+    graph_output: type[BaseModel] = (
+        output_schema
+        if with_output_extraction and output_schema is not None
+        else ConversationalAdvancedAgentOutput
+    )
+
     graph_input: type[BaseModel] = _ConversationalAdvancedAgentGraphInput
     wrapper_input: type[BaseModel] = _ConversationalAdvancedAgentGraphInput
     if input_schema:
@@ -389,10 +408,17 @@ def create_conversational_advanced_agent_graph(
             input_schema if "messages" in input_schema.model_fields else wrapper_input
         )
 
+    conversational_output_key = get_unique_model_field_name(
+        "uipath__conversational_output",
+        _ConversationalAdvancedAgentGraphInput,
+        input_schema,
+    )
     state_fields: dict[str, Any] = {
         initial_message_count_key: (int | None, None),
         **runtime_prompt.state_fields,
     }
+    if with_output_extraction:
+        state_fields[conversational_output_key] = (dict[str, Any] | None, None)
     wrapper_state = cast(
         type[BaseModel],
         create_model(
@@ -425,10 +451,13 @@ def create_conversational_advanced_agent_graph(
             update.update(runtime_prompt.resolve(declared_input(state)))
         return update
 
-    def transform_output(state: BaseModel) -> dict[str, Any]:
+    def _new_messages(state: BaseModel) -> list[Any]:
         initial_count = getattr(state, initial_message_count_key) or 0
         messages = cast(ConversationalAdvancedAgentGraphState, state).messages
-        new_messages = messages[initial_count:]
+        return list(messages[initial_count:])
+
+    def transform_output(state: BaseModel) -> dict[str, Any]:
+        new_messages = _new_messages(state)
         converted = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
                 messages=new_messages, include_tool_results=False
@@ -436,19 +465,53 @@ def create_conversational_advanced_agent_graph(
             if new_messages
             else []
         )
-        return {"uipath__agent_response_messages": converted}
+        if not with_output_extraction or output_schema is None:
+            return {"uipath__agent_response_messages": converted}
+
+        custom_fields = getattr(state, conversational_output_key, None) or {}
+        output = {
+            **custom_fields,
+            "uipath__agent_response_messages": [
+                message.model_dump(by_alias=True) for message in converted
+            ],
+        }
+        return output_schema.model_validate(output).model_dump(
+            by_alias=True, exclude_none=True
+        )
+
+    # Built once: binding tools is stateless, and the node runs every exchange.
+    extract_output = (
+        create_conversational_output_extractor(model, output_schema)
+        if with_output_extraction and output_schema is not None
+        else None
+    )
+
+    async def generate_conversational_output(state: BaseModel) -> dict[str, Any]:
+        assert extract_output is not None  # guarded by with_output_extraction
+        # The whole transcript, as the standard path passes: a declared field's
+        # answer often lives in the user's message or an earlier exchange, not in
+        # what the agent just produced.
+        messages = cast(ConversationalAdvancedAgentGraphState, state).messages
+        return {conversational_output_key: await extract_output(messages)}
 
     wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(
         wrapper_state,
         input_schema=graph_input,
-        output_schema=ConversationalAdvancedAgentOutput,
+        output_schema=graph_output,
     )
     wrapper.add_node("capture_exchange_start", capture_exchange_start)
     wrapper.add_node("advanced_agent", inner_graph)
     wrapper.add_node("transform_output", transform_output)
     wrapper.add_edge(START, "capture_exchange_start")
     wrapper.add_edge("capture_exchange_start", "advanced_agent")
-    wrapper.add_edge("advanced_agent", "transform_output")
+    if with_output_extraction:
+        wrapper.add_node(
+            "generate_conversational_output", generate_conversational_output
+        )
+        wrapper.add_edge("advanced_agent", "generate_conversational_output")
+        wrapper.add_edge("generate_conversational_output", "transform_output")
+    else:
+        wrapper.add_edge("advanced_agent", "transform_output")
     wrapper.add_edge("transform_output", END)
 
     return wrapper

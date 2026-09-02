@@ -343,3 +343,150 @@ async def test_empty_history_still_produces_response() -> None:
     result = await graph.ainvoke({"messages": [HumanMessage(content="hi", id="u1")]})
 
     assert len(result["uipath__agent_response_messages"]) == 1
+
+
+def _conversational_output_model(**properties: dict[str, Any]) -> type[BaseModel]:
+    """Build an output model the way the runtime does, from the agent's JSON schema."""
+    from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+        create_model as create_model_from_schema,
+    )
+
+    return create_model_from_schema(
+        {
+            "type": "object",
+            "properties": {
+                "uipath__agent_response_messages": {"type": "array"},
+                **properties,
+            },
+        }
+    )
+
+
+_OutputWithCustomFields = _conversational_output_model(
+    ticketId={"type": "string"}, resolved={"type": "boolean"}
+)
+_OutputMessagesOnly = _conversational_output_model()
+
+
+class TestCustomOutputFields:
+    """Declared output fields are filled by the same extraction call standard
+    conversational agents use: the loop produces messages, not fields."""
+
+    def test_custom_fields_insert_the_extraction_node(self) -> None:
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt="sys",
+            backend=None,
+            output_schema=_OutputWithCustomFields,
+        )
+
+        assert "generate_conversational_output" in set(graph.nodes)
+
+    def test_messages_only_output_skips_the_extraction_node(self) -> None:
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt="sys",
+            backend=None,
+            output_schema=_OutputMessagesOnly,
+        )
+
+        assert "generate_conversational_output" not in set(graph.nodes)
+
+    def test_no_output_schema_skips_the_extraction_node(self) -> None:
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(), tools=[], system_prompt="sys", backend=None
+        )
+
+        assert "generate_conversational_output" not in set(graph.nodes)
+
+    def test_extraction_state_key_does_not_collide_with_input(self) -> None:
+        class _Colliding(BaseModel):
+            messages: list[Any] = Field(default_factory=list)
+            uipath__conversational_output: str = ""
+
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt="sys",
+            backend=None,
+            input_schema=_Colliding,
+            output_schema=_OutputWithCustomFields,
+        )
+
+        assert "uipath__conversational_output_1" in graph.state_schema.model_fields
+
+    @pytest.mark.asyncio
+    async def test_extracted_fields_are_merged_into_the_output(self) -> None:
+        with (
+            patch(
+                "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+                return_value=_fake_inner_agent(),
+            ),
+            patch(
+                "uipath_langchain.agent.advanced.agent.create_conversational_output_extractor",
+                return_value=_extractor({"ticketId": "INC-42", "resolved": True}),
+            ),
+        ):
+            graph = create_conversational_advanced_agent_graph(
+                model=_mock_model(),
+                tools=[],
+                system_prompt="sys",
+                backend=None,
+                output_schema=_OutputWithCustomFields,
+            ).compile()
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content="hi", id="u1")]}
+            )
+
+        assert result["ticketId"] == "INC-42"
+        assert result["resolved"] is True
+        assert len(result["uipath__agent_response_messages"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_extraction_sees_the_whole_transcript(self) -> None:
+        """A declared field's answer often lives in an earlier turn, so the
+        extraction gets the full history, as the standard path does."""
+        seen: list[list[Any]] = []
+
+        async def record(messages: Any) -> dict[str, Any]:
+            seen.append(list(messages))
+            return {"ticketId": "INC-1"}
+
+        with (
+            patch(
+                "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+                return_value=_fake_inner_agent(),
+            ),
+            patch(
+                "uipath_langchain.agent.advanced.agent.create_conversational_output_extractor",
+                return_value=record,
+            ),
+        ):
+            graph = create_conversational_advanced_agent_graph(
+                model=_mock_model(),
+                tools=[],
+                system_prompt="sys",
+                backend=None,
+                output_schema=_OutputWithCustomFields,
+            ).compile()
+            await graph.ainvoke(
+                {
+                    "messages": [
+                        HumanMessage(content="older turn", id="u0"),
+                        HumanMessage(content="hi", id="u1"),
+                    ]
+                }
+            )
+
+        assert [message.id for message in seen[0]] == ["u0", "u1", "ai-1"]
+
+
+def _extractor(args: dict[str, Any]) -> Any:
+    """An extraction callable that always returns ``args``."""
+
+    async def extract(messages: Any) -> dict[str, Any]:
+        return args
+
+    return extract
