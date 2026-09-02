@@ -3,6 +3,7 @@
 from collections.abc import Container
 from typing import Literal
 
+from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
@@ -15,11 +16,14 @@ from .utils import (
 
 def create_route_agent(
     valid_targets: Container[str] | None = None,
+    verify_output_files: bool = False,
 ):
     """Create the conditional-edge routing function.
 
     Args:
         valid_targets: Allowed routing destinations
+        verify_output_files: Send ``end_execution`` through the output-file
+            verification node instead of straight to TERMINATE.
 
     Returns:
         Routing function for LangGraph conditional edges
@@ -81,6 +85,8 @@ def create_route_agent(
         current_tool_name = current_tool_call["name"]
 
         if current_tool_name in FLOW_CONTROL_TOOLS:
+            if verify_output_files and current_tool_name == END_EXECUTION_TOOL.name:
+                return AgentGraphNode.VERIFY_OUTPUT_FILES
             return AgentGraphNode.TERMINATE
 
         if valid_targets is not None and current_tool_name not in valid_targets:
