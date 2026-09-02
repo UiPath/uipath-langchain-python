@@ -1,11 +1,13 @@
 """Tests for the forced-extraction helpers."""
 
 import logging
-from typing import Any
+from typing import Any, TypeVar, cast
 
 import pytest
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    AnyMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
@@ -18,6 +20,17 @@ from uipath_langchain.agent.react.forced_extraction import (
     _strip_reasoning_blocks,
 )
 from uipath_langchain.chat.thinking import strip_thinking
+
+_ModelT = TypeVar("_ModelT")
+
+
+def _strip(model: _ModelT) -> _ModelT:
+    """Call the duck-typed ``strip_thinking`` with a stand-in model.
+
+    ``strip_thinking`` only reads attributes and ``model_copy``, so the fakes below
+    satisfy it at runtime; the casts keep the fake's own type on the way out.
+    """
+    return cast(_ModelT, strip_thinking(cast(BaseChatModel, model)))
 
 
 class _FakeConverse(BaseModel):
@@ -51,7 +64,7 @@ class TestStripThinking:
                 "anthropic_beta": ["x"],
             }
         )
-        result = strip_thinking(model)  # type: ignore[arg-type]
+        result = _strip(model)
         assert result.additional_model_request_fields == {"anthropic_beta": ["x"]}
 
     def test_converse_removes_thinking_and_output_config(self) -> None:
@@ -61,24 +74,24 @@ class TestStripThinking:
                 "output_config": {"effort": "high"},
             }
         )
-        result = strip_thinking(model)  # type: ignore[arg-type]
+        result = _strip(model)
         assert result.additional_model_request_fields == {}
 
     def test_invoke_removes_thinking_from_model_kwargs(self) -> None:
         model = _FakeInvoke(
             model_kwargs={"thinking": {"type": "enabled"}, "top_p": 0.9}
         )
-        result = strip_thinking(model)  # type: ignore[arg-type]
+        result = _strip(model)
         assert result.model_kwargs == {"top_p": 0.9}
 
     def test_native_clears_thinking_attribute(self) -> None:
         model = _FakeNative(thinking={"type": "adaptive"})
-        result = strip_thinking(model)  # type: ignore[arg-type]
+        result = _strip(model)
         assert result.thinking is None
 
     def test_no_thinking_returns_same_instance(self) -> None:
         model = _FakeConverse(additional_model_request_fields={"anthropic_beta": ["x"]})
-        assert strip_thinking(model) is model  # type: ignore[arg-type]
+        assert _strip(model) is model
 
     def test_copy_failure_returns_original_and_warns(
         self, caplog: pytest.LogCaptureFixture
@@ -96,7 +109,7 @@ class TestStripThinking:
 
         model = _CopyFails()
         with caplog.at_level(logging.WARNING):
-            result = strip_thinking(model)  # type: ignore[arg-type]
+            result = _strip(model)
 
         assert result is model
         assert any(
@@ -133,8 +146,10 @@ class TestStripReasoningBlocks:
         )
         out = _strip_reasoning_blocks([msg])
         assert len(out) == 1
-        assert out[0].content == []
-        assert out[0].tool_calls[0]["name"] == "end_execution"
+        kept = out[0]
+        assert isinstance(kept, AIMessage)
+        assert kept.content == []
+        assert kept.tool_calls[0]["name"] == "end_execution"
 
     def test_strips_redacted_thinking_blocks(self) -> None:
         """redacted_thinking can't be replayed on a thinking-off call either."""
@@ -163,7 +178,10 @@ class TestEnsureTrailingUserTurn:
 
     def test_appends_user_turn_after_assistant(self) -> None:
         """A surviving stalled assistant turn gets a terse, tool-neutral user turn."""
-        msgs = [HumanMessage(content="q"), AIMessage(content="answer")]
+        msgs: list[AnyMessage] = [
+            HumanMessage(content="q"),
+            AIMessage(content="answer"),
+        ]
         out = _ensure_trailing_user_turn(msgs)
         assert len(out) == 3
         assert isinstance(out[-2], AIMessage)
@@ -175,13 +193,13 @@ class TestEnsureTrailingUserTurn:
 
     def test_no_turn_added_when_already_user(self) -> None:
         """Stripping left a user turn last (reasoning-only stall dropped) — add nothing."""
-        msgs = [HumanMessage(content="the task")]
+        msgs: list[AnyMessage] = [HumanMessage(content="the task")]
         out = _ensure_trailing_user_turn(msgs)
         assert out == msgs
 
     def test_no_turn_added_when_ends_on_tool_result(self) -> None:
         """A trailing tool result is already user-role — don't append a second user turn."""
-        msgs = [
+        msgs: list[AnyMessage] = [
             HumanMessage(content="q"),
             AIMessage(
                 content="",
@@ -194,7 +212,7 @@ class TestEnsureTrailingUserTurn:
 
     def test_appends_after_non_user_terminal_message(self) -> None:
         """A trailing non-user-role message (e.g. system) still gets a user turn."""
-        msgs = [SystemMessage(content="sys")]
+        msgs: list[AnyMessage] = [SystemMessage(content="sys")]
         out = _ensure_trailing_user_turn(msgs)
         assert len(out) == 2
         assert isinstance(out[-1], HumanMessage)

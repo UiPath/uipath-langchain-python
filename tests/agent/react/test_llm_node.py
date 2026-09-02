@@ -1,6 +1,6 @@
 """Tests for LLM node tool call filtering functionality."""
 
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -454,7 +454,7 @@ class TestForcedExtractionEscalation:
     on the wire (Bedrock handlers, langchain_anthropic)."""
 
     def _thinking_model(self) -> Any:
-        model = _StubAzureChatOpenAI.model_construct()
+        model: Any = _StubAzureChatOpenAI.model_construct()
         model.thinking = {
             "type": "adaptive"
         }  # thinking active; OpenAI MRO won't downgrade
@@ -463,7 +463,7 @@ class TestForcedExtractionEscalation:
         return model
 
     def _plain_model(self) -> Any:
-        model = _StubAzureChatOpenAI.model_construct()
+        model: Any = _StubAzureChatOpenAI.model_construct()
         model.bind_tools = Mock(return_value=model)
         model.bind = Mock(return_value=model)
         return model
@@ -479,7 +479,9 @@ class TestForcedExtractionEscalation:
             messages=[HumanMessage(content="q"), *([prior] * stalls)]
         )
 
-    async def _run_capture(self, model: Any, tool_choice: str = "auto") -> list[Any]:
+    async def _run_capture(
+        self, model: Any, tool_choice: Literal["auto", "any"] = "auto"
+    ) -> list[Any]:
         captured: dict[str, Any] = {}
 
         async def fake_ainvoke(msgs: Any) -> AIMessage:
