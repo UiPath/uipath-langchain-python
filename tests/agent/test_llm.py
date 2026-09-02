@@ -14,7 +14,7 @@ from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.exceptions.licensing import raise_for_provider_http_error
+from uipath_langchain.agent.exceptions.llm import raise_for_provider_http_error
 
 _DETAIL = "License not available for LLM usage. You need additional 'AGU'."
 

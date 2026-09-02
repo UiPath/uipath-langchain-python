@@ -178,6 +178,24 @@ class TestAnthropicGetToolBindingKwargs:
         assert set(result.keys()) == {"tool_choice", "parallel_tool_calls", "strict"}
 
 
+class TestAnthropicKeepsForcingUnderThinking:
+    """Native Anthropic accepts forced tool_choice under thinking (unlike Bedrock),
+    so it must NOT downgrade 'any' regardless of the thinking mode."""
+
+    def _model(self, thinking: object) -> object:
+        return type("FakeChatAnthropic", (), {"thinking": thinking})()
+
+    def test_extended_thinking_keeps_any(self):
+        handler = AnthropicPayloadHandler(self._model({"type": "enabled"}))  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs(tools=[], tool_choice="any")
+        assert result["tool_choice"] == "any"
+
+    def test_adaptive_thinking_keeps_any(self):
+        handler = AnthropicPayloadHandler(self._model({"type": "adaptive"}))  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs(tools=[], tool_choice="any")
+        assert result["tool_choice"] == "any"
+
+
 # ---------------------------------------------------------------------------
 # Gemini handler
 # ---------------------------------------------------------------------------

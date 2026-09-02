@@ -187,7 +187,6 @@ def create_agent(
         input_schema=input_schema,
         is_conversational=config.is_conversational,
         llm_messages_limit=config.llm_messages_limit,
-        thinking_messages_limit=config.thinking_messages_limit,
         tool_choice=config.tool_choice,
         parallel_tool_calls=config.parallel_tool_calls,
         strict_mode=config.strict_mode,
@@ -219,7 +218,6 @@ def create_agent(
         ]
         route_agent = create_route_agent(
             valid_targets=target_node_names,
-            thinking_messages_limit=config.thinking_messages_limit,
         )
 
     builder.add_conditional_edges(

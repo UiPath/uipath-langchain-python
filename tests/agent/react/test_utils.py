@@ -12,7 +12,7 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.agent.react.utils import (
     build_conversational_output_args_schema,
-    count_consecutive_thinking_messages,
+    count_consecutive_tool_less_turns,
     extract_current_tool_call_index,
     find_latest_ai_message,
     has_custom_conversational_output_fields,
@@ -24,12 +24,12 @@ class TestCountSuccessiveCompletions:
 
     def test_empty_messages(self):
         """Should return 0 for empty message list."""
-        assert count_consecutive_thinking_messages([]) == 0
+        assert count_consecutive_tool_less_turns([]) == 0
 
     def test_no_ai_messages(self):
         """Should return 0 when no AI messages exist."""
         messages = [HumanMessage(content="test")]
-        assert count_consecutive_thinking_messages(messages) == 0
+        assert count_consecutive_tool_less_turns(messages) == 0
 
     def test_last_message_not_ai(self):
         """Should return 0 when last message is not AI."""
@@ -37,7 +37,7 @@ class TestCountSuccessiveCompletions:
             AIMessage(content="response"),
             HumanMessage(content="follow-up"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 0
+        assert count_consecutive_tool_less_turns(messages) == 0
 
     def test_ai_message_with_tool_calls(self):
         """Should return 0 when last AI message has tool calls."""
@@ -48,7 +48,7 @@ class TestCountSuccessiveCompletions:
                 tool_calls=[{"name": "test", "args": {}, "id": "call_1"}],
             ),
         ]
-        assert count_consecutive_thinking_messages(messages) == 0
+        assert count_consecutive_tool_less_turns(messages) == 0
 
     def test_ai_message_without_content(self):
         """Should return 0 when last AI message has no content."""
@@ -56,7 +56,7 @@ class TestCountSuccessiveCompletions:
             HumanMessage(content="query"),
             AIMessage(content=""),
         ]
-        assert count_consecutive_thinking_messages(messages) == 0
+        assert count_consecutive_tool_less_turns(messages) == 0
 
     def test_single_text_completion(self):
         """Should count single text-only AI message."""
@@ -64,7 +64,7 @@ class TestCountSuccessiveCompletions:
             HumanMessage(content="query"),
             AIMessage(content="thinking"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 1
+        assert count_consecutive_tool_less_turns(messages) == 1
 
     def test_two_successive_completions(self):
         """Should count multiple consecutive text-only AI messages."""
@@ -73,7 +73,7 @@ class TestCountSuccessiveCompletions:
             AIMessage(content="thinking 1"),
             AIMessage(content="thinking 2"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 2
+        assert count_consecutive_tool_less_turns(messages) == 2
 
     def test_three_successive_completions(self):
         """Should count all consecutive text-only AI messages at end."""
@@ -83,7 +83,7 @@ class TestCountSuccessiveCompletions:
             AIMessage(content="thinking 2"),
             AIMessage(content="thinking 3"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 3
+        assert count_consecutive_tool_less_turns(messages) == 3
 
     def test_tool_call_resets_count(self):
         """Should only count completions after last tool call."""
@@ -98,7 +98,7 @@ class TestCountSuccessiveCompletions:
             AIMessage(content="thinking 2"),
             AIMessage(content="thinking 3"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 2
+        assert count_consecutive_tool_less_turns(messages) == 2
 
     def test_mixed_message_types(self):
         """Should handle complex message patterns correctly."""
@@ -114,7 +114,7 @@ class TestCountSuccessiveCompletions:
             HumanMessage(content="user follow-up"),
             AIMessage(content="responding to follow-up"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 1
+        assert count_consecutive_tool_less_turns(messages) == 1
 
     def test_multiple_tool_calls_in_message(self):
         """Should reset count even with multiple tool calls."""
@@ -129,7 +129,7 @@ class TestCountSuccessiveCompletions:
                 ],
             ),
         ]
-        assert count_consecutive_thinking_messages(messages) == 0
+        assert count_consecutive_tool_less_turns(messages) == 0
 
     def test_ai_message_with_empty_tool_calls_list(self):
         """Should handle AI message with empty tool_calls list."""
@@ -137,7 +137,7 @@ class TestCountSuccessiveCompletions:
             HumanMessage(content="query"),
             AIMessage(content="thinking", tool_calls=[]),
         ]
-        assert count_consecutive_thinking_messages(messages) == 1
+        assert count_consecutive_tool_less_turns(messages) == 1
 
     def test_only_ai_messages_all_text(self):
         """Should count all AI messages when all are text-only."""
@@ -146,7 +146,7 @@ class TestCountSuccessiveCompletions:
             AIMessage(content="thought 2"),
             AIMessage(content="thought 3"),
         ]
-        assert count_consecutive_thinking_messages(messages) == 3
+        assert count_consecutive_tool_less_turns(messages) == 3
 
 
 class TestFindLatestAiMessage:

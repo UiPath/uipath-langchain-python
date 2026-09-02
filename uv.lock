@@ -4546,7 +4546,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.16.14"
+version = "0.16.15"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4630,13 +4630,13 @@ requires-dist = [
     { name = "rdflib", specifier = ">=7.0.0,<8.0.0" },
     { name = "uipath", specifier = ">=2.14.6,<2.15.0" },
     { name = "uipath-core", specifier = ">=0.5.29,<0.6.0" },
-    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-langchain-client", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-langchain-client", extras = ["fireworks"], marker = "extra == 'fireworks'", specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.18.0,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.18.3,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.18.3,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.18.3,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["fireworks"], marker = "extra == 'fireworks'", specifier = ">=1.18.3,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.18.3,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.18.3,<1.19.0" },
+    { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.18.3,<1.19.0" },
     { name = "uipath-llm-client", specifier = ">=1.18.0,<1.19.0" },
     { name = "uipath-platform", specifier = ">=0.2.22,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.13.0,<0.14.0" },
@@ -4663,15 +4663,15 @@ dev = [
 
 [[package]]
 name = "uipath-langchain-client"
-version = "1.18.0"
+version = "1.18.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
     { name = "uipath-llm-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/23/35/1e85f3bc58a15998be90c60ea10a2af48f3eb3cc4e0ea23d0dffbbd923f7/uipath_langchain_client-1.18.0.tar.gz", hash = "sha256:b3acd898be4d66c4f67c3b2c5fb1336baf1370da0479d4ec886ff20724161364", size = 41577, upload-time = "2026-08-26T13:15:07.658Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/12/858eed0121888d6d2304471c00a9b9e3a1998a7a4aff3bdf3d0e883ceb81/uipath_langchain_client-1.18.3.tar.gz", hash = "sha256:97b72aa0526408a5cd119c096ea1785a04cee9cf9be52098296a94188d2f0f7b", size = 43633, upload-time = "2026-09-02T09:36:21.837Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/ff/37bd3dcdd480e9dfa88395c86cd7618f3604990999c431836384e4b0bfa0/uipath_langchain_client-1.18.0-py3-none-any.whl", hash = "sha256:7be6b044cb01761dabbd5c922d33912e52499bc643cb87804a44ae6def31e2da", size = 49707, upload-time = "2026-08-26T13:15:06.626Z" },
+    { url = "https://files.pythonhosted.org/packages/98/67/7dc37aec17e2ab25a63e43f6036af8ae1851533db09f6189cfc2b765b57f/uipath_langchain_client-1.18.3-py3-none-any.whl", hash = "sha256:d29df950b58ba4b37360a7384797a20872cb477784d3665c3d3504d8abeea86a", size = 51371, upload-time = "2026-09-02T09:36:20.746Z" },
 ]
 
 [package.optional-dependencies]
@@ -4691,6 +4691,8 @@ anthropic = [
     { name = "langchain-anthropic" },
 ]
 bedrock = [
+    { name = "anthropic", extra = ["bedrock"] },
+    { name = "langchain-anthropic" },
     { name = "langchain-aws", extra = ["anthropic"] },
 ]
 fireworks = [

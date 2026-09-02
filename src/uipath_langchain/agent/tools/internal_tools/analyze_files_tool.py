@@ -39,8 +39,10 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.exceptions.licensing import raise_for_provider_http_error
-from uipath_langchain.agent.exceptions.llm import raise_for_llm_client_error
+from uipath_langchain.agent.exceptions.llm import (
+    raise_for_llm_client_error,
+    raise_for_provider_http_error,
+)
 from uipath_langchain.agent.multimodal import (
     FileInfo,
     build_file_content_blocks_for,
