@@ -22,7 +22,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx2
 import pytest
 from mcp.shared.exceptions import MCPError
-from mcp.types import CONNECTION_CLOSED, INVALID_REQUEST, METHOD_NOT_FOUND
+from mcp.types import (
+    CONNECTION_CLOSED,
+    INVALID_REQUEST,
+    METHOD_NOT_FOUND,
+    Implementation,
+    InitializeResult,
+    ServerCapabilities,
+)
 from uipath.agent.models.agent import AgentMcpResourceConfig, AgentMcpTool
 
 from uipath_langchain.agent.tools.mcp import McpClient, SessionInfo, SessionInfoFactory
@@ -31,6 +38,7 @@ from uipath_langchain.agent.tools.mcp.protocol_strategy import (
     LegacyHandshakeStrategy,
     ModernDiscoveryStrategy,
     build_protocol_strategy,
+    is_session_rejected,
 )
 from uipath_langchain.agent.tools.mcp.streamable_http import MCP_SESSION_ID
 
@@ -327,6 +335,11 @@ def test_legacy_recovers_from_session_loss_but_not_from_bad_requests() -> None:
     assert strategy.is_recoverable(_error(INVALID_REQUEST, "Session terminated"), None)
     assert strategy.is_recoverable(_error(INVALID_REQUEST, "Session not found"), None)
     assert not strategy.is_recoverable(_error(INVALID_REQUEST, "Bad params"), None)
+    # The TypeScript SDK's transport refuses an unknown session under -32000,
+    # which is also CONNECTION_CLOSED -- retryable either way.
+    assert strategy.is_recoverable(
+        _error(CONNECTION_CLOSED, "Bad Request: No valid session ID provided"), None
+    )
     # A bare 404 is only a lost session while a restored ID is still in play.
     assert strategy.is_recoverable(_error(METHOD_NOT_FOUND, "Not Found"), "restored")
     assert not strategy.is_recoverable(_error(METHOD_NOT_FOUND, "Not Found"), None)
@@ -345,6 +358,26 @@ def test_modern_recovers_only_from_a_dropped_connection() -> None:
     )
 
 
+def test_a_dropped_transport_is_not_a_verdict_on_the_session() -> None:
+    """Recovery may only discard the stored ID when the server rejected it.
+
+    ``CONNECTION_CLOSED`` is JSON-RPC's ``-32000``, the same code the
+    TypeScript SDK's transport uses to refuse a session it does not know, so
+    the code alone cannot decide. Reading a dropped connection as a verdict
+    would throw away a live persisted session on a transient failure; reading a
+    refusal as a drop would resume a session the server has already declared
+    dead, and the retry would fail identically.
+    """
+    assert not is_session_rejected(_error(CONNECTION_CLOSED, "Connection closed"))
+    assert is_session_rejected(
+        _error(CONNECTION_CLOSED, "Bad Request: No valid session ID provided")
+    )
+    assert is_session_rejected(_error(INVALID_REQUEST, "Session terminated"))
+    # A bare 404 for a restored ID names no session, but it is still the
+    # server's answer rather than a dead socket.
+    assert is_session_rejected(_error(METHOD_NOT_FOUND, "Not Found"))
+
+
 @pytest.mark.asyncio
 async def test_modern_reset_keeps_the_affinity_id() -> None:
     """Discarding the routing ID on failure would abandon the warm instance."""
@@ -361,10 +394,119 @@ async def test_legacy_reset_clears_the_stale_session_id() -> None:
     """A lost legacy session must not be re-announced on the next handshake."""
     strategy = LegacyHandshakeStrategy()
     session_info = SessionInfo("session-1")
+    await session_info.set_protocol_version(LEGACY_VERSION)
 
     await strategy.reset(session_info)
 
     assert await session_info.get_session_id() is None
+    # The version described the discarded session; keeping it would let the next
+    # connection adopt a version the replacement never negotiated.
+    assert await session_info.get_protocol_version() is None
+
+
+def _initialize_result(version: str) -> InitializeResult:
+    """A handshake result as a server would return it."""
+    return InitializeResult(
+        protocolVersion=version,
+        capabilities=ServerCapabilities(),
+        serverInfo=Implementation(name="test-server", version="1.0.0"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_resume_adopts_a_stored_version_without_negotiating() -> None:
+    """A remembered version is all a resumed session needs, so nothing is sent.
+
+    This is the pre-SDK-2 wire behaviour: a stored session is used as-is, with
+    only the ``mcp-session-id`` header identifying it. Re-running ``initialize``
+    inside a live session is refused outright by some servers -- the reference
+    TypeScript implementation answers "Server already initialized" -- which
+    would cost the persisted session, and with it the gateway affinity, on every
+    run against such a server.
+    """
+    strategy = LegacyHandshakeStrategy()
+    session_info = SessionInfo("persisted-session")
+    await session_info.set_protocol_version(LEGACY_VERSION)
+    session = MagicMock()
+    session.initialize = AsyncMock()
+
+    await strategy.connect(session, session_info)
+
+    session.initialize.assert_not_awaited()
+    adopted = session.adopt.call_args.args[0]
+    assert isinstance(adopted, InitializeResult)
+    assert adopted.protocol_version == LEGACY_VERSION
+    assert await session_info.get_session_id() == "persisted-session"
+    assert await session_info.get_protocol_version() == LEGACY_VERSION
+
+
+@pytest.mark.asyncio
+async def test_legacy_resume_negotiates_when_the_version_is_unknown() -> None:
+    """A store written before versions were recorded has nothing to adopt.
+
+    The handshake inside the restored session is the fallback, not the norm: it
+    is the only way left to learn what that session was negotiated at.
+    """
+    strategy = LegacyHandshakeStrategy()
+    session_info = SessionInfo("persisted-session")
+    session = MagicMock()
+    session.initialize = AsyncMock(return_value=_initialize_result(LEGACY_VERSION))
+
+    await strategy.connect(session, session_info)
+
+    session.initialize.assert_awaited_once()
+    session.adopt.assert_not_called()
+    # Learned now, so the next resume needs no handshake at all.
+    assert await session_info.get_protocol_version() == LEGACY_VERSION
+
+
+@pytest.mark.asyncio
+async def test_legacy_resume_ignores_a_version_it_cannot_speak() -> None:
+    """A modern version stored against the ID cannot be adopted on this wire."""
+    strategy = LegacyHandshakeStrategy()
+    session_info = SessionInfo("affinity-id")
+    await session_info.set_protocol_version(MODERN_VERSION)
+    session = MagicMock()
+    session.initialize = AsyncMock(return_value=_initialize_result(LEGACY_VERSION))
+
+    await strategy.connect(session, session_info)
+
+    session.adopt.assert_not_called()
+    session.initialize.assert_awaited_once()
+    assert await session_info.get_protocol_version() == LEGACY_VERSION
+
+
+@pytest.mark.asyncio
+async def test_legacy_handshake_records_what_it_negotiated() -> None:
+    """A cold session stores its version, which is what makes resume free."""
+    strategy = LegacyHandshakeStrategy()
+    session_info = SessionInfo()
+    session = MagicMock()
+    session.initialize = AsyncMock(return_value=_initialize_result("2025-06-18"))
+
+    await strategy.connect(session, session_info)
+
+    session.initialize.assert_awaited_once()
+    assert await session_info.get_protocol_version() == "2025-06-18"
+
+
+@pytest.mark.asyncio
+async def test_legacy_resume_falls_back_cleanly_when_the_session_is_rejected() -> None:
+    """A refused handshake still yields a working connection, version recorded."""
+    strategy = LegacyHandshakeStrategy()
+    session_info = SessionInfo("stale-session")
+    session = MagicMock()
+    session.initialize = AsyncMock(
+        side_effect=[
+            MCPError(INVALID_REQUEST, "Invalid Request: Server already initialized"),
+            _initialize_result(LEGACY_VERSION),
+        ]
+    )
+
+    await strategy.connect(session, session_info)
+
+    assert session.initialize.await_count == 2
+    assert await session_info.get_protocol_version() == LEGACY_VERSION
 
 
 def test_auto_applies_the_legacy_policy_before_an_era_is_resolved() -> None:

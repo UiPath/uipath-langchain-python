@@ -216,6 +216,54 @@ async def test_legacy_resume_keeps_the_originally_negotiated_version() -> None:
     )
     resumed_calls = [r for r in after_resume if r.rpc_method == "tools/call"]
     assert resumed_calls and resumed_calls[0].protocol_version == LEGACY_VERSION
+    # And it costs nothing to learn: the version was stored with the ID, so the
+    # resumed connection adopts it instead of handshaking a second time.
+    assert gateway.count("initialize") == 1
+    assert not [r for r in after_resume if r.rpc_method == "initialize"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_resume_survives_a_server_that_refuses_reinitialization() -> None:
+    """A resumed session must not depend on being allowed to re-handshake.
+
+    The reference TypeScript implementation answers a second ``initialize`` on a
+    live session with "Server already initialized". A client that resumes by
+    re-running the handshake loses the persisted session on every run against
+    such a server -- and with it the gateway affinity the session ID provides.
+    Adopting the stored version keeps the resume free of wire traffic, so the
+    server is never asked.
+    """
+    server = PinnedVersionServer("2025-06-18", refuse_reinitialize=True)
+    gateway = RecordingGateway(server.build_app())
+    shared = SessionInfo()
+    factory = pinned_session_factory(shared)
+
+    async with serve(gateway) as url:
+        with patched_sdk(url):
+            first = make_client(session_info_factory=factory, terminate_on_close=False)
+            await first.call_tool("add", {"a": 1, "b": 1})
+            original_session_id = await first.get_session_id()
+            await first.dispose()
+
+            resume_boundary = len(gateway.records)
+
+            second = make_client(session_info_factory=factory, terminate_on_close=False)
+            result = await second.call_tool("add", {"a": 2, "b": 2})
+            resumed_session_id = await second.get_session_id()
+            await second.dispose()
+
+    assert result.structured_content == {"result": 4}
+    assert resumed_session_id == original_session_id == "session-1"
+    # The handshake was never re-sent, so the server never had to refuse it.
+    assert server.initialize_count == 1
+    assert server.refused_reinitialize_count == 0
+    after_resume = gateway.records[resume_boundary:]
+    assert after_resume and all(
+        record.session_id == original_session_id for record in after_resume
+    )
+    assert [
+        r.protocol_version for r in after_resume if r.rpc_method == "tools/call"
+    ] == ["2025-06-18"]
 
 
 @pytest.mark.asyncio

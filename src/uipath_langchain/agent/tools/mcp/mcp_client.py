@@ -15,7 +15,6 @@ import httpx2
 from mcp import ClientSession
 from mcp.shared.exceptions import MCPError
 from mcp.types import (
-    CONNECTION_CLOSED,
     CallToolResult,
     ListToolsResult,
 )
@@ -28,6 +27,7 @@ from .protocol_strategy import (
     ProtocolMode,
     ProtocolStrategy,
     build_protocol_strategy,
+    is_session_rejected,
 )
 from .protocol_strategy import is_session_error as _is_session_error
 from .streamable_http import SessionInfo, streamable_http_client
@@ -332,10 +332,10 @@ class McpClient(UiPathDisposableProtocol):
         The HTTP client and external ``SessionInfo`` object are reused.
 
         The strategy is asked to discard persisted session state only when
-        ``error`` is the server's verdict on the session. ``CONNECTION_CLOSED``
-        is not: the transport dropped, so the ID is kept and the reconnect
-        resumes the same session. With no ``error`` nothing is known against
-        the session and it is likewise kept.
+        ``error`` is the server's verdict on the session -- see
+        ``is_session_rejected``. A dropped transport is not: the ID is kept and
+        the reconnect resumes the same session. With no ``error`` nothing is
+        known against the session and it is likewise kept.
         """
         async with self._lock:
             if not self._client_initialized:
@@ -351,7 +351,7 @@ class McpClient(UiPathDisposableProtocol):
                 if (
                     self._session_info is not None
                     and error is not None
-                    and error.code != CONNECTION_CLOSED
+                    and is_session_rejected(error)
                 ):
                     await self._strategy.reset(self._session_info)
                 await self._open_connection()

@@ -403,8 +403,9 @@ async def test_dropped_connection_resumes_the_persisted_session(
         result = await client.call_tool("test_tool", {"query": "test"})
 
         assert result.structured_content == {"result": "Success from test_tool"}
-        # The handshake ran again on the new transport -- inside the same session.
-        assert endpoint.initialize_count == 2
+        # No second handshake: the reconnect adopts the version the first one
+        # negotiated, so the resumed session costs nothing on the wire.
+        assert endpoint.initialize_count == 1
         assert endpoint.session_mint_count == 1
         assert await client.get_session_id() == "session-1"
         assert [h["mcp-session-id"] for h in endpoint.headers_for("tools/call")] == [

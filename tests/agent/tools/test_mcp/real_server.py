@@ -112,11 +112,24 @@ class PinnedVersionServer:
         modern_only: When True, serve ``server/discover`` and reject the legacy
             ``initialize`` handshake, the way a server that speaks only the
             modern protocol would. Requires a modern ``protocol_version``.
+        refuse_reinitialize: When True, refuse an ``initialize`` that arrives on
+            an existing session, the way the reference TypeScript
+            implementation does (``"Invalid Request: Server already
+            initialized"``). Resuming a session on such a server must therefore
+            cost no handshake.
     """
 
-    def __init__(self, protocol_version: str, *, modern_only: bool = False) -> None:
+    def __init__(
+        self,
+        protocol_version: str,
+        *,
+        modern_only: bool = False,
+        refuse_reinitialize: bool = False,
+    ) -> None:
         self.protocol_version = protocol_version
         self.modern_only = modern_only
+        self.refuse_reinitialize = refuse_reinitialize
+        self.refused_reinitialize_count = 0
         self.session_ids: list[str] = []
         self.delete_count = 0
         self.initialize_count = 0
@@ -138,10 +151,18 @@ class PinnedVersionServer:
 
         body = json.loads(await request.body())
         method = body.get("method")
+        session_header = request.headers.get(MCP_SESSION_ID)
 
         if method == "server/discover":
             return self._discover(body)
         if method == "initialize":
+            if self.refuse_reinitialize and session_header in self.session_ids:
+                self.refused_reinitialize_count += 1
+                return self._error(
+                    body.get("id"),
+                    INVALID_REQUEST,
+                    "Invalid Request: Server already initialized",
+                )
             return self._initialize(body)
         if method is not None and method.startswith("notifications/"):
             return Response(status_code=202)

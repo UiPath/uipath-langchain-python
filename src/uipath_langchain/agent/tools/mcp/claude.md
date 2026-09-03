@@ -123,10 +123,12 @@ Base class for MCP session ID tracking.  Lives in `streamable_http.py`.
 class SessionInfo:
     def __init__(self, session_id: str | None = None) -> None:
         self.session_id = session_id
-        self.protocol_version: str | None = None  # retained, unread
+        self.protocol_version: str | None = None
 
     async def get_session_id(self) -> str | None: ...
     async def set_session_id(self, session_id: str | None) -> None: ...
+    async def get_protocol_version(self) -> str | None: ...
+    async def set_protocol_version(self, protocol_version: str | None) -> None: ...
 ```
 
 The base implementation stores session ID in a plain attribute.  Async methods
@@ -139,14 +141,21 @@ session ID; in the modern era it is the client-minted affinity ID. This is why
 reaching `2026-07-28` required no change in `uipath-agents-python` —
 `SessionInfoDebugState` persists either kind unmodified.
 
-`protocol_version` is retained for compatibility but **nothing reads it**. The
-SDK stamps the negotiated version onto every request itself once negotiation
-completes, and a resumed legacy session learns its version by re-running the
-handshake (see below) rather than by probing.
+`protocol_version` holds **the version the stored session was negotiated at**,
+and the legacy strategy both writes and reads it. It cannot be recovered from
+the wire -- responses carry only the session ID -- so a store that persists the
+ID should persist this too: with it, a resumed session needs no negotiation at
+all (see below). A store that does not is not broken, only slower: `None` means
+"not known", and the strategy falls back to re-running the handshake.
+
+A subclass persisting externally should override all four accessors, so the ID
+and its version are written and cleared together.
 
 **Important:** The response hook calls `set_session_id` during `initialize()`
 when the server assigns an ID. `McpClient._initialize_session` only reads the
-stored value afterward. Passing `None` clears a stale session before recovery.
+stored value afterward. Passing `None` clears a stale session before recovery;
+`LegacyHandshakeStrategy.reset` clears the version alongside it, so a
+replacement session can never inherit a version it did not negotiate.
 
 #### Upstream StreamableHTTPTransport
 
@@ -181,7 +190,7 @@ Negotiation itself is one call either way; what genuinely differs is the session
 |---------|------------------------------------|------------------------|
 | Negotiate | `ClientSession.initialize()` | `ClientSession.discover()` |
 | Identity | `mcp-session-id`, server-minted | none in-protocol; UiPath-minted affinity ID |
-| Resume | re-run the handshake inside the restored session | nothing to resume |
+| Resume | adopt the stored version locally; re-handshake only when it is unknown | nothing to resume |
 | Terminate on close | `DELETE` | no-op (automatic; no session ID) |
 | Recoverable errors | session lost → reopen and re-handshake | only `CONNECTION_CLOSED` |
 
@@ -195,10 +204,18 @@ class ProtocolStrategy(Protocol):
 ```
 
 `McpClient` calls `reset` only when the error that triggered recovery is the
-server's verdict on the session. `CONNECTION_CLOSED` is not -- the transport
-dropped, the server never rejected anything -- so the ID is kept and the
-reconnect resumes the warm session. Every other recoverable error clears the ID
-before the fresh handshake.
+server's verdict on the session, which `is_session_rejected(error)` decides. A
+dropped transport is not a verdict -- the server never rejected anything -- so
+the ID is kept and the reconnect resumes the warm session; anything the server
+answered *about the session* clears the ID before the fresh handshake.
+
+The code alone cannot make that call. `CONNECTION_CLOSED` is JSON-RPC's
+implementation-defined server-error code `-32000`, and the TypeScript SDK's
+Streamable HTTP transport uses the same code to refuse a session it does not
+know (`"Bad Request: No valid session ID provided"`). Treating every `-32000`
+as a dropped connection would keep a session the server has just declared dead
+and burn the retry resuming it, so a `-32000` whose message names a lost
+session counts as a verdict.
 
 Selected by `McpClient(protocol_mode=...)` via `build_protocol_strategy`:
 
@@ -216,38 +233,53 @@ move any discovery-capable UiPath MCP server to stateless `2026-07-28` and stop
 issuing session IDs, breaking the playground persistence `SessionInfoDebugState`
 exists for.
 
-#### Resuming a legacy session: re-handshake, do not guess
+#### Resuming a legacy session: adopt the version, do not renegotiate
 
-A restored session ID arrives without the protocol version it was negotiated at,
-and the version cannot be recovered from the wire — server responses carry only
-the session ID. The strategy therefore re-runs `initialize` **inside** the
-restored session:
+A restored session ID is useless without the protocol version it was negotiated
+at, and that version cannot be recovered from the wire — server responses carry
+only the session ID. It is therefore stored *with* the ID, and a resume installs
+it locally through `ClientSession.adopt`, which is documented to touch no wire:
 
 ```python
 restored = await info.get_session_id()
 if restored is None:
-    await session.initialize()
+    await self._handshake(session, info)          # cold: negotiate and store the version
     return
+if await self._adopt_restored_session(session, info, restored):
+    return                                        # no request sent at all
 try:
-    await session.initialize()      # lands inside the restored session
+    result = await session.initialize()           # version unknown: lands inside the session
 except MCPError as error:
     if error.code == CONNECTION_CLOSED:
-        raise                       # transport died; says nothing about the session
-    await self.reset(info)          # stale, or this server refuses a 2nd handshake
-    await session.initialize()      # same transport: a refused request does not close it
+        raise                                     # transport died; says nothing about the session
+    await self.reset(info)                        # stale, or this server refuses a 2nd handshake
+    await self._handshake(session, info)          # same transport: a refused request does not close it
 ```
 
-This is safe because the server routes purely by the session header and mints a
-new session only when the header is **absent**
+**Why adopting beats re-handshaking.** Whether a server accepts a second
+`initialize` inside a live session is implementation-defined. The Python SDK
+does. The reference TypeScript implementation refuses it outright with
+`-32600 "Invalid Request: Server already initialized"`, so a client that resumes
+by re-handshaking loses the persisted session on **every** run against such a
+server — falling back to a cold one, and with it the gateway affinity the
+session ID exists to provide. Adopting asks the server nothing, so it works
+either way, and it also restores the pre-SDK-2 wire shape: a resumed run sends
+only ordinary requests carrying `mcp-session-id`.
+
+The handshake path remains for a store written before versions were recorded
+(`get_protocol_version()` returns `None`), and for a stored version this client
+cannot speak on a legacy wire — a modern version, or one dropped upstream. It is
+safe because the server routes purely by the session header and mints a new
+session only when the header is **absent**
 ([`streamable_http_manager.py`](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/server/streamable_http_manager.py)).
 A server that ignores the header instead mints a replacement; the strategy detects
 that by comparing the ID before and after and continues with the new session.
 
-Probing candidate versions with `send_ping` instead — the pre-existing approach —
-always matched the *oldest* handshake version, because servers do not validate
-that header against what the session negotiated. That silently downgraded every
-later request and disabled the server's `2025-11-25` SSE resumability. Do not
-reintroduce it.
+Probing candidate versions with `send_ping` — the original approach — always
+matched the *oldest* handshake version, because servers do not validate that
+header against what the session negotiated. That silently downgraded every later
+request and disabled the server's `2025-11-25` SSE resumability. Do not
+reintroduce it: the version is remembered now, not guessed.
 
 #### Modern-era instance affinity
 
@@ -379,8 +411,9 @@ During client initialization, `McpClient`:
 4. Passes the `SessionInfo` to the local adapter, which opens the SDK transport
 5. Creates a new `ClientSession` over those streams
 6. Calls `strategy.connect(session, session_info)`, which negotiates for its era:
-   - **legacy** — `session.initialize()`, whether or not an ID was restored; the
-     response hook stores the server-assigned ID
+   - **legacy** — adopts a restored ID whose version is known, sending nothing;
+     otherwise `session.initialize()`, whose response hook stores the
+     server-assigned ID, and whose result is stored as the version
    - **modern** — mints an affinity ID if absent, then `session.discover()`
    - **auto** — mints an affinity ID if absent, then `probe_modern_era(session)`;
      on fallback it clears a freshly minted ID and runs the legacy `connect`;
@@ -500,7 +533,8 @@ Phase 2: Connection Initialization (repeated after session loss)
 ┌─────────────────┐
 │ session.        │ ─── Sends initialize request
 │ initialize()    │     Response hook calls set_session_id()
-│                 │     (skipped when an ID was restored)
+│                 │     (skipped when a stored ID *and* version
+│                 │      are adopted instead)
 └─────────────────┘
 ┌─────────────────┐
 │ McpClient reads │ ─── await session_info.get_session_id()
@@ -591,6 +625,10 @@ Which errors trigger reinitialization is **era-specific**, decided by
 dropped but the server never rejected the session, so `McpClient` skips `reset`
 and the reconnect resumes the same session. The other codes are the server's verdict,
 and `reset` clears the ID before the fresh handshake.
+
+`-32000` is both `CONNECTION_CLOSED` and the code the TypeScript SDK's transport
+refuses an unknown session with, so `is_session_rejected` reads the *message* to
+tell a dropped socket from a verdict. See the `reset` discussion above.
 
 `INVALID_REQUEST` is retried only when its message explicitly identifies a
 terminated, expired, or invalid session. An externally restored session is not
@@ -683,7 +721,7 @@ async def _reinitialize_session(
             if (
                 self._session_info is not None
                 and error is not None
-                and error.code != CONNECTION_CLOSED
+                and is_session_rejected(error)
             ):
                 await self._strategy.reset(self._session_info)
             await self._open_connection()
@@ -708,10 +746,10 @@ async with AsyncExitStack() as stack:
 ### 5. Reinitialization Reuses the HTTP Client
 
 On a recoverable session error, `_reinitialize_session()` closes the old
-connection stack, calls `strategy.reset` to clear the ID unless the error was a
-plain `CONNECTION_CLOSED` -- a dropped transport is not the server's verdict, so
-the ID is kept and the reconnect resumes the same session -- and opens a fresh
-SDK transport and `ClientSession`. The authenticated `httpx2.AsyncClient`
+connection stack, calls `strategy.reset` to clear the ID unless
+`is_session_rejected(error)` is False -- a dropped transport is not the server's
+verdict, so the ID is kept and the reconnect resumes the same session -- and
+opens a fresh SDK transport and `ClientSession`. The authenticated `httpx2.AsyncClient`
 and `SessionInfo` instance are reused. The failed-session identity guard prevents a late failure
 from a concurrent operation from tearing down a replacement session.
 

@@ -41,12 +41,17 @@ logger = logging.getLogger(__name__)
 class SessionInfo:
     """Store the MCP session ID and allow subclasses to persist it externally."""
 
+    #: Class-level default so a subclass that skips ``super().__init__()`` still
+    #: reads as "version not known" rather than raising.
+    protocol_version: str | None = None
+
     def __init__(self, session_id: str | None = None) -> None:
         self.session_id = session_id
-        # Exposed for subclasses that want to record what was negotiated.
-        # Nothing in this package sets or reads it: the SDK stamps the version
-        # onto every request itself, and a resumed session learns its version by
-        # re-running the handshake rather than by being told.
+        # The version the stored session was negotiated at. Held alongside the
+        # ID because it cannot be recovered from the wire: responses carry only
+        # the session ID. A subclass that persists the ID externally should
+        # persist this too, so a later run can resume the session without
+        # re-running the handshake to learn its version.
         self.protocol_version: str | None = None
 
     async def get_session_id(self) -> str | None:
@@ -56,6 +61,19 @@ class SessionInfo:
     async def set_session_id(self, session_id: str | None) -> None:
         """Store a server-assigned session ID, or clear it with ``None``."""
         self.session_id = session_id
+
+    async def get_protocol_version(self) -> str | None:
+        """Return the version the stored session was negotiated at, if known.
+
+        ``None`` means "not known", not "no session": a store written by an
+        older revision holds an ID and no version, and a resumed connection
+        then has to learn the version from the server.
+        """
+        return self.protocol_version
+
+    async def set_protocol_version(self, protocol_version: str | None) -> None:
+        """Record the negotiated version, or clear it with ``None``."""
+        self.protocol_version = protocol_version
 
 
 @dataclass(frozen=True)

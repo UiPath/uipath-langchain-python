@@ -26,6 +26,9 @@ from mcp.types import (
     METHOD_NOT_FOUND,
     UNSUPPORTED_PROTOCOL_VERSION,
     DiscoverResult,
+    Implementation,
+    InitializeResult,
+    ServerCapabilities,
     UnsupportedProtocolVersionErrorData,
 )
 from mcp.types.version import (
@@ -46,8 +49,23 @@ logger = logging.getLogger(__name__)
 
 ProtocolMode = Literal["legacy", "auto", "modern"]
 
-#: Session-disconnect markers that make an ``INVALID_REQUEST`` recoverable.
-_SESSION_LOST_MARKERS = ("terminated", "expired", "invalid", "not found")
+#: Session-disconnect markers that make a request-level error recoverable.
+#: ``no valid session`` is how the TypeScript SDK's transport phrases it.
+_SESSION_LOST_MARKERS = (
+    "terminated",
+    "expired",
+    "invalid",
+    "not found",
+    "no valid session",
+)
+
+
+def _names_a_lost_session(error: MCPError) -> bool:
+    """Report whether ``error``'s message says the session itself is gone."""
+    message = error.message.lower()
+    return "session" in message and any(
+        marker in message for marker in _SESSION_LOST_MARKERS
+    )
 
 
 def is_session_error(error: MCPError) -> bool:
@@ -62,12 +80,31 @@ def is_session_error(error: MCPError) -> bool:
     """
     if error.code == CONNECTION_CLOSED:
         return True
-    message = error.message.lower()
-    return (
-        error.code in (32600, INVALID_REQUEST)
-        and "session" in message
-        and any(marker in message for marker in _SESSION_LOST_MARKERS)
-    )
+    # ``32600`` is the unsigned spelling some gateways emit for INVALID_REQUEST.
+    return error.code in (32600, INVALID_REQUEST) and _names_a_lost_session(error)
+
+
+def is_session_rejected(error: MCPError) -> bool:
+    """Report whether ``error`` is the server's verdict on the stored session.
+
+    The distinction decides whether recovery may keep the persisted session ID.
+    A transport that simply dropped says nothing about the session, so the ID is
+    kept and the reconnect resumes it; anything the *server* answered about the
+    session means the ID is dead and must be discarded.
+
+    The code alone cannot tell those apart, because ``CONNECTION_CLOSED`` is
+    JSON-RPC's implementation-defined server-error code ``-32000``, which the
+    TypeScript SDK's Streamable HTTP transport also uses to refuse a session it
+    does not know (``"Bad Request: No valid session ID provided"``). So a
+    ``-32000`` naming a lost session is a verdict, not a dropped connection.
+
+    Args:
+        error: The error that triggered recovery.
+
+    Returns:
+        True when the persisted session ID must be discarded.
+    """
+    return error.code != CONNECTION_CLOSED or _names_a_lost_session(error)
 
 
 @runtime_checkable
@@ -93,10 +130,22 @@ class ProtocolStrategy(Protocol):
 class LegacyHandshakeStrategy:
     """Negotiate through ``initialize`` and reuse server-minted sessions.
 
-    A restored session is re-negotiated rather than probed. The server routes
-    requests purely by the ``mcp-session-id`` header and creates a new session
-    only when no header is present, so an ``initialize`` carrying a restored ID
-    lands *inside* that session and returns the version it was negotiated at.
+    A restored session is resumed without any negotiation traffic when the store
+    remembers the version it was negotiated at: the version is the only thing a
+    fresh ``ClientSession`` is missing, and
+    :meth:`ClientSession.adopt` installs it locally. The session then continues
+    exactly as it did before this client existed -- the wire sees only the
+    ``mcp-session-id`` header on ordinary requests, and no server is asked to
+    re-initialize a session it already initialized.
+
+    When the version is *not* known -- a store written before it was recorded --
+    there is nothing to adopt, so the handshake is re-run inside the restored
+    session. The server routes requests purely by the ``mcp-session-id`` header
+    and creates a new session only when no header is present, so that
+    ``initialize`` lands *inside* the session and returns the version it was
+    negotiated at. Servers differ on whether they allow it (the reference
+    TypeScript implementation answers "Server already initialized"), which is
+    why a rejection falls back to a clean session.
     """
 
     def __init__(self) -> None:
@@ -106,11 +155,10 @@ class LegacyHandshakeStrategy:
         """Run the handshake, resuming a persisted session when one exists."""
         restored_id = await info.get_session_id()
         if restored_id is None:
-            await session.initialize()
-            logger.info(
-                "MCP session initialized with session ID: %s",
-                await info.get_session_id(),
-            )
+            await self._handshake(session, info)
+            return
+
+        if await self._adopt_restored_session(session, info, restored_id):
             return
 
         try:
@@ -131,13 +179,10 @@ class LegacyHandshakeStrategy:
                 error.code,
             )
             await self.reset(info)
-            await session.initialize()
-            logger.info(
-                "MCP session initialized with session ID: %s",
-                await info.get_session_id(),
-            )
+            await self._handshake(session, info)
             return
 
+        await info.set_protocol_version(result.protocol_version)
         current_id = await info.get_session_id()
         if current_id == restored_id:
             logger.info(
@@ -154,6 +199,68 @@ class LegacyHandshakeStrategy:
                 current_id,
                 result.protocol_version,
             )
+
+    @staticmethod
+    async def _handshake(session: ClientSession, info: SessionInfo) -> None:
+        """Negotiate a brand-new session and remember what it settled on."""
+        result = await session.initialize()
+        await info.set_protocol_version(result.protocol_version)
+        logger.info(
+            "MCP session initialized with session ID: %s at %s",
+            await info.get_session_id(),
+            result.protocol_version,
+        )
+
+    @staticmethod
+    async def _adopt_restored_session(
+        session: ClientSession, info: SessionInfo, restored_id: str
+    ) -> bool:
+        """Resume a stored session locally, with no request on the wire.
+
+        The stored version is the whole of what a fresh ``ClientSession`` lacks:
+        ``adopt`` installs it, and every later request is stamped at that
+        version. The server is never told anything, which is what makes this
+        safe on a server that refuses a second ``initialize``.
+
+        Args:
+            session: The un-negotiated session to bring up.
+            info: The store holding the session ID and its version.
+            restored_id: The stored session ID, for logging.
+
+        Returns:
+            True when the session was adopted, False when the version is
+            unknown and the caller must negotiate instead.
+        """
+        restored_version = await info.get_protocol_version()
+        if restored_version is None:
+            return False
+        if restored_version not in HANDSHAKE_PROTOCOL_VERSIONS:
+            # A modern version stored against this ID, or a version this client
+            # no longer speaks. Neither can be adopted onto a legacy wire, and
+            # the handshake will settle it correctly.
+            logger.info(
+                "Stored MCP session %s names version %s, which is not a "
+                "handshake version; re-negotiating instead",
+                restored_id,
+                restored_version,
+            )
+            return False
+        session.adopt(
+            InitializeResult(
+                protocolVersion=restored_version,
+                # Capabilities and server info are not persisted: nothing in
+                # this package reads them back, and inventing them here keeps
+                # the resume free of wire traffic.
+                capabilities=ServerCapabilities(),
+                serverInfo=Implementation(name="restored-session", version="0"),
+            )
+        )
+        logger.info(
+            "Resumed MCP session %s at %s without re-initializing",
+            restored_id,
+            restored_version,
+        )
+        return True
 
     def is_recoverable(self, error: MCPError, restored_id: str | None) -> bool:
         """Recognize explicit and restored-session disconnect responses.
@@ -176,8 +283,14 @@ class LegacyHandshakeStrategy:
         return restored_id is not None
 
     async def reset(self, info: SessionInfo) -> None:
-        """Clear the stale session ID so the next handshake starts clean."""
+        """Clear the stale session ID so the next handshake starts clean.
+
+        The version goes with it: it described the session being discarded, and
+        leaving it behind would let the next connection adopt a version the
+        replacement session never negotiated.
+        """
         await info.set_session_id(None)
+        await info.set_protocol_version(None)
 
 
 class ModernDiscoveryStrategy:
