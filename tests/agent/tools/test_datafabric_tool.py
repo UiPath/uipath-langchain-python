@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from uipath.agent.models.agent import AgentContextResourceConfig
+from uipath.core.feature_flags import FeatureFlags
 from uipath.platform.entities import DataFabricEntityItem
 
 import uipath_langchain.agent.tools as agent_tools
@@ -13,6 +14,7 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
 )
 from uipath_langchain.agent.tools.context_tool import create_context_tool
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_tool import (
+    ENTITY_V3_API_FF,
     DataFabricTextQueryHandler,
     create_datafabric_tool,
 )
@@ -215,3 +217,62 @@ async def test_datafabric_handler_prefers_terminal_ai_message():
     result = await handler("find missing row")
 
     assert result == "I could not find any matching rows."
+
+
+def _sdk_with_both_resolvers() -> MagicMock:
+    """A UiPath SDK mock exposing both the current and V3 resolution methods."""
+    resolution = SimpleNamespace(entities=[MagicMock()], entities_service=MagicMock())
+    sdk = MagicMock()
+    sdk.entities.resolve_entity_set_async = AsyncMock(return_value=resolution)
+    sdk.entities.resolve_entity_set_v3_async = AsyncMock(return_value=resolution)
+    return sdk
+
+
+@pytest.mark.asyncio
+async def test_entity_resolution_uses_v1_when_v3_flag_disabled():
+    """Default (flag off): resolve via the current method, never the V3 one."""
+    entity = _entity()
+    sdk = _sdk_with_both_resolvers()
+    handler = DataFabricTextQueryHandler(entity_set=[entity], llm=MagicMock())
+
+    # Set the flag off explicitly (programmatic value beats any
+    # UIPATH_FEATURE_EnableEntityV3API env var) so the assertion is deterministic.
+    FeatureFlags.configure_flags({ENTITY_V3_API_FF: False})
+    try:
+        with (
+            patch("uipath.platform.UiPath", return_value=sdk),
+            patch(
+                "uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph.DataFabricGraph.create",
+                return_value=_FakeCompiledGraph({"messages": []}),
+            ),
+        ):
+            await handler._ensure_datafabric_graph()
+    finally:
+        FeatureFlags.reset_flags()
+
+    sdk.entities.resolve_entity_set_async.assert_awaited_once_with([entity])
+    sdk.entities.resolve_entity_set_v3_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_entity_resolution_uses_v3_when_v3_flag_enabled():
+    """Flag on: resolve via the dedicated V3 method, never the current one."""
+    entity = _entity()
+    sdk = _sdk_with_both_resolvers()
+    handler = DataFabricTextQueryHandler(entity_set=[entity], llm=MagicMock())
+
+    FeatureFlags.configure_flags({ENTITY_V3_API_FF: True})
+    try:
+        with (
+            patch("uipath.platform.UiPath", return_value=sdk),
+            patch(
+                "uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph.DataFabricGraph.create",
+                return_value=_FakeCompiledGraph({"messages": []}),
+            ),
+        ):
+            await handler._ensure_datafabric_graph()
+    finally:
+        FeatureFlags.reset_flags()
+
+    sdk.entities.resolve_entity_set_v3_async.assert_awaited_once_with([entity])
+    sdk.entities.resolve_entity_set_async.assert_not_called()

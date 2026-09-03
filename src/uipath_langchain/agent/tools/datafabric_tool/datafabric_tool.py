@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
 
+# Flag routing Data Fabric entity-metadata resolution to the V3 API.
+ENTITY_V3_API_FF = "EnableEntityV3API"
+
 
 @dataclass(frozen=True, slots=True)
 class _DataFabricToolConfig:
@@ -82,12 +85,21 @@ class DataFabricTextQueryHandler:
             if self._compiled is not None:
                 return self._compiled
 
+            from uipath.core.feature_flags import FeatureFlags
             from uipath.platform import UiPath
 
             from .datafabric_subgraph import DataFabricGraph
 
             sdk = UiPath()
-            resolution = await sdk.entities.resolve_entity_set_async(self._entity_set)
+            # Flag on: resolve via the V3 API method; off: the default method.
+            if FeatureFlags.is_flag_enabled(ENTITY_V3_API_FF, default=False):
+                resolution = await sdk.entities.resolve_entity_set_v3_async(
+                    self._entity_set
+                )
+            else:
+                resolution = await sdk.entities.resolve_entity_set_async(
+                    self._entity_set
+                )
             if not resolution.entities:
                 raise ValueError(
                     "No Data Fabric entity schemas could be fetched. "
