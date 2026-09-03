@@ -11,16 +11,25 @@ from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+import httpx2
 from mcp import ClientSession
-from mcp.shared.exceptions import McpError
-from mcp.shared.message import SessionMessage
-from mcp.types import CallToolResult, ListToolsResult
+from mcp.shared.exceptions import MCPError
+from mcp.types import (
+    CONNECTION_CLOSED,
+    CallToolResult,
+    ListToolsResult,
+)
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
 from uipath_langchain._utils import get_execution_folder_path
 
+from .protocol_strategy import (
+    ProtocolMode,
+    ProtocolStrategy,
+    build_protocol_strategy,
+)
+from .protocol_strategy import is_session_error as _is_session_error
 from .streamable_http import SessionInfo, streamable_http_client
 
 if TYPE_CHECKING:
@@ -30,6 +39,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def _normalize_timeout(
+    timeout: httpx.Timeout | httpx2.Timeout | float | None,
+) -> httpx2.Timeout | float:
+    """Convert the pre-upgrade HTTPX timeout type for the MCP 2 transport."""
+    if timeout is None:
+        return httpx2.Timeout(600)
+    if isinstance(timeout, httpx.Timeout):
+        return httpx2.Timeout(
+            connect=timeout.connect,
+            read=timeout.read,
+            write=timeout.write,
+            pool=timeout.pool,
+        )
+    return timeout
 
 
 class SessionInfoFactory:
@@ -61,23 +86,23 @@ class McpClient(UiPathDisposableProtocol):
        - Creates ClientSession
        - Calls session.initialize() to get session ID
 
-    2. **Session Reinitialization** (on 404 error):
-       - Reuses existing HTTP client and streamable connection
-       - Calls session.initialize() again to get new session ID
+    2. **Session Reinitialization** (after a terminated session):
+       - Reuses the existing HTTP client and persisted session store
+       - Replaces the transport and ``ClientSession``
+       - Performs a fresh legacy initialization handshake
 
     Thread-safety is ensured via asyncio.Lock for both phases.
     """
 
-    # Error codes that indicate session disconnect/termination
-    SESSION_ERROR_CODES = [32600, -32000]
-
     def __init__(
         self,
         config: "AgentMcpResourceConfig",
-        timeout: httpx.Timeout | None = None,
+        timeout: httpx.Timeout | httpx2.Timeout | float | None = None,
         max_retries: int = 1,
         session_info_factory: SessionInfoFactory | None = None,
         terminate_on_close: bool = True,
+        *,
+        protocol_mode: ProtocolMode = "legacy",
     ) -> None:
         """Initialize the MCP tool session.
 
@@ -91,12 +116,20 @@ class McpClient(UiPathDisposableProtocol):
             max_retries: Maximum number of retries on session disconnect errors.
             session_info_factory: Factory for creating SessionInfo instances.
                 Defaults to ``SessionInfoFactory`` which returns a plain SessionInfo.
+            terminate_on_close: Whether to terminate the server session on
+                disposal. Already a no-op in the modern era, which has no session.
+            protocol_mode: Which negotiation era to use. ``"legacy"`` (the
+                default) sends only the ``initialize`` handshake, preserving
+                pre-existing behavior. ``"modern"`` uses ``server/discover``
+                only. ``"auto"`` probes for the modern era and falls back to the
+                handshake.
         """
         self._config = config
-        self._timeout = timeout or httpx.Timeout(600)
+        self._timeout = _normalize_timeout(timeout)
         self._max_retries = max_retries
         self._session_info_factory = session_info_factory or SessionInfoFactory()
         self._terminate_on_close = terminate_on_close
+        self._strategy: ProtocolStrategy = build_protocol_strategy(protocol_mode)
 
         # URL and headers are resolved lazily from SDK
         self._url: str | None = None
@@ -112,15 +145,12 @@ class McpClient(UiPathDisposableProtocol):
         self._tools_cache: ListToolsResult | None = None
 
         # Client state (created once, reused across session reinitializations)
-        self._http_client: httpx.AsyncClient | None = None
-        self._read_stream: (
-            MemoryObjectReceiveStream[SessionMessage | Exception] | None
-        ) = None
-        self._write_stream: MemoryObjectSendStream[SessionMessage] | None = None
+        self._http_client: httpx2.AsyncClient | None = None
         self._session_info: SessionInfo | None = None
         self._stack: AsyncExitStack | None = None
+        self._connection_stack: AsyncExitStack | None = None
 
-        # Session state (can be reinitialized without recreating client)
+        # Session state (replaced on recovery while the HTTP client is reused)
         self._session: ClientSession | None = None
         self._client_initialized: bool = False
 
@@ -145,7 +175,7 @@ class McpClient(UiPathDisposableProtocol):
 
         This is called once on first use. Creates:
         - UiPath SDK instance to retrieve MCP server URL
-        - httpx.AsyncClient with authorization headers
+        - httpx2.AsyncClient with authorization headers
         - Streamable HTTP connection (read/write streams)
         - ClientSession
 
@@ -175,83 +205,84 @@ class McpClient(UiPathDisposableProtocol):
 
         logger.debug(f"Retrieved MCP server URL: {self._url}")
 
-        # Create exit stack for resource management
-        self._stack = AsyncExitStack()
-        await self._stack.__aenter__()
-
-        # Create HTTP client with SSL, proxy, and redirect settings
-        client_kwargs = get_httpx_client_kwargs(headers=self._headers)
-        client_kwargs["timeout"] = self._timeout
-        self._http_client = await self._stack.enter_async_context(
-            httpx.AsyncClient(**client_kwargs)
-        )
-
-        # Create session info for tracking session ID
-        self._session_info = self._session_info_factory.create_session(mcp_server)
-
-        # Load previously stored session ID (no-op for base SessionInfo,
-        # triggers lazy load from debug state for SessionInfoDebugState)
-        existing = await self._session_info.get_session_id()
-        if existing:
-            logger.info(f"Loaded existing session ID from session info: {existing}")
-
-        # Create streamable HTTP connection
-        (
-            self._read_stream,
-            self._write_stream,
-        ) = await self._stack.enter_async_context(
-            streamable_http_client(
-                url=self._url,
-                http_client=self._http_client,
-                session_info=self._session_info,
-                terminate_on_close=self._terminate_on_close,
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        self._stack = stack
+        try:
+            # Create HTTP client with SSL, proxy, and redirect settings
+            client_kwargs = get_httpx_client_kwargs(headers=self._headers)
+            client_kwargs["timeout"] = self._timeout
+            self._http_client = await stack.enter_async_context(
+                httpx2.AsyncClient(**client_kwargs)
             )
-        )
 
-        # Create ClientSession (but don't initialize yet)
-        # These are guaranteed to be set by the context manager above
-        assert self._read_stream is not None
-        assert self._write_stream is not None
-        self._session = await self._stack.enter_async_context(
-            ClientSession(self._read_stream, self._write_stream)
-        )
+            # Create session info for tracking session ID
+            self._session_info = self._session_info_factory.create_session(mcp_server)
+
+            # Load a session ID persisted by the AgentHub debug-state integration.
+            existing = await self._session_info.get_session_id()
+            if existing:
+                logger.info(f"Loaded existing session ID from session info: {existing}")
+
+            await self._open_connection()
+        except BaseException:
+            await stack.aclose()
+            self._stack = None
+            self._http_client = None
+            self._session_info = None
+            raise
 
         self._client_initialized = True
         logger.info("MCP client initialized")
 
-        # Now initialize the MCP session
-        await self._initialize_session()
+    async def _open_connection(self) -> None:
+        """Open a fresh transport and ClientSession over the reusable HTTP client."""
+        if self._url is None or self._http_client is None or self._session_info is None:
+            raise RuntimeError(
+                "Cannot open MCP connection: client prerequisites missing"
+            )
+
+        connection_stack = AsyncExitStack()
+        await connection_stack.__aenter__()
+        try:
+            read_stream, write_stream = await connection_stack.enter_async_context(
+                streamable_http_client(
+                    url=self._url,
+                    http_client=self._http_client,
+                    session_info=self._session_info,
+                    terminate_on_close=self._terminate_on_close,
+                    identity=self._strategy.identity,
+                )
+            )
+            self._session = await connection_stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            self._connection_stack = connection_stack
+            await self._initialize_session()
+        except BaseException:
+            await connection_stack.aclose()
+            self._session = None
+            self._connection_stack = None
+            raise
 
     async def _initialize_session(self) -> None:
-        """Initialize or reinitialize the MCP session.
+        """Negotiate the newly-created MCP session through the protocol strategy.
 
-        Calls session.initialize() to perform the MCP handshake and obtain
-        a session ID from the server. Can be called multiple times on the
-        same ClientSession to recover from session disconnects.
+        The strategy owns the era-specific handshake: the legacy ``initialize``
+        exchange, or the modern ``server/discover`` probe. MCP 2 makes
+        ``ClientSession.initialize()`` idempotent per instance, so recovery
+        creates a new session before calling this again.
 
         Requires: Client must be initialized first (_initialize_client).
         """
-        if self._session is None:
+        if self._session is None or self._session_info is None:
             raise RuntimeError("Cannot initialize session: client not initialized")
 
-        existing_session_id = (
-            await self._session_info.get_session_id() if self._session_info else None
-        )
+        existing_session_id = await self._session_info.get_session_id()
         logger.info(
             f"Initializing MCP session (session_info id: {existing_session_id})"
         )
-
-        if existing_session_id is None:
-            await self._session.initialize()
-
-            # The transport calls set_session_id during initialize,
-            # so we just read the current value here.
-            new_session_id = (
-                await self._session_info.get_session_id()
-                if self._session_info
-                else None
-            )
-            logger.info(f"MCP session initialized with session ID: {new_session_id}")
+        await self._strategy.connect(self._session, self._session_info)
 
     async def _ensure_session(self) -> ClientSession:
         """Ensure client and session are initialized, return the session.
@@ -262,44 +293,92 @@ class McpClient(UiPathDisposableProtocol):
         Returns:
             The initialized ClientSession.
         """
-        if not self._client_initialized:
-            async with self._lock:
-                if not self._client_initialized:
-                    await self._initialize_client()
+        # Always cross the lifecycle lock. Recovery creates the replacement
+        # ClientSession before its initialize handshake completes, so a lock-free
+        # fast path could expose a half-initialized session to another operation.
+        async with self._lock:
+            if not self._client_initialized:
+                await self._initialize_client()
+            elif self._session is None:
+                # A failed replacement leaves the reusable HTTP client intact.
+                # Reopen on the next operation instead of poisoning the client.
+                await self._open_connection()
 
-        return self._session  # type: ignore[return-value]
+            if self._session is None:
+                raise RuntimeError("MCP client initialized without a session")
+            return self._session
 
-    async def _reinitialize_session(self) -> None:
-        """Reinitialize only the MCP session after a disconnect error.
+    async def _close_connection_for_recovery(self) -> None:
+        """Detach and best-effort close the current connection stack."""
+        connection_stack = self._connection_stack
+        self._connection_stack = None
+        self._session = None
+        if connection_stack is None:
+            return
+        try:
+            await connection_stack.aclose()
+        except Exception as error:
+            logger.debug("Error closing failed MCP connection: %s", error)
 
-        Thread-safe via lock. Reuses existing HTTP client and streamable
-        connection; only performs a new MCP handshake.
-        Clears the session info first so initialize() doesn't send a stale session ID.
+    async def _reinitialize_session(
+        self,
+        failed_session: ClientSession | None = None,
+        error: MCPError | None = None,
+    ) -> None:
+        """Replace the transport/session after a disconnect and initialize again.
+
+        MCP 2 makes ``ClientSession.initialize()`` idempotent, so recovery must
+        create a fresh ClientSession rather than calling initialize on the old one.
+        The HTTP client and external ``SessionInfo`` object are reused.
+
+        The strategy is asked to discard persisted session state only when
+        ``error`` is the server's verdict on the session. ``CONNECTION_CLOSED``
+        is not: the transport dropped, so the ID is kept and the reconnect
+        resumes the same session. With no ``error`` nothing is known against
+        the session and it is likewise kept.
         """
         async with self._lock:
             if not self._client_initialized:
                 # Client not initialized, do full initialization
                 await self._initialize_client()
             else:
-                # Clear stale session ID before re-initializing
-                if self._session_info:
-                    await self._session_info.set_session_id(None)
-                await self._initialize_session()
+                if failed_session is not None and self._session is not failed_session:
+                    logger.debug(
+                        "MCP session was already replaced by another operation"
+                    )
+                    return
+                await self._close_connection_for_recovery()
+                if (
+                    self._session_info is not None
+                    and error is not None
+                    and error.code != CONNECTION_CLOSED
+                ):
+                    await self._strategy.reset(self._session_info)
+                await self._open_connection()
 
-    def _is_session_error(self, error: McpError) -> bool:
-        """Check if an McpError indicates a session disconnect.
+    @staticmethod
+    def is_session_error(error: MCPError) -> bool:
+        """Check if an MCPError indicates a session disconnect.
 
         Args:
-            error: The McpError to check.
+            error: The MCPError to check.
 
         Returns:
             True if the error indicates a session disconnect.
         """
-        return (
-            hasattr(error, "error")
-            and hasattr(error.error, "code")
-            and error.error.code in self.SESSION_ERROR_CODES
+        return _is_session_error(error)
+
+    async def _is_recoverable_session_error(self, error: MCPError) -> bool:
+        """Ask the active protocol strategy whether a reconnect could fix ``error``.
+
+        The answer is era-specific: a legacy session can be lost and re-established,
+        while every modern request is self-contained, so only a dropped connection
+        is worth retrying there.
+        """
+        restored_id = (
+            await self._session_info.get_session_id() if self._session_info else None
         )
+        return self._strategy.is_recoverable(error, restored_id)
 
     async def _execute_with_retry(
         self,
@@ -309,7 +388,7 @@ class McpClient(UiPathDisposableProtocol):
         """Execute a session operation with automatic retry on session disconnect.
 
         On first call, initializes the full client stack. On session
-        disconnect, reinitializes only the session and retries up to
+        disconnect, replaces the transport/session and retries up to
         ``_max_retries`` times.
 
         Args:
@@ -321,11 +400,12 @@ class McpClient(UiPathDisposableProtocol):
             The result of *operation*.
 
         Raises:
-            McpError: If the operation fails after all retries.
+            MCPError: If the operation fails after all retries.
         """
         retry_count = 0
 
         while retry_count <= self._max_retries:
+            session: ClientSession | None = None
             try:
                 session = await self._ensure_session()
                 logger.debug(
@@ -333,15 +413,16 @@ class McpClient(UiPathDisposableProtocol):
                 )
                 return await operation(session)
 
-            except McpError as e:
-                logger.info(f"McpError during {operation_name}: {e}")
+            except MCPError as e:
+                logger.info(f"MCPError during {operation_name}: {e}")
 
-                if self._is_session_error(e) and retry_count < self._max_retries:
+                recoverable = await self._is_recoverable_session_error(e)
+                if recoverable and retry_count < self._max_retries:
                     logger.warning(
-                        f"Session disconnected (error code: {e.error.code}), "
+                        f"Session disconnected (error code: {e.code}), "
                         f"reinitializing session"
                     )
-                    await self._reinitialize_session()
+                    await self._reinitialize_session(session, error=e)
                     retry_count += 1
                     continue
                 else:
@@ -408,17 +489,23 @@ class McpClient(UiPathDisposableProtocol):
         async with self._tools_lock:
             self._tools_cache = None
             async with self._lock:
+                if self._connection_stack is not None:
+                    try:
+                        await self._connection_stack.aclose()
+                    except Exception as e:
+                        logger.debug(f"Error during MCP connection cleanup: {e}")
+                    finally:
+                        self._connection_stack = None
+                        self._session = None
+
                 if self._stack is not None:
                     try:
-                        await self._stack.__aexit__(None, None, None)
+                        await self._stack.aclose()
                     except Exception as e:
                         logger.debug(f"Error during cleanup: {e}")
                     finally:
                         self._stack = None
-                        self._session = None
                         self._http_client = None
-                        self._read_stream = None
-                        self._write_stream = None
                         self._session_info = None
                         self._client_initialized = False
 
