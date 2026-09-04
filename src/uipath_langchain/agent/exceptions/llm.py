@@ -1,12 +1,28 @@
-"""Map normalized LLM-client errors into agent runtime errors."""
+"""Map normalized LLM-client errors into agent runtime errors.
 
-from uipath.llm_client import UiPathError, UiPathLLMErrorCode
+The LLM client (uipath-llm-client / uipath-langchain-client) surfaces two shapes:
+a ``UiPathError`` carrying a semantic ``error_code`` (handled by
+``raise_for_llm_client_error``), and a ``UiPathAPIError`` carrying an HTTP
+``status_code`` + ``body`` for provider passthrough failures (handled by
+``raise_for_provider_http_error``). Both are mapped to ``AgentRuntimeError`` so
+upstream handling can categorise without provider-specific logic.
+"""
+
+from typing import NoReturn
+
+from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
+
+# Maps known LLM Gateway status codes to specific error codes.
+# Unknown status codes fall back to HTTP_ERROR.
+_LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
+    403: AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
+}
 
 
 def raise_for_llm_client_error(error: UiPathError) -> None:
@@ -22,3 +38,32 @@ def raise_for_llm_client_error(error: UiPathError) -> None:
             ),
             category=UiPathErrorCategory.USER,
         ) from error
+
+
+def _category_for_status(status_code: int) -> UiPathErrorCategory:
+    """Map LLM provider HTTP statuses to their runtime error category."""
+    if status_code == 403:
+        return UiPathErrorCategory.DEPLOYMENT
+    if status_code >= 500:
+        return UiPathErrorCategory.SYSTEM
+    return UiPathErrorCategory.UNKNOWN
+
+
+def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
+    """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
+
+    Reads the HTTP status code and the gateway's ``detail`` (from ``error.body``)
+    and re-raises as an ``AgentRuntimeError`` chained on the original.
+    """
+    status_code = error.status_code
+    code = _LLM_STATUS_CODE_MAP.get(status_code, AgentRuntimeErrorCode.HTTP_ERROR)
+    category = _category_for_status(status_code)
+    detail = error.body.get("detail") if isinstance(error.body, dict) else None
+
+    raise AgentRuntimeError(
+        code=code,
+        title=f"LLM provider returned HTTP {status_code}",
+        detail=detail or error.message or str(error),
+        category=category,
+        status=status_code,
+    ) from error

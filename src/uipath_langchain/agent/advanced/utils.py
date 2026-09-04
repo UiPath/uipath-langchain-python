@@ -10,7 +10,7 @@ from typing import Any, NamedTuple, cast
 from deepagents.backends import BackendProtocol, FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
 from jsonpath_ng import parse as jsonpath_parse  # type: ignore[import-untyped]
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from uipath.platform import UiPath
 from uipath.platform.attachments import Attachment
 
@@ -33,15 +33,18 @@ MEMORY_INDEX_VIRTUAL_PATH = f"/{MEMORY_DIR_NAME}/{MEMORY_INDEX_FILENAME}"
 
 def create_state_with_input(
     input_schema: type[BaseModel] | None,
-) -> type[AdvancedAgentGraphState]:
-    """Create combined state by merging AdvancedAgentGraphState with the input schema."""
+    *,
+    base: type[BaseModel] = AdvancedAgentGraphState,
+    name: str = "CompleteAdvancedAgentGraphState",
+    model_config: ConfigDict | None = None,
+) -> Any:
+    """Create combined state by merging ``base`` with the input schema."""
     if input_schema is None:
-        return AdvancedAgentGraphState
-    CompleteState = type(
-        "CompleteAdvancedAgentGraphState",
-        (AdvancedAgentGraphState, input_schema),
-        {},
-    )
+        return base
+    namespace: dict[str, Any] = {}
+    if model_config is not None:
+        namespace["model_config"] = model_config
+    CompleteState = type(name, (base, input_schema), namespace)
     cast(type[BaseModel], CompleteState).model_rebuild()
     return CompleteState
 

@@ -2,6 +2,9 @@ name: Lint
 
 on: workflow_call
 
+env:
+  SAFE_CHAIN_MINIMUM_PACKAGE_AGE_EXCLUSIONS: uipath,uipath-core,uipath-dev,uipath-langchain,uipath-langchain-client,uipath-llm-client,uipath-platform,uipath-robot,uipath-runtime,jsonschema-pydantic-converter
+
 jobs:
   # Job that runs when custom version testing is enabled - just completes successfully
   skip-lint:

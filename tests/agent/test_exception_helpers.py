@@ -9,6 +9,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from uipath_langchain.agent.exceptions.helpers import raise_for_enriched
+from uipath_langchain.agent.tools.process_tool import _start_jobs_errors
 
 
 def _make_enriched(
@@ -138,3 +139,62 @@ class TestErrorProperties:
         with pytest.raises(AgentRuntimeError) as exc_info:
             raise_for_enriched(err, _KNOWN_ERRORS, title=_TITLE, tool="T")
         assert exc_info.value.__cause__ is err
+
+
+class TestStartJobsNotFound:
+    def test_process_not_found(self) -> None:
+        err = _make_enriched(
+            404,
+            {"errorCode": "1002", "message": "AssociatedProcessNotFound"},
+        )
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_enriched(
+                err, _start_jobs_errors(err), title=_TITLE, tool="MyProcess"
+            )
+        assert exc_info.value.error_info.detail == (
+            "Could not find process for tool 'MyProcess'. "
+            "Please check if the process is deployed in the configured folder."
+        )
+
+    def test_attachment_not_found(self) -> None:
+        err = _make_enriched(
+            404,
+            {"errorCode": "1002", "message": "AttachmentNotFound"},
+        )
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_enriched(
+                err, _start_jobs_errors(err), title=_TITLE, tool="MyProcess"
+            )
+        detail = exc_info.value.error_info.detail
+        assert "Could not find process" not in detail
+        assert detail == (
+            "Could not find an attachment passed to tool 'MyProcess'. "
+            "Please check that the attachments provided to the tool still exist."
+        )
+
+    def test_unknown_message_includes_server_message(self) -> None:
+        err = _make_enriched(
+            404,
+            {"errorCode": "1002", "message": "SomeOtherItemNotFound"},
+        )
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_enriched(
+                err, _start_jobs_errors(err), title=_TITLE, tool="MyProcess"
+            )
+        assert exc_info.value.error_info.detail == (
+            "Could not start process for tool 'MyProcess': an item required "
+            "to start the job was not found. "
+            "Server message: SomeOtherItemNotFound"
+        )
+
+    def test_empty_server_message(self) -> None:
+        err = _make_enriched(404, {"errorCode": "1002"})
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_enriched(
+                err, _start_jobs_errors(err), title=_TITLE, tool="MyProcess"
+            )
+        assert exc_info.value.error_info.detail == (
+            "Could not start process for tool 'MyProcess': an item required "
+            "to start the job was not found. "
+            "Server message: "
+        )

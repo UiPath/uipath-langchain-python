@@ -5,11 +5,16 @@ on:
   push:
     branches:
       - main
+      - 'release/**'
     paths:
       - pyproject.toml
 
+env:
+  SAFE_CHAIN_MINIMUM_PACKAGE_AGE_EXCLUSIONS: uipath,uipath-core,uipath-dev,uipath-langchain,uipath-langchain-client,uipath-llm-client,uipath-platform,uipath-robot,uipath-runtime,jsonschema-pydantic-converter
+
 jobs:
   lint:
+    if: ${{ !github.event.created }}
     uses: ./.github/workflows/lint.yml
 
   build:

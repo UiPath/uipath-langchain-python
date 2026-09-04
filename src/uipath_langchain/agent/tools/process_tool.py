@@ -12,13 +12,10 @@ from uipath.platform.errors import EnrichedException
 from uipath.platform.orchestrator import JobState
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import (
-    get_execution_folder_key,
-    get_execution_folder_path,
-)
+from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.attachments.job_attachments import get_job_attachments
 from uipath_langchain.agent.exceptions import raise_for_enriched
-from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,
@@ -29,20 +26,35 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from .utils import sanitize_tool_name
 
-_START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
-    (404, "1002"): (
-        "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
-        UiPathErrorCategory.DEPLOYMENT,
-    ),
-    (400, "1100"): (
-        "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
-        UiPathErrorCategory.DEPLOYMENT,
-    ),
-    (409, None): (
-        "Cannot start process for tool '{tool}': {message}",
-        UiPathErrorCategory.DEPLOYMENT,
-    ),
+_START_JOBS_404_TEMPLATES: dict[str, str] = {
+    "AssociatedProcessNotFound": "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
+    "AttachmentNotFound": "Could not find an attachment passed to tool '{tool}'. Please check that the attachments provided to the tool still exist.",
 }
+
+_START_JOBS_404_FALLBACK_TEMPLATE = "Could not start process for tool '{tool}': an item required to start the job was not found. Server message: {message}"
+
+
+def _start_jobs_errors(
+    e: EnrichedException,
+) -> dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]]:
+    server_message = (e.error_info.message if e.error_info else None) or ""
+    not_found_template = _START_JOBS_404_TEMPLATES.get(
+        server_message, _START_JOBS_404_FALLBACK_TEMPLATE
+    )
+    return {
+        (404, "1002"): (
+            not_found_template,
+            UiPathErrorCategory.DEPLOYMENT,
+        ),
+        (400, "1100"): (
+            "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
+            UiPathErrorCategory.DEPLOYMENT,
+        ),
+        (409, None): (
+            "Cannot start process for tool '{tool}': {message}",
+            UiPathErrorCategory.DEPLOYMENT,
+        ),
+    }
 
 
 def create_process_tool(
@@ -55,11 +67,7 @@ def create_process_tool(
 
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
-    # Eval serverless jobs expose UIPATH_FOLDER_KEY but not UIPATH_FOLDER_PATH;
-    # without a folder header StartJobs returns 404 for a deployed process.
-    # invoke_async accepts only one of folder_path/folder_key, so resolve one.
-    folder_path = get_execution_folder_path() or resource.properties.folder_path
-    folder_key = get_execution_folder_key() if not folder_path else None
+    folder_path = get_execution_folder_path()
     # getattr, not attribute access: BaseResourceProperties sets extra="allow", so against a uipath
     # release predating the declared field the value is present only if the stored JSON carried it.
     entry_point_path = getattr(resource.properties, "entry_point_path", None)
@@ -92,7 +100,6 @@ def create_process_tool(
                     job = await client.processes.invoke_async(
                         name=process_name,
                         input_arguments=input_arguments,
-                        folder_key=folder_key,
                         folder_path=folder_path,
                         attachments=attachments,
                         parent_span_id=parent_span_id,
@@ -103,7 +110,7 @@ def create_process_tool(
                 except EnrichedException as e:
                     raise_for_enriched(
                         e,
-                        _START_JOBS_ERRORS,
+                        _start_jobs_errors(e),
                         title=f"Failed to execute tool '{resource.name}'",
                         tool=resource.name,
                     )
@@ -148,7 +155,6 @@ def create_process_tool(
             "tool_type": resource.type.lower(),
             "display_name": process_name,
             "folder_path": folder_path,
-            "folder_key": folder_key,
             "entry_point_path": entry_point_path,
             "args_schema": input_model,
             "output_schema": output_model,

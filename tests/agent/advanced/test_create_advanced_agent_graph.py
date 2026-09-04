@@ -81,6 +81,19 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
     assert call_kwargs["middleware"][0].state_key == "uipath__system_prompt"
 
 
+def test_static_system_prompt_skips_runtime_middleware() -> None:
+    """A plain string prompt reaches the deep agent unchanged, with no middleware."""
+    with patch(
+        "uipath_langchain.agent.advanced.agent._create_deep_agent",
+        return_value=MagicMock(),
+    ) as mock_create:
+        _build(system_prompt="sys")
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["system_prompt"] == "sys"
+    assert call_kwargs["middleware"] == []
+
+
 @pytest.mark.asyncio
 async def test_transform_input_without_schema_builds_single_user_message() -> None:
     """With no input schema, the built message comes straight from build_user_message."""

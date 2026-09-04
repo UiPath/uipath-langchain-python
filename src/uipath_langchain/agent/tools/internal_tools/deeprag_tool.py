@@ -5,10 +5,12 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import StructuredTool
+from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
 )
+from uipath.core.feature_flags import FeatureFlags
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import CreateDeepRag, UiPathConfig, WaitEphemeralIndex
@@ -37,6 +39,8 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+
+DEEP_RAG_FROM_ATTACHMENTS_KILL_SWITCH = "DisableDeepRagFromAttachments"
 
 
 class ReadyEphemeralIndex(SkipInterruptValue):
@@ -114,6 +118,19 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag(**_tool_kwargs: Any):
+            if not FeatureFlags.is_flag_enabled(
+                DEEP_RAG_FROM_ATTACHMENTS_KILL_SWITCH, default=False
+            ):
+                return interrupt(
+                    CreateDeepRag(
+                        name=f"task-{uuid.uuid4()}",
+                        prompt=query,
+                        attachments=[attachment_id],
+                        citation_mode=citation_mode,
+                        index_folder_key=UiPathConfig.folder_key,
+                    )
+                )
+
             @durable_interrupt
             async def create_ephemeral_index():
                 uipath = UiPath()

@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
+from ..thinking import thinking_rejects_forced_tool_choice
 from .base import ModelPayloadHandler
 
 logger = logging.getLogger(__name__)
@@ -86,15 +87,10 @@ class BedrockInvokePayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool | None = None,
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        _thinking = (getattr(self.model, "model_kwargs", None) or {}).get("thinking")
-        thinking_enabled = (
-            isinstance(_thinking, dict) and _thinking.get("type") == "enabled"
-        )
-        # Anthropic models via Invoke API don't support forced tool use with extended thinking
-        if thinking_enabled and tool_choice == "any":
+        if tool_choice == "any" and thinking_rejects_forced_tool_choice(self.model):
             logger.warning(
-                "Thinking is enabled for the model, but tool_choice is 'any'. "
-                "Changing tool_choice to 'auto' to keep the same behaviour as ChatAnthropicBedrock."
+                "Bedrock rejects forced tool_choice while thinking is active; "
+                "downgrading tool_choice 'any' -> 'auto'."
             )
             tool_choice = "auto"
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
@@ -142,17 +138,10 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool | None = None,
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        _thinking = (
-            getattr(self.model, "additional_model_request_fields", None) or {}
-        ).get("thinking")
-        thinking_enabled = (
-            isinstance(_thinking, dict) and _thinking.get("type") == "enabled"
-        )
-        # Anthropic models via Converse API don't support forced tool use with extended thinking
-        if thinking_enabled and tool_choice == "any":
+        if tool_choice == "any" and thinking_rejects_forced_tool_choice(self.model):
             logger.warning(
-                "Thinking is enabled for the model, but tool_choice is 'any'. "
-                "Changing tool_choice to 'auto' to keep the same behaviour as ChatAnthropicBedrock."
+                "Bedrock rejects forced tool_choice while thinking is active; "
+                "downgrading tool_choice 'any' -> 'auto'."
             )
             tool_choice = "auto"
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
