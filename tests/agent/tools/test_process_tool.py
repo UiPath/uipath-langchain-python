@@ -180,7 +180,44 @@ class TestProcessToolInvocation:
             parent_span_id=None,
             parent_operation_id=None,
             run_as_me=None,
+            entry_point_path=None,
         )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_invoke_forwards_the_configured_entry_point(
+        self, mock_uipath_class, mock_interrupt, process_resource
+    ):
+        """A stored entry point reaches StartJobs; without it Orchestrator runs the release default."""
+        process_resource.properties.entry_point_path = "Workflows/Main.xaml"
+
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key-123"
+        mock_job.folder_key = "folder-key-123"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        resumed = MagicMock(spec=Job)
+        resumed.state = "successful"
+        mock_interrupt.return_value = resumed
+
+        tool = create_process_tool(process_resource)
+        await tool.ainvoke({})
+
+        _, kwargs = mock_client.processes.invoke_async.call_args
+        assert kwargs["entry_point_path"] == "Workflows/Main.xaml"
+
+    def test_metadata_carries_the_entry_point(self, process_resource):
+        process_resource.properties.entry_point_path = "Workflows/Main.xaml"
+
+        tool = create_process_tool(process_resource)
+
+        assert tool.metadata is not None
+        assert tool.metadata["entry_point_path"] == "Workflows/Main.xaml"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
@@ -535,6 +572,7 @@ class TestProcessToolFlowType:
             parent_span_id=None,
             parent_operation_id=None,
             run_as_me=None,
+            entry_point_path=None,
         )
 
     @pytest.mark.asyncio
@@ -616,6 +654,7 @@ class TestProcessToolFunctionType:
             parent_span_id=None,
             parent_operation_id=None,
             run_as_me=None,
+            entry_point_path=None,
         )
 
     @pytest.mark.asyncio

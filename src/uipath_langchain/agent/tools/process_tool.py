@@ -68,6 +68,9 @@ def create_process_tool(
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
     folder_path = get_execution_folder_path()
+    # getattr, not attribute access: BaseResourceProperties sets extra="allow", so against a uipath
+    # release predating the declared field the value is present only if the stored JSON carried it.
+    entry_point_path = getattr(resource.properties, "entry_point_path", None)
 
     input_model: Any = create_model(resource.input_schema)
     output_model: Any = create_output_model(resource.output_schema, resource.name)
@@ -102,6 +105,7 @@ def create_process_tool(
                         parent_span_id=parent_span_id,
                         parent_operation_id=parent_operation_id,
                         run_as_me=True if run_as_me else None,
+                        entry_point_path=entry_point_path,
                     )
                 except EnrichedException as e:
                     raise_for_enriched(
@@ -151,6 +155,7 @@ def create_process_tool(
             "tool_type": resource.type.lower(),
             "display_name": process_name,
             "folder_path": folder_path,
+            "entry_point_path": entry_point_path,
             "args_schema": input_model,
             "output_schema": output_model,
             "_span_context": _span_context,
