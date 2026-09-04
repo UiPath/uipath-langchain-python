@@ -2,6 +2,28 @@
 
 from typing import Any
 
+# The `job-attachment` definitions key is load-bearing: the JSON-schema-to-Pydantic
+# converter derives the `__Job_attachment` marker type from it, and that marker is
+# what `get_job_attachment_paths` looks for when discovering attachment fields.
+JOB_ATTACHMENT_DEFINITION: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "ID": {"type": "string", "description": "Orchestrator attachment key"},
+        "FullName": {"type": "string", "description": "File name"},
+        "MimeType": {
+            "type": "string",
+            "description": "The MIME type of the content",
+        },
+        "Metadata": {
+            "type": "object",
+            "description": "Dictionary<string, string> of metadata",
+            "additionalProperties": {"type": "string"},
+        },
+    },
+    "required": ["ID", "FullName", "MimeType"],
+    "x-uipath-resource-kind": "JobAttachment",
+}
+
 # BatchTransform output schema with file attachment
 BATCH_TRANSFORM_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -12,26 +34,7 @@ BATCH_TRANSFORM_OUTPUT_SCHEMA: dict[str, Any] = {
         }
     },
     "required": ["result"],
-    "definitions": {
-        "job-attachment": {
-            "type": "object",
-            "properties": {
-                "ID": {"type": "string", "description": "Orchestrator attachment key"},
-                "FullName": {"type": "string", "description": "File name"},
-                "MimeType": {
-                    "type": "string",
-                    "description": "The MIME type of the content",
-                },
-                "Metadata": {
-                    "type": "object",
-                    "description": "Dictionary<string, string> of metadata",
-                    "additionalProperties": {"type": "string"},
-                },
-            },
-            "required": ["ID", "FullName", "MimeType"],
-            "x-uipath-resource-kind": "JobAttachment",
-        }
-    },
+    "definitions": {"job-attachment": JOB_ATTACHMENT_DEFINITION},
 }
 
 

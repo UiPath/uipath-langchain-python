@@ -366,3 +366,82 @@ async def test_runtime_system_prompt_middleware_supports_async_model_calls() -> 
 
     assert captured[0].system_message is not None
     assert captured[0].system_message.text == ("runtime prompt\n\ndeepagents prompt")
+
+
+class TestOutputFileVerification:
+    """The wrapper gates typed output on the declared output file fields."""
+
+    ATTACHMENT_ID = "11111111-1111-1111-1111-111111111111"
+
+    @staticmethod
+    def _output_model(required: bool = True) -> type[BaseModel]:
+        from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+            create_model as create_model_from_schema,
+        )
+        from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+            JOB_ATTACHMENT_DEFINITION,
+        )
+
+        return create_model_from_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "report": {"$ref": "#/definitions/job-attachment"},
+                },
+                "required": ["report"] if required else [],
+                "definitions": {"job-attachment": JOB_ATTACHMENT_DEFINITION},
+            }
+        )
+
+    @staticmethod
+    def _tools() -> list[Any]:
+        from uipath_langchain.agent.tools.internal_tools.output_file_tool import (
+            create_output_file_tool,
+        )
+
+        return [create_output_file_tool()]
+
+    def test_file_output_inserts_the_verification_node(self) -> None:
+        graph = _build(output_schema=self._output_model(), tools=self._tools())
+
+        assert "verify_output_files" in set(graph.nodes)
+
+    def test_no_file_output_keeps_the_direct_edge(self) -> None:
+        graph = _build(output_schema=_Output, tools=self._tools())
+
+        assert "verify_output_files" not in set(graph.nodes)
+
+    def test_file_output_without_the_tool_is_not_verified(self) -> None:
+        """With the feature off the tool is absent, so nothing gates the output."""
+        graph = _build(output_schema=self._output_model(), tools=[])
+
+        assert "verify_output_files" not in set(graph.nodes)
+
+    def test_retry_and_problem_state_fields_are_added(self) -> None:
+        graph = _build(output_schema=self._output_model(), tools=self._tools())
+        fields = set(graph.state_schema.model_fields)
+
+        assert "uipath__output_file_retries" in fields
+        assert "uipath__output_file_problem" in fields
+
+    def test_no_file_output_adds_no_verification_state(self) -> None:
+        graph = _build(output_schema=_Output, tools=self._tools())
+        fields = set(graph.state_schema.model_fields)
+
+        assert "uipath__output_file_retries" not in fields
+        assert "uipath__output_file_problem" not in fields
+
+    async def test_verification_state_is_not_forwarded_as_agent_input(self) -> None:
+        """The keys are internal, so transform_input must not treat them as inputs."""
+        graph = _build(
+            input_schema=_Input,
+            output_schema=self._output_model(),
+            tools=self._tools(),
+        )
+        state = graph.state_schema(book={"title": "x"}, question="q")
+
+        update = await graph.nodes["transform_input"].runnable.ainvoke(state)
+
+        assert "messages" in update
+        assert "uipath__output_file_retries" not in update

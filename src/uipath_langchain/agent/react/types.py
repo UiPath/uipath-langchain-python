@@ -29,6 +29,8 @@ class InnerAgentGraphState(BaseModel):
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
     memory_injection: str = ""
     conversational_output: dict[str, Any] | None = None
+    output_file_retries: int = 0
+    output_file_problem: str | None = None
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
@@ -66,6 +68,7 @@ class AgentGraphNode(StrEnum):
     LLM = "llm"
     TOOLS = "tools"
     GENERATE_CONVERSATIONAL_OUTPUT = "generate-conversational-output"
+    VERIFY_OUTPUT_FILES = "verify-output-files"
     TERMINATE = "terminate"
     GUARDED_TERMINATE = "guarded-terminate"
     MEMORY_RECALL = "memory_recall"

@@ -1,15 +1,22 @@
-"""GENERATE_CONVERSATIONAL_OUTPUT node for the Agent graph.
+"""Structured-output extraction for conversational agents.
 
-This intermediate node runs after AGENT for conversational agents whose
-output schema declares custom fields beyond `uipath__agent_response_messages`.
-It performs a focused LLM call with only the `set_conversational_output`
-tool bound and `tool_choice="any"` to extract the structured output for the turn.
+A conversational agent's loop produces messages, but its output schema may
+declare fields as well. Nothing in the message stream fills those, so they are
+extracted afterwards by a focused LLM call with only the
+`set_conversational_output` tool bound and `tool_choice="any"`, which forces the
+model to answer with the declared fields.
+
+`create_conversational_output_extractor` is that call, independent of any graph.
+`create_conversational_output_node` wraps it as the react graph's
+GENERATE_CONVERSATIONAL_OUTPUT node; the advanced agent's wrapper graph builds
+its own node over the same extractor.
 """
 
-from typing import TypeVar
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from pydantic import BaseModel
 from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
@@ -34,15 +41,19 @@ from .types import AgentGraphState
 StateT = TypeVar("StateT", bound=AgentGraphState)
 
 
-def create_conversational_output_node(
+def create_conversational_output_extractor(
     model: BaseChatModel,
     agent_output_schema: type[BaseModel],
-):
-    """Build the conversational structured-output node.
+) -> Callable[[Sequence[BaseMessage]], Awaitable[dict[str, Any]]]:
+    """Build the focused call that extracts the declared output fields.
+
+    The returned coroutine takes the exchange's messages and returns the
+    structured-output arguments the model produced. It is graph-agnostic: the
+    caller decides where those arguments are stored.
 
     Args:
         model: The chat model to invoke for the extraction call. Reused from
-            the AGENT loop; rebinding is stateless.
+            the agent loop; rebinding is stateless.
         agent_output_schema: The agent's declared output schema. Used to
             construct the `set_conversational_output` tool with the
             LLM-fillable fields (`uipath__agent_response_messages` stripped).
@@ -63,8 +74,8 @@ def create_conversational_output_node(
     )
     output_prompt = get_generate_output_prompt()
 
-    async def conversational_output_node(state: StateT):
-        messages = [*state.messages, HumanMessage(content=output_prompt)]
+    async def extract(exchange_messages: Sequence[BaseMessage]) -> dict[str, Any]:
+        messages = [*exchange_messages, HumanMessage(content=output_prompt)]
         config = config_without_streaming(var_child_runnable_config.get(None))
 
         try:
@@ -115,6 +126,19 @@ def create_conversational_output_node(
                 category=UiPathErrorCategory.SYSTEM,
             )
 
-        return {"inner_state": {"conversational_output": set_output_call["args"]}}
+        return set_output_call["args"]
+
+    return extract
+
+
+def create_conversational_output_node(
+    model: BaseChatModel,
+    agent_output_schema: type[BaseModel],
+):
+    """Build the react graph's GENERATE_CONVERSATIONAL_OUTPUT node."""
+    extract = create_conversational_output_extractor(model, agent_output_schema)
+
+    async def conversational_output_node(state: StateT):
+        return {"inner_state": {"conversational_output": await extract(state.messages)}}
 
     return conversational_output_node
