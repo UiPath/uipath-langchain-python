@@ -1,883 +1,769 @@
-"""Tests for McpClient class."""
+"""Tests for the MCP 2 Streamable HTTP client integration."""
 
+import asyncio
 import json
-import logging
-import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+import httpx2
 import pytest
+from mcp.shared.exceptions import MCPError
+from mcp.types import CONNECTION_CLOSED, INVALID_REQUEST, METHOD_NOT_FOUND
 from uipath.agent.models.agent import AgentMcpResourceConfig, AgentMcpTool
 
 from uipath_langchain.agent.tools.mcp import McpClient, SessionInfo, SessionInfoFactory
 
-logger = logging.getLogger(__name__)
 
+class LegacyMcpEndpoint:
+    """Small Streamable HTTP endpoint used to exercise the real MCP SDK transport."""
 
-class TestMcpClient:
-    """Test MCP client behavior with mocked HTTP."""
+    def __init__(
+        self,
+        protocol_version: str = "2025-11-25",
+        *,
+        failed_tool_calls: int = 0,
+        failed_tool_message: str | None = None,
+        failed_tool_code: int = INVALID_REQUEST,
+        block_initialize_on: int | None = None,
+        fail_initialize_on: set[int] | None = None,
+        rejected_session_ids: set[str] | None = None,
+        repeat_session_header: bool = False,
+        known_session_ids: set[str] | None = None,
+        mints_new_session_on_initialize: bool = False,
+    ) -> None:
+        self.protocol_version = protocol_version
+        self.failed_tool_calls = failed_tool_calls
+        self.failed_tool_message = failed_tool_message
+        # JSON-RPC code for the injected failure. The SDK synthesizes
+        # CONNECTION_CLOSED client-side when a transport dies, which a mock
+        # transport cannot stage cleanly; returning the code in a body drives
+        # the same recovery decision through the real transport.
+        self.failed_tool_code = failed_tool_code
+        self.block_initialize_on = block_initialize_on
+        self.fail_initialize_on = fail_initialize_on or set()
+        self.rejected_session_ids = rejected_session_ids or set()
+        self.repeat_session_header = repeat_session_header
+        # Sessions this endpoint will route to. Seed it to stand in for a session
+        # a previous process established and persisted externally.
+        self.known_session_ids = set(known_session_ids or ())
+        # Real servers route by the session header and mint only when it is
+        # absent. Set this to model a server that ignores the header instead.
+        self.mints_new_session_on_initialize = mints_new_session_on_initialize
+        self.initialize_blocked = asyncio.Event()
+        self.release_initialize = asyncio.Event()
+        self.methods: list[str] = []
+        self.request_headers: list[tuple[str, httpx2.Headers]] = []
+        self.initialize_count = 0
+        self.session_mint_count = 0
+        self.tool_call_count = 0
+        self.delete_count = 0
+        self.transport = httpx2.MockTransport(self.handle)
 
-    @pytest.fixture
-    def mcp_resource_config(self):
-        """Create a minimal MCP resource config for testing."""
-        return AgentMcpResourceConfig(
-            name="test_server",
-            description="Test MCP server",
-            folder_path="/Shared/TestFolder",
-            slug="test-server",
-            available_tools=[
-                AgentMcpTool(
-                    name="test_tool",
-                    description="A test tool",
-                    input_schema={
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
+    async def handle(self, request: httpx2.Request) -> httpx2.Response:
+        """Return protocol-correct JSON responses for the MCP methods under test."""
+        if request.method == "GET":
+            return httpx2.Response(405)
+        if request.method == "DELETE":
+            self.delete_count += 1
+            self.request_headers.append(("DELETE", request.headers))
+            return httpx2.Response(204)
+
+        body = json.loads(request.content)
+        method = body["method"]
+        self.methods.append(method)
+        self.request_headers.append((method, request.headers))
+
+        if method == "initialize":
+            self.initialize_count += 1
+            if self.initialize_count == self.block_initialize_on:
+                self.initialize_blocked.set()
+                await self.release_initialize.wait()
+            if self.initialize_count in self.fail_initialize_on:
+                return httpx2.Response(
+                    400,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Replacement initialization failed",
+                        },
                     },
                 )
-            ],
-        )
-
-    @pytest.fixture
-    def mock_uipath_sdk(self):
-        """Create a mock UiPath SDK for patching."""
-        mock_sdk = MagicMock()
-        mock_server = MagicMock()
-        mock_server.mcp_url = "https://test.uipath.com/mcp"
-        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
-        mock_sdk._config = MagicMock()
-        mock_sdk._config.secret = "test-secret-token"
-        return mock_sdk
-
-    def create_mock_stream_response(
-        self,
-        method_call_sequence: list[str],
-        initialize_count: list[int],
-        tool_call_count: list[int],
-        session_guid_1: str = "test-session-first",
-        session_guid_2: str = "test-session-retry",
-        fail_first_tool_call: bool = False,
-    ):
-        """Create a MockStreamResponse class for testing.
-
-        Args:
-            method_call_sequence: List to track method calls.
-            initialize_count: Mutable counter for initialize calls.
-            tool_call_count: Mutable counter for tool calls.
-            session_guid_1: Session ID for first initialization.
-            session_guid_2: Session ID for retry initialization.
-            fail_first_tool_call: If True, first tool call returns 404.
-        """
-
-        class MockStreamResponse:
-            """Mock HTTP stream response for MCP protocol."""
-
-            def __init__(self, method: str, url: str, **kwargs: Any):
-                self.request_method = method
-                self.url = url
-                self.kwargs = kwargs
-
-                if method == "GET":
-                    self.status_code = 405
-                    self.headers = {}
-                    self._content = b""
-                    return
-
-                json_body = kwargs.get("json", {})
-                request_headers = kwargs.get("headers", {})
-
-                self.json_body = json_body
-                self.method = json_body.get("method", "")
-                self.request_headers = request_headers
-                self.request_mcp_session_id = request_headers.get("mcp-session-id", "")
-
-                logger.debug(
-                    f"Responding to method {self.method} for session {self.request_mcp_session_id}"
-                )
-                method_call_sequence.append(self.method)
-
-                status_code, response_json, headers = self._build_response()
-                self.headers = headers or {}
-                self._response_json = response_json
-                self.status_code = status_code
-
-                if response_json:
-                    self._content = json.dumps(self._response_json).encode("utf-8")
-                    self.headers["content-type"] = "application/json"
-                else:
-                    self._content = b""
-
-            def _build_response(self) -> tuple[int, Any, dict[str, str] | None]:
-                """Build JSON-RPC response based on method."""
-                request_id = self.json_body.get("id")
-
-                if self.method == "initialize":
-                    initialize_count[0] += 1
-                    session_id = (
-                        session_guid_1 if initialize_count[0] == 1 else session_guid_2
-                    )
-                    logger.debug(f"MCP initializes new session {session_id}")
-                    return (
-                        200,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "protocolVersion": "2025-06-18",
-                                "capabilities": {"tools": {}},
-                                "serverInfo": {
-                                    "name": "test-server",
-                                    "version": "1.0.0",
-                                },
-                            },
-                        },
-                        {"mcp-session-id": session_id},
-                    )
-
-                elif self.method == "notifications/initialized":
-                    return (204, None, {})
-
-                elif self.method == "tools/list":
-                    return (
-                        200,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "tools": [
-                                    {
-                                        "name": "test_tool",
-                                        "description": "A test tool",
-                                        "inputSchema": {
-                                            "type": "object",
-                                            "properties": {"query": {"type": "string"}},
-                                            "required": ["query"],
-                                        },
-                                        "outputSchema": {
-                                            "type": "object",
-                                            "properties": {
-                                                "result": {"type": "string"}
-                                            },
-                                        },
-                                    }
-                                ],
-                            },
-                        },
-                        {},
-                    )
-
-                elif self.method == "tools/call":
-                    tool_call_count[0] += 1
-
-                    if fail_first_tool_call and tool_call_count[0] == 1:
-                        # Return HTTP 404 to trigger session re-initialization
-                        return (404, None, None)
-
-                    # Success response with structured content
-                    params = self.json_body.get("params", {})
-                    tool_name = params.get("name", "unknown")
-                    structured_result = {"result": f"Success from {tool_name}"}
-
-                    return (
-                        200,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": json.dumps(structured_result),
-                                    }
-                                ],
-                                "structuredContent": structured_result,
-                                "isError": False,
-                            },
-                        },
-                        {},
-                    )
-
-                else:
-                    if request_id is None:
-                        return (204, None, {})
-                    return (
-                        500,
-                        {
-                            "jsonrpc": "2.0",
-                            "id": request_id,
-                            "error": {"code": -32601, "message": "Method not found"},
-                        },
-                        {},
-                    )
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args: Any, **kwargs: Any):
-                pass
-
-            async def aread(self) -> bytes:
-                """Return the response content."""
-                return self._content
-
-            def raise_for_status(self) -> None:
-                """Check response status."""
-                if self.status_code >= 400:
-                    raise Exception(f"HTTP {self.status_code}")
-
-        return MockStreamResponse
-
-    def create_mock_http_client(self, mock_stream_response_class: type) -> MagicMock:
-        """Create a mock HTTP client that uses the given stream response class."""
-        mock_client = MagicMock()
-        mock_client.stream = lambda method, url, **kwargs: mock_stream_response_class(
-            method, url, **kwargs
-        )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
-        return mock_client
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_session_initializes_on_first_call(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that session is initialized lazily on first tool call."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        session = McpClient(config=mcp_resource_config)
-
-        # Session should not be initialized yet
-        assert await session.get_session_id() is None
-        assert not session.is_client_initialized
-
-        # Call tool - should trigger initialization (with SDK mocked)
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            result = await session.call_tool("test_tool", {"query": "test"})
-
-        # Verify initialization happened
-        assert initialize_count[0] == 1
-        assert await session.get_session_id() == "test-session-first"
-        assert session.is_client_initialized
-        assert tool_call_count[0] == 1
-        assert result is not None
-
-        # Verify HTTP client was created once
-        assert mock_async_client_class.call_count == 1
-
-        # Verify method sequence
-        assert "initialize" in method_call_sequence
-        assert "notifications/initialized" in method_call_sequence
-        assert "tools/call" in method_call_sequence
-
-        await session.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_session_reused_across_calls(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that session is reused for multiple tool calls."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        session = McpClient(config=mcp_resource_config)
-
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            # First call
-            await session.call_tool("test_tool", {"query": "first"})
-            assert initialize_count[0] == 1
-
-            # Second call - should reuse session
-            await session.call_tool("test_tool", {"query": "second"})
-            assert initialize_count[0] == 1  # Still only one initialization
-            assert tool_call_count[0] == 2  # But two tool calls
-
-        # HTTP client should still be created only once
-        assert mock_async_client_class.call_count == 1
-
-        await session.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_session_reinitializes_on_404_error(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that only session (not client) is reinitialized on 404 error.
-
-        This verifies the key behavior: when a 404 error occurs, we should:
-        - Keep the existing HTTP client (not create a new one)
-        - Keep the existing streamable connection
-        - Only call session.initialize() again to get a new session ID
-        """
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence,
-            initialize_count,
-            tool_call_count,
-            fail_first_tool_call=True,
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        session = McpClient(config=mcp_resource_config)
-
-        # Call tool - first call fails with 404, should retry
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            result = await session.call_tool("test_tool", {"query": "test"})
-
-        logger.info(f"Result: {result}")
-        logger.info(f"Method sequence: {method_call_sequence}")
-        logger.info(f"Initialize count: {initialize_count[0]}")
-        logger.info(f"Tool call count: {tool_call_count[0]}")
-
-        # Verify session was reinitialized (initialize called twice)
-        assert initialize_count[0] == 2, (
-            f"Expected 2 session initializations, got {initialize_count[0]}"
-        )
-
-        # Verify tool call was retried
-        assert tool_call_count[0] == 2, (
-            f"Expected 2 tool calls, got {tool_call_count[0]}"
-        )
-
-        # Verify session ID changed to the retry session
-        assert await session.get_session_id() == "test-session-retry"
-        assert result is not None
-
-        # KEY ASSERTION: HTTP client should be created only ONCE
-        # Session reinitialization reuses the existing client
-        assert mock_async_client_class.call_count == 1, (
-            f"Expected HTTP client to be created only once, "
-            f"but was created {mock_async_client_class.call_count} times"
-        )
-
-        # Verify the expected method sequence
-        expected_init_count = method_call_sequence.count("initialize")
-        expected_tool_count = method_call_sequence.count("tools/call")
-        assert expected_init_count == 2, (
-            f"Expected 2 initialize calls, got {expected_init_count}"
-        )
-        assert expected_tool_count == 2, (
-            f"Expected 2 tools/call, got {expected_tool_count}"
-        )
-
-        await session.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_max_retries_exceeded(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that exception is raised when max retries are exceeded."""
-        from mcp.shared.exceptions import McpError
-
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        # Create a response that always fails tool calls
-        class AlwaysFailMockResponse:
-            def __init__(self, method: str, url: str, **kwargs: Any):
-                self.request_method = method
-                if method == "GET":
-                    self.status_code = 405
-                    self.headers = {}
-                    self._content = b""
-                    return
-
-                json_body = kwargs.get("json", {})
-                self.method = json_body.get("method", "")
-                method_call_sequence.append(self.method)
-                request_id = json_body.get("id")
-
-                if self.method == "initialize":
-                    initialize_count[0] += 1
-                    self.status_code = 200
-                    self.headers = {"mcp-session-id": f"session-{initialize_count[0]}"}
-                    self._response_json = {
+            session_id = self._session_for_initialize(request)
+            if session_id is None:
+                return httpx2.Response(
+                    404,
+                    headers={"content-type": "application/json"},
+                    json={
                         "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {
-                            "protocolVersion": "2025-06-18",
-                            "capabilities": {"tools": {}},
-                            "serverInfo": {"name": "test", "version": "1.0"},
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Session not found",
                         },
-                    }
-                    self._content = json.dumps(self._response_json).encode()
-                    self.headers["content-type"] = "application/json"
-                elif self.method == "notifications/initialized":
-                    self.status_code = 204
-                    self.headers = {}
-                    self._content = b""
-                elif self.method == "tools/call":
-                    tool_call_count[0] += 1
-                    # Always return 404
-                    self.status_code = 404
-                    self.headers = {}
-                    self._content = b""
-                else:
-                    self.status_code = 200
-                    self.headers = {}
-                    self._content = b""
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args: Any):
-                pass
-
-            async def aread(self) -> bytes:
-                return self._content
-
-            def raise_for_status(self) -> None:
-                if self.status_code >= 400:
-                    raise Exception(f"HTTP {self.status_code}")
-
-        mock_http_client = self.create_mock_http_client(AlwaysFailMockResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        session = McpClient(config=mcp_resource_config, max_retries=1)
-
-        # Should raise McpError after retries exhausted
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            with pytest.raises(McpError):
-                await session.call_tool("test_tool", {"query": "test"})
-
-        # Should have reinitialized session (2 initialize calls)
-        assert initialize_count[0] == 2
-
-        # Should have attempted tool call twice
-        assert tool_call_count[0] == 2
-
-        # HTTP client still created only once
-        assert mock_async_client_class.call_count == 1
-
-        await session.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_dispose_releases_resources(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that dispose() properly releases session resources."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
+                    },
+                )
+            return self._json_response(
+                body["id"],
+                {
+                    "protocolVersion": self.protocol_version,
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "test-server", "version": "1.0.0"},
+                },
+                headers={"mcp-session-id": session_id},
+            )
+        if method == "notifications/initialized":
+            return httpx2.Response(202)
+        if method == "ping":
+            if request.headers.get("mcp-session-id") in self.rejected_session_ids:
+                return httpx2.Response(
+                    404,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Session not found",
+                        },
+                    },
+                )
+            if request.headers.get("mcp-protocol-version") != self.protocol_version:
+                return httpx2.Response(
+                    400,
+                    headers={"content-type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": body["id"],
+                        "error": {
+                            "code": INVALID_REQUEST,
+                            "message": "Unsupported protocol version",
+                        },
+                    },
+                )
+            return self._json_response(body["id"], {})
+        if method == "tools/list":
+            return self._json_response(
+                body["id"],
+                {
+                    "tools": [
+                        {
+                            "name": "test_tool",
+                            "description": "A test tool",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {"query": {"type": "string"}},
+                                "required": ["query"],
+                            },
+                            "outputSchema": {
+                                "type": "object",
+                                "properties": {"result": {"type": "string"}},
+                            },
+                        }
+                    ]
+                },
+                headers=self._repeated_session_header(),
+            )
+        if method == "tools/call":
+            self.tool_call_count += 1
+            if self.tool_call_count <= self.failed_tool_calls:
+                if self.failed_tool_message is not None:
+                    return httpx2.Response(
+                        404,
+                        headers={"content-type": "application/json"},
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": body["id"],
+                            "error": {
+                                "code": self.failed_tool_code,
+                                "message": self.failed_tool_message,
+                            },
+                        },
+                    )
+                return httpx2.Response(404)
+            result = {"result": f"Success from {body['params']['name']}"}
+            return self._json_response(
+                body["id"],
+                {
+                    "content": [{"type": "text", "text": json.dumps(result)}],
+                    "structuredContent": result,
+                    "isError": False,
+                },
+                headers=self._repeated_session_header(),
+            )
+        return httpx2.Response(
+            404,
+            json={
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {"code": METHOD_NOT_FOUND, "message": "Method not found"},
+            },
         )
 
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        session = McpClient(config=mcp_resource_config)
-
-        # Initialize session
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            await session.call_tool("test_tool", {"query": "test"})
-        assert await session.get_session_id() is not None
-        assert session.is_client_initialized
-
-        # Close session
-        await session.dispose()
-
-        # Verify resources are released
-        assert await session.get_session_id() is None
-        assert session._session is None
-        assert session._stack is None
-        assert not session.is_client_initialized
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_client_initialized_property(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that is_client_initialized property reflects actual state."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
+    @staticmethod
+    def _json_response(
+        request_id: int,
+        result: dict[str, Any],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> httpx2.Response:
+        response_headers = {"content-type": "application/json"}
+        response_headers.update(headers or {})
+        return httpx2.Response(
+            200,
+            headers=response_headers,
+            json={"jsonrpc": "2.0", "id": request_id, "result": result},
         )
 
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
+    def headers_for(self, method: str) -> list[httpx2.Headers]:
+        """Return captured headers for one protocol or HTTP method."""
+        return [headers for name, headers in self.request_headers if name == method]
 
-        session = McpClient(config=mcp_resource_config)
+    def _session_for_initialize(self, request: httpx2.Request) -> str | None:
+        """Resolve the session an ``initialize`` belongs to, or None to reject it.
 
-        # Before any call
-        assert not session.is_client_initialized
+        Mirrors the SDK server: a request naming a live session is handled inside
+        it, and a new session is minted only when no session header is present.
+        An unknown or expired ID is rejected rather than silently replaced.
+        """
+        incoming = request.headers.get("mcp-session-id")
+        if incoming is not None and not self.mints_new_session_on_initialize:
+            if (
+                incoming in self.rejected_session_ids
+                or incoming not in self.known_session_ids
+            ):
+                return None
+            return incoming
+        self.session_mint_count += 1
+        minted = f"session-{self.session_mint_count}"
+        self.known_session_ids.add(minted)
+        return minted
 
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            # After first call
-            await session.call_tool("test_tool", {"query": "test"})
-            assert session.is_client_initialized
+    def _repeated_session_header(self) -> dict[str, str] | None:
+        if not self.repeat_session_header or self.session_mint_count == 0:
+            return None
+        return {"mcp-session-id": f"session-{self.session_mint_count}"}
 
-        # After dispose
-        await session.dispose()
-        assert not session.is_client_initialized
 
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_session_can_be_reused_after_dispose(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+@pytest.fixture
+def mcp_resource_config() -> AgentMcpResourceConfig:
+    """Create a minimal MCP resource config for testing."""
+    return AgentMcpResourceConfig(
+        name="test_server",
+        description="Test MCP server",
+        folder_path="/Shared/TestFolder",
+        slug="test-server",
+        available_tools=[
+            AgentMcpTool(
+                name="test_tool",
+                description="A test tool",
+                input_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            )
+        ],
+    )
+
+
+@pytest.fixture
+def mock_uipath_sdk() -> MagicMock:
+    """Create a mock UiPath SDK and resolved MCP server."""
+    sdk = MagicMock()
+    server = MagicMock()
+    server.mcp_url = "https://test.uipath.com/mcp"
+    server.slug = "test-server"
+    server.folder_key = "folder-key"
+    sdk.mcp.retrieve_async = AsyncMock(return_value=server)
+    sdk._config.secret = "test-secret-token"
+    return sdk
+
+
+@asynccontextmanager
+async def configured_client(
+    config: AgentMcpResourceConfig,
+    sdk: MagicMock,
+    endpoint: LegacyMcpEndpoint,
+    **kwargs: Any,
+) -> AsyncIterator[McpClient]:
+    """Build an McpClient whose real HTTP client uses the mock transport."""
+    client = McpClient(config=config, **kwargs)
+    http_kwargs = {
+        "headers": {"Authorization": "Bearer test-secret-token"},
+        "transport": endpoint.transport,
+        "follow_redirects": True,
+    }
+    with (
+        patch("uipath.platform.UiPath", return_value=sdk),
+        patch(
+            "uipath_langchain.agent.tools.mcp.mcp_client.get_httpx_client_kwargs",
+            return_value=http_kwargs,
+        ),
     ):
-        """Test that session can be reinitialized after dispose()."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
+        try:
+            yield client
+        finally:
+            await client.dispose()
 
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
+
+@pytest.mark.asyncio
+async def test_legacy_httpx_timeout_is_normalized_for_final_client(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """The pre-upgrade public timeout type remains accepted by McpClient."""
+    endpoint = LegacyMcpEndpoint()
+    legacy_timeout = httpx.Timeout(20, connect=1, read=2, write=3, pool=4)
+
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        timeout=legacy_timeout,
+    ) as client:
+        await client.call_tool("test_tool", {"query": "test"})
+
+        assert client._http_client is not None
+        final_timeout = client._http_client.timeout
+        assert final_timeout.connect == 1
+        assert final_timeout.read == 2
+        assert final_timeout.write == 3
+        assert final_timeout.pool == 4
+
+
+@pytest.mark.asyncio
+async def test_replaces_transport_and_session_after_404(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A terminated session gets a fresh handshake while reusing its HTTP client."""
+    endpoint = LegacyMcpEndpoint(failed_tool_calls=1)
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 2
+        assert endpoint.tool_call_count == 2
+        assert endpoint.delete_count == 1
+        assert await client.get_session_id() == "session-2"
+        assert [h["mcp-session-id"] for h in endpoint.headers_for("tools/call")] == [
+            "session-1",
+            "session-2",
+        ]
+
+
+@pytest.mark.asyncio
+async def test_replaces_session_after_official_session_not_found_error(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """The SDK server's canonical expired-session response triggers recovery."""
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        failed_tool_message="Session not found",
+    )
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 2
+        assert endpoint.tool_call_count == 2
+        assert await client.get_session_id() == "session-2"
+
+
+@pytest.mark.asyncio
+async def test_dropped_connection_resumes_the_persisted_session(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """``CONNECTION_CLOSED`` reopens the transport but keeps the session.
+
+    A dropped connection is not the server's verdict on the session, so the
+    retry must resume it. A fresh handshake would start a cold session and, for
+    a store-backed ``SessionInfo``, throw away the persisted one for nothing.
+    """
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        failed_tool_message="Connection closed",
+        failed_tool_code=CONNECTION_CLOSED,
+    )
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        # No second handshake: the reconnect adopts the version the first one
+        # negotiated, so the resumed session costs nothing on the wire.
+        assert endpoint.initialize_count == 1
+        assert endpoint.session_mint_count == 1
+        assert await client.get_session_id() == "session-1"
+        assert [h["mcp-session-id"] for h in endpoint.headers_for("tools/call")] == [
+            "session-1",
+            "session-1",
+        ]
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_does_not_offer_a_minted_id_to_a_legacy_handshake(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """The probe is pinned, but a legacy server never issued that ID.
+
+    This endpoint refuses any ``initialize`` naming a session it did not mint, so
+    a handshake still carrying the affinity ID would be rejected first and the
+    session established only on the clean retry.
+    """
+    endpoint = LegacyMcpEndpoint()
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint, protocol_mode="auto"
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.methods[0] == "server/discover"
+        assert endpoint.headers_for("server/discover")[0].get("mcp-session-id")
+        # Accepted on the first attempt: the minted ID was withdrawn before it.
+        assert endpoint.initialize_count == 1
+        assert endpoint.headers_for("initialize")[0].get("mcp-session-id") is None
+        assert await client.get_session_id() == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_persisted_session_replaced_when_server_ignores_the_header(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A server that mints on every handshake loses the session but stays usable."""
+    endpoint = LegacyMcpEndpoint(
+        known_session_ids={"persisted-session"},
+        mints_new_session_on_initialize=True,
+    )
+    session_info = SessionInfo("persisted-session")
+
+    class PersistedFactory(SessionInfoFactory):
+        def create_session(self, mcp_server: Any) -> SessionInfo:
+            return session_info
+
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        session_info_factory=PersistedFactory(),
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 1
+        assert await client.get_session_id() == "session-1"
+        assert endpoint.headers_for("tools/call")[0]["mcp-session-id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_rejected_persisted_session_is_initialized_and_deleted_once(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A stale restored ID is replaced and only the fresh SDK session is deleted."""
+    endpoint = LegacyMcpEndpoint(rejected_session_ids={"expired-session"})
+    session_info = SessionInfo("expired-session")
+
+    class PersistedFactory(SessionInfoFactory):
+        def create_session(self, mcp_server: Any) -> SessionInfo:
+            return session_info
+
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        session_info_factory=PersistedFactory(),
+    ) as client:
+        result = await client.call_tool("test_tool", {"query": "test"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        # The refused handshake for the stale ID, then the clean one.
+        assert endpoint.initialize_count == 2
+        assert endpoint.session_mint_count == 1
+        assert await client.get_session_id() == "session-1"
+
+    assert endpoint.delete_count == 1
+    assert endpoint.headers_for("DELETE")[0]["mcp-session-id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_only_an_initialize_response_assigns_a_session_id(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A session ID arriving on any other response must not be adopted.
+
+    The SDK's own transport reads the ID only from the handshake. Persisting it
+    from any response would let a proxy echoing the header replace a stored ID
+    mid-connection -- including a client-minted routing key in ``auto`` mode,
+    whose probe runs on the legacy wire before the era is known.
+    """
+
+    class RecordingSessionInfo(SessionInfo):
+        def __init__(self) -> None:
+            super().__init__()
+            self.persisted: list[str | None] = []
+
+        async def set_session_id(self, session_id: str | None) -> None:
+            self.persisted.append(session_id)
+            await super().set_session_id(session_id)
+
+    session_info = RecordingSessionInfo()
+
+    class RecordingFactory(SessionInfoFactory):
+        def create_session(self, mcp_server: Any) -> SessionInfo:
+            return session_info
+
+    # The endpoint stamps a *different* session ID onto every non-initialize
+    # response, the way a session-rewriting proxy would.
+    endpoint = LegacyMcpEndpoint(repeat_session_header=True)
+    endpoint._repeated_session_header = lambda: {"mcp-session-id": "proxy-injected"}  # type: ignore[method-assign]
+
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        session_info_factory=RecordingFactory(),
+    ) as client:
+        await client.call_tool("test_tool", {"query": "test"})
+
+        assert session_info.persisted == ["session-1"]
+        assert await client.get_session_id() == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_repeated_session_headers_do_not_repeat_external_persistence(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """An unchanged response header is not persisted after every MCP call."""
+
+    class CountingSessionInfo(SessionInfo):
+        def __init__(self) -> None:
+            super().__init__()
+            self.persisted_values: list[str | None] = []
+
+        async def set_session_id(self, session_id: str | None) -> None:
+            self.persisted_values.append(session_id)
+            await super().set_session_id(session_id)
+
+    session_info = CountingSessionInfo()
+
+    class CountingFactory(SessionInfoFactory):
+        def create_session(self, mcp_server: Any) -> SessionInfo:
+            return session_info
+
+    endpoint = LegacyMcpEndpoint(repeat_session_header=True)
+    async with configured_client(
+        mcp_resource_config,
+        mock_uipath_sdk,
+        endpoint,
+        session_info_factory=CountingFactory(),
+    ) as client:
+        await client.list_tools()
+        await client.call_tool("test_tool", {"query": "first"})
+        await client.call_tool("test_tool", {"query": "second"})
+
+        assert session_info.persisted_values == ["session-1"]
+
+
+@pytest.mark.asyncio
+async def test_max_retries_exceeded_raises_mcp_error(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """Repeated session termination is surfaced after the configured retry."""
+    endpoint = LegacyMcpEndpoint(failed_tool_calls=2)
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint, max_retries=1
+    ) as client:
+        with pytest.raises(MCPError) as exc_info:
+            await client.call_tool("test_tool", {"query": "test"})
+
+        assert exc_info.value.code == INVALID_REQUEST
+        assert endpoint.initialize_count == 2
+        assert endpoint.tool_call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_recovery_does_not_replace_a_new_session(
+    mcp_resource_config: AgentMcpResourceConfig,
+) -> None:
+    """A late failure from an old session must not tear down its replacement."""
+    client = McpClient(config=mcp_resource_config)
+    failed_session = MagicMock()
+    replacement_session = MagicMock()
+    client._client_initialized = True
+    client._session = replacement_session
+    client._session_info = SessionInfo("replacement-id")
+    open_connection = AsyncMock()
+
+    with patch.object(client, "_open_connection", open_connection):
+        await client._reinitialize_session(failed_session)
+
+    assert client._session is replacement_session
+    assert await client.get_session_id() == "replacement-id"
+    open_connection.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_continues_when_failed_connection_cleanup_raises(
+    mcp_resource_config: AgentMcpResourceConfig,
+) -> None:
+    """Closing the failed stack cannot mask recovery of the MCP connection."""
+    client = McpClient(config=mcp_resource_config)
+    failed_session = MagicMock()
+    failed_stack = MagicMock()
+    failed_stack.aclose = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+    client._client_initialized = True
+    client._session = failed_session
+    client._connection_stack = failed_stack
+    client._session_info = SessionInfo("failed-session")
+    open_connection = AsyncMock()
+
+    with patch.object(client, "_open_connection", open_connection):
+        await client._reinitialize_session(
+            failed_session, error=MCPError(INVALID_REQUEST, "Session terminated")
         )
 
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
+    failed_stack.aclose.assert_awaited_once()
+    open_connection.assert_awaited_once()
+    assert await client.get_session_id() is None
 
-        session = McpClient(config=mcp_resource_config)
 
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            # First use
-            await session.call_tool("test_tool", {"query": "first"})
-            assert await session.get_session_id() == "test-session-first"
+@pytest.mark.asyncio
+async def test_concurrent_call_waits_for_recovery_initialization(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A caller cannot use a replacement session before its handshake finishes."""
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        block_initialize_on=2,
+    )
 
-            # Close
-            await session.dispose()
-            assert await session.get_session_id() is None
-
-            # Reuse - should create new client and session
-            # Note: mock returns "test-session-retry" for second initialize
-            await session.call_tool("test_tool", {"query": "second"})
-            assert await session.get_session_id() == "test-session-retry"
-            assert session.is_client_initialized
-
-        # HTTP client was created twice (once before dispose, once after)
-        assert mock_async_client_class.call_count == 2
-
-        await session.dispose()
-
-    @pytest.mark.asyncio
-    async def test_raises_on_missing_mcp_url(self, mcp_resource_config):
-        """Test that ValueError is raised when MCP server has no URL configured."""
-        mock_sdk = MagicMock()
-        mock_server = MagicMock()
-        mock_server.mcp_url = None  # No URL configured
-        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
-        mock_sdk._config = MagicMock()
-        mock_sdk._config.secret = "test-token"
-
-        session = McpClient(config=mcp_resource_config)
-
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_sdk,
-        ):
-            with pytest.raises(ValueError, match="has no URL configured"):
-                await session.call_tool("test_tool", {"query": "test"})
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_custom_session_info_factory_is_used(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that a custom SessionInfoFactory is called during initialization."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        recovery_call = asyncio.create_task(
+            client.call_tool("test_tool", {"query": "recover"})
         )
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
+        await asyncio.wait_for(endpoint.initialize_blocked.wait(), timeout=2)
 
-        custom_session_info = SessionInfo()
+        concurrent_list = asyncio.create_task(client.list_tools(force_refresh=True))
+        await asyncio.sleep(0)
+        assert not concurrent_list.done()
 
-        class TrackingFactory(SessionInfoFactory):
-            called_with_server = None
-
-            def create_session(self, mcp_server: Any) -> SessionInfo:
-                TrackingFactory.called_with_server = mcp_server
-                return custom_session_info
-
-        factory = TrackingFactory()
-        session = McpClient(
-            config=mcp_resource_config,
-            session_info_factory=factory,
+        endpoint.release_initialize.set()
+        call_result, list_result = await asyncio.gather(
+            recovery_call,
+            concurrent_list,
         )
 
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
+        assert call_result.structured_content == {"result": "Success from test_tool"}
+        assert list_result.tools[0].name == "test_tool"
+
+
+@pytest.mark.asyncio
+async def test_later_call_recovers_after_replacement_initialization_failure(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A failed replacement does not strand the client without a session."""
+    endpoint = LegacyMcpEndpoint(
+        failed_tool_calls=1,
+        fail_initialize_on={2},
+    )
+
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        with pytest.raises(MCPError, match="Replacement initialization failed"):
+            await client.call_tool("test_tool", {"query": "first"})
+
+        assert client.is_client_initialized
+        assert client._session is None
+
+        result = await client.call_tool("test_tool", {"query": "second"})
+
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 3
+
+
+@pytest.mark.asyncio
+async def test_raises_on_missing_mcp_url(
+    mcp_resource_config: AgentMcpResourceConfig,
+) -> None:
+    """A server registration without an endpoint fails before allocating HTTP state."""
+    sdk = MagicMock()
+    server = MagicMock()
+    server.mcp_url = None
+    sdk.mcp.retrieve_async = AsyncMock(return_value=server)
+
+    client = McpClient(config=mcp_resource_config)
+    with patch("uipath.platform.UiPath", return_value=sdk):
+        with pytest.raises(ValueError, match="has no URL configured"):
+            await client.call_tool("test_tool", {"query": "test"})
+
+
+@pytest.mark.asyncio
+async def test_initialization_failure_cleans_state_and_allows_retry(
+    mcp_resource_config: AgentMcpResourceConfig,
+    mock_uipath_sdk: MagicMock,
+) -> None:
+    """A failed handshake releases both stacks and leaves the client reusable."""
+    endpoint = LegacyMcpEndpoint()
+
+    async with configured_client(
+        mcp_resource_config, mock_uipath_sdk, endpoint
+    ) as client:
+        with patch.object(
+            client,
+            "_initialize_session",
+            AsyncMock(side_effect=RuntimeError("initialize failed")),
         ):
-            await session.call_tool("test_tool", {"query": "test"})
+            with pytest.raises(RuntimeError, match="initialize failed"):
+                await client.call_tool("test_tool", {"query": "first"})
 
-        # Verify factory was called with the McpServer
-        assert TrackingFactory.called_with_server is not None
-
-        # Verify our custom SessionInfo instance is used by McpClient
-        assert session._session_info is custom_session_info
-        assert await session.get_session_id() == "test-session-first"
-
-        await session.dispose()
-
-    @pytest.mark.asyncio
-    async def test_skips_initialize_when_session_info_has_id(self, mcp_resource_config):
-        """Test that _initialize_session skips session.initialize() when SessionInfo has an ID."""
-        session = McpClient(config=mcp_resource_config)
-
-        # Simulate already-initialized client with pre-existing session ID
-        session._session_info = SessionInfo(session_id="pre-existing-id")
-        session._session = MagicMock()
-        session._session.initialize = AsyncMock()
-
-        await session._initialize_session()
-
-        # initialize() should NOT be called because session_info already has an ID
-        session._session.initialize.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_reinitialize_clears_session_info_before_init(
-        self, mcp_resource_config
-    ):
-        """Test that _reinitialize_session clears session info then calls initialize."""
-        session = McpClient(config=mcp_resource_config)
-
-        # Simulate already-initialized client with a stale session ID
-        session._client_initialized = True
-        session._session_info = SessionInfo(session_id="stale-id")
-        session._session = MagicMock()
-        session._session.initialize = AsyncMock()
-
-        await session._reinitialize_session()
-
-        # Session info should have been cleared before re-initializing
-        # (set_session_id(None) was called, then _initialize_session ran)
-        session._session.initialize.assert_called_once()
-
-        # After reinitialize, session_info.session_id is None because
-        # the mocked initialize() doesn't set a new one
-        assert await session.get_session_id() is None
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_list_tools_initializes_session_and_returns_result(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """Test that list_tools lazily initializes session and returns tools."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        client = McpClient(config=mcp_resource_config)
-
+        assert client._stack is None
+        assert client._connection_stack is None
+        assert client._http_client is None
+        assert client._session_info is None
+        assert client._session is None
         assert not client.is_client_initialized
 
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            result = await client.list_tools()
+        result = await client.call_tool("test_tool", {"query": "second"})
 
-        # Session should have been initialized
-        assert initialize_count[0] == 1
-        assert client.is_client_initialized
+        assert result.structured_content == {"result": "Success from test_tool"}
+        assert endpoint.initialize_count == 1
 
-        # Should return the tools from the mock server
-        assert result is not None
-        assert len(result.tools) == 1
-        assert result.tools[0].name == "test_tool"
 
-        # Verify protocol flow includes tools/list
-        assert "initialize" in method_call_sequence
-        assert "tools/list" in method_call_sequence
-        # tools/call should NOT have been called
-        assert "tools/call" not in method_call_sequence
-
-        await client.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_list_tools_caches_result_across_calls(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """list_tools caches its result: a second call reuses the session and the
-        cached tool list, issuing only one tools/list RPC."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        client = McpClient(config=mcp_resource_config)
-
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            first = await client.list_tools()
-            assert initialize_count[0] == 1
-
-            second = await client.list_tools()
-            assert initialize_count[0] == 1  # Still only one initialization
-
-        # Fetched once per lifetime: second call returns the cached result, no new RPC.
-        assert method_call_sequence.count("tools/list") == 1
-        assert first is second
-
-        await client.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_list_tools_force_refresh_bypasses_cache(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """force_refresh=True re-queries the server instead of returning the cache."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        client = McpClient(config=mcp_resource_config)
-
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            await client.list_tools()
-            await client.list_tools(force_refresh=True)
-
-        # Session reused, but the server is queried twice.
-        assert initialize_count[0] == 1
-        assert method_call_sequence.count("tools/list") == 2
-
-        await client.dispose()
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_dispose_clears_tools_cache(
-        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
-    ):
-        """dispose() clears the cached tool list so a reused (or resumed) client
-        re-fetches it once."""
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        client = McpClient(config=mcp_resource_config)
-
-        with patch(
-            "uipath.platform.UiPath",
-            return_value=mock_uipath_sdk,
-        ):
-            await client.list_tools()
-            assert client._tools_cache is not None
-
-        await client.dispose()
-        assert client._tools_cache is None
-
-    @pytest.mark.asyncio
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    @patch("httpx.AsyncClient")
-    async def test_retrieve_async_uses_name_and_execution_folder_path(
-        self, mock_async_client_class, mcp_resource_config
-    ):
-        """Test that name resolution receives both identities and the execution folder."""
-        mock_sdk = MagicMock()
-        mock_server = MagicMock()
-        mock_server.mcp_url = "https://test.uipath.com/mcp"
-        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
-        mock_sdk._config = MagicMock()
-        mock_sdk._config.secret = "test-secret-token"
-
-        method_call_sequence: list[str] = []
-        initialize_count = [0]
-        tool_call_count = [0]
-
-        MockStreamResponse = self.create_mock_stream_response(
-            method_call_sequence, initialize_count, tool_call_count
-        )
-        mock_http_client = self.create_mock_http_client(MockStreamResponse)
-        mock_async_client_class.return_value = mock_http_client
-
-        session = McpClient(config=mcp_resource_config)
-
-        with patch("uipath.platform.UiPath", return_value=mock_sdk):
-            await session.call_tool("test_tool", {"query": "test"})
-
-        mock_sdk.mcp.retrieve_async.assert_called_once_with(
-            name="test_server",
-            folder_path="/Shared/TestFolder",
-        )
-
-        await session.dispose()
+def test_only_session_specific_invalid_request_is_retryable() -> None:
+    """Ordinary INVALID_REQUEST errors must not be mislabeled as disconnects."""
+    assert McpClient.is_session_error(
+        MCPError(code=CONNECTION_CLOSED, message="Connection closed")
+    )
+    assert McpClient.is_session_error(
+        MCPError(code=INVALID_REQUEST, message="Session terminated")
+    )
+    assert McpClient.is_session_error(
+        MCPError(code=INVALID_REQUEST, message="Session not found")
+    )
+    assert not McpClient.is_session_error(
+        MCPError(code=INVALID_REQUEST, message="Invalid request parameters")
+    )
