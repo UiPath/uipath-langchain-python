@@ -13,6 +13,10 @@ from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ...runtime._citations import cas_deep_rag_citation_wrapper
+from ..attachments.output_files import (
+    DEFAULT_MAX_OUTPUT_FILE_RETRIES,
+    get_output_file_fields,
+)
 from ..guardrails.actions import GuardrailAction
 from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
 from .conversational_output_node import (
@@ -31,6 +35,7 @@ from .llm_node import (
     create_llm_node,
 )
 from .memory_node import create_memory_recall_node
+from .output_files_node import create_output_files_node
 from .router import (
     create_route_agent,
 )
@@ -81,6 +86,13 @@ def create_agent(
         config = AgentGraphConfig()
 
     agent_tools = list(tools)
+    output_file_fields = (
+        get_output_file_fields(output_schema)
+        if output_schema is not None
+        and not config.is_conversational
+        and config.output_files_enabled
+        else []
+    )
     flow_control_tools: list[BaseTool] = (
         [] if config.is_conversational else create_flow_control_tools(output_schema)
     )
@@ -161,6 +173,13 @@ def create_agent(
     )
     builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
 
+    if output_file_fields:
+        builder.add_node(
+            AgentGraphNode.VERIFY_OUTPUT_FILES,
+            create_output_files_node(
+                output_file_fields, DEFAULT_MAX_OUTPUT_FILE_RETRIES
+            ),
+        )
     if with_conversational_output_node and output_schema is not None:
         builder.add_node(
             AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT,
@@ -216,8 +235,11 @@ def create_agent(
             *tool_node_names,
             AgentGraphNode.TERMINATE,
         ]
+        if output_file_fields:
+            target_node_names.append(AgentGraphNode.VERIFY_OUTPUT_FILES)
         route_agent = create_route_agent(
             valid_targets=target_node_names,
+            verify_output_files=bool(output_file_fields),
         )
 
     builder.add_conditional_edges(

@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, NotRequired, cast
+from typing import Any, Literal, NotRequired, cast
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
@@ -21,11 +21,22 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
+from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from uipath.core.chat import UiPathConversationMessageData
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_unique_model_field_name
 from uipath_langchain.agent.attachments.job_attachments import get_job_attachment_paths
+from uipath_langchain.agent.attachments.output_files import (
+    DEFAULT_MAX_OUTPUT_FILE_RETRIES,
+    diagnose_output_files,
+    get_output_file_fields,
+)
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .types import (
@@ -167,6 +178,7 @@ def create_advanced_agent_graph(
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
     skills: Sequence[str] | None = None,
+    output_files_enabled: bool = False,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -175,12 +187,20 @@ def create_advanced_agent_graph(
     ``FilesystemBackend`` also enables workspace memory: deepagents'
     ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
     Memory stays disabled for non-filesystem backends, which carry no workspace.
+
+    With ``output_files_enabled``, a job-attachment field in the output schema
+    is gated by a verification node: an unfilled required file field, or a
+    reference to an attachment that is not linked to this job, sends the agent
+    back for another turn instead of emitting an output it cannot honor.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
     )
     runtime_prompt = _resolve_runtime_system_prompt(
         system_prompt, AdvancedAgentGraphState, input_schema
+    )
+    output_file_fields = (
+        get_output_file_fields(output_schema) if output_files_enabled else []
     )
 
     inner_graph = create_advanced_agent(
@@ -194,16 +214,21 @@ def create_advanced_agent_graph(
         skills=skills,
     )
 
+    output_file_retries_key = get_unique_model_field_name(
+        "uipath__output_file_retries", AdvancedAgentGraphState, input_schema
+    )
+    state_fields: dict[str, Any] = dict(runtime_prompt.state_fields)
+    if output_file_fields:
+        state_fields[output_file_retries_key] = (int, 0)
+
     wrapper_state = create_state_with_input(input_schema)
-    if runtime_prompt.state_fields:
+    if state_fields:
         wrapper_state = create_model(
             "RuntimeAdvancedAgentGraphState",
             __base__=wrapper_state,
-            **runtime_prompt.state_fields,
+            **state_fields,
         )
-    internal_fields = set(AdvancedAgentGraphState.model_fields) | set(
-        runtime_prompt.state_fields
-    )
+    internal_fields = set(AdvancedAgentGraphState.model_fields) | set(state_fields)
     attachment_paths = (
         get_job_attachment_paths(input_schema) if input_schema is not None else []
     )
@@ -231,6 +256,38 @@ def create_advanced_agent_graph(
         structured = getattr(state, "structured_response", {})
         return output_schema.model_validate(structured).model_dump()
 
+    async def verify_output_files(
+        state: BaseModel,
+    ) -> Command[Literal["advanced_agent", "transform_output"]]:
+        structured = getattr(state, "structured_response", {}) or {}
+        problem = await diagnose_output_files(output_file_fields, structured)
+        if problem is None:
+            return Command(goto="transform_output")
+
+        retries = getattr(state, output_file_retries_key, 0) or 0
+        if retries >= DEFAULT_MAX_OUTPUT_FILE_RETRIES:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+                title="Agent did not produce the required output file",
+                detail=(
+                    f"{problem} The agent was given "
+                    f"{DEFAULT_MAX_OUTPUT_FILE_RETRIES} chance(s) to correct this "
+                    "and did not. Verify the agent's prompt asks for the file, and "
+                    "that the output schema's file fields are the ones you intend."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
+
+        # The structured-output tool call is already answered by this point, so the
+        # correction goes in as a new user turn rather than a tool result.
+        return Command(
+            goto="advanced_agent",
+            update={
+                "messages": [HumanMessage(content=problem)],
+                            output_file_retries_key: retries + 1,
+            },
+        )
+
     wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(
         wrapper_state, input_schema=input_schema, output_schema=output_schema
     )
@@ -239,7 +296,11 @@ def create_advanced_agent_graph(
     wrapper.add_node("transform_output", transform_output)
     wrapper.add_edge(START, "transform_input")
     wrapper.add_edge("transform_input", "advanced_agent")
-    wrapper.add_edge("advanced_agent", "transform_output")
+    if output_file_fields:
+        wrapper.add_node("verify_output_files", verify_output_files)
+        wrapper.add_edge("advanced_agent", "verify_output_files")
+    else:
+        wrapper.add_edge("advanced_agent", "transform_output")
     wrapper.add_edge("transform_output", END)
 
     return wrapper
