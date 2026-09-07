@@ -2,37 +2,47 @@
 
 from typing import Any
 
-# BatchTransform output schema with file attachment
-BATCH_TRANSFORM_OUTPUT_SCHEMA: dict[str, Any] = {
+# The `job-attachment` definitions key is load-bearing: the JSON-schema-to-Pydantic
+# converter derives the `__Job_attachment` marker type from it, and that marker is
+# what `get_job_attachment_paths` looks for when discovering attachment fields.
+JOB_ATTACHMENT_DEFINITION: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "result": {
-            "$ref": "#/definitions/job-attachment",
-            "description": "The transformed result file as an attachment",
-        }
-    },
-    "required": ["result"],
-    "definitions": {
-        "job-attachment": {
+        "ID": {"type": "string", "description": "Orchestrator attachment key"},
+        "FullName": {"type": "string", "description": "File name"},
+        "MimeType": {
+            "type": "string",
+            "description": "The MIME type of the content",
+        },
+        "Metadata": {
             "type": "object",
-            "properties": {
-                "ID": {"type": "string", "description": "Orchestrator attachment key"},
-                "FullName": {"type": "string", "description": "File name"},
-                "MimeType": {
-                    "type": "string",
-                    "description": "The MIME type of the content",
-                },
-                "Metadata": {
-                    "type": "object",
-                    "description": "Dictionary<string, string> of metadata",
-                    "additionalProperties": {"type": "string"},
-                },
-            },
-            "required": ["ID", "FullName", "MimeType"],
-            "x-uipath-resource-kind": "JobAttachment",
-        }
+            "description": "Dictionary<string, string> of metadata",
+            "additionalProperties": {"type": "string"},
+        },
     },
+    "required": ["ID", "FullName", "MimeType"],
+    "x-uipath-resource-kind": "JobAttachment",
 }
+
+
+def single_attachment_schema(field: str, description: str) -> dict[str, Any]:
+    """A schema for an object whose one required ``field`` holds an attachment."""
+    return {
+        "type": "object",
+        "properties": {
+            field: {
+                "$ref": "#/definitions/job-attachment",
+                "description": description,
+            }
+        },
+        "required": [field],
+        "definitions": {"job-attachment": JOB_ATTACHMENT_DEFINITION},
+    }
+
+
+BATCH_TRANSFORM_OUTPUT_SCHEMA: dict[str, Any] = single_attachment_schema(
+    "result", "The transformed result file as an attachment"
+)
 
 
 def add_query_field_to_schema(
