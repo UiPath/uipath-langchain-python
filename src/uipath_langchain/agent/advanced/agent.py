@@ -9,6 +9,7 @@ from deepagents import create_deep_agent as _create_deep_agent
 from deepagents.backends import BackendProtocol
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
@@ -17,7 +18,7 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
@@ -43,6 +44,7 @@ from uipath_langchain.agent.react.conversational_output_node import (
 from uipath_langchain.agent.react.utils import (
     has_custom_conversational_output_fields,
 )
+from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .types import (
@@ -141,6 +143,132 @@ def _resolve_runtime_system_prompt(
     return _RuntimeSystemPrompt(None, system_prompt, state_key)
 
 
+class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Route deep-agent model calls through the provider's payload handler.
+
+    The react path shapes every call with ``get_payload_handler`` and checks the
+    finish reason that comes back. Deep agents bypass both, and each omission
+    breaks a Gemini subagent turn: with no forced ``tool_choice`` the request
+    carries no ``function_calling_config``, so Vertex falls back to ``AUTO`` and
+    ``gemini-2.5-flash`` answers with Python source instead of a function call,
+    then the resulting ``MALFORMED_FUNCTION_CALL`` arrives as an empty message
+    that reads as a final answer. Only the main agent escapes it, because a
+    structured-output response format forces ``tool_choice`` for every one of
+    its calls.
+    """
+
+    def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
+        # langchain_google_genai rejects a request carrying both tool_choice and
+        # tool_config.function_calling_config, gating on tool_choice's
+        # truthiness. Matching that gate keeps the two mutually exclusive.
+        if request.tool_choice:
+            return request
+        bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
+        tool_config = (
+            get_payload_handler(request.model)
+            .get_tool_binding_kwargs(
+                tools=bound_tools,
+                tool_choice="auto",
+                strict_mode=True,
+            )
+            .get("tool_config")
+        )
+        if tool_config is None:
+            return request
+        return request.override(
+            model_settings={**request.model_settings, "tool_config": tool_config}
+        )
+
+    def _validate_response(
+        self, request: ModelRequest[Any], response: ModelResponse[Any]
+    ) -> None:
+        handler = get_payload_handler(request.model)
+        for message in response.result:
+            if isinstance(message, AIMessage):
+                handler.check_stop_reason(message)
+        self._reject_empty_answer(response)
+
+    def _reject_empty_answer(self, response: ModelResponse[Any]) -> None:
+        """Refuse a turn that neither said anything nor called a tool.
+
+        Such a message ends the loop as a final answer, so a subagent hands its
+        caller an empty result and the caller either retries forever or invents
+        one. A provider that reports no finish reason still lands here.
+        """
+        if response.structured_response is not None:
+            return
+        messages = [m for m in response.result if isinstance(m, AIMessage)]
+        if not messages:
+            return
+        last = messages[-1]
+        if last.text.strip() or last.tool_calls:
+            return
+        # A reasoning-only turn also carries no text and no tool calls, and is a
+        # step the loop can continue from rather than a dead end.
+        if any(block.get("type") != "text" for block in last.content_blocks):
+            return
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+            title="The model returned an empty response.",
+            detail=(
+                "The model produced neither text nor a tool call, which ends the "
+                "agent loop with nothing to report. If you are using a BYOM "
+                "configuration, verify your model deployment returns tool calls "
+                "for the tools it is given."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        response = handler(self._prepare_request(request))
+        self._validate_response(request, response)
+        return response
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        response = await handler(self._prepare_request(request))
+        self._validate_response(request, response)
+        return response
+
+
+def _subagents_with_middleware(
+    subagents: Sequence[SubAgent | CompiledSubAgent],
+    extra: Sequence[AgentMiddleware[Any, Any]],
+) -> list[SubAgent | CompiledSubAgent]:
+    """Attach ``extra`` to every declarative subagent, general-purpose included.
+
+    ``create_deep_agent`` gives the ``middleware`` argument to the main agent
+    alone and assembles the general-purpose subagent itself, so a request-shaping
+    middleware reaches a subagent only through its spec. Supplying that spec here
+    suppresses the identical one deepagents would add, and it still builds the
+    subagent's own middleware stack, tools, model, and prompt around ours.
+    """
+    specs = list(subagents)
+    if not any(spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in specs):
+        specs.insert(0, cast("SubAgent", dict(GENERAL_PURPOSE_SUBAGENT)))
+    with_middleware: list[SubAgent | CompiledSubAgent] = []
+    for spec in specs:
+        # A compiled or remote subagent is an opaque runnable with no model call
+        # of ours to wrap.
+        if "runnable" in spec or "graph_id" in spec:
+            with_middleware.append(spec)
+            continue
+        with_middleware.append(
+            cast(
+                "SubAgent",
+                {**spec, "middleware": [*spec.get("middleware", []), *extra]},
+            )
+        )
+    return with_middleware
+
+
 def create_advanced_agent(
     model: BaseChatModel,
     system_prompt: str | SystemMessage | None = "",
@@ -161,15 +289,16 @@ def create_advanced_agent(
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
     """
+    payload_handler_middleware = _PayloadHandlerMiddleware()
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=list(subagents),
+        subagents=_subagents_with_middleware(subagents, [payload_handler_middleware]),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=list(middleware),
+        middleware=[*middleware, payload_handler_middleware],
         skills=list(skills) if skills else None,
     )
 

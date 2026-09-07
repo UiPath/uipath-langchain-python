@@ -45,6 +45,17 @@ def _mock_model() -> MagicMock:
     return model
 
 
+def _runtime_prompt_middleware(
+    middleware: Any,
+) -> list[_RuntimeSystemPromptMiddleware]:
+    """The runtime-prompt middleware among those passed to the deep agent."""
+    return [
+        entry
+        for entry in middleware
+        if isinstance(entry, _RuntimeSystemPromptMiddleware)
+    ]
+
+
 def _build(**overrides: Any) -> Any:
     kwargs: dict[str, Any] = dict(
         model=_mock_model(),
@@ -76,9 +87,9 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system_prompt"] is None
-    assert len(call_kwargs["middleware"]) == 1
-    assert isinstance(call_kwargs["middleware"][0], _RuntimeSystemPromptMiddleware)
-    assert call_kwargs["middleware"][0].state_key == "uipath__system_prompt"
+    runtime_middleware = _runtime_prompt_middleware(call_kwargs["middleware"])
+    assert len(runtime_middleware) == 1
+    assert runtime_middleware[0].state_key == "uipath__system_prompt"
 
 
 def test_static_system_prompt_skips_runtime_middleware() -> None:
@@ -91,7 +102,7 @@ def test_static_system_prompt_skips_runtime_middleware() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system_prompt"] == "sys"
-    assert call_kwargs["middleware"] == []
+    assert _runtime_prompt_middleware(call_kwargs["middleware"]) == []
 
 
 @pytest.mark.asyncio
