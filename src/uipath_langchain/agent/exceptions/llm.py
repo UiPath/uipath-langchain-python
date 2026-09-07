@@ -21,6 +21,55 @@ from uipath_langchain.agent.exceptions.exceptions import (
 _LICENSE_ERROR_CODE = 10000
 _LICENSE_TITLE = "license not available"
 
+# A canned, provider-free replacement for the useless HTTP reason phrase. The
+# relayed provider message is deliberately NOT read out of the body:
+# it may carry customer PII, and it is already recorded on the LLM call span,
+# which is tenant-scoped. It has to stand on its own -- USER is not in
+# _SHOULD_WRAP_CATEGORIES, so nothing else is prepended to it.
+_BAD_REQUEST_DETAIL = (
+    "The model provider rejected the request as invalid. Review the agent's model "
+    "settings (output-token limit, temperature, effort). The provider's own message "
+    "is recorded on the LLM call span for this run."
+)
+
+_Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str]
+
+_NOT_FOUND_SIGNATURES: tuple[tuple[tuple[str, ...], _Verdict], ...] = (
+    (
+        ("no active connection found for endpoint",),
+        (
+            AgentRuntimeErrorCode.LLM_BYO_CONNECTION_UNAVAILABLE,
+            UiPathErrorCategory.DEPLOYMENT,
+            "The agent's model connection is not available",
+            "The model this agent uses is served through a bring-your-own-model "
+            "connection whose relay is not connected. Start the relay client for "
+            "that connection, or reload the relay on your nodes if you recently "
+            "changed its configuration, then run the agent again.",
+        ),
+    ),
+    (
+        ("deploymentnotfound",),
+        (
+            AgentRuntimeErrorCode.LLM_PROVIDER_NOT_FOUND,
+            UiPathErrorCategory.DEPLOYMENT,
+            "The agent's model deployment does not exist",
+            "If you are using a Bring Your Own configuration "
+            "make sure it is correctly configured. If the error "
+            "persists, contact your administrator.",
+        ),
+    ),
+    (
+        ("reached the end of its life",),
+        (
+            AgentRuntimeErrorCode.LLM_PROVIDER_NOT_FOUND,
+            UiPathErrorCategory.DEPLOYMENT,
+            "The agent's model has been retired",
+            "The provider has retired the model version this agent is configured "
+            "to use. Point the agent at a currently supported model.",
+        ),
+    ),
+)
+
 
 def raise_for_llm_client_error(error: UiPathError) -> None:
     """Raise a structured agent error for known LLM-client error codes."""
@@ -60,13 +109,55 @@ def _is_license_error(body: object) -> bool:
     return isinstance(title, str) and title.strip().lower() == _LICENSE_TITLE
 
 
+def _body_fields(body: object) -> list[str]:
+    """The body's free-text fields, lowercased, for marker matching only."""
+    if isinstance(body, str):
+        return [body.lower()]
+    if not isinstance(body, dict):
+        return []
+
+    sources: list[object] = [body]
+    error = body.get("error")
+    if isinstance(error, dict):
+        sources.append(error)
+    elif isinstance(error, str):
+        sources.append({"message": error})
+
+    return [
+        value.lower()
+        for source in sources
+        if isinstance(source, dict)
+        for key in ("message", "code", "detail", "title")
+        if isinstance(value := source.get(key), str)
+    ]
+
+
+def _match_not_found_signature(body: object) -> _Verdict | None:
+    """The verdict for a 404 whose body names its own cause, else ``None``."""
+    fields = _body_fields(body)
+    for markers, verdict in _NOT_FOUND_SIGNATURES:
+        if any(all(marker in field for marker in markers) for field in fields):
+            return verdict
+    return None
+
+
 def _classify(
     status_code: int, body: object
-) -> tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str]:
-    """Map an LLM provider HTTP status onto (code, category, title).
+) -> tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]:
+    """Map an LLM provider HTTP status onto (code, category, title, fallback_detail).
 
-    403 is the only status whose meaning depends on the body; keeping the code,
-    category and title decided in one place stops them drifting apart.
+    Only 400, 403 and 404 are classified beyond the 5xx/other split.
+
+    403 and 404 are the statuses whose meaning depends on the body; keeping the
+    code, category, title and fallback detail decided in one place stops them
+    drifting apart. Both name a cause only for a body that names its own --
+    ``_is_license_error`` for 403, ``_NOT_FOUND_SIGNATURES`` for 404 -- and
+    leave the rest unnamed rather than guessing.
+
+    ``fallback_detail`` is the customer-facing text to use when the gateway
+    supplied no ProblemDetails ``detail`` of its own. ``None`` means "fall back
+    to the HTTP reason phrase" -- the useless two-word message, so only
+    statuses whose cause we cannot name are left with it.
     """
     if status_code == 403:
         if _is_license_error(body):
@@ -77,17 +168,41 @@ def _classify(
                 title
                 if isinstance(title, str) and title.strip()
                 else "License not available",
+                None,
             )
         return (
             AgentRuntimeErrorCode.LLM_PROVIDER_FORBIDDEN,
             UiPathErrorCategory.DEPLOYMENT,
             "LLM provider returned HTTP 403",
+            None,
         )
+
+    if status_code == 400:
+        return (
+            AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST,
+            UiPathErrorCategory.USER,
+            "LLM provider rejected the request",
+            _BAD_REQUEST_DETAIL,
+        )
+
+    if status_code == 404:
+        if (verdict := _match_not_found_signature(body)) is not None:
+            return verdict
 
     title = f"LLM provider returned HTTP {status_code}"
     if status_code >= 500:
-        return AgentRuntimeErrorCode.HTTP_ERROR, UiPathErrorCategory.SYSTEM, title
-    return AgentRuntimeErrorCode.HTTP_ERROR, UiPathErrorCategory.UNKNOWN, title
+        return (
+            AgentRuntimeErrorCode.HTTP_ERROR,
+            UiPathErrorCategory.SYSTEM,
+            title,
+            None,
+        )
+    return (
+        AgentRuntimeErrorCode.HTTP_ERROR,
+        UiPathErrorCategory.UNKNOWN,
+        title,
+        None,
+    )
 
 
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
@@ -98,13 +213,13 @@ def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     """
     status_code = error.status_code
     body = error.body
-    code, category, title = _classify(status_code, body)
-    detail = error.body.get("detail") if isinstance(error.body, dict) else None
+    code, category, title, fallback_detail = _classify(status_code, body)
+    gateway_detail = body.get("detail") if isinstance(body, dict) else None
 
     raise AgentRuntimeError(
         code=code,
         title=title,
-        detail=detail or error.message or str(error),
+        detail=gateway_detail or fallback_detail or error.message or str(error),
         category=category,
         status=status_code,
     ) from error
