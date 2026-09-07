@@ -68,9 +68,7 @@ def create_process_tool(
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
     folder_path = get_execution_folder_path()
-    # getattr, not attribute access: BaseResourceProperties sets extra="allow", so against a uipath
-    # release predating the declared field the value is present only if the stored JSON carried it.
-    entry_point_path = getattr(resource.properties, "entry_point_path", None)
+    entry_point_path = resource.properties.entry_point_path
 
     input_model: Any = create_model(resource.input_schema)
     output_model: Any = create_output_model(resource.output_schema, resource.name)
