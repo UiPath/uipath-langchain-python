@@ -441,3 +441,81 @@ class TestOutputFileVerification:
 
         assert "messages" in update
         assert "uipath__output_file_retries" not in update
+
+
+class TestOutputFileToolIsWithheldFromSubagents:
+    """deepagents hands its ``tools`` list to the general-purpose subagent, but
+    only the main agent produces the typed output. A subagent that published a
+    file returned a text summary, losing the reference, so the main agent redid
+    the work and then referenced a workspace file that was never written."""
+
+    @staticmethod
+    def _output_model() -> type[BaseModel]:
+        from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+            create_model as create_model_from_schema,
+        )
+        from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+            JOB_ATTACHMENT_DEFINITION,
+        )
+
+        return create_model_from_schema(
+            {
+                "type": "object",
+                "properties": {"file": {"$ref": "#/definitions/job-attachment"}},
+                "required": ["file"],
+                "definitions": {"job-attachment": JOB_ATTACHMENT_DEFINITION},
+            }
+        )
+
+    @staticmethod
+    def _build_and_capture(tools: list[Any]) -> tuple[list[str], list[str]]:
+        from uipath_langchain.agent.advanced.agent import create_advanced_agent_graph
+
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent",
+            return_value=MagicMock(),
+        ) as create_deep_agent:
+            create_advanced_agent_graph(
+                model=_mock_model(),
+                tools=tools,
+                system_prompt="sys",
+                backend=None,
+                response_format=None,
+                input_schema=None,
+                output_schema=TestOutputFileToolIsWithheldFromSubagents._output_model(),
+                build_user_message=lambda args: "go",
+                output_files_enabled=True,
+            )
+        kwargs = create_deep_agent.call_args.kwargs
+        shared = [t.name for t in kwargs["tools"]]
+        main_only = [
+            t.name for mw in kwargs["middleware"] for t in getattr(mw, "tools", [])
+        ]
+        return shared, main_only
+
+    def test_the_tool_reaches_the_main_agent_only(self) -> None:
+        from uipath_langchain.agent.tools.internal_tools.output_file_tool import (
+            OUTPUT_FILE_TOOL_NAME,
+            create_output_file_tool,
+        )
+
+        shared, main_only = self._build_and_capture([create_output_file_tool()])
+
+        assert OUTPUT_FILE_TOOL_NAME not in shared
+        assert OUTPUT_FILE_TOOL_NAME in main_only
+
+    def test_every_other_tool_stays_shared(self) -> None:
+        from langchain_core.tools import StructuredTool
+
+        from uipath_langchain.agent.tools.internal_tools.output_file_tool import (
+            create_output_file_tool,
+        )
+
+        other = StructuredTool.from_function(
+            lambda x: x, name="some_other_tool", description="d"
+        )
+
+        shared, main_only = self._build_and_capture([other, create_output_file_tool()])
+
+        assert "some_other_tool" in shared
+        assert main_only == ["create_output_file"]

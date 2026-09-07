@@ -111,6 +111,14 @@ class TestToolSchema:
 
         assert schema["required"] == ["file_name"]
 
+    def test_the_description_says_it_makes_an_attachment_not_a_file(self):
+        """The old wording, "create a file", is what led an agent to reference
+        the result by workspace path and fault the run."""
+        description = create_output_file_tool().description
+
+        assert "attachment" in description
+        assert "not a file on disk" in description
+
     def test_tool_is_named_for_the_prompt(self):
         assert create_output_file_tool().name == OUTPUT_FILE_TOOL_NAME
 
@@ -140,12 +148,12 @@ class TestCreateFromContent:
         assert result["file"]["FullName"] == "passwd.txt"
         assert created[0]["name"] == "passwd.txt"
 
-    async def test_no_source_is_rejected(self, created):
+    async def test_no_source_comes_back_as_an_error(self, created):
         tool = create_output_file_tool()
 
-        with pytest.raises(ValueError, match="'content'"):
-            await call(tool, file_name="report.md")
+        result = await call(tool, file_name="report.md")
 
+        assert "'content'" in result["error"]
         assert created == []
 
 
@@ -160,12 +168,17 @@ class TestCreateFromWorkspacePath:
         assert created[0]["source_path"] == str(tmp_path / "report.md")
         assert created[0]["content"] is None
 
-    async def test_missing_workspace_file_is_rejected(self, created, tmp_path):
+    async def test_missing_workspace_file_comes_back_as_an_error(
+        self, created, tmp_path
+    ):
+        """Raising here faulted whole runs: the agent had used `content`, which
+        leaves no file, then referenced it by path."""
         tool = create_output_file_tool(FakeBackend(tmp_path))
 
-        with pytest.raises(ValueError, match="does not exist in your workspace"):
-            await call(tool, file_name="report.md", file_path="/absent.md")
+        result = await call(tool, file_name="report.md", file_path="/absent.md")
 
+        assert "not a file in your workspace" in result["error"]
+        assert "leaves no file behind" in result["error"]
         assert created == []
 
     @pytest.mark.parametrize(
@@ -174,9 +187,9 @@ class TestCreateFromWorkspacePath:
     async def test_traversal_is_rejected(self, created, tmp_path, file_path):
         tool = create_output_file_tool(FakeBackend(tmp_path))
 
-        with pytest.raises(ValueError, match="traversal"):
-            await call(tool, file_name="x.txt", file_path=file_path)
+        result = await call(tool, file_name="x.txt", file_path=file_path)
 
+        assert "traversal" in result["error"]
         assert created == []
 
     async def test_symlink_out_of_the_workspace_is_rejected(self, created, tmp_path):
@@ -189,9 +202,9 @@ class TestCreateFromWorkspacePath:
         (workspace / "link.txt").symlink_to(outside / "secret.txt")
         tool = create_output_file_tool(FakeBackend(workspace))
 
-        with pytest.raises(ValueError, match="outside your workspace"):
-            await call(tool, file_name="secret.txt", file_path="/link.txt")
+        result = await call(tool, file_name="secret.txt", file_path="/link.txt")
 
+        assert "outside your workspace" in result["error"]
         assert created == []
 
     async def test_a_relative_path_is_read_from_the_workspace_root(
@@ -207,9 +220,11 @@ class TestCreateFromWorkspacePath:
     async def test_content_and_file_path_together_are_rejected(self, created, tmp_path):
         tool = create_output_file_tool(FakeBackend(tmp_path))
 
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            await call(tool, file_name="report.md", content="x", file_path="/report.md")
+        result = await call(
+            tool, file_name="report.md", content="x", file_path="/report.md"
+        )
 
+        assert "mutually exclusive" in result["error"]
         assert created == []
 
 

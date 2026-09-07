@@ -43,6 +43,9 @@ from uipath_langchain.agent.react.conversational_output_node import (
 from uipath_langchain.agent.react.utils import (
     has_custom_conversational_output_fields,
 )
+from uipath_langchain.agent.tools.internal_tools.output_file_tool import (
+    OUTPUT_FILE_TOOL_NAME,
+)
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .types import (
@@ -55,6 +58,19 @@ from .utils import (
     create_state_with_input,
     resolve_input_attachments,
 )
+
+
+class _MainAgentToolsMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Carries tools that must not reach subagents.
+
+    ``create_deep_agent`` shares its ``tools`` list with the general-purpose
+    subagent but gives caller middleware to the main agent alone, and only the
+    main agent fills the typed output.
+    """
+
+    def __init__(self, tools: Sequence[BaseTool]) -> None:
+        super().__init__()
+        self.tools = list(tools)
 
 
 class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
@@ -174,6 +190,17 @@ def create_advanced_agent(
     )
 
 
+def _partition_main_agent_tools(
+    tools: Sequence[BaseTool],
+) -> tuple[list[BaseTool], list[BaseTool]]:
+    """Split off the tools the general-purpose subagent must not receive."""
+    shared: list[BaseTool] = []
+    main_only: list[BaseTool] = []
+    for tool in tools:
+        (main_only if tool.name == OUTPUT_FILE_TOOL_NAME else shared).append(tool)
+    return shared, main_only
+
+
 def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
@@ -208,6 +235,11 @@ def create_advanced_agent_graph(
     output_file_fields = (
         get_output_file_fields(output_schema) if output_files_enabled else []
     )
+    tools, main_agent_only_tools = _partition_main_agent_tools(tools)
+
+    middleware: list[AgentMiddleware[Any, Any]] = list(runtime_prompt.middleware)
+    if main_agent_only_tools:
+        middleware.append(_MainAgentToolsMiddleware(main_agent_only_tools))
 
     inner_graph = create_advanced_agent(
         model=model,
@@ -216,7 +248,7 @@ def create_advanced_agent_graph(
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=middleware,
         skills=skills,
     )
 

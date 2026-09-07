@@ -7,8 +7,8 @@ places that ticket in the declared output field.
 
 Two content sources, and which one is offered depends on the agent flavour:
 
-- ``content`` — the file body inline. The only source a standard agent has,
-  since it owns no filesystem. Text formats only.
+- ``content`` — the body inline. The only source a standard agent has, since it
+  owns no filesystem. Text formats only.
 - ``file_path`` — a path in the agent's own workspace, offered only when the
   backend exposes a workspace root (advanced agents). Preferred there: the body
   never round-trips through the model, so large and binary files work.
@@ -51,25 +51,28 @@ _EXTRA_MIME_TYPES = {
 }
 
 _TOOL_DESCRIPTION = (
-    "Create a file and attach it to this job, then return the attachment "
-    "reference to put in the agent output field that expects a file. Call this "
-    "before ending execution: an output file field can only be filled with a "
-    "reference this tool returned."
+    "Create an Orchestrator attachment on this job and return its reference, "
+    "for an agent output field that expects a file. This creates an attachment, "
+    "not a file on disk."
 )
 
 _FILE_NAME_DESCRIPTION = (
-    "File name including the extension, e.g. 'summary.md' or 'accounts.csv'. "
-    "The extension determines the file's MIME type, so it must match the "
-    "format of the content."
+    "Name the attachment carries, including the extension, e.g. 'summary.md' "
+    "or 'accounts.csv'. The extension determines its MIME type, so it must "
+    "match the format of the content."
 )
 
-_CONTENT_DESCRIPTION = "The full text content of the file."
+_CONTENT_DESCRIPTION = "The full text content of the attachment."
 
 _FILE_PATH_DESCRIPTION = (
-    "Path of an existing file in your workspace to publish, e.g. '/report.md'. "
-    "Prefer this over 'content' for anything you have already written to a "
-    "file, and use it for any non-text file."
+    "Path of a file you wrote to your workspace with the filesystem tools, "
+    "e.g. '/report.md'. Prefer this over 'content' for a file that already "
+    "exists there, and use it for any non-text file."
 )
+
+
+class _OutputFileRejected(Exception):
+    """A model-correctable rejection, reported to the agent rather than raised."""
 
 
 @runtime_checkable
@@ -136,12 +139,12 @@ def _resolve_source_path(backend: Any, file_path: str) -> Path:
 
     virtual_path = file_path if file_path.startswith("/") else f"/{file_path}"
     if ".." in virtual_path or virtual_path.startswith("~"):
-        raise ValueError(f"Path traversal is not allowed: {file_path!r}")
+        raise _OutputFileRejected(f"Path traversal is not allowed: {file_path!r}")
 
     root = Path(backend.cwd).resolve()
     resolved = (root / virtual_path.lstrip("/")).resolve()
     if resolved != root and root not in resolved.parents:
-        raise ValueError(f"{file_path!r} is outside your workspace")
+        raise _OutputFileRejected(f"{file_path!r} is outside your workspace")
     return resolved
 
 
@@ -166,19 +169,21 @@ def create_output_file_tool(backend: Any | None = None) -> _OutputFileTool:
         content = kwargs.get("content")
         file_path = kwargs.get("file_path")
 
+        # Returned rather than raised: an exception here faults the whole run.
         if not file_name:
-            raise ValueError("'file_name' is required.")
+            return {"error": "'file_name' is required."}
         if not content and not file_path:
-            raise ValueError(
-                "Provide the file body in 'content'"
+            return {
+                "error": "Provide the file body in 'content'"
                 + (
-                    ", or an existing workspace path in 'file_path'."
+                    ", or the path of a file you already wrote to your "
+                    "workspace in 'file_path'."
                     if with_file_path
                     else "."
                 )
-            )
+            }
         if content and file_path:
-            raise ValueError("'content' and 'file_path' are mutually exclusive.")
+            return {"error": "'content' and 'file_path' are mutually exclusive."}
 
         # file_name comes from the model; it names the attachment, not a path.
         attachment_name = Path(file_name).name
@@ -191,14 +196,22 @@ def create_output_file_tool(backend: Any | None = None) -> _OutputFileTool:
             example_calls=[],
         )
         async def publish_output_file(**_tool_kwargs: Any) -> dict[str, Any]:
-            source_path = (
-                _resolve_source_path(backend, file_path) if file_path else None
-            )
-            if source_path is not None and not source_path.is_file():
-                raise ValueError(
-                    f"'{file_path}' does not exist in your workspace. Write the "
-                    "file first, or pass its body in 'content'."
+            try:
+                source_path = (
+                    _resolve_source_path(backend, file_path) if file_path else None
                 )
+            except _OutputFileRejected as rejection:
+                return {"error": str(rejection)}
+            if source_path is not None and not source_path.is_file():
+                return {
+                    "error": (
+                        f"'{file_path}' is not a file in your workspace. Note "
+                        "that passing 'content' uploads directly and leaves no "
+                        "file behind, so a file you created that way cannot be "
+                        "referenced by path. Write it with the filesystem tools "
+                        "first, or pass its body in 'content'."
+                    )
+                }
 
             uipath = UiPath()
             attachment_id = await uipath.jobs.create_attachment_async(
@@ -214,7 +227,10 @@ def create_output_file_tool(backend: Any | None = None) -> _OutputFileTool:
                 "MimeType": guess_mime_type(attachment_name),
             }
 
-        return {"file": await publish_output_file(**kwargs)}
+        published = await publish_output_file(**kwargs)
+        if "error" in published:
+            return published
+        return {"file": published}
 
     # Imported here to avoid a circular import at module load.
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
