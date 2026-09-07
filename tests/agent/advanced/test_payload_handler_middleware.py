@@ -1,9 +1,12 @@
 """Tests for the payload-handler middleware on the advanced agent."""
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from deepagents import create_deep_agent
+from deepagents.middleware import SubAgentMiddleware
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
@@ -306,3 +309,67 @@ def test_bound_tools_are_filtered_to_basetools() -> None:
 
     assert prepared.model_settings["tool_config"] == VALIDATED_TOOL_CONFIG
     assert isinstance(request.tools[0], BaseTool)
+
+
+def _general_purpose_spec(build: Callable[[], Any]) -> dict[str, Any]:
+    """The general-purpose spec deepagents actually receives from ``build``.
+
+    Nothing else here builds a real deep agent, so nothing else notices when a
+    supplied spec stops matching the one deepagents would have assembled.
+    """
+    captured: dict[str, Any] = {}
+    original = SubAgentMiddleware.__init__
+
+    def record(self: Any, *args: Any, **kwargs: Any) -> None:
+        captured["subagents"] = kwargs.get("subagents") or (args[0] if args else [])
+        original(self, *args, **kwargs)
+
+    with patch.object(SubAgentMiddleware, "__init__", record):
+        build()
+    return next(
+        spec for spec in captured["subagents"] if spec["name"] == "general-purpose"
+    )
+
+
+class TestGeneralPurposeSubagentParity:
+    """Supplying the spec ourselves opts out of the one deepagents assembles.
+
+    Its two code paths are not identical, so anything the auto-added spec would
+    have carried has to be restated on ours. These compare the two directly.
+    """
+
+    def _build(self, **kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        model = GenericFakeChatModel(messages=iter([]))
+        baseline = _general_purpose_spec(
+            lambda: create_deep_agent(
+                model=model, system_prompt="p", tools=[echo], subagents=[], **kwargs
+            )
+        )
+        ours = _general_purpose_spec(
+            lambda: create_advanced_agent(
+                model=model, system_prompt="p", tools=[echo], subagents=[], **kwargs
+            )
+        )
+        return baseline, ours
+
+    def test_middleware_matches_deepagents_plus_ours(self) -> None:
+        baseline, ours = self._build()
+
+        names = [m.name for m in ours["middleware"]]
+        assert [n for n in names if n != _PayloadHandlerMiddleware.__name__] == [
+            m.name for m in baseline["middleware"]
+        ]
+        assert _PayloadHandlerMiddleware.__name__ in names
+
+    def test_skills_reach_the_subagent(self) -> None:
+        """Restated on the spec: deepagents reads a supplied spec's skills from it."""
+        baseline, ours = self._build(skills=["/skills"])
+
+        assert "SkillsMiddleware" in [m.name for m in baseline["middleware"]]
+        assert "SkillsMiddleware" in [m.name for m in ours["middleware"]]
+
+    def test_prompt_and_tools_match(self) -> None:
+        baseline, ours = self._build()
+
+        assert ours["system_prompt"] == baseline["system_prompt"]
+        assert [t.name for t in ours["tools"]] == [t.name for t in baseline["tools"]]

@@ -241,6 +241,7 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
 def _subagents_with_middleware(
     subagents: Sequence[SubAgent | CompiledSubAgent],
     extra: Sequence[AgentMiddleware[Any, Any]],
+    skills: Sequence[str] | None = None,
 ) -> list[SubAgent | CompiledSubAgent]:
     """Attach ``extra`` to every declarative subagent, general-purpose included.
 
@@ -249,10 +250,17 @@ def _subagents_with_middleware(
     middleware reaches a subagent only through its spec. Supplying that spec here
     suppresses the identical one deepagents would add, and it still builds the
     subagent's own middleware stack, tools, model, and prompt around ours.
+
+    ``skills`` has to be restated on the spec: deepagents gives its own
+    general-purpose subagent the top-level ``skills``, but reads a supplied spec's
+    from the spec alone, so omitting it here silently drops that subagent's skills.
     """
     specs = list(subagents)
     if not any(spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in specs):
-        specs.insert(0, cast("SubAgent", dict(GENERAL_PURPOSE_SUBAGENT)))
+        general_purpose = cast("SubAgent", dict(GENERAL_PURPOSE_SUBAGENT))
+        if skills:
+            general_purpose["skills"] = list(skills)
+        specs.insert(0, general_purpose)
     with_middleware: list[SubAgent | CompiledSubAgent] = []
     for spec in specs:
         # A compiled or remote subagent is an opaque runnable with no model call
@@ -294,7 +302,9 @@ def create_advanced_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=_subagents_with_middleware(subagents, [payload_handler_middleware]),
+        subagents=_subagents_with_middleware(
+            subagents, [payload_handler_middleware], skills=skills
+        ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
