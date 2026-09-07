@@ -45,9 +45,9 @@ The workflow follows a ReAct pattern:
 
 - Python 3.11+
 - `uipath-langchain`
-- `langchain-mcp-adapters`
+- MCP Python SDK 2.0
 - `langgraph`
-- `httpx`
+- `httpx2`
 - `python-dotenv`
 - UiPath OAuth credentials and MCP server URL in environment
 - UiPath external application configured with `OR.Jobs` scope (or appropriate scope for your MCP server)
@@ -80,5 +80,4 @@ For debugging issues:
    ```bash
    uipath run agent --debug '{"task": "What is 2 + 2?"}'
    ```
-
 

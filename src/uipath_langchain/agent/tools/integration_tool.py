@@ -243,6 +243,15 @@ def convert_to_activity_metadata(
     if http_method == "GETBYID":
         http_method = "GET"
 
+    # determine content type and json body section
+    content_type = "application/json"
+    json_body_section = None
+    if resource.properties.body_structure is not None:
+        shorthand_type = resource.properties.body_structure.get("contentType", "json")
+        if shorthand_type == "multipart":
+            content_type = "multipart/form-data"
+        json_body_section = resource.properties.body_structure.get("jsonBodySection")
+
     param_location_info = ActivityParameterLocationInfo()
     # because of nested fields and array notation, use a set to avoid duplicates
     body_fields_set = set()
@@ -251,6 +260,11 @@ def convert_to_activity_metadata(
     for param in resource.properties.parameters:
         param_name = param.name
         field_location = param.field_location
+
+        # Skip the multipart envelope marker itself - not real data, and its
+        # name can collide with an entity field of the same name (e.g. "body").
+        if field_location in ("multipart", "file") and param_name == json_body_section:
+            continue
 
         if field_location == "query":
             param_location_info.query_params.append(param_name)
@@ -270,15 +284,6 @@ def convert_to_activity_metadata(
             body_fields_set.add(top_level_field)
 
     param_location_info.body_fields = list(body_fields_set)
-
-    # determine content type and json body section
-    content_type = "application/json"
-    json_body_section = None
-    if resource.properties.body_structure is not None:
-        shorthand_type = resource.properties.body_structure.get("contentType", "json")
-        if shorthand_type == "multipart":
-            content_type = "multipart/form-data"
-        json_body_section = resource.properties.body_structure.get("jsonBodySection")
 
     return ActivityMetadata(
         object_path=resource.properties.tool_path,

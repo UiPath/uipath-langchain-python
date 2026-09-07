@@ -249,6 +249,38 @@ class TestConvertToIntegrationServiceMetadata:
         assert result.content_type == "application/json"
         assert result.json_body_section is None
 
+    def test_multipart_envelope_marker_does_not_shadow_nested_body_field(
+        self, resource_factory
+    ):
+        """A parameter naming the multipart JSON envelope (fieldLocation multipart,
+        name == jsonBodySection) must not shadow a real entity field that shares
+        that same top-level name via dotted children (fieldLocation body)."""
+        params = [
+            AgentIntegrationToolParameter(
+                name="body", type="string", field_location="multipart"
+            ),
+            AgentIntegrationToolParameter(
+                name="body.content", type="string", field_location="body"
+            ),
+            AgentIntegrationToolParameter(
+                name="body.adaptiveCardContent", type="string", field_location="body"
+            ),
+            AgentIntegrationToolParameter(
+                name="file", type="file", field_location="file"
+            ),
+        ]
+        resource = resource_factory(parameters=params)
+        resource.properties.body_structure = {
+            "contentType": "multipart",
+            "jsonBodySection": "body",
+        }
+
+        result = convert_to_activity_metadata(resource)
+
+        assert "body" in result.parameter_location_info.body_fields
+        assert "body" not in result.parameter_location_info.multipart_params
+        assert result.parameter_location_info.multipart_params == ["file"]
+
     def test_parameter_location_mapping_simple_fields(self, resource_factory):
         """Test parameter mapping for simple field names across different locations."""
         params = [

@@ -18,11 +18,8 @@ from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeErrorCode,
 )
 
-# Maps known LLM Gateway status codes to specific error codes.
-# Unknown status codes fall back to HTTP_ERROR.
-_LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
-    403: AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
-}
+_LICENSE_ERROR_CODE = 10000
+_LICENSE_TITLE = "license not available"
 
 
 def raise_for_llm_client_error(error: UiPathError) -> None:
@@ -40,13 +37,57 @@ def raise_for_llm_client_error(error: UiPathError) -> None:
         ) from error
 
 
-def _category_for_status(status_code: int) -> UiPathErrorCategory:
-    """Map LLM provider HTTP statuses to their runtime error category."""
+def _is_license_error(body: object) -> bool:
+    """True only for the LLM gateway's own licensing ProblemDetails.
+
+    Anything else -- a passthrough body, an HTML edge page, an empty body, or a
+    403 carrying a different ``errorCode`` such as 10900 (authorization) -- is
+    not a licensing failure, whatever its status code.
+    """
+    if not isinstance(body, dict):
+        return False
+
+    error_code = body.get("errorCode")
+    # bool is an int subclass, so True would otherwise compare equal to 1.
+    if isinstance(error_code, (int, str)) and not isinstance(error_code, bool):
+        try:
+            if int(error_code) == _LICENSE_ERROR_CODE:
+                return True
+        except ValueError:
+            pass
+
+    title = body.get("title")
+    return isinstance(title, str) and title.strip().lower() == _LICENSE_TITLE
+
+
+def _classify(
+    status_code: int, body: object
+) -> tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str]:
+    """Map an LLM provider HTTP status onto (code, category, title).
+
+    403 is the only status whose meaning depends on the body; keeping the code,
+    category and title decided in one place stops them drifting apart.
+    """
     if status_code == 403:
-        return UiPathErrorCategory.DEPLOYMENT
+        if _is_license_error(body):
+            title = body.get("title") if isinstance(body, dict) else None
+            return (
+                AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
+                UiPathErrorCategory.DEPLOYMENT,
+                title
+                if isinstance(title, str) and title.strip()
+                else "License not available",
+            )
+        return (
+            AgentRuntimeErrorCode.LLM_PROVIDER_FORBIDDEN,
+            UiPathErrorCategory.DEPLOYMENT,
+            "LLM provider returned HTTP 403",
+        )
+
+    title = f"LLM provider returned HTTP {status_code}"
     if status_code >= 500:
-        return UiPathErrorCategory.SYSTEM
-    return UiPathErrorCategory.UNKNOWN
+        return AgentRuntimeErrorCode.HTTP_ERROR, UiPathErrorCategory.SYSTEM, title
+    return AgentRuntimeErrorCode.HTTP_ERROR, UiPathErrorCategory.UNKNOWN, title
 
 
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
@@ -56,13 +97,13 @@ def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     and re-raises as an ``AgentRuntimeError`` chained on the original.
     """
     status_code = error.status_code
-    code = _LLM_STATUS_CODE_MAP.get(status_code, AgentRuntimeErrorCode.HTTP_ERROR)
-    category = _category_for_status(status_code)
+    body = error.body
+    code, category, title = _classify(status_code, body)
     detail = error.body.get("detail") if isinstance(error.body, dict) else None
 
     raise AgentRuntimeError(
         code=code,
-        title=f"LLM provider returned HTTP {status_code}",
+        title=title,
         detail=detail or error.message or str(error),
         category=category,
         status=status_code,

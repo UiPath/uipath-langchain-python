@@ -3,7 +3,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
@@ -134,7 +134,7 @@ async def _refresh_tool_schema(
         )
         return _tool_removed_message(mcp_tool.name)
 
-    if not _breaking_schema_change(mcp_tool.input_schema, fresh.inputSchema):
+    if not _breaking_schema_change(mcp_tool.input_schema, fresh.input_schema):
         return None
 
     logger.warning(
@@ -143,16 +143,16 @@ async def _refresh_tool_schema(
     )
     # Heal: update the cached baseline and the schema the model is bound to, so the
     # next LLM turn re-binds the live schema and the model can build a valid call.
-    mcp_tool.input_schema = fresh.inputSchema
-    mcp_tool.output_schema = fresh.outputSchema
+    mcp_tool.input_schema = fresh.input_schema
+    mcp_tool.output_schema = fresh.output_schema
     if fresh.description:
         mcp_tool.description = fresh.description
     tool = tool_holder.get("tool") if tool_holder else None
     if tool is not None:
-        tool.args_schema = fresh.inputSchema
+        tool.args_schema = fresh.input_schema
         if fresh.description:
             tool.description = fresh.description
-    return _schema_change_message(mcp_tool.name, fresh.inputSchema)
+    return _schema_change_message(mcp_tool.name, fresh.input_schema)
 
 
 @asynccontextmanager
@@ -260,8 +260,8 @@ async def create_mcp_tools(
                 AgentMcpTool(
                     name=tool.name,
                     description=tool.description or "",
-                    input_schema=tool.inputSchema,
-                    output_schema=tool.outputSchema,
+                    input_schema=tool.input_schema,
+                    output_schema=tool.output_schema,
                     argument_properties=argument_properties,
                 )
             )
@@ -299,15 +299,15 @@ async def create_mcp_tools(
 
 
 def _map_mcp_error(
-    error: McpError, tool_name: str, server_slug: str
+    error: MCPError, tool_name: str, server_slug: str
 ) -> AgentRuntimeError:
-    """Map a protocol-level McpError to a categorized AgentRuntimeError.
+    """Map a protocol-level MCPError to a categorized AgentRuntimeError.
 
-    MCP tool execution failures come back as ``CallToolResult.isError`` results,
-    so an McpError raised during a call is a protocol/session/transport failure —
+    MCP tool execution failures come back as ``CallToolResult.is_error`` results,
+    so an MCPError raised during a call is a protocol/session/transport failure —
     hence the SYSTEM category.
     """
-    if error.error.code in McpClient.SESSION_ERROR_CODES:
+    if McpClient.is_session_error(error):
         detail = (
             f"The connection to MCP server '{server_slug}' was terminated and "
             f"could not be re-established while calling tool '{tool_name}'. "
@@ -316,7 +316,7 @@ def _map_mcp_error(
     else:
         detail = (
             f"MCP server '{server_slug}' returned an error for tool "
-            f"'{tool_name}': {error.error.message}"
+            f"'{tool_name}': {error.message}"
         )
     return AgentRuntimeError(
         code=AgentRuntimeErrorCode.HTTP_ERROR,
@@ -328,16 +328,26 @@ def _map_mcp_error(
 
 
 def _normalize_tool_result(result: Any) -> Any:
-    """Normalize an MCP ``call_tool`` result into JSON-serializable content."""
+    """Normalize an MCP ``call_tool`` result into JSON-serializable content.
+
+    Serialized with ``by_alias=True`` so blocks keep their wire spelling. SDK 2.0
+    renamed the model attributes to snake case while keeping the camelCase names
+    as serialization aliases, so a plain ``model_dump()`` would silently rewrite
+    every non-text block handed to the model -- ``mimeType`` becoming
+    ``mime_type``, ``_meta`` becoming ``meta``. Text blocks are unaffected either
+    way, which is why the difference is easy to miss.
+    """
     content = result.content if hasattr(result, "content") else result
     if isinstance(content, list):
-        return [
-            item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else item
-            for item in content
-        ]
-    if hasattr(content, "model_dump"):
-        return content.model_dump(exclude_none=True)
-    return content
+        return [_dump_block(item) for item in content]
+    return _dump_block(content)
+
+
+def _dump_block(item: Any) -> Any:
+    """Serialize one MCP content block in its wire-compatible representation."""
+    if not hasattr(item, "model_dump"):
+        return item
+    return item.model_dump(by_alias=True, mode="json", exclude_none=True)
 
 
 def build_mcp_tool(
@@ -359,7 +369,7 @@ def build_mcp_tool(
         output_schema=output_schema,
     )
     async def tool_fn(**kwargs: Any) -> Any:
-        """Execute MCP tool call with ephemeral session.
+        """Execute an MCP tool call through the managed client session.
 
         When ``refresh_schema_before_call`` is set (cached discovery mode), the live
         tool schema is checked first against the McpClient's cached tool list (fetched
@@ -376,7 +386,7 @@ def build_mcp_tool(
                 return retry_message
         try:
             result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
-        except McpError as e:
+        except MCPError as e:
             raise _map_mcp_error(e, mcp_tool.name, mcpClient.server_slug) from e
         logger.info(f"Tool call successful for {mcp_tool.name}")
         return _normalize_tool_result(result)

@@ -1,0 +1,6 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./src/simple-http-mcp/graph.py:graph"
+  }
+}

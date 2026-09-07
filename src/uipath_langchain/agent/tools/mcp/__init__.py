@@ -6,6 +6,7 @@ from .mcp_tool import (
     create_mcp_tools_and_clients,
     open_mcp_tools,
 )
+from .session_tools import load_mcp_tools
 from .streamable_http import SessionInfo
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "create_mcp_tools_and_clients",
     "open_mcp_tools",
     "create_mcp_tools",
+    "load_mcp_tools",
 ]

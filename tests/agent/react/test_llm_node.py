@@ -371,9 +371,31 @@ class TestLLMNodeProviderErrorHandling:
 
     @staticmethod
     def _http_403() -> httpx.Response:
+        """A genuine gateway licensing 403, carrying its errorCode marker."""
         request = httpx.Request("POST", "http://gateway/")
         return httpx.Response(
-            403, request=request, json={"status": 403, "detail": "need AGU"}
+            403,
+            request=request,
+            json={
+                "title": "License not available",
+                "status": 403,
+                "detail": "need AGU",
+                "errorCode": 10000,
+            },
+        )
+
+    @staticmethod
+    def _http_403_unmarked() -> httpx.Response:
+        """A third-party 403 relayed by the gateway: no licensing marker.
+
+        The shape both PC-5000 and SRE-654983 actually hit.
+        """
+        request = httpx.Request("POST", "http://gateway/")
+        return httpx.Response(
+            403,
+            request=request,
+            text="<!doctype html><title>403</title>403 Forbidden",
+            headers={"content-type": "text/html"},
         )
 
     @pytest.mark.asyncio
@@ -406,6 +428,24 @@ class TestLLMNodeProviderErrorHandling:
         info = exc_info.value.error_info
         assert info.status == 403
         assert info.code.endswith(AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE.value)
+
+    @pytest.mark.asyncio
+    async def test_unmarked_403_maps_to_provider_forbidden_not_license(self):
+        # Regression for PC-5000 / SRE-654983: an edge or BYOM endpoint refuses
+        # the request and the gateway relays it verbatim. Nothing licensing
+        # happened, so nothing licensing may be reported.
+        node = self._node_raising(
+            UiPathAPIError.from_response(self._http_403_unmarked())
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await node(self.state)
+
+        info = exc_info.value.error_info
+        assert info.status == 403
+        assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_FORBIDDEN.value)
+        # The relayed body is not quoted back: detail is the HTTP reason phrase.
+        assert info.detail == "Forbidden"
 
     @pytest.mark.asyncio
     async def test_new_client_unsupported_mime_error_maps_to_file_error(self):
