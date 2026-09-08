@@ -290,6 +290,7 @@ async def create_mcp_tools(
                 "display_name": mcp_tool.name,
                 "folder_path": config.folder_path,
                 "slug": config.slug,
+                "resource_name": config.name,
             },
             argument_properties=mcp_tool.argument_properties,
         )
