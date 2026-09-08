@@ -290,6 +290,9 @@ async def create_mcp_tools(
                 "display_name": mcp_tool.name,
                 "folder_path": config.folder_path,
                 "slug": config.slug,
+                # Agent-level resource name (what the designer shows); trace UIs use it
+                # to title MCP tool spans as "{tool} ({resource})" (PC-4906).
+                "resource_name": config.name,
             },
             argument_properties=mcp_tool.argument_properties,
         )
