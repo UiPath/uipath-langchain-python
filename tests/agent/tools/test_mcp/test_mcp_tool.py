@@ -114,6 +114,17 @@ class TestMcpToolMetadata:
         assert tool.metadata is not None
         assert tool.metadata["slug"] == "my-mcp-server"
 
+    @pytest.mark.asyncio
+    async def test_mcp_tool_metadata_has_resource_name(
+        self, mcp_resource, mock_mcp_client
+    ):
+        """Metadata carries the agent-level resource name used in span titles."""
+        tools = await create_mcp_tools(mcp_resource, mock_mcp_client)
+
+        tool = tools[0]
+        assert tool.metadata is not None
+        assert tool.metadata["resource_name"] == "test_mcp_server"
+
 
 class TestMcpToolCreation:
     """Test MCP tool creation from metadata."""
@@ -325,6 +336,7 @@ class TestCreateMcpToolsFromAgent:
             assert "display_name" in tool.metadata
             assert "folder_path" in tool.metadata
             assert "slug" in tool.metadata
+            assert "resource_name" in tool.metadata
 
 
 class TestMcpToolResultSerialization:
