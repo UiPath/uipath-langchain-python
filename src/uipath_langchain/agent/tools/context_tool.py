@@ -219,6 +219,7 @@ def handle_semantic_search(
     static_folder_path_prefix = _resolve_static_folder_path_prefix(resource)
     result_count = resource.settings.result_count
     threshold = resource.settings.threshold
+    search_during_ingestion = resource.settings.search_during_ingestion
 
     static = is_static_query(resource)
     prompt = resource.settings.query.value if static else None
@@ -287,6 +288,7 @@ def handle_semantic_search(
             scope_folder=resolved_folder_path_prefix,
             scope_extension=file_extension,
             include_system_indexes=debug_run,
+            search_during_ingestion=search_during_ingestion,
         )
 
         actual_query = prompt or query
@@ -304,7 +306,10 @@ def handle_semantic_search(
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_INGESTION_IN_PROGRESS,
                 title=f"Context grounding index '{resource.index_name}' is still ingesting",
-                detail=str(e),
+                detail=(
+                    f"{e}. Enable 'search during ingestion' on this context resource "
+                    "to search the documents indexed so far instead of failing."
+                ),
                 category=UiPathErrorCategory.USER,
             ) from e
         except EnrichedException as e:

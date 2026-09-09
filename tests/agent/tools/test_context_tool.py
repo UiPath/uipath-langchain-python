@@ -53,6 +53,7 @@ def _make_context_resource(
     retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
     folder_path_prefix=None,
     context_type="index",
+    search_during_ingestion=False,
     **kwargs,
 ):
     """Helper to create an AgentContextResourceConfig."""
@@ -73,6 +74,7 @@ def _make_context_resource(
             ),
             citation_mode=citation_mode_value,
             folder_path_prefix=folder_path_prefix,
+            search_during_ingestion=search_during_ingestion,
         ),
         is_enabled=True,
         **kwargs,
@@ -1281,3 +1283,74 @@ class TestSemanticSearchSystemIndexFallbackIntegration:
         assert any("/v2/indexes/allacrossfolders" in u for u in urls)
         assert any("/v2/indexes/allsystemindexes" in u for u in urls)
         assert any("/v1.2/search/sys-1" in u for u in urls)
+
+
+class TestSearchDuringIngestionSetting:
+    """searchDuringIngestion on the context resource reaches the retriever."""
+
+    @staticmethod
+    async def _retriever_kwargs_for(resource):
+        """Invoke the semantic tool and return the ContextGroundingRetriever kwargs."""
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = []
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("semantic_tool", resource)
+            assert tool.coroutine is not None
+            await tool.coroutine(query="test query")
+
+            mock_retriever_class.assert_called_once()
+            return mock_retriever_class.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_not_searching_during_ingestion(self):
+        resource = _make_context_resource(
+            name="semantic_tool",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+        )
+
+        kwargs = await self._retriever_kwargs_for(resource)
+
+        assert kwargs["search_during_ingestion"] is False
+
+    @pytest.mark.asyncio
+    async def test_agent_json_predating_the_toggle_keeps_failing_fast(self):
+        """An agent.json with no searchDuringIngestion key must not opt in."""
+        resource = AgentContextResourceConfig.model_validate(
+            {
+                "$resourceType": "context",
+                "name": "semantic_tool",
+                "description": "docs index",
+                "contextType": "index",
+                "indexName": "test-index",
+                "folderPath": "/test/folder",
+                "isEnabled": True,
+                "settings": {
+                    "threshold": 0,
+                    "resultCount": 3,
+                    "retrievalMode": "Semantic",
+                    "query": {"description": "The query.", "variant": "Dynamic"},
+                },
+            }
+        )
+
+        kwargs = await self._retriever_kwargs_for(resource)
+
+        assert kwargs["search_during_ingestion"] is False
+
+    @pytest.mark.asyncio
+    async def test_opt_in_is_forwarded_to_the_retriever(self):
+        resource = _make_context_resource(
+            name="semantic_tool",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+            search_during_ingestion=True,
+        )
+
+        kwargs = await self._retriever_kwargs_for(resource)
+
+        assert kwargs["search_during_ingestion"] is True
