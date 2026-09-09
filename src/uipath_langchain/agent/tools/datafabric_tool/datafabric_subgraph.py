@@ -31,7 +31,7 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 from uipath.platform.entities import EntitiesService, Entity
-from uipath.platform.errors import DataFabricError, EnrichedException
+from uipath.platform.errors import DataFabricError, DataFabricErrorCategory
 
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
@@ -103,6 +103,7 @@ class QueryExecutor:
                 records = await self._entities.query_entity_records_async(
                     sql_query=sql_query,
                     relationships_as_scalar=True,
+                    resolve_choice_sets=True,
                 )
                 if span is not None:
                     span.set_attribute("df.record_count", len(records))
@@ -121,9 +122,9 @@ class QueryExecutor:
         """Handle a failed SQL query: log, record span attributes, return error dict."""
         logger.error("SQL query failed: %s", e)
 
-        df_error = None
-        if isinstance(e, EnrichedException):
-            df_error = DataFabricError.from_enriched_exception(e)
+        # Covers both origins: client-side validation rejections raised before
+        # the request, and errors returned by the query engine.
+        df_error = DataFabricError.from_exception(e)
 
         if span is not None:
             self._record_error_span(span, e, df_error)
@@ -169,6 +170,14 @@ class QueryExecutor:
                 parts.append("— This error is transient, retry the same query.")
             elif df_error.is_bad_sql:
                 parts.append("— Fix the SQL syntax and retry.")
+            elif df_error.category == DataFabricErrorCategory.UNSUPPORTED_CONSTRUCT:
+                parts.append(
+                    "— The entity query engine cannot express this construct. Do NOT "
+                    "retry a variant of the same shape (another subquery, UNION, or "
+                    "CTE). Rewrite it as a single flat SELECT with explicit JOINs, or "
+                    "if the question cannot be expressed that way, stop calling "
+                    "execute_sql and say so in a plain text reply."
+                )
             return " ".join(parts)
         return str(exc)
 
@@ -195,7 +204,10 @@ class DataFabricGraph:
         )
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
-                entities, resource_description, base_system_prompt
+                entities,
+                resource_description,
+                base_system_prompt,
+                entities_service=entities_service,
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
