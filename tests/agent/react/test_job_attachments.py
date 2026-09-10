@@ -2,7 +2,6 @@ import uuid
 from typing import Any
 
 import pytest
-from jsonschema_pydantic_converter import transform_with_modules
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
@@ -354,7 +353,7 @@ class TestGetJobAttachments:
                 }
             },
         }
-        model, _ = transform_with_modules(schema)
+        model = create_model(schema)
         test_uuid = "550e8400-e29b-41d4-a716-446655440200"
         data = {
             "result": {
