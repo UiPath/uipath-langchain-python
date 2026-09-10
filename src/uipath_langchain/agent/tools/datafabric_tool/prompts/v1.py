@@ -30,7 +30,10 @@ question requires fields from multiple entities.
 2. JOIN PLANNING — If multiple entities are needed, identify the foreign-key \
 columns that connect them. Do NOT add a JOIN unless a column from the joined \
 entity is used in SELECT, WHERE, GROUP BY, or ORDER BY. An anti-join (a JOIN \
-that contributes nothing to the answer) is wrong.
+that contributes nothing to the answer) is wrong. \
+NEVER use a subquery (WHERE … IN (SELECT …), scalar subquery, derived table) \
+to correlate two entities — ALWAYS rewrite as a JOIN. Subqueries are rejected \
+by the backend.
 3. FIELD SELECTION (read each field's name, type, and description from the \
 entity schemas above):
    a. Re-read the question. Identify exactly what information is being asked \
@@ -64,12 +67,20 @@ refers to; when a business (non-system) field overlaps a system field's \
 concept and it is unclear which to use — prefer the BUSINESS field.
 4. WHERE FILTERS — What predicates belong in WHERE? What are the exact values \
 to filter on?
-5. VALUE RESOLUTION — Before finalising any equality / IN filter on a textual \
-field:
+5. VALUE RESOLUTION — Before finalising any equality / IN filter:
    {value_resolution_strategy}
    Match the stored casing and punctuation exactly. Do NOT lowercase, \
 titlecase, or normalise the filter value. If the question uses a synonym or \
 abbreviation, look at the entity schema above for the canonical form.
+   **CHOICE-SET FIELDS** (identified by "Allowed values:" in the Description column):
+   - These fields accept their **display label** as a string in WHERE clauses \
+(e.g. ``WHERE Priority = 'Critical'``, NOT ``WHERE Priority = 0``).
+   - The allowed values are listed in the Description column of the schema table.
+   - Multi-select (array) choice-set fields cannot be \
+filtered via SQL — only SELECT them to read their values.
+   - When two entities share the same choice set (listed under "Shared \
+Choice-Set Join Paths"), their columns can be directly compared in a JOIN: \
+``ON EntityA.Field = EntityB.Field``.
 6. AGGREGATION INTENT — Match aggregation to the question:
    - "how many" -> COUNT
    - "how many distinct" / "unique X" / "different X" -> COUNT(DISTINCT field)
@@ -173,7 +184,7 @@ targeted fix:
 | SYNTAX_ERROR      | "syntax error near"             | Check commas, parentheses, keyword spelling, and clause ordering (SELECT / FROM / WHERE / GROUP BY / ORDER BY / LIMIT). |
 | TYPE_MISMATCH     | "type mismatch"                 | Use ``CAST(... AS <type>)`` to coerce the operand.                                                       |
 | AGGREGATION_ERROR | "not an aggregate"              | Ensure every non-aggregated SELECT field appears in GROUP BY.                                           |
-| EMPTY_RESULT      | Query returns 0 rows            | Re-check each WHERE literal against the entity metadata (allowed_values, examples). Verify case, spacing, punctuation. Check whether a JOIN is filtering rows out — verify join conditions match the foreign-key relationships in the entity schemas. |
+| EMPTY_RESULT      | Query returns 0 rows            | Re-check each WHERE literal against the entity metadata (allowed_values, examples). For choice-set fields, use the exact display label string from the schema (e.g. ``'Critical'`` not ``0``). Verify case, spacing, punctuation. Check whether a JOIN is filtering rows out — verify join conditions match the foreign-key relationships in the entity schemas. |
 
 CONVERGENCE RULES:
 1. Never repeat the exact same failing query.

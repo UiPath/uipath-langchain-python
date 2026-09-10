@@ -172,9 +172,9 @@ name = "aiologic"
 version = "0.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "sniffio" },
-    { name = "typing-extensions" },
-    { name = "wrapt" },
+    { name = "sniffio", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "wrapt", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f1/7a/d51f2fde1e8ae8a83431f8e97b7a71e9358cdb1d4d2ce6be387fa44d68de/aiologic-0.17.1.tar.gz", hash = "sha256:2e1b93b9e88ced318c2a63ad7b382688f40cbfe40e3d42258d49dc9c5aea179d", size = 252354, upload-time = "2026-06-27T20:41:33.25Z" }
 wheels = [
@@ -991,8 +991,8 @@ name = "culsans"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiologic" },
-    { name = "typing-extensions" },
+    { name = "aiologic", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d9/e3/49afa1bc180e0d28008ec6bcdf82a4072d1c7a41032b5b759b60814ca4b0/culsans-0.11.0.tar.gz", hash = "sha256:0b43d0d05dce6106293d114c86e3fb4bfc63088cfe8ff08ed3fe36891447fe33", size = 107546, upload-time = "2025-12-31T23:15:38.196Z" }
 wheels = [
@@ -4737,7 +4737,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.17.5"
+version = "0.17.6"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4836,7 +4836,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.18.3,<1.19.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.18.3,<1.19.0" },
     { name = "uipath-llm-client", specifier = ">=1.18.0,<1.19.0" },
-    { name = "uipath-platform", specifier = ">=0.2.24,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.28,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.13.0,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "all"]
@@ -4927,7 +4927,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.2.24"
+version = "0.2.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -4938,9 +4938,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/d2/d2d79bd778e029ea32590be2aeab0b32f5f62ffab38d1a773bc13fb326f8/uipath_platform-0.2.24.tar.gz", hash = "sha256:6f1b8673d96c048142e6421a13b67002ca756ed80083e2c767ded4e0eccefd52", size = 447671, upload-time = "2026-09-03T12:21:32.472Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/3b/7c95f00997d23b16e9fcc738b54d8847291308e3e116ba8fa2b60093c461/uipath_platform-0.2.28.tar.gz", hash = "sha256:628c5c12ea5ae665c472711d9915216a939043bd4254240a8f645e1d1630cc54", size = 451707, upload-time = "2026-09-09T15:12:38.671Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/40/f007b2819a5613047eff60f1f3b6ff8b108276abe2b7428cc0884d8c52d7/uipath_platform-0.2.24-py3-none-any.whl", hash = "sha256:1144874dba7e812ee2092580f94abba27c18f9552ca3a331992a571bfecdd561", size = 291730, upload-time = "2026-09-03T12:21:30.9Z" },
+    { url = "https://files.pythonhosted.org/packages/52/53/f5d1a559239aea5787b51ce6c31de84e45ea35c0ae1fca4ba507057f841f/uipath_platform-0.2.28-py3-none-any.whl", hash = "sha256:557c9cdabcdbe45d668ff8c896a680131aad1cb22720cf6ecbe1d95d8c1c1bcd", size = 293932, upload-time = "2026-09-09T15:12:36.838Z" },
 ]
 
 [[package]]

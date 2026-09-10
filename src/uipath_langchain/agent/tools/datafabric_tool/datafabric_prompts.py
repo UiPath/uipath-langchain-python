@@ -349,4 +349,5 @@ SQL_CONSTRAINTS = """\
 8. **Explicit GROUP BY** - All non-aggregated columns in SELECT must be in GROUP BY
 9. **Simple aggregations only** - No DISTINCT in aggregates
 10. **ORDER BY only selected columns** - Cannot ORDER BY columns not in SELECT list
-11. **Limit unbounded row queries** - Queries without WHERE that could return many rows must include a LIMIT clause (e.g., LIMIT 100). Scalar aggregate queries do not require LIMIT"""
+11. **Limit unbounded row queries** - Queries without WHERE that could return many rows must include a LIMIT clause (e.g., LIMIT 100). Scalar aggregate queries do not require LIMIT
+12. **Choice-set fields use display labels** - Choice-set fields list their allowed values in the Description column of the schema table. Use the display label as a string in WHERE clauses (e.g. ``WHERE Priority = 'Critical'``). Multi-select (array) choice-set fields cannot be filtered via SQL — only SELECT them."""
