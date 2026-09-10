@@ -145,6 +145,7 @@ async def test_query_executor_requests_relationships_as_scalar() -> None:
     svc.query_entity_records_async.assert_awaited_once_with(
         sql_query="SELECT id FROM TaskEntity LIMIT 10",
         relationships_as_scalar=True,
+        resolve_choice_sets=True,
     )
     assert result["records"] == [{"id": 1}]
 
@@ -241,7 +242,7 @@ async def test_query_executor_error_with_datafabric_error() -> None:
             "uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph.DataFabricError"
         ) as mock_dfe_cls,
     ):
-        mock_dfe_cls.from_enriched_exception.return_value = fake_df_error
+        mock_dfe_cls.from_exception.return_value = fake_df_error
         result = await qe("SELECT bad_col FROM T")
 
     assert result["records"] == []
@@ -689,7 +690,7 @@ async def test_query_executor_error_with_span_sets_attributes() -> None:
             "uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph.DataFabricError"
         ) as mock_dfe_cls,
     ):
-        mock_dfe_cls.from_enriched_exception.return_value = fake_df_error
+        mock_dfe_cls.from_exception.return_value = fake_df_error
         result = await qe("SELECT bad")
 
     assert result["records"] == []

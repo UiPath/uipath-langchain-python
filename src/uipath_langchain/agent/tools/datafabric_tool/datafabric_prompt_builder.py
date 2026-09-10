@@ -11,7 +11,7 @@ backend deny-lists.
 
 import logging
 
-from uipath.platform.entities import Entity
+from uipath.platform.entities import EntitiesService, Entity
 
 from .datafabric_prompts import SQL_CONSTRAINTS
 from .models import (
@@ -26,13 +26,34 @@ from .prompts import build_prompt_context, get_prompt_version
 logger = logging.getLogger(__name__)
 
 
-def build_entity_context(entity: Entity) -> EntitySQLContext:
+def _resolve_choiceset_labels(
+    entities_service: EntitiesService | None,
+    choiceset_id: str,
+) -> list[str]:
+    """Fetch choice-set value labels. Returns empty list on failure."""
+    if entities_service is None:
+        return []
+    try:
+        values = entities_service.get_choiceset_values(choiceset_id)
+        return [v.display_name for v in values]
+    except Exception:
+        logger.warning("Failed to fetch CS values for %s", choiceset_id, exc_info=True)
+        return []
+
+
+def build_entity_context(
+    entity: Entity,
+    entities_service: EntitiesService | None = None,
+) -> EntitySQLContext:
     """Convert an Entity SDK object to schema + derived query patterns.
 
     Auto-added system/audit fields (Id, CreateTime, UpdateTime, CreatedBy,
     UpdatedBy) are surfaced in the schema, tagged ``system`` via
     :attr:`FieldSchema.is_system_field`, but are always excluded from the
     derived query patterns so the examples reference only business fields.
+
+    When ``entities_service`` is provided, choice-set fields are enriched
+    with their allowed value labels.
     """
     field_schemas: list[FieldSchema] = []
     # Query patterns are derived from business fields only — system fields,
@@ -40,6 +61,7 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
     business_field_names: list[str] = []
     numeric_field: str | None = None
     text_field: str | None = None
+    _cs_label_cache: dict[str, list[str]] = {}
 
     for field in entity.fields or []:
         if field.is_hidden_field:
@@ -61,11 +83,34 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             ref_field = getattr(field, "reference_field", None)
             ref_definition = getattr(ref_field, "definition", None)
             ref_field_name = getattr(ref_definition, "name", None)
+
+        # Resolve choice-set labels for the field description.
+        # choiceset_id is populated by the SDK when the EntityField model
+        # parses the entity GET response (via AliasChoices on the field).
+        cs_id = getattr(field, "choiceset_id", None)
+        cs_description_suffix = ""
+        if cs_id:
+            if cs_id not in _cs_label_cache:
+                _cs_label_cache[cs_id] = _resolve_choiceset_labels(
+                    entities_service, cs_id
+                )
+            labels = _cs_label_cache[cs_id]
+            if labels:
+                cs_description_suffix = f" — allowed values: {', '.join(labels)}"
+
+        base_desc = field.description or ""
+        if base_desc and cs_description_suffix:
+            field_desc = base_desc + cs_description_suffix
+        elif cs_description_suffix:
+            field_desc = f"Allowed values: {', '.join(labels)}"
+        else:
+            field_desc = base_desc
+
         fs = FieldSchema(
             name=field.name,
             display_name=field.display_name,
             type=type_name,
-            description=field.description,
+            description=field_desc,
             is_foreign_key=is_relationship,
             is_required=field.is_required,
             is_unique=field.is_unique,
@@ -136,6 +181,7 @@ def build_sql_context(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    entities_service: EntitiesService | None = None,
 ) -> SQLContext:
     """Build the full SQL context from entities, prompts, and constraints.
 
@@ -147,6 +193,8 @@ def build_sql_context(
             ``## Agent Instructions``.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        entities_service: Optional platform service for fetching choice-set
+            value labels during schema resolution.
     """
     version = get_prompt_version(prompt_version)
     ctx = build_prompt_context(
@@ -160,7 +208,9 @@ def build_sql_context(
         resource_description=None,
         sql_expert_system_prompt=rendered_prompt,
         constraints=SQL_CONSTRAINTS,
-        entity_contexts=[build_entity_context(e) for e in entities],
+        entity_contexts=[
+            build_entity_context(e, entities_service=entities_service) for e in entities
+        ],
     )
 
 
@@ -263,6 +313,7 @@ def build(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    entities_service: EntitiesService | None = None,
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
@@ -276,6 +327,8 @@ def build(
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        entities_service: Optional platform service for fetching choice-set
+            value labels.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -288,5 +341,6 @@ def build(
         resource_description,
         base_system_prompt,
         prompt_version=prompt_version,
+        entities_service=entities_service,
     )
     return format_sql_context(ctx)
