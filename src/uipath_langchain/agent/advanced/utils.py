@@ -151,9 +151,12 @@ def _with_file_paths(
     resolved: list[dict[str, Any]] = []
     for attachment in attachments:
         path = paths.get(uuid.UUID(str(attachment["id"])))
-        resolved.append(
-            {**attachment, "file_path": f"/{path.name}"} if path else attachment
-        )
+        if path is None:
+            resolved.append(
+                {key: value for key, value in attachment.items() if key != "file_path"}
+            )
+        else:
+            resolved.append({**attachment, "file_path": f"/{path.name}"})
     return resolved
 
 

@@ -332,3 +332,40 @@ async def test_resolve_message_attachments_ignores_non_block_content(
 
     mock_client.attachments.download_async.assert_not_awaited()
     assert updated == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_message_attachments_drops_a_stale_file_path(
+    tmp_path: Path,
+) -> None:
+    """A path carried over from an earlier exchange must not outlive its file."""
+    backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    attachment_id = uuid.uuid4()
+    attachments = [
+        {
+            "id": str(attachment_id),
+            "full_name": "report.md",
+            "mime_type": "text/markdown",
+            "file_path": f"/{attachment_id}_report.md",
+        }
+    ]
+    message = HumanMessage(
+        id="message-1",
+        content_blocks=[
+            {"type": "text", "text": render_attachments_block(attachments)}
+        ],
+        additional_kwargs={"attachments": attachments},
+    )
+
+    mock_client = MagicMock()
+    mock_client.attachments.download_async = AsyncMock(
+        side_effect=RuntimeError("attachment not found")
+    )
+    with patch(
+        "uipath_langchain.agent.advanced.utils.UiPath",
+        return_value=mock_client,
+    ):
+        updated = await resolve_message_attachments(backend, [message])
+
+    assert "file_path" not in updated[0].additional_kwargs["attachments"][0]
+    assert "file_path" not in updated[0].content[0]["text"]
