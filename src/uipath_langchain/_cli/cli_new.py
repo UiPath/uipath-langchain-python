@@ -4,6 +4,8 @@ import shutil
 import click
 from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli.middlewares import MiddlewareResult
+from uipath._cli.models.agent_frameworks import AgentFramework
+from uipath._cli.models.project_types import ProjectType
 
 console = ConsoleLogger()
 
@@ -47,8 +49,14 @@ requires-python = ">=3.11"
         f.write(toml_content)
 
 
-def langgraph_new_middleware(name: str) -> MiddlewareResult:
+def langgraph_new_middleware(
+    name: str,
+    project_type: ProjectType = ProjectType.AUTO,
+    agent_framework: AgentFramework | None = None,
+) -> MiddlewareResult:
     """Middleware to create demo langchain agent"""
+    if not AgentFramework.LANGCHAIN.claims_scaffold(project_type, agent_framework):
+        return MiddlewareResult(should_continue=True)
 
     directory = os.getcwd()
 
