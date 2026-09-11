@@ -487,10 +487,6 @@ agent = create_my_agent()
 
 ### LLM-as-judge
 
-<!-- REMOVE WHEN: LLM-as-judge feature flag is enabled on all rings -->
-!!! info "Platform Availability"
-    `UiPathLLMAsJudgeMiddleware` and `LLMAsJudgeValidator` ship in the `uipath-langchain` package on PyPI, but the LLM-as-judge guardrail they call is still rolling out on the platform side and isn't enabled on every tenant yet — regardless of which judge models your governance policy permits. Watch the UiPath product release notes for when it lands.
-
 Use `LLMAsJudgeValidator` to check content against a plain-language rule via a judge LLM. Scope is inferred from the decorated target (here, the agent factory → AGENT scope). See the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/#llm-as-judge) for the full parameter reference (`threshold`, `positive_examples`, `negative_examples`, and their limits).
 
 ```python

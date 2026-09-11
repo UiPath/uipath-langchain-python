@@ -8,17 +8,40 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
+from uipath.core.feature_flags import FeatureFlags
 
 from uipath_langchain.agent.exceptions import AgentStartupError
+from uipath_langchain.agent.react._schema_refs import (
+    UNRESOLVED_TYPE_TITLE,
+    neutralize_dangling_refs,
+    ref_resolves,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
-    _UNRESOLVED_TYPE_TITLE,
-    _neutralize_dangling_refs,
-    _ref_resolves,
+    DATAMODEL_CODE_GENERATOR_CONVERTER_FF,
     create_model,
     create_output_model,
 )
 
 # --- Fixtures: reusable schema fragments ---
+
+
+# Every test in this module runs against both backends. Requested through
+# ``pytestmark`` rather than autouse so the parametrization is explicit.
+pytestmark = pytest.mark.usefixtures("schema_backend")
+
+
+@pytest.fixture(params=[False, True], ids=["legacy", "datamodel_code_generator"])
+def schema_backend(request: pytest.FixtureRequest) -> Any:
+    """Run every test in this module against both conversion backends.
+
+    The two are meant to be interchangeable behind
+    ``DATAMODEL_CODE_GENERATOR_CONVERTER_FF``, so the contract is only proven if
+    it holds either way.
+    """
+    FeatureFlags.reset_flags()
+    FeatureFlags.configure_flags({DATAMODEL_CODE_GENERATOR_CONVERTER_FF: request.param})
+    yield request.param
+    FeatureFlags.reset_flags()
 
 
 @pytest.fixture()
@@ -313,36 +336,36 @@ class TestPseudoModuleIsolation:
 
 
 class TestRefResolves:
-    """_ref_resolves: only a local pointer with a present target resolves."""
+    """ref_resolves: only a local pointer with a present target resolves."""
 
     def test_present_local_ref_resolves(self, schema_with_defs: dict[str, Any]) -> None:
-        assert _ref_resolves("#/$defs/Contact", schema_with_defs) is True
+        assert ref_resolves("#/$defs/Contact", schema_with_defs) is True
 
     def test_missing_local_ref_does_not_resolve(self) -> None:
-        assert _ref_resolves("#/$defs/Missing", {"$defs": {}}) is False
+        assert ref_resolves("#/$defs/Missing", {"$defs": {}}) is False
 
     def test_definitions_keyword_resolves(self) -> None:
         root = {"definitions": {"Foo": {"type": "object"}}}
-        assert _ref_resolves("#/definitions/Foo", root) is True
+        assert ref_resolves("#/definitions/Foo", root) is True
 
     def test_nested_pointer(self) -> None:
         root = {"$defs": {"A": {"$defs": {"B": {"type": "string"}}}}}
-        assert _ref_resolves("#/$defs/A/$defs/B", root) is True
-        assert _ref_resolves("#/$defs/A/$defs/Missing", root) is False
+        assert ref_resolves("#/$defs/A/$defs/B", root) is True
+        assert ref_resolves("#/$defs/A/$defs/Missing", root) is False
 
     def test_external_and_bare_refs_do_not_resolve(self) -> None:
-        assert _ref_resolves("https://example.com/Foo", {}) is False
-        assert _ref_resolves("#", {}) is False
-        assert _ref_resolves("Contact", {}) is False
+        assert ref_resolves("https://example.com/Foo", {}) is False
+        assert ref_resolves("#", {}) is False
+        assert ref_resolves("Contact", {}) is False
 
 
 class TestNeutralizeDanglingRefs:
-    """_neutralize_dangling_refs: surgical, in-place, preserves valid nodes."""
+    """neutralize_dangling_refs: surgical, in-place, preserves valid nodes."""
 
     def test_valid_schema_returned_unchanged(
         self, schema_with_defs: dict[str, Any]
     ) -> None:
-        sanitized, dropped = _neutralize_dangling_refs(schema_with_defs)
+        sanitized, dropped = neutralize_dangling_refs(schema_with_defs)
         assert dropped == []
         assert sanitized == schema_with_defs
 
@@ -351,11 +374,11 @@ class TestNeutralizeDanglingRefs:
             "type": "object",
             "properties": {"amount": {"$ref": "#/$defs/Missing"}},
         }
-        sanitized, dropped = _neutralize_dangling_refs(schema)
+        sanitized, dropped = neutralize_dangling_refs(schema)
         assert dropped == ["#/$defs/Missing"]
         node = sanitized["properties"]["amount"]
         assert "$ref" not in node
-        assert node["title"] == _UNRESOLVED_TYPE_TITLE
+        assert node["title"] == UNRESOLVED_TYPE_TITLE
         assert "#/$defs/Missing" in node["description"]
 
     def test_valid_sibling_and_valid_ref_preserved(
@@ -370,11 +393,11 @@ class TestNeutralizeDanglingRefs:
             },
             "$defs": {"Contact": contact_def},
         }
-        sanitized, dropped = _neutralize_dangling_refs(schema)
+        sanitized, dropped = neutralize_dangling_refs(schema)
         assert dropped == ["#/$defs/Missing"]
         assert sanitized["properties"]["status"] == {"type": "string"}
         assert sanitized["properties"]["owner"] == {"$ref": "#/$defs/Contact"}
-        assert sanitized["properties"]["amount"]["title"] == _UNRESOLVED_TYPE_TITLE
+        assert sanitized["properties"]["amount"]["title"] == UNRESOLVED_TYPE_TITLE
 
     def test_nested_in_array_items_neutralized(self) -> None:
         schema = {
@@ -383,10 +406,10 @@ class TestNeutralizeDanglingRefs:
                 "rows": {"type": "array", "items": {"$ref": "#/$defs/Missing"}},
             },
         }
-        sanitized, dropped = _neutralize_dangling_refs(schema)
+        sanitized, dropped = neutralize_dangling_refs(schema)
         assert dropped == ["#/$defs/Missing"]
         items = sanitized["properties"]["rows"]["items"]
-        assert items["title"] == _UNRESOLVED_TYPE_TITLE
+        assert items["title"] == UNRESOLVED_TYPE_TITLE
 
     def test_dangling_ref_inside_valid_def_neutralized(self) -> None:
         schema = {
@@ -399,12 +422,12 @@ class TestNeutralizeDanglingRefs:
                 },
             },
         }
-        sanitized, dropped = _neutralize_dangling_refs(schema)
+        sanitized, dropped = neutralize_dangling_refs(schema)
         assert dropped == ["#/$defs/Missing"]
         # outer, resolvable ref kept; inner dangling ref neutralized
         assert sanitized["properties"]["w"] == {"$ref": "#/$defs/Wrapper"}
         inner = sanitized["$defs"]["Wrapper"]["properties"]["x"]
-        assert inner["title"] == _UNRESOLVED_TYPE_TITLE
+        assert inner["title"] == UNRESOLVED_TYPE_TITLE
 
     def test_does_not_mutate_input(self) -> None:
         schema = {
@@ -412,7 +435,7 @@ class TestNeutralizeDanglingRefs:
             "properties": {"a": {"$ref": "#/$defs/Missing"}},
         }
         original = copy.deepcopy(schema)
-        _neutralize_dangling_refs(schema)
+        neutralize_dangling_refs(schema)
         assert schema == original
 
 
@@ -430,7 +453,7 @@ class TestCreateOutputModel:
         model = create_output_model(schema, "my_tool")
         props = model.model_json_schema()["properties"]
         assert "status" in props  # valid sibling preserved
-        assert props["amount"]["title"] == _UNRESOLVED_TYPE_TITLE
+        assert props["amount"]["title"] == UNRESOLVED_TYPE_TITLE
         assert "Nullableofdecimal" in props["amount"]["description"]
         # Permissive: every value kind validates (a typed field would raise here).
         for value in [1.5, "text", {"k": 1}, [1, 2], True, None]:
@@ -461,7 +484,7 @@ class TestCreateOutputModel:
         # no named types are generated -> nothing to collide / deduplicate
         assert js.get("$defs", {}) == {}
         for field in ["f1", "f2", "f3", "f4", "f5"]:
-            assert js["properties"][field]["title"] == _UNRESOLVED_TYPE_TITLE
+            assert js["properties"][field]["title"] == UNRESOLVED_TYPE_TITLE
         model.model_validate(
             {"f1": 1, "f2": "x", "f3": None, "f4": [1], "f5": {"a": 1}}
         )
