@@ -191,3 +191,13 @@ class AgentStartupError(UiPathBaseRuntimeError):
             prefix="AGENT_STARTUP",
             include_traceback=include_traceback,
         )
+
+
+def max_iterations_error(max_iterations: int) -> AgentRuntimeError:
+    """The termination error raised when an agent loop exhausts its iteration budget."""
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.TERMINATION_MAX_ITERATIONS,
+        title=f"Maximum iterations of '{max_iterations}' reached.",
+        detail="Verify the agent's trajectory or consider increasing the max iterations in the agent's settings.",
+        category=UiPathErrorCategory.USER,
+    )
