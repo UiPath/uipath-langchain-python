@@ -75,9 +75,7 @@ class TestToolConfigInjection:
         assert "tool_config" not in prepared.model_settings
 
     def test_response_format_is_left_alone(self) -> None:
-        """A response format makes create_agent derive tool_choice="any" at bind
-        time, after this middleware has run, so injecting a mode here would
-        collide with a choice we never saw on the request."""
+        """create_agent derives tool_choice="any" from it, after this runs."""
         prepared = _PayloadHandlerMiddleware()._prepare_request(
             _request(_gemini(), response_format=ToolStrategy({"type": "object"}))
         )
@@ -87,8 +85,7 @@ class TestToolConfigInjection:
     def test_a_response_format_request_binds_the_way_create_agent_binds_it(
         self,
     ) -> None:
-        """The main agent's call, reproduced: create_agent forces "any" for a
-        ToolStrategy regardless of request.tool_choice."""
+        """The main agent's call: create_agent forces "any" for a ToolStrategy."""
         model = _gemini()
         prepared = _PayloadHandlerMiddleware()._prepare_request(
             _request(model, response_format=ToolStrategy({"type": "object"}))
@@ -363,11 +360,7 @@ def _general_purpose_spec(build: Callable[[], Any]) -> dict[str, Any]:
 
 
 class TestGeneralPurposeSubagentParity:
-    """Supplying the spec ourselves opts out of the one deepagents assembles.
-
-    Its two code paths are not identical, so anything the auto-added spec would
-    have carried has to be restated on ours. These compare the two directly.
-    """
+    """Supplying the spec opts out of deepagents' own, which is not identical."""
 
     def _build(self, **kwargs: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         model = GenericFakeChatModel(messages=iter([]))

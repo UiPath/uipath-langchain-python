@@ -146,25 +146,15 @@ def _resolve_runtime_system_prompt(
 class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
     """Route deep-agent model calls through the provider's payload handler.
 
-    The react path shapes every call with ``get_payload_handler`` and checks the
-    finish reason that comes back. Deep agents bypass both, and each omission
-    breaks a Gemini subagent turn: with no forced ``tool_choice`` the request
-    carries no ``function_calling_config``, so Vertex falls back to ``AUTO`` and
-    ``gemini-2.5-flash`` answers with Python source instead of a function call,
-    then the resulting ``MALFORMED_FUNCTION_CALL`` arrives as an empty message
-    that reads as a final answer. Only the main agent escapes it, because a
-    structured-output response format forces ``tool_choice`` for every one of
-    its calls.
+    The react path shapes every call and checks the finish reason. Deep agents
+    do neither, so a Gemini subagent turn reaches Vertex with no function
+    calling mode and its malformed replies read as final answers.
     """
 
     def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
-        # langchain_google_genai rejects a request carrying both tool_choice and
-        # tool_config.function_calling_config. request.tool_choice is not the
-        # value that reaches bind_tools: create_agent derives it as
-        # `"any" if structured_output_tools else request.tool_choice` after
-        # middleware has run, so a response format forces "any" behind our back.
-        # Shaping the request only when neither is set keeps them exclusive, and
-        # a response format already guarantees a mode of its own.
+        # create_agent derives the bound tool_choice after middleware runs, as
+        # `"any" if structured_output_tools else request.tool_choice`, and
+        # langchain_google_genai rejects a request carrying both that and a mode.
         if request.tool_choice or request.response_format is not None:
             return request
         bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
@@ -193,12 +183,7 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         self._reject_empty_answer(response)
 
     def _reject_empty_answer(self, response: ModelResponse[Any]) -> None:
-        """Refuse a turn that neither said anything nor called a tool.
-
-        Such a message ends the loop as a final answer, so a subagent hands its
-        caller an empty result and the caller either retries forever or invents
-        one. A provider that reports no finish reason still lands here.
-        """
+        """Refuse a turn with no text and no tool calls, which ends the loop."""
         if response.structured_response is not None:
             return
         messages = [m for m in response.result if isinstance(m, AIMessage)]
@@ -207,8 +192,7 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         last = messages[-1]
         if last.text.strip() or last.tool_calls:
             return
-        # A reasoning-only turn also carries no text and no tool calls, and is a
-        # step the loop can continue from rather than a dead end.
+        # A reasoning-only turn has no text and no tool calls either.
         if any(block.get("type") != "text" for block in last.content_blocks):
             return
         raise AgentRuntimeError(
@@ -249,15 +233,10 @@ def _subagents_with_middleware(
 ) -> list[SubAgent | CompiledSubAgent]:
     """Attach ``extra`` to every declarative subagent, general-purpose included.
 
-    ``create_deep_agent`` gives the ``middleware`` argument to the main agent
-    alone and assembles the general-purpose subagent itself, so a request-shaping
-    middleware reaches a subagent only through its spec. Supplying that spec here
-    suppresses the identical one deepagents would add, and it still builds the
-    subagent's own middleware stack, tools, model, and prompt around ours.
-
-    ``skills`` has to be restated on the spec: deepagents gives its own
-    general-purpose subagent the top-level ``skills``, but reads a supplied spec's
-    from the spec alone, so omitting it here silently drops that subagent's skills.
+    ``create_deep_agent`` gives its ``middleware`` argument to the main agent
+    alone, so a spec is the only route into a subagent. ``skills`` is restated
+    because deepagents reads a supplied spec's skills from the spec, not from
+    the top-level argument.
     """
     specs = list(subagents)
     if not any(spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in specs):
