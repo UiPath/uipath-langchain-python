@@ -17,7 +17,7 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
@@ -36,6 +36,7 @@ from uipath_langchain.agent.attachments.output_files import (
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    max_iterations_error,
 )
 from uipath_langchain.agent.react.conversational_output_node import (
     create_conversational_output_extractor,
@@ -101,6 +102,61 @@ class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return await handler(self._prepare_request(request))
 
 
+class _MaxIterationsMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Stop the loop once it has spent its iteration budget for this turn.
+
+    Counts the AI messages the agent produced since the turn started, the way the
+    standard agent's llm node does, and raises the same termination error. Counting
+    messages rather than model calls keeps the budget spent across a suspend and
+    resume, where any per-run counter starts over.
+    """
+
+    def __init__(
+        self, max_iterations: int, initial_message_count_key: str | None = None
+    ) -> None:
+        self.max_iterations = max_iterations
+        self.initial_message_count_key = initial_message_count_key
+        if initial_message_count_key is not None:
+            self.state_schema = type(
+                "MaxIterationsState",
+                (AgentState,),
+                {
+                    "__annotations__": {
+                        initial_message_count_key: NotRequired[int | None]
+                    }
+                },
+            )
+
+    def _check_budget(self, request: ModelRequest[Any]) -> None:
+        initial_count = (
+            cast("int | None", request.state.get(self.initial_message_count_key)) or 0
+            if self.initial_message_count_key is not None
+            else 0
+        )
+        messages = cast("list[Any]", request.state.get("messages") or [])
+        produced = sum(
+            1 for message in messages[initial_count:] if isinstance(message, AIMessage)
+        )
+        if produced >= self.max_iterations:
+            raise max_iterations_error(self.max_iterations)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        self._check_budget(request)
+        return handler(request)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        self._check_budget(request)
+        return await handler(request)
+
+
 @dataclass(frozen=True)
 class _RuntimeSystemPrompt:
     """A system prompt that is either fixed or resolved from each invocation's input."""
@@ -139,6 +195,14 @@ def _resolve_runtime_system_prompt(
         "uipath__system_prompt", base_state, input_schema
     )
     return _RuntimeSystemPrompt(None, system_prompt, state_key)
+
+
+def _max_iterations_middleware(
+    max_iterations: int | None, initial_message_count_key: str | None = None
+) -> list[AgentMiddleware[Any, Any]]:
+    if max_iterations is None:
+        return []
+    return [_MaxIterationsMiddleware(max_iterations, initial_message_count_key)]
 
 
 def create_advanced_agent(
@@ -185,6 +249,7 @@ def create_advanced_agent_graph(
     build_user_message: Callable[[dict[str, Any]], str],
     skills: Sequence[str] | None = None,
     output_files_enabled: bool = False,
+    max_iterations: int | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -198,6 +263,9 @@ def create_advanced_agent_graph(
     is gated by a verification node: an unfilled required file field, or a
     reference to an attachment that is not linked to this job, sends the agent
     back for another turn instead of emitting an output it cannot honor.
+
+    ``max_iterations`` caps the model calls the agent loop may make; ``None``
+    leaves it uncapped.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -216,7 +284,10 @@ def create_advanced_agent_graph(
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=[
+            *runtime_prompt.middleware,
+            *_max_iterations_middleware(max_iterations),
+        ],
         skills=skills,
     )
 
@@ -320,6 +391,7 @@ def create_conversational_advanced_agent_graph(
     skills: Sequence[str] | None = None,
     input_schema: type[BaseModel] | None = None,
     output_schema: type[BaseModel] | None = None,
+    max_iterations: int | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -333,6 +405,9 @@ def create_conversational_advanced_agent_graph(
     filled the same way the standard conversational agent fills them: a focused
     extraction call over the exchange's messages, after the loop has finished.
     The loop itself produces messages, so nothing in it can produce those fields.
+
+    ``max_iterations`` caps the model calls the agent loop may make per exchange;
+    ``None`` leaves it uncapped.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -352,7 +427,10 @@ def create_conversational_advanced_agent_graph(
         system_prompt=runtime_prompt.static_prompt,
         backend=backend,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=[
+            *runtime_prompt.middleware,
+            *_max_iterations_middleware(max_iterations, initial_message_count_key),
+        ],
         skills=skills,
     )
 

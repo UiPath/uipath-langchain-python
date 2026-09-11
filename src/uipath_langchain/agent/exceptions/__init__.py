@@ -3,6 +3,7 @@ from .exceptions import (
     AgentRuntimeErrorCode,
     AgentStartupError,
     AgentStartupErrorCode,
+    max_iterations_error,
 )
 from .helpers import raise_for_enriched
 
@@ -12,4 +13,5 @@ __all__ = [
     "AgentStartupErrorCode",
     "AgentRuntimeErrorCode",
     "raise_for_enriched",
+    "max_iterations_error",
 ]
