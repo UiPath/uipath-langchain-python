@@ -2,7 +2,7 @@
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -191,7 +191,7 @@ async def test_resolve_message_attachments_downloads_and_adds_file_path(
             "file_path": f"/{expected_name}",
         }
     ]
-    blocks = [block["text"] for block in updated[0].content]
+    blocks = [block["text"] for block in cast(list[dict[str, Any]], updated[0].content)]
     assert blocks[0] == "can you read this file?"
     assert f"/{expected_name}" in blocks[1]
     assert blocks[1].count(ATTACHMENTS_BLOCK_PREFIX) == 1
@@ -368,4 +368,24 @@ async def test_resolve_message_attachments_drops_a_stale_file_path(
         updated = await resolve_message_attachments(backend, [message])
 
     assert "file_path" not in updated[0].additional_kwargs["attachments"][0]
-    assert "file_path" not in updated[0].content[0]["text"]
+    content = cast(list[dict[str, Any]], updated[0].content)
+    assert "FilePath" not in content[0]["text"]
+
+
+def test_attachments_block_uses_the_job_attachment_key_names() -> None:
+    """The model copies these into tool args, which require the schema's key names."""
+    rendered = render_attachments_block(
+        [
+            {
+                "id": "abc",
+                "full_name": "report.md",
+                "mime_type": "text/markdown",
+                "file_path": "/abc_report.md",
+            }
+        ]
+    )
+
+    assert '"ID": "abc"' in rendered
+    assert '"FullName": "report.md"' in rendered
+    assert '"MimeType": "text/markdown"' in rendered
+    assert '"FilePath": "/abc_report.md"' in rendered
