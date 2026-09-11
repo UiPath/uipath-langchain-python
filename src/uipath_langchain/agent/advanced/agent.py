@@ -6,9 +6,8 @@ from typing import Any, Literal, NotRequired, cast
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
-from deepagents.backends import BackendProtocol
-from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.backends.protocol import BackendFactory
+from deepagents.backends import BackendProtocol, FilesystemBackend
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
@@ -27,6 +26,7 @@ from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_unique_model_field_name
+from uipath_langchain.agent.attachments.constants import OUTPUT_FILE_TOOL_NAME
 from uipath_langchain.agent.attachments.job_attachments import get_job_attachment_paths
 from uipath_langchain.agent.attachments.output_files import (
     DEFAULT_MAX_OUTPUT_FILE_RETRIES,
@@ -205,12 +205,69 @@ def _max_iterations_middleware(
     return [_MaxIterationsMiddleware(max_iterations, initial_message_count_key)]
 
 
+# A subagent returns only a text report, so a reference it produces never reaches
+# the main agent -- the only agent that fills the typed output.
+MAIN_AGENT_ONLY_TOOLS: frozenset[str] = frozenset({OUTPUT_FILE_TOOL_NAME})
+
+
+def _partition_main_agent_tools(
+    tools: Sequence[BaseTool],
+) -> tuple[list[BaseTool], list[BaseTool]]:
+    """Split ``tools`` into (shared with subagents, main agent only)."""
+    shared: list[BaseTool] = []
+    main_only: list[BaseTool] = []
+    for tool in tools:
+        (main_only if tool.name in MAIN_AGENT_ONLY_TOOLS else shared).append(tool)
+    return shared, main_only
+
+
+def _subagents_without_main_agent_tools(
+    subagents: Sequence[SubAgent | CompiledSubAgent],
+    shared_tools: Sequence[BaseTool],
+    skills: Sequence[str] | None,
+) -> list[SubAgent | CompiledSubAgent]:
+    """Give every subagent the shared tool list instead of the parent's.
+
+    deepagents hands a subagent the parent's ``tools`` unless its spec declares its
+    own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``), so
+    pinning ``tools`` on each spec is what actually withholds a main-agent-only tool.
+
+    The auto-added ``general-purpose`` subagent is replaced with an explicit spec,
+    since it would otherwise inherit the parent list too. Supplying a spec under
+    that name suppresses the built-in one. That branch is also the only reader of
+    ``profile.general_purpose_subagent``, so its ``enabled`` / ``description`` /
+    ``system_prompt`` overrides do not apply here. ``skills`` has to be repeated into the
+    spec: the built-in branch reads the top-level ``skills`` argument, while a
+    caller-supplied spec reads ``spec["skills"]``, so omitting it silently drops
+    skills from that subagent.
+    """
+    resolved: list[SubAgent | CompiledSubAgent] = []
+    for spec in subagents:
+        # A CompiledSubAgent brings its own graph and tools; nothing to filter.
+        if "runnable" in spec or "tools" in spec:
+            resolved.append(spec)
+            continue
+        resolved.append({**spec, "tools": list(shared_tools)})
+
+    if not any(
+        spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in resolved
+    ):
+        gp: dict[str, Any] = {
+            **GENERAL_PURPOSE_SUBAGENT,
+            "tools": list(shared_tools),
+        }
+        if skills:
+            gp["skills"] = list(skills)
+        resolved.append(gp)  # type: ignore[arg-type]
+    return resolved
+
+
 def create_advanced_agent(
     model: BaseChatModel,
     system_prompt: str | SystemMessage | None = "",
     tools: Sequence[BaseTool] = (),
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
-    backend: BackendProtocol | BackendFactory | None = None,
+    backend: BackendProtocol | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
@@ -224,12 +281,15 @@ def create_advanced_agent(
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
+
+    Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
+    shared_tools, _ = _partition_main_agent_tools(tools)
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=list(subagents),
+        subagents=_subagents_without_main_agent_tools(subagents, shared_tools, skills),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
@@ -242,7 +302,7 @@ def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str | Callable[[dict[str, Any]], str],
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     response_format: ResponseFormat[Any] | None,
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
@@ -250,6 +310,7 @@ def create_advanced_agent_graph(
     skills: Sequence[str] | None = None,
     output_files_enabled: bool = False,
     max_iterations: int | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -287,6 +348,7 @@ def create_advanced_agent_graph(
         middleware=[
             *runtime_prompt.middleware,
             *_max_iterations_middleware(max_iterations),
+            *middleware,
         ],
         skills=skills,
     )
@@ -387,11 +449,12 @@ def create_conversational_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str | Callable[[dict[str, Any]], str],
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     skills: Sequence[str] | None = None,
     input_schema: type[BaseModel] | None = None,
     output_schema: type[BaseModel] | None = None,
     max_iterations: int | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -430,6 +493,7 @@ def create_conversational_advanced_agent_graph(
         middleware=[
             *runtime_prompt.middleware,
             *_max_iterations_middleware(max_iterations, initial_message_count_key),
+            *middleware,
         ],
         skills=skills,
     )

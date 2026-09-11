@@ -21,7 +21,10 @@ from uipath.platform.documents import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
+    durable_interrupt,
+)
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
@@ -183,6 +186,7 @@ def create_ixp_escalation_tool(
         output_type=OutputSchema,
         metadata={
             "tool_type": "vs_escalation",
+            SUSPENDS_RUN: True,
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
             "ixp_tool_id": ixp_tool_name,
