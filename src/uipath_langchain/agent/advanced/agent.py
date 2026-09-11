@@ -159,9 +159,13 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
 
     def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
         # langchain_google_genai rejects a request carrying both tool_choice and
-        # tool_config.function_calling_config, gating on tool_choice's
-        # truthiness. Matching that gate keeps the two mutually exclusive.
-        if request.tool_choice:
+        # tool_config.function_calling_config. request.tool_choice is not the
+        # value that reaches bind_tools: create_agent derives it as
+        # `"any" if structured_output_tools else request.tool_choice` after
+        # middleware has run, so a response format forces "any" behind our back.
+        # Shaping the request only when neither is set keeps them exclusive, and
+        # a response format already guarantees a mode of its own.
+        if request.tool_choice or request.response_format is not None:
             return request
         bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
         tool_config = (

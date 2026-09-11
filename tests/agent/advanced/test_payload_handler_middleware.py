@@ -8,6 +8,7 @@ import pytest
 from deepagents import create_deep_agent
 from deepagents.middleware import SubAgentMiddleware
 from langchain.agents.middleware import ModelRequest, ModelResponse
+from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, tool
@@ -38,8 +39,16 @@ def _gemini() -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="dummy")
 
 
-def _request(model: Any, tool_choice: Any = None) -> ModelRequest[Any]:
-    return ModelRequest(model=model, messages=[], tools=[echo], tool_choice=tool_choice)
+def _request(
+    model: Any, tool_choice: Any = None, response_format: Any = None
+) -> ModelRequest[Any]:
+    return ModelRequest(
+        model=model,
+        messages=[],
+        tools=[echo],
+        tool_choice=tool_choice,
+        response_format=response_format,
+    )
 
 
 def _response(*messages: AIMessage, structured: Any = None) -> ModelResponse[Any]:
@@ -64,6 +73,28 @@ class TestToolConfigInjection:
         )
 
         assert "tool_config" not in prepared.model_settings
+
+    def test_response_format_is_left_alone(self) -> None:
+        """A response format makes create_agent derive tool_choice="any" at bind
+        time, after this middleware has run, so injecting a mode here would
+        collide with a choice we never saw on the request."""
+        prepared = _PayloadHandlerMiddleware()._prepare_request(
+            _request(_gemini(), response_format=ToolStrategy({"type": "object"}))
+        )
+
+        assert "tool_config" not in prepared.model_settings
+
+    def test_a_response_format_request_binds_the_way_create_agent_binds_it(
+        self,
+    ) -> None:
+        """The main agent's call, reproduced: create_agent forces "any" for a
+        ToolStrategy regardless of request.tool_choice."""
+        model = _gemini()
+        prepared = _PayloadHandlerMiddleware()._prepare_request(
+            _request(model, response_format=ToolStrategy({"type": "object"}))
+        )
+
+        model.bind_tools([echo], tool_choice="any", **prepared.model_settings)
 
     def test_injected_config_binds_without_conflicting(self) -> None:
         """langchain_google_genai raises when tool_choice and tool_config collide."""
