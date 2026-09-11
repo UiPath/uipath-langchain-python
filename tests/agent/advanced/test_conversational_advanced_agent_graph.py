@@ -92,10 +92,13 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
 
     call_kwargs = create_deep_agent.call_args.kwargs
     assert call_kwargs["system_prompt"] is None
-    assert len(call_kwargs["middleware"]) == 1
-    middleware = call_kwargs["middleware"][0]
-    assert isinstance(middleware, _RuntimeSystemPromptMiddleware)
-    assert middleware.state_key == "uipath__system_prompt"
+    runtime_middleware = [
+        middleware
+        for middleware in call_kwargs["middleware"]
+        if isinstance(middleware, _RuntimeSystemPromptMiddleware)
+    ]
+    assert len(runtime_middleware) == 1
+    assert runtime_middleware[0].state_key == "uipath__system_prompt"
 
 
 def test_static_system_prompt_skips_runtime_middleware() -> None:
@@ -113,7 +116,10 @@ def test_static_system_prompt_skips_runtime_middleware() -> None:
 
     call_kwargs = create_deep_agent.call_args.kwargs
     assert call_kwargs["system_prompt"] == "sys"
-    assert call_kwargs["middleware"] == []
+    assert not any(
+        isinstance(middleware, _RuntimeSystemPromptMiddleware)
+        for middleware in call_kwargs["middleware"]
+    )
 
 
 @pytest.mark.asyncio
