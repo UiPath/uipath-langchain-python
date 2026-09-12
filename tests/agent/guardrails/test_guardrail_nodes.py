@@ -32,10 +32,14 @@ class FakeGuardrails:
         self._result = result
         self.last_text = None
         self.last_guardrail = None
+        self.last_attachments = None
+        self.call_count = 0
 
-    def evaluate_guardrail(self, text, guardrail):
+    def evaluate_guardrail(self, text, guardrail, *, attachments=None):
+        self.call_count += 1
         self.last_text = text
         self.last_guardrail = guardrail
+        self.last_attachments = attachments
         return self._result
 
 
@@ -558,16 +562,35 @@ class TestGuardrailHelperFunctions:
         )
 
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
-        state = AgentGuardrailsGraphState(messages=[HumanMessage("test message")])
 
-        def payload_generator(s):
-            return "generated payload"
-
-        result = _evaluate_builtin_guardrail(state, guardrail, payload_generator)
+        result = await _evaluate_builtin_guardrail(guardrail, "generated payload")
 
         assert result.result == GuardrailValidationResultType.PASSED
         assert fake.guardrails.last_text == "generated payload"
         assert fake.guardrails.last_guardrail is guardrail
+        assert fake.guardrails.last_attachments is None
+
+    @pytest.mark.asyncio
+    async def test_evaluate_builtin_guardrail_forwards_attachments(self, monkeypatch):
+        """Attachment references reach the SDK call."""
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _evaluate_builtin_guardrail,
+        )
+
+        fake = _patch_uipath(monkeypatch)
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        attachment = GuardrailAttachment(
+            id="7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10",
+            file_name="a.csv",
+            mime_type="text/csv",
+            url="https://x/a.csv",
+        )
+
+        await _evaluate_builtin_guardrail(guardrail, "payload", [attachment])
+
+        assert fake.guardrails.last_attachments == [attachment]
 
     def test_create_validation_command_success(self):
         """Test validation command creation for successful validation."""
@@ -977,3 +1000,166 @@ class TestGuardrailNodeMetadata:
         assert metadata is not None
         assert metadata["payload"]["output"] == "tool output data"
         assert metadata["payload"]["input"] is None
+
+
+class TestGuardrailNodeAttachments:
+    """Agent- and LLM-scope nodes forward the run's job attachments to the judge."""
+
+    _UUID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
+
+    @staticmethod
+    def _judge_guardrail() -> MagicMock:
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "Example"
+        guardrail.validator_type = "llm_as_judge"
+        return guardrail
+
+    @staticmethod
+    def _patch_resolver(monkeypatch, attachments):
+        from unittest.mock import AsyncMock
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.resolve_guardrail_attachments",
+            AsyncMock(return_value=attachments),
+        )
+
+    def _state_with_attachment(self):
+        from uipath.platform.attachments import Attachment
+
+        return AgentGuardrailsGraphState(
+            messages=[HumanMessage("payload")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments={
+                    self._UUID: Attachment(
+                        ID=self._UUID, FullName="Tickets.csv", MimeType="text/csv"
+                    )
+                }
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_agent_init_node_forwards_resolved_attachments(self, monkeypatch):
+        """An Agent-scope PRE guardrail sees the file supplied as agent input."""
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        attachment = GuardrailAttachment(
+            id=self._UUID,
+            file_name="Tickets.csv",
+            mime_type="text/csv",
+            url="https://x/Tickets.csv?sig=s",
+        )
+        self._patch_resolver(monkeypatch, [attachment])
+
+        _, node = create_agent_init_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        cmd = await node(self._state_with_attachment())
+
+        assert cmd.goto == "ok"
+        assert fake.guardrails.last_attachments == [attachment]
+
+    @pytest.mark.asyncio
+    async def test_llm_node_forwards_resolved_attachments(self, monkeypatch):
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        attachment = GuardrailAttachment(
+            id=self._UUID,
+            file_name="Tickets.csv",
+            mime_type="text/csv",
+            url="https://x/Tickets.csv?sig=s",
+        )
+        self._patch_resolver(monkeypatch, [attachment])
+
+        _, node = create_llm_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        await node(self._state_with_attachment())
+
+        assert fake.guardrails.last_attachments == [attachment]
+
+    @pytest.mark.asyncio
+    async def test_span_metadata_never_carries_the_sas_url(self, monkeypatch):
+        """The resolved url is a credential; only identity may reach observability."""
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        _patch_uipath(monkeypatch)
+        self._patch_resolver(
+            monkeypatch,
+            [
+                GuardrailAttachment(
+                    id=self._UUID,
+                    file_name="Tickets.csv",
+                    mime_type="text/csv",
+                    url="https://x/Tickets.csv?sig=SECRET",
+                )
+            ],
+        )
+
+        _, node = create_agent_init_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        await node(self._state_with_attachment())
+
+        metadata = node.__metadata__
+        assert metadata["payload"]["attachments"] == [
+            {"id": self._UUID, "fileName": "Tickets.csv", "mimeType": "text/csv"}
+        ]
+        assert "SECRET" not in json.dumps(metadata["payload"])
+
+    @pytest.mark.asyncio
+    async def test_payload_generator_runs_once_per_evaluation(self, monkeypatch):
+        """Regression guard: the generator used to run twice — once for observability
+        metadata and once inside the evaluator — which would double every resolution."""
+        calls = []
+        _patch_uipath(monkeypatch)
+        self._patch_resolver(monkeypatch, [])
+
+        def counting_get_message_content(msg):
+            calls.append(1)
+            return "payload"
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.get_message_content",
+            counting_get_message_content,
+        )
+
+        _, node = create_agent_init_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
+
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_node_still_passes_when_no_attachment_resolved(self, monkeypatch):
+        """The low-code node is fail-closed, so resolution must absorb its own errors."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        self._patch_resolver(monkeypatch, [])
+
+        _, node = create_agent_init_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        cmd = await node(self._state_with_attachment())
+
+        assert cmd.goto == "ok"
+        assert fake.guardrails.last_attachments == []

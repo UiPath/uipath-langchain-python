@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -14,10 +15,14 @@ from uipath.platform import UiPath
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
+    GuardrailAttachment,
     GuardrailScope,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.guardrails.attachment_refs import (
+    resolve_guardrail_attachments,
+)
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
     _extract_tool_args_from_message,
@@ -67,24 +72,36 @@ def _evaluate_deterministic_guardrail(
         )
 
 
-def _evaluate_builtin_guardrail(
-    state: AgentGuardrailsGraphState,
+async def _evaluate_builtin_guardrail(
     guardrail: BuiltInValidatorGuardrail,
-    payload_generator: Callable[[AgentGuardrailsGraphState], str],
+    text: str,
+    attachments: list[GuardrailAttachment] | None = None,
 ):
     """Evaluate built-in validator guardrail.
 
+    Takes the already-generated payload rather than the generator: the caller needs the
+    same payload for observability metadata, and generating it twice would double any
+    work the generator does.
+
+    ``evaluate_guardrail`` is a synchronous HTTP call, so it is offloaded to a thread
+    rather than blocking the event loop for the whole round-trip — which now includes the
+    backend fetching and decoding each attachment.
+
     Args:
-        state: The current agent graph state.
         guardrail: The built-in validator guardrail to evaluate.
-        payload_generator: Function to generate payload text from state.
+        text: The payload text to validate.
+        attachments: Resolved attachment references the validator may inspect.
 
     Returns:
         The guardrail evaluation result.
     """
-    text = payload_generator(state)
     uipath = UiPath()
-    return uipath.guardrails.evaluate_guardrail(text, guardrail)
+    return await asyncio.to_thread(
+        uipath.guardrails.evaluate_guardrail,
+        text,
+        guardrail,
+        attachments=attachments,
+    )
 
 
 def _create_validation_command(
@@ -201,15 +218,31 @@ def _create_guardrail_node(
                     output_data_extractor,
                 )
             elif isinstance(guardrail, BuiltInValidatorGuardrail):
-                # Generate and store payload for observability
+                # Generate and store payload for observability. Generated once and passed
+                # down: it used to run again inside _evaluate_builtin_guardrail.
                 payload = payload_generator(state)
                 if execution_stage == ExecutionStage.PRE_EXECUTION:
                     metadata["payload"]["input"] = payload
                 else:
                     metadata["payload"]["output"] = payload
 
-                result = _evaluate_builtin_guardrail(
-                    state, guardrail, payload_generator
+                attachments = await resolve_guardrail_attachments(
+                    state.inner_state.job_attachments, guardrail
+                )
+                if attachments:
+                    # Identity only — the resolved url is a SAS credential and must not
+                    # reach a span or a log line.
+                    metadata["payload"]["attachments"] = [
+                        {
+                            "id": attachment.id,
+                            "fileName": attachment.file_name,
+                            "mimeType": attachment.mime_type,
+                        }
+                        for attachment in attachments
+                    ]
+
+                result = await _evaluate_builtin_guardrail(
+                    guardrail, payload, attachments
                 )
             else:
                 # Provide specific error message for DeterministicGuardrails with wrong scope
