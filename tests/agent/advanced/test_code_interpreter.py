@@ -30,6 +30,10 @@ from uipath_langchain.agent.advanced import (
     ptc_tool_names,
     subagent_dispatch_is_replay_safe,
 )
+from uipath_langchain.agent.advanced.code_interpreter import (
+    EVAL_TOOL_NAME,
+    SINGLE_IN_FLIGHT_NOTE,
+)
 
 pytest.importorskip("langchain_quickjs", reason="needs the code-interpreter extra")
 
@@ -248,6 +252,22 @@ def test_dispatch_withheld_for_a_precompiled_subagent() -> None:
         [cast("CompiledSubAgent", {"name": "worker", "runnable": object()})],
         [_tool("search")],
     )
+
+
+def test_eval_description_tells_the_model_only_one_may_be_in_flight() -> None:
+    """The REPL takes one call at a time, and nothing else tells the model.
+
+    Upstream renders the description and offers no override, and per-tool
+    parallelism is not expressible in a tool schema, so a model that is not told
+    batches two ``eval`` calls in one turn and loses one to ``ConcurrentEvalError``.
+    Asserted on the description the model is shown, not on the constant.
+    """
+    middleware = build_code_interpreter_middleware([_tool("read_invoice")])[0]
+    description = {t.name: t for t in middleware.tools}[EVAL_TOOL_NAME].description
+
+    assert SINGLE_IN_FLIGHT_NOTE.strip() in description
+    # The rendered description survives ahead of the note rather than being replaced.
+    assert description.startswith("Execute JavaScript")
 
 
 def test_factory_returns_one_middleware() -> None:
