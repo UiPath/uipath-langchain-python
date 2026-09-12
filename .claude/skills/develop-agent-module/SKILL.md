@@ -113,7 +113,7 @@ Use the structured error types in `exceptions/` — never raise raw `Exception`,
 - **Runtime errors** (during execution): `AgentRuntimeError(code=AgentRuntimeErrorCode.X, title=..., detail=..., category=...)`
 - **Startup errors** (during init): `AgentStartupError(code=AgentStartupErrorCode.X, title=..., detail=..., category=...)`
 - **HTTP errors from platform calls**: catch `EnrichedException`, map via `raise_for_enriched()` in `exceptions/helpers.py`
-- **LLM provider errors**: handled by `raise_for_provider_http_error()` in `exceptions/licensing.py`
+- **LLM provider errors**: handled by `raise_for_provider_http_error()` in `exceptions/llm.py`
 - Always chain exceptions: `raise AgentRuntimeError(...) from e`
 
 ## Testing
