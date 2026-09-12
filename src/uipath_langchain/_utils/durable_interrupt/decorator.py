@@ -94,6 +94,28 @@ def _inject_resume(scratchpad: Any, value: Any) -> Any:
     return value
 
 
+SUSPENDS_RUN = "suspends_run"
+"""Tool-metadata key: this tool may raise ``GraphInterrupt`` instead of returning.
+
+A caller that invokes tools outside the graph's tool node must not offer these.
+The node is replayed from its checkpoint on resume, so every call made before the
+interrupt runs again, and such bridges do not reach approval hooks.
+
+Set unconditionally on a tool that suspends only sometimes: the answer for a
+caller outside the tool node is the same either way.
+"""
+
+
+def suspends_run(tool: Any) -> bool:
+    """Whether ``tool`` suspends the run instead of returning a value.
+
+    Per-tool rather than per-factory: ``context_tool`` builds both suspending and
+    non-suspending variants depending on retrieval mode. An unstamped tool reports
+    ``False``.
+    """
+    return bool((getattr(tool, "metadata", None) or {}).get(SUSPENDS_RUN))
+
+
 def durable_interrupt(fn: F) -> F:
     """Decorator that executes a side-effecting function exactly once and interrupts.
 

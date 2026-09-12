@@ -24,6 +24,7 @@ from uipath.platform.context_grounding.context_grounding_index import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
     SkipInterruptValue,
     durable_interrupt,
 )
@@ -185,6 +186,7 @@ def create_deeprag_tool(
             "display_name": tool_name,
             "args_schema": input_model,
             "output_schema": output_model,
+            SUSPENDS_RUN: True,
         },
     )
     tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
