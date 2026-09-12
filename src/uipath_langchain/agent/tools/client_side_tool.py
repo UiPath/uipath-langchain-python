@@ -9,7 +9,10 @@ from langchain_core.tools import InjectedToolCallId, StructuredTool
 from uipath.agent.models.agent import AgentClientSideToolResourceConfig
 from uipath.eval.mocks import mockable
 
-from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
+    durable_interrupt,
+)
 from uipath_langchain.agent.contracts.client_side_tools import (
     ClientSideToolInfo as ClientSideToolInfo,
 )
@@ -126,6 +129,7 @@ def create_client_side_tool(
         metadata={
             IS_CONVERSATIONAL_CLIENT_SIDE_TOOL: True,
             "output_schema": resource.output_schema,
+            SUSPENDS_RUN: True,
         },
     )
 

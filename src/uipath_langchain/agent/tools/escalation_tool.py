@@ -26,7 +26,10 @@ from uipath_langchain._utils import (
     get_current_span_and_trace_ids,
     get_execution_folder_path,
 )
-from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
+    durable_interrupt,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,
@@ -514,6 +517,7 @@ def create_escalation_tool(
         argument_properties=channel.argument_properties,
         metadata={
             "tool_type": "escalation",
+            SUSPENDS_RUN: True,
             "display_name": _try_get_channel_app_name(channel) or channel.name,
             "channel_type": channel.type,
             "recipient": None,

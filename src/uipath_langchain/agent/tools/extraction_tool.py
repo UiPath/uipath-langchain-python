@@ -14,6 +14,7 @@ from uipath.platform.documents import ExtractionResponseIXP
 from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils.durable_interrupt import SUSPENDS_RUN
 from uipath_langchain.agent.attachments.job_attachments import (
     get_job_attachment_paths,
     get_job_attachments,
@@ -159,6 +160,7 @@ def create_ixp_extraction_tool(
         output_type=ExtractionResponseIXP,
         metadata={
             "tool_type": "ixp_extraction",
+            SUSPENDS_RUN: True,
             "display_name": resource.name,
             "project_name": project_name,
             "version_tag": version_tag,
