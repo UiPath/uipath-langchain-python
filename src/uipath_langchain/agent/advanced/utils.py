@@ -189,7 +189,7 @@ async def _download_missing(
 
 
 async def resolve_message_attachments(
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     messages: Sequence[AnyMessage],
 ) -> list[AnyMessage]:
     """Download attachments referenced by messages and add their ``file_path``.
