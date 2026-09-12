@@ -78,7 +78,7 @@ class TestResolveGuardrailAttachments:
         client.attachments.get_blob_file_access_uri_async.assert_not_awaited()
 
     @pytest.mark.parametrize(
-        "mime", ["application/pdf", "image/png", "application/octet-stream"]
+        "mime", ["application/octet-stream", "application/zip", "video/mp4"]
     )
     async def test_skips_unsupported_mime_type(self, monkeypatch, mime):
         monkeypatch.setenv(_ENV_FLAG, "true")
@@ -87,9 +87,20 @@ class TestResolveGuardrailAttachments:
         assert await resolve_guardrail_attachments(_registry(mime=mime), _judge()) == []
 
     @pytest.mark.parametrize(
-        "mime", ["text/plain", "text/csv", "application/json", "text/markdown"]
+        "mime",
+        [
+            # Phase 1 — decoded and inlined by the backend.
+            "text/plain",
+            "text/csv",
+            "application/json",
+            "text/markdown",
+            # Phase 2 — sent to a vision-capable judge as content parts.
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+        ],
     )
-    async def test_accepts_every_phase_one_mime_type(self, monkeypatch, mime):
+    async def test_accepts_every_supported_mime_type(self, monkeypatch, mime):
         monkeypatch.setenv(_ENV_FLAG, "true")
         _patch_client(monkeypatch, uri="https://x/a", name="a")
 

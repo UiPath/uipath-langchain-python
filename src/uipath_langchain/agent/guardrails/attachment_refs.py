@@ -32,10 +32,12 @@ _LLM_AS_JUDGE = "llm_as_judge"
 #: Matches the ceiling the validate API enforces; resolving more would be wasted work.
 _MAX_ATTACHMENTS = 5
 
-#: Phase 1 — types that are already text, inlined into the judge payload by the backend.
-#: Phase 2 adds pdf and the image types, which the backend sends to the model as content parts.
+#: What the backend can inspect. The runtime only forwards references — the backend decides
+#: how to read each type, so this set exists to avoid spending an Orchestrator round-trip on a
+#: file that would be skipped anyway.
 SUPPORTED_MIME_TYPES = frozenset(
     {
+        # Already text: the backend decodes these and inlines them into the judged payload.
         "text/plain",
         "text/csv",
         "application/csv",
@@ -44,6 +46,12 @@ SUPPORTED_MIME_TYPES = frozenset(
         "application/json",
         "text/xml",
         "application/xml",
+        # Binary: the backend sends these to a vision-capable judge model as content parts.
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
     }
 )
 
