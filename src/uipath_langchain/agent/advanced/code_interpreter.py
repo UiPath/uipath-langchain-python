@@ -43,6 +43,9 @@ PTC_FILESYSTEM_TOOLS: tuple[str, ...] = get_args(FsToolName)
 
 _RESERVED_TOOL_NAMES = frozenset({"task"})
 
+# Upstream's default ``tool_name``; the factory does not override it.
+EVAL_TOOL_NAME = "eval"
+
 # Subagent spec keys that make deepagents interrupt without a stamped tool.
 _SUBAGENT_INTERRUPT_KEYS = ("interrupt_on", "permissions", "middleware")
 
@@ -59,6 +62,20 @@ other two write nothing.
 # Per-eval wall clock. The REPL is for orchestration and arithmetic, not long
 # computation, and a bridged tool call does not consume it.
 DEFAULT_EVAL_TIMEOUT_SECONDS = 5.0
+
+SINGLE_IN_FLIGHT_NOTE = (
+    " Only one eval may run at a time: they share one interpreter and its state, "
+    "so a second call issued in the same turn fails instead of queueing. Put the "
+    "work in one call and use `await Promise.all([...])` to parallelise inside it."
+)
+"""Appended to the ``eval`` tool description by the factory.
+
+Upstream renders that description from the persistence mode and offers no
+override, and the single-in-flight rule is not in it. It is also not expressible
+as a tool schema field: ``parallel_tool_calls`` is a request-level switch in both
+the OpenAI and Anthropic APIs, so a model that is not told batches two ``eval``
+calls and loses a turn to ``ConcurrentEvalError``.
+"""
 
 
 def ptc_tool_names(tools: Sequence[BaseTool]) -> list[str]:
@@ -205,14 +222,33 @@ def build_code_interpreter_middleware(
         len(tools),
         "offered" if dispatch else "withheld",
     )
-    return [
-        middleware_cls(
-            ptc=[*exposed, *PTC_FILESYSTEM_TOOLS],
-            mode=mode,
-            subagents=dispatch,
-            timeout=timeout,
-        )
-    ]
+    middleware = middleware_cls(
+        ptc=[*exposed, *PTC_FILESYSTEM_TOOLS],
+        mode=mode,
+        subagents=dispatch,
+        timeout=timeout,
+    )
+    _append_single_in_flight_note(middleware)
+    return [middleware]
+
+
+def _append_single_in_flight_note(middleware: Any) -> None:
+    """Tell the model the REPL takes one call at a time.
+
+    Mutates the description of the tool this factory just built, rather than the
+    class, so no other consumer of ``langchain_quickjs`` is affected. A rendering
+    change upstream drops the note rather than corrupting it, which the factory
+    test catches.
+    """
+    for tool in getattr(middleware, "tools", ()):
+        if tool.name == EVAL_TOOL_NAME:
+            tool.description = tool.description.rstrip() + SINGLE_IN_FLIGHT_NOTE
+            return
+    logger.warning(
+        "Code interpreter: no %r tool to annotate, so the model is not told that "
+        "only one eval may be in flight",
+        EVAL_TOOL_NAME,
+    )
 
 
 def _without_camel_collisions(
