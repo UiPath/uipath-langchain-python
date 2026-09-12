@@ -21,7 +21,7 @@ def mock_env_vars():
 def mock_guardrails_service():
     """Mock the guardrails service to avoid HTTP errors in tests."""
 
-    def mock_evaluate_guardrail(text, guardrail):
+    def mock_evaluate_guardrail(text, guardrail, *, attachments=None):
         """Mock guardrail evaluation - always passes validation."""
         return GuardrailValidationResult(
             result=GuardrailValidationResultType.PASSED,
