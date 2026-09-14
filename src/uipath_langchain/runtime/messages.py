@@ -40,6 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from uipath_langchain._utils._attachments import render_attachments_block
 from uipath_langchain.agent.contracts.client_side_tools import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
@@ -208,9 +209,7 @@ class UiPathChatMessagesMapper:
             # Add attachment references as a text block for LLM visibility
             if attachments:
                 content_blocks.append(
-                    create_text_block(
-                        f"<uip:attachments>{json.dumps(attachments)}</uip:attachments>"
-                    )
+                    create_text_block(render_attachments_block(attachments))
                 )
 
             # Metadata for the user/assistant message
