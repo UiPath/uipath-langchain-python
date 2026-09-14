@@ -814,8 +814,10 @@ class TestStripEnumsFromSchema:
         ]
         assert engine_schema["type"] == "string"
         assert engine_schema["title"] == "Search Engine"
-        assert engine_schema["description"].startswith("The search engine to use")
-        assert "PlaceholderEngine" in engine_schema["description"]
+        assert (
+            engine_schema["description"]
+            == "The search engine to use (Allowed value(s): PlaceholderEngine)"
+        )
 
 
 class TestCreateIntegrationToolWithArgumentProperties:
