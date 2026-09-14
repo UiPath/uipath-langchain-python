@@ -1088,22 +1088,80 @@ class TestGuardrailNodeAttachments:
         assert fake.guardrails.last_attachments == [attachment]
 
     @pytest.mark.asyncio
-    async def test_span_metadata_never_carries_the_sas_url(self, monkeypatch):
-        """The resolved url is a credential; only identity may reach observability."""
-        from uipath.platform.guardrails import GuardrailAttachment
+    async def test_tool_scope_node_never_resolves_attachments(self, monkeypatch):
+        """Tool scope is excluded by product decision: a tool-scope judge would ship file
+        contents on every tool call."""
+        from unittest.mock import AsyncMock
 
-        _patch_uipath(monkeypatch)
-        self._patch_resolver(
-            monkeypatch,
-            [
-                GuardrailAttachment(
-                    id=self._UUID,
-                    file_name="Tickets.csv",
-                    mime_type="text/csv",
-                    url="https://x/Tickets.csv?sig=SECRET",
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        resolver = AsyncMock(return_value=[])
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.resolve_guardrail_attachments",
+            resolver,
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "my_tool", "args": {"q": 1}, "id": "c1"}],
                 )
             ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._state_with_attachment().inner_state.job_attachments
+            ),
         )
+        await node(state)
+
+        resolver.assert_not_awaited()
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    async def test_attachment_rejection_falls_back_to_text_only(self, monkeypatch):
+        """A 400 on a request that carried attachments must not kill the run: the backend
+        rejected the file references, so evaluate the text payload alone."""
+        import httpx
+        from uipath.platform.errors import EnrichedException
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        calls: list[list | None] = []
+        response = httpx.Response(
+            400, request=httpx.Request("POST", "https://x/validate"), text="bad url"
+        )
+        rejection = EnrichedException(
+            httpx.HTTPStatusError("400", request=response.request, response=response)
+        )
+
+        class FlakyGuardrails:
+            def evaluate_guardrail(self, text, guardrail, *, attachments=None):
+                calls.append(attachments)
+                if attachments:
+                    raise rejection
+                return GuardrailValidationResult(
+                    result=GuardrailValidationResultType.PASSED, reason="ok"
+                )
+
+        class FlakyUiPath:
+            guardrails = FlakyGuardrails()
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: FlakyUiPath(),
+        )
+        attachment = GuardrailAttachment(
+            id=self._UUID,
+            file_name="a.csv",
+            mime_type="text/csv",
+            url="https://x/a.csv",
+        )
+        self._patch_resolver(monkeypatch, [attachment])
 
         _, node = create_agent_init_guardrail_node(
             guardrail=self._judge_guardrail(),
@@ -1111,13 +1169,46 @@ class TestGuardrailNodeAttachments:
             success_node="ok",
             failure_node="nope",
         )
-        await node(self._state_with_attachment())
+        cmd = await node(self._state_with_attachment())
 
-        metadata = node.__metadata__
-        assert metadata["payload"]["attachments"] == [
-            {"id": self._UUID, "fileName": "Tickets.csv", "mimeType": "text/csv"}
-        ]
-        assert "SECRET" not in json.dumps(metadata["payload"])
+        assert cmd.goto == "ok"
+        assert calls == [[attachment], None]
+
+    @pytest.mark.asyncio
+    async def test_non_attachment_400_still_propagates(self, monkeypatch):
+        """Only an attachment-caused 400 is absorbed; a 400 without attachments is real."""
+        import httpx
+        from uipath.platform.errors import EnrichedException
+
+        response = httpx.Response(
+            400, request=httpx.Request("POST", "https://x/validate"), text="bad"
+        )
+        rejection = EnrichedException(
+            httpx.HTTPStatusError("400", request=response.request, response=response)
+        )
+
+        class FailingGuardrails:
+            def evaluate_guardrail(self, text, guardrail, *, attachments=None):
+                raise rejection
+
+        class FailingUiPath:
+            guardrails = FailingGuardrails()
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: FailingUiPath(),
+        )
+        self._patch_resolver(monkeypatch, [])
+
+        _, node = create_agent_init_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        with pytest.raises(EnrichedException):
+            await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
 
     @pytest.mark.asyncio
     async def test_payload_generator_runs_once_per_evaluation(self, monkeypatch):

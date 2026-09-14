@@ -32,6 +32,9 @@ _LLM_AS_JUDGE = "llm_as_judge"
 #: Matches the ceiling the validate API enforces; resolving more would be wasted work.
 _MAX_ATTACHMENTS = 5
 
+#: The validate API rejects longer file names with a 400.
+_MAX_FILE_NAME_LENGTH = 260
+
 #: What the backend can inspect. The runtime only forwards references — the backend decides
 #: how to read each type, so this set exists to avoid spending an Orchestrator round-trip on a
 #: file that would be skipped anyway.
@@ -107,9 +110,12 @@ async def _resolve_one(
         blob_info = await client.attachments.get_blob_file_access_uri_async(
             key=uuid.UUID(str(attachment.id))
         )
+        # The validate API caps file names at 260 characters; a longer name would be a 400
+        # for the whole request, and this is a display label, not an identifier.
+        file_name = (attachment.full_name or blob_info.name)[:_MAX_FILE_NAME_LENGTH]
         return GuardrailAttachment(
             id=str(attachment.id),
-            file_name=attachment.full_name or blob_info.name,
+            file_name=file_name,
             mime_type=attachment.mime_type,
             url=blob_info.uri,
         )

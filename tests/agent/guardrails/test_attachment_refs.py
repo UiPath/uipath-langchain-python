@@ -163,3 +163,15 @@ class TestResolveGuardrailAttachments:
         _patch_client(monkeypatch, uri="https://x/a.csv", name="a.csv")
 
         assert await resolve_guardrail_attachments({}, _judge()) == []
+
+    async def test_truncates_over_long_file_names_to_the_api_ceiling(self, monkeypatch):
+        """The validate API rejects names over 260 chars; a 400 there would kill the run."""
+        monkeypatch.setenv(_ENV_FLAG, "true")
+        _patch_client(monkeypatch, uri="https://x/a.csv", name="a.csv")
+        long_name = "x" * 300 + ".csv"
+
+        result = await resolve_guardrail_attachments(
+            _registry(name=long_name), _judge()
+        )
+
+        assert len(result[0].file_name) == 260

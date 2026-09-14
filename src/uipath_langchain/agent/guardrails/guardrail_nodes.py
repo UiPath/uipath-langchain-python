@@ -12,6 +12,7 @@ from uipath.core.guardrails import (
     GuardrailValidationResultType,
 )
 from uipath.platform import UiPath
+from uipath.platform.errors import EnrichedException
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
@@ -35,6 +36,9 @@ from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
 logger = logging.getLogger(__name__)
+
+#: Guardrail scopes whose evaluations may inspect attached files. Deliberately not TOOL.
+_ATTACHMENT_SCOPES = frozenset({GuardrailScope.AGENT, GuardrailScope.LLM})
 
 
 def _evaluate_deterministic_guardrail(
@@ -96,12 +100,28 @@ async def _evaluate_builtin_guardrail(
         The guardrail evaluation result.
     """
     uipath = UiPath()
-    return await asyncio.to_thread(
-        uipath.guardrails.evaluate_guardrail,
-        text,
-        guardrail,
-        attachments=attachments,
-    )
+    try:
+        return await asyncio.to_thread(
+            uipath.guardrails.evaluate_guardrail,
+            text,
+            guardrail,
+            attachments=attachments,
+        )
+    except EnrichedException as exc:
+        # A 400 on a request that carried attachments means the backend rejected the
+        # attachment references themselves (unsafe url, unknown host, oversize name...).
+        # A guardrail must never fail the run because of a file, so evaluate the text
+        # payload alone. Any other status is a genuine failure and propagates as before.
+        if not attachments or exc.status_code != 400:
+            raise
+        logger.warning(
+            "Guardrail '%s' rejected the attachment references (HTTP 400); "
+            "re-evaluating without attachments.",
+            guardrail.name,
+        )
+        return await asyncio.to_thread(
+            uipath.guardrails.evaluate_guardrail, text, guardrail, attachments=None
+        )
 
 
 def _create_validation_command(
@@ -226,20 +246,16 @@ def _create_guardrail_node(
                 else:
                     metadata["payload"]["output"] = payload
 
-                attachments = await resolve_guardrail_attachments(
-                    state.inner_state.job_attachments, guardrail
+                # File contents reach the judge at Agent and LLM scope only. Tool scope is
+                # excluded on purpose: a tool-scope judge would resolve SAS urls and ship
+                # file contents on every tool call, over a registry that only grows.
+                attachments = (
+                    await resolve_guardrail_attachments(
+                        state.inner_state.job_attachments, guardrail
+                    )
+                    if scope in _ATTACHMENT_SCOPES
+                    else []
                 )
-                if attachments:
-                    # Identity only — the resolved url is a SAS credential and must not
-                    # reach a span or a log line.
-                    metadata["payload"]["attachments"] = [
-                        {
-                            "id": attachment.id,
-                            "fileName": attachment.file_name,
-                            "mimeType": attachment.mime_type,
-                        }
-                        for attachment in attachments
-                    ]
 
                 result = await _evaluate_builtin_guardrail(
                     guardrail, payload, attachments
