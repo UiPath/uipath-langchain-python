@@ -44,6 +44,7 @@ from uipath_langchain.agent.react.conversational_output_node import (
 from uipath_langchain.agent.react.utils import (
     has_custom_conversational_output_fields,
 )
+from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .types import (
@@ -208,6 +209,89 @@ def _max_iterations_middleware(
 
 # A subagent returns only a text report, so a reference it produces never reaches
 # the main agent -- the only agent that fills the typed output.
+class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Route deep-agent model calls through the provider's payload handler.
+
+    The react path shapes every call and checks the finish reason. Deep agents
+    do neither, so a Gemini subagent turn reaches Vertex with no function
+    calling mode and its malformed replies read as final answers.
+    """
+
+    def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
+        # create_agent derives the bound tool_choice after middleware runs, as
+        # `"any" if structured_output_tools else request.tool_choice`, and
+        # langchain_google_genai rejects a request carrying both that and a mode.
+        if request.tool_choice or request.response_format is not None:
+            return request
+        bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
+        tool_config = (
+            get_payload_handler(request.model)
+            .get_tool_binding_kwargs(
+                tools=bound_tools,
+                tool_choice="auto",
+                strict_mode=True,
+            )
+            .get("tool_config")
+        )
+        if tool_config is None:
+            return request
+        return request.override(
+            model_settings={**request.model_settings, "tool_config": tool_config}
+        )
+
+    def _validate_response(
+        self, request: ModelRequest[Any], response: ModelResponse[Any]
+    ) -> None:
+        handler = get_payload_handler(request.model)
+        for message in response.result:
+            if isinstance(message, AIMessage):
+                handler.check_stop_reason(message)
+        self._reject_empty_answer(response)
+
+    def _reject_empty_answer(self, response: ModelResponse[Any]) -> None:
+        """Refuse a turn with no text and no tool calls, which ends the loop."""
+        if response.structured_response is not None:
+            return
+        messages = [m for m in response.result if isinstance(m, AIMessage)]
+        if not messages:
+            return
+        last = messages[-1]
+        if last.text.strip() or last.tool_calls:
+            return
+        # A reasoning-only turn has no text and no tool calls either.
+        if any(block.get("type") != "text" for block in last.content_blocks):
+            return
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+            title="The model returned an empty response.",
+            detail=(
+                "The model produced neither text nor a tool call, which ends the "
+                "agent loop with nothing to report. If you are using a BYOM "
+                "configuration, verify your model deployment returns tool calls "
+                "for the tools it is given."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        response = handler(self._prepare_request(request))
+        self._validate_response(request, response)
+        return response
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        response = await handler(self._prepare_request(request))
+        self._validate_response(request, response)
+        return response
+
+
 MAIN_AGENT_ONLY_TOOLS: frozenset[str] = frozenset({OUTPUT_FILE_TOOL_NAME})
 
 
@@ -226,6 +310,7 @@ def _subagents_without_main_agent_tools(
     subagents: Sequence[SubAgent | CompiledSubAgent],
     shared_tools: Sequence[BaseTool],
     skills: Sequence[str] | None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> list[SubAgent | CompiledSubAgent]:
     """Give every subagent the shared tool list instead of the parent's.
 
@@ -241,6 +326,9 @@ def _subagents_without_main_agent_tools(
     spec: the built-in branch reads the top-level ``skills`` argument, while a
     caller-supplied spec reads ``spec["skills"]``, so omitting it silently drops
     skills from that subagent.
+
+    ``middleware`` rides along for the same reason: ``create_deep_agent`` gives its
+    own ``middleware`` argument to the main agent alone.
     """
     resolved: list[SubAgent | CompiledSubAgent] = []
     for spec in subagents:
@@ -248,7 +336,13 @@ def _subagents_without_main_agent_tools(
         if "runnable" in spec or "tools" in spec:
             resolved.append(spec)
             continue
-        resolved.append({**spec, "tools": list(shared_tools)})
+        resolved.append(
+            {
+                **spec,
+                "tools": list(shared_tools),
+                "middleware": [*spec.get("middleware", []), *middleware],
+            }
+        )
 
     if not any(
         spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in resolved
@@ -256,6 +350,7 @@ def _subagents_without_main_agent_tools(
         gp: dict[str, Any] = {
             **GENERAL_PURPOSE_SUBAGENT,
             "tools": list(shared_tools),
+            "middleware": list(middleware),
         }
         if skills:
             gp["skills"] = list(skills)
@@ -283,15 +378,18 @@ def create_advanced_agent(
     Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
     shared_tools, _ = _partition_main_agent_tools(tools)
+    payload_handler = _PayloadHandlerMiddleware()
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=_subagents_without_main_agent_tools(subagents, shared_tools, skills),
+        subagents=_subagents_without_main_agent_tools(
+            subagents, shared_tools, skills, [payload_handler]
+        ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=list(middleware),
+        middleware=[*middleware, payload_handler],
     )
 
 
