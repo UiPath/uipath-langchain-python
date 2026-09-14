@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from uipath.platform.attachments import Attachment, BlobFileAccessInfo
 from uipath.platform.guardrails import BuiltInValidatorGuardrail
+from uipath.platform.guardrails.guardrails import EnumParameterValue
 
 from uipath_langchain.agent.guardrails.attachment_refs import (
     GUARDRAIL_ATTACHMENTS_FEATURE_FLAG,
@@ -19,6 +20,17 @@ _ENV_FLAG = f"UIPATH_FEATURE_{GUARDRAIL_ATTACHMENTS_FEATURE_FLAG}"
 def _judge() -> MagicMock:
     guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
     guardrail.validator_type = "llm_as_judge"
+    return guardrail
+
+
+def _scoped_judge(applies_to: str, parameter_id: str = "appliesTo") -> MagicMock:
+    """A judge guardrail carrying the ``appliesTo`` parameter the designer writes."""
+    guardrail = _judge()
+    guardrail.validator_parameters = [
+        EnumParameterValue.model_validate(
+            {"$parameterType": "enum", "id": parameter_id, "value": applies_to}
+        )
+    ]
     return guardrail
 
 
@@ -175,3 +187,57 @@ class TestResolveGuardrailAttachments:
         )
 
         assert len(result[0].file_name) == 260
+
+    @pytest.mark.parametrize("applies_to", ["Prompts", "prompts", "  PROMPTS  "])
+    async def test_returns_empty_when_scoped_to_prompts(self, monkeypatch, applies_to):
+        """A prompts-only guardrail must not spend an Orchestrator call per file."""
+        monkeypatch.setenv(_ENV_FLAG, "true")
+        client = _patch_client(monkeypatch, uri="https://x/a.csv", name="a.csv")
+
+        result = await resolve_guardrail_attachments(
+            _registry(), _scoped_judge(applies_to)
+        )
+
+        assert result == []
+        client.attachments.get_blob_file_access_uri_async.assert_not_awaited()
+
+    async def test_matches_the_scope_parameter_id_case_insensitively(self, monkeypatch):
+        """The backend matches parameter ids ignoring case; a mismatch here would resolve
+        files the author scoped out."""
+        monkeypatch.setenv(_ENV_FLAG, "true")
+        client = _patch_client(monkeypatch, uri="https://x/a.csv", name="a.csv")
+
+        result = await resolve_guardrail_attachments(
+            _registry(), _scoped_judge("Prompts", parameter_id="AppliesTo")
+        )
+
+        assert result == []
+        client.attachments.get_blob_file_access_uri_async.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "applies_to", ["Files", "Both", "both", "something-we-never-shipped"]
+    )
+    async def test_resolves_when_the_scope_is_not_prompts_only(
+        self, monkeypatch, applies_to
+    ):
+        """Anything but Prompts keeps files in scope, matching the backend's default of Both.
+        An unrecognized value must not silently stop scanning files."""
+        monkeypatch.setenv(_ENV_FLAG, "true")
+        _patch_client(monkeypatch, uri="https://x/a.csv", name="a.csv")
+
+        result = await resolve_guardrail_attachments(
+            _registry(), _scoped_judge(applies_to)
+        )
+
+        assert [r.file_name for r in result] == ["a.csv"]
+
+    async def test_resolves_when_the_scope_parameter_is_malformed(self, monkeypatch):
+        """Never raises: the caller re-raises, which would end the run over a bad parameter."""
+        monkeypatch.setenv(_ENV_FLAG, "true")
+        _patch_client(monkeypatch, uri="https://x/a.csv", name="a.csv")
+        guardrail = _judge()
+        guardrail.validator_parameters = 7  # not a list
+
+        result = await resolve_guardrail_attachments(_registry(), guardrail)
+
+        assert [r.file_name for r in result] == ["a.csv"]

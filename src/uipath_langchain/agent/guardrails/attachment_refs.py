@@ -1,8 +1,9 @@
 """Project a run's job-attachment registry into guardrail attachment references.
 
-Only the ``llm_as_judge`` validator consumes attachments today, and only behind a feature
-flag, so both gates live here: resolving a SAS URL costs an Orchestrator round-trip and
-there is no point spending it for a validator that will ignore the result.
+Only the ``llm_as_judge`` validator consumes attachments today, only behind a feature flag,
+and only when the guardrail's author scoped it to files, so all three gates live here:
+resolving a SAS URL costs an Orchestrator round-trip and there is no point spending it for a
+validator -- or a guardrail configuration -- that will ignore the result.
 
 Nothing in this module raises. The low-code guardrail node re-raises any exception it sees
 (see ``guardrail_nodes._create_guardrail_node``), which terminates the agent run — so a
@@ -34,6 +35,16 @@ _MAX_ATTACHMENTS = 5
 
 #: The validate API rejects longer file names with a 400.
 _MAX_FILE_NAME_LENGTH = 260
+
+#: Optional guardrail parameter scoping the evaluation to ``Prompts``, ``Files`` or ``Both``.
+#: Parameter ids are matched case-insensitively, as the backend does.
+_APPLIES_TO_PARAMETER = "appliesto"
+
+#: The one value that puts files out of scope. Anything else -- including an absent parameter,
+#: which is every guardrail configured before it existed -- keeps them in, matching the
+#: backend's default of "Both". Narrowing on an unrecognized value would silently stop
+#: scanning files for a guardrail whose author never asked for that.
+_PROMPTS_ONLY = "prompts"
 
 #: What the backend can inspect. The runtime only forwards references — the backend decides
 #: how to read each type, so this set exists to avoid spending an Orchestrator round-trip on a
@@ -68,6 +79,29 @@ def _is_enabled(guardrail: BuiltInValidatorGuardrail) -> bool:
     )
 
 
+def _scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> bool:
+    """Whether the guardrail's ``appliesTo`` parameter puts the run's files in scope.
+
+    The backend gates on this too, but it can only do so after the URLs are resolved. Reading
+    it here is what actually saves the Orchestrator round-trip per file on a prompts-only
+    guardrail -- the reason this projection is gated at all.
+    """
+    try:
+        for parameter in getattr(guardrail, "validator_parameters", None) or []:
+            if str(getattr(parameter, "id", "")).lower() != _APPLIES_TO_PARAMETER:
+                continue
+            value = getattr(parameter, "value", None)
+            if isinstance(value, str):
+                return value.strip().lower() != _PROMPTS_ONLY
+    except Exception:
+        # This module promises never to raise: the caller re-raises, which ends the run. A
+        # parameter list that is not shaped as expected falls back to the backend's default.
+        logger.debug(
+            "Could not read the guardrail scope; assuming files apply.", exc_info=True
+        )
+    return True
+
+
 async def resolve_guardrail_attachments(
     job_attachments: dict[str, Attachment],
     guardrail: BuiltInValidatorGuardrail,
@@ -80,10 +114,16 @@ async def resolve_guardrail_attachments(
 
     Returns:
         Resolved attachment references, or an empty list when the feature is off, the
-        validator cannot use them, none are of a supported type, or resolution failed.
-        Never raises.
+        validator cannot use them, the guardrail is scoped to prompts only, none are of a
+        supported type, or resolution failed. Never raises.
     """
     if not job_attachments or not _is_enabled(guardrail):
+        return []
+    if not _scope_includes_files(guardrail):
+        logger.debug(
+            "Guardrail '%s' is scoped to prompts; skipping attachment resolution.",
+            getattr(guardrail, "name", "?"),
+        )
         return []
 
     candidates = [
