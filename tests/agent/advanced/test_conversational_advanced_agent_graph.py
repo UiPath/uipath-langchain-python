@@ -1,10 +1,13 @@
 """Tests for the conversational advanced agent wrapper builder."""
 
+import uuid
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends import FilesystemBackend
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -12,6 +15,7 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
+from uipath_langchain._utils._attachments import render_attachments_block
 from uipath_langchain.agent.advanced.agent import (
     _RuntimeSystemPromptMiddleware,
     create_conversational_advanced_agent_graph,
@@ -506,3 +510,95 @@ def _extractor(args: dict[str, Any]) -> Any:
         return args
 
     return extract
+
+
+def _recording_inner_agent(seen: list[Any]) -> Any:
+    """A stand-in deepagent that records the messages the wrapper handed it."""
+
+    def respond(state: ConversationalAdvancedAgentGraphState) -> dict[str, Any]:
+        seen.extend(state.messages)
+        return {"messages": [AIMessage(content="here is my plan", id="ai-1")]}
+
+    builder: StateGraph[Any, Any, Any, Any] = StateGraph(
+        ConversationalAdvancedAgentGraphState
+    )
+    builder.add_node("respond", respond)
+    builder.add_edge(START, "respond")
+    builder.add_edge("respond", END)
+    return builder.compile()
+
+
+def _attachment_message(attachment_id: uuid.UUID) -> HumanMessage:
+    attachments = [
+        {
+            "id": str(attachment_id),
+            "full_name": "uipath_company_report.md",
+            "mime_type": "text/markdown",
+        }
+    ]
+    return HumanMessage(
+        id="u1",
+        content_blocks=[
+            {"type": "text", "text": "can you read this file?"},
+            {"type": "text", "text": render_attachments_block(attachments)},
+        ],
+        additional_kwargs={"attachments": attachments},
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_attachments_are_downloaded_and_pathed(tmp_path: Path) -> None:
+    """A file attached in the chat reaches the workspace and the model sees its path."""
+    backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    attachment_id = uuid.uuid4()
+    seen: list[Any] = []
+
+    mock_client = MagicMock()
+    mock_client.attachments.download_async = AsyncMock()
+    with (
+        patch(
+            "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+            return_value=_recording_inner_agent(seen),
+        ),
+        patch(
+            "uipath_langchain.agent.advanced.utils.UiPath",
+            return_value=mock_client,
+        ),
+    ):
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(), tools=[], system_prompt="sys", backend=backend
+        ).compile()
+        result = await graph.ainvoke({"messages": [_attachment_message(attachment_id)]})
+
+    expected_name = f"{attachment_id}_uipath_company_report.md"
+    assert mock_client.attachments.download_async.call_args.kwargs[
+        "destination_path"
+    ] == str(backend.cwd / expected_name)
+
+    hydrated = next(message for message in seen if message.id == "u1")
+    assert hydrated.additional_kwargs["attachments"][0]["file_path"] == (
+        f"/{expected_name}"
+    )
+    assert f"/{expected_name}" in hydrated.content[1]["text"]
+    assert len(result["uipath__agent_response_messages"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_attachments_need_a_filesystem_backend() -> None:
+    """Without a workspace the attachment block is passed through unchanged."""
+    attachment_id = uuid.uuid4()
+    message = _attachment_message(attachment_id)
+    seen: list[Any] = []
+
+    with patch(
+        "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+        return_value=_recording_inner_agent(seen),
+    ):
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(), tools=[], system_prompt="sys", backend=None
+        ).compile()
+        await graph.ainvoke({"messages": [message]})
+
+    unchanged = next(seen_message for seen_message in seen if seen_message.id == "u1")
+    assert unchanged.content == message.content
+    assert "file_path" not in unchanged.additional_kwargs["attachments"][0]
