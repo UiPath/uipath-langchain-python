@@ -150,7 +150,7 @@ def handle_enum(
     if values and not any(
         isinstance(v, str) and _TEMPLATE_VALUE_PATTERN.match(v) for v in values
     ):
-        hint = f"Allowed value(s): {', '.join(str(v) for v in values)}."
+        hint = f"Allowed value(s): {', '.join(str(v) for v in values)}"
         description = field_schema.get("description")
         field_schema["description"] = f"{description} ({hint})" if description else hint
 
