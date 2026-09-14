@@ -75,6 +75,21 @@ def test_build_includes_domain_guidance_in_rendered_prompt():
     assert "Use business-friendly ticket language." in prompt
 
 
+def test_build_includes_entity_disambiguation_rule():
+    """Similar entities must trigger a clarifying question, not a silent guess.
+
+    Locks the disambiguation rule and its no-tool directive into the rendered
+    v1 prompt so a future template/rendering edit can't silently drop or join
+    it while the suite still passes (PR #1084). Applies to both the entity-set
+    and ontology paths, since both render through the default v1 strategy.
+    """
+    prompt = build([_fake_entity(_fake_field())], resource_description="")
+
+    assert "do NOT guess and do NOT silently pick one" in prompt
+    assert "reply with a brief clarifying question" in prompt
+    assert "instead of calling ``execute_sql``" in prompt
+
+
 def test_relationship_field_renders_join_when_target_entity_present():
     order = _fake_entity(
         _fake_field(),
