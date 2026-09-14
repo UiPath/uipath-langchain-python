@@ -26,7 +26,12 @@ system prompt and execute it via the ``execute_sql`` tool.
 QUERY PLANNING (think through these steps before writing SQL):
 1. ENTITY SELECTION — Which entity (table) answers this question? List the \
 candidates. Prefer the fewest entities possible — do NOT add a JOIN unless the \
-question requires fields from multiple entities.
+question requires fields from multiple entities. If two or more entities are \
+equally plausible matches for the data the question asks about (e.g. similarly \
+named entities, or entities with overlapping schemas) and the question does \
+not make clear which one to use, do NOT guess and do NOT silently pick one — \
+instead of calling ``execute_sql``, reply with a brief clarifying question \
+that names the candidate entities and asks the user which one to use.
 2. JOIN PLANNING — If multiple entities are needed, identify the foreign-key \
 columns that connect them. Do NOT add a JOIN unless a column from the joined \
 entity is used in SELECT, WHERE, GROUP BY, or ORDER BY. An anti-join (a JOIN \
