@@ -55,6 +55,7 @@ from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
     resolve_input_attachments,
+    resolve_message_attachments,
 )
 
 
@@ -569,9 +570,12 @@ def create_conversational_advanced_agent_graph(
             }
         ).model_dump(by_alias=True, exclude_unset=True)
 
-    def capture_exchange_start(state: BaseModel) -> dict[str, Any]:
+    async def capture_exchange_start(state: BaseModel) -> dict[str, Any]:
         messages = cast(ConversationalAdvancedAgentGraphState, state).messages
         update: dict[str, Any] = {initial_message_count_key: len(messages)}
+        hydrated_messages = await resolve_message_attachments(backend, messages)
+        if hydrated_messages:
+            update["messages"] = hydrated_messages
         if runtime_prompt.build_prompt is not None:
             update.update(runtime_prompt.resolve(declared_input(state)))
         return update
