@@ -51,7 +51,7 @@ class EscalateAction(GuardrailAction):
     def __init__(
         self,
         app_name: str,
-        app_folder_path: str,
+        app_folder_path: str | None,
         version: int,
         recipient: AgentEscalationRecipient,
     ):
@@ -59,7 +59,9 @@ class EscalateAction(GuardrailAction):
 
         Args:
             app_name: Name of the escalation app.
-            app_folder_path: Folder path where the escalation app is located.
+            app_folder_path: Folder path where the escalation app is located, or
+                None when the app lives inside the solution and has no folder of
+                its own.
             version: Version of the escalation app.
             recipient: Recipient object (StandardRecipient or AssetRecipient).
         """
