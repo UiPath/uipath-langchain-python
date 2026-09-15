@@ -625,14 +625,25 @@ async def test_concurrent_recovery_does_not_replace_a_new_session(
 async def test_recovery_continues_when_failed_connection_cleanup_raises(
     mcp_resource_config: AgentMcpResourceConfig,
 ) -> None:
-    """Closing the failed stack cannot mask recovery of the MCP connection."""
+    """A connection that fails on close cannot mask recovery of the MCP connection."""
     client = McpClient(config=mcp_resource_config)
     failed_session = MagicMock()
-    failed_stack = MagicMock()
-    failed_stack.aclose = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+    close_requested = asyncio.Event()
+
+    async def failing_connection() -> None:
+        await close_requested.wait()
+        raise RuntimeError("cleanup failed")
+
+    failed_task = asyncio.create_task(failing_connection())
+    # A finished handshake, so dispose signals the task rather than cancelling it
+    # and the RuntimeError path is the one exercised.
+    ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+    ready.set_result(None)
     client._client_initialized = True
     client._session = failed_session
-    client._connection_stack = failed_stack
+    client._connection_task = failed_task
+    client._ready = ready
+    client._close_requested = close_requested
     client._session_info = SessionInfo("failed-session")
     open_connection = AsyncMock()
 
@@ -641,7 +652,7 @@ async def test_recovery_continues_when_failed_connection_cleanup_raises(
             failed_session, error=MCPError(INVALID_REQUEST, "Session terminated")
         )
 
-    failed_stack.aclose.assert_awaited_once()
+    assert failed_task.done()
     open_connection.assert_awaited_once()
     assert await client.get_session_id() is None
 
@@ -741,7 +752,7 @@ async def test_initialization_failure_cleans_state_and_allows_retry(
                 await client.call_tool("test_tool", {"query": "first"})
 
         assert client._stack is None
-        assert client._connection_stack is None
+        assert client._connection_task is None
         assert client._http_client is None
         assert client._session_info is None
         assert client._session is None
