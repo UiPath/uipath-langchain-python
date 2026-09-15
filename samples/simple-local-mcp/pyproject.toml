@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Math and Weather Local MCP Server Agent"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
-    "langchain-anthropic>=1.2.0",
+    "langchain-anthropic>=1.4.6",
     "mcp==2.0.0",
     "uipath",
     "uipath-langchain",
