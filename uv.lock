@@ -456,12 +456,12 @@ name = "black"
 version = "26.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
-    { name = "mypy-extensions" },
-    { name = "packaging" },
-    { name = "pathspec" },
-    { name = "platformdirs" },
-    { name = "pytokens" },
+    { name = "click", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "mypy-extensions", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "packaging", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "pathspec", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "platformdirs", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "pytokens", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/37/5628dd55bf2b34257fc7603f0fe97c40e3aaf24265f416a9c85c95ca1436/black-26.5.1.tar.gz", hash = "sha256:dd321f668053961824bcc1be1cc1df748b2d7e4fa28086b08331e577b0100a73", size = 679439, upload-time = "2026-05-18T16:53:36.107Z" }
 wheels = [
@@ -4818,7 +4818,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.18.5"
+version = "0.18.6"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
