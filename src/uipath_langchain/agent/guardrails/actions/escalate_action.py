@@ -39,6 +39,8 @@ from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
 
+_SOLUTION_LOCAL_FOLDER_PLACEHOLDERS = frozenset({"solution_folder", ".", ""})
+
 
 class EscalateAction(GuardrailAction):
     """Node-producing action that inserts a HITL interruption node into the graph.
@@ -51,7 +53,7 @@ class EscalateAction(GuardrailAction):
     def __init__(
         self,
         app_name: str,
-        app_folder_path: str,
+        app_folder_path: str | None,
         version: int,
         recipient: AgentEscalationRecipient,
     ):
@@ -59,12 +61,18 @@ class EscalateAction(GuardrailAction):
 
         Args:
             app_name: Name of the escalation app.
-            app_folder_path: Folder path where the escalation app is located.
+            app_folder_path: Folder path where the escalation app is located. A
+                solution-local placeholder is stored as None, so the app is
+                resolved just-in-time instead of in a folder that does not exist.
             version: Version of the escalation app.
             recipient: Recipient object (StandardRecipient or AssetRecipient).
         """
         self.app_name = app_name
-        self.app_folder_path = app_folder_path
+        self.app_folder_path = (
+            None
+            if app_folder_path in _SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
+            else app_folder_path
+        )
         self.version = version
         self.recipient = recipient
 
