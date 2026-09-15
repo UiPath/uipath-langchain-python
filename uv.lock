@@ -4901,7 +4901,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.69,<0.2.0" },
     { name = "pillow", specifier = ">=12.1.1" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "python-dotenv", specifier = ">=1.2.2,<2.0.0" },
     { name = "rdflib", specifier = ">=7.0.0,<8.0.0" },
     { name = "uipath", specifier = ">=2.14.13,<2.15.0" },
     { name = "uipath-core", specifier = ">=0.5.29,<0.6.0" },
