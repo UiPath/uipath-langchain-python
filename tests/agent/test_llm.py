@@ -11,10 +11,16 @@ customer as LICENSE_NOT_AVAILABLE, sending them to look for AGU they already
 had.
 
 Note on ``detail``: the mapper reads the gateway's ProblemDetails ``detail`` key
-and otherwise falls back to ``UiPathAPIError.message`` -- the HTTP reason phrase.
-A passthrough provider body is therefore *not* quoted back to the customer; an
-unmarked 403 reports "Forbidden" whatever the upstream body contained. The tests
-below pin that down as the current contract.
+-- first-party UiPath text -- and never the vendor envelope. A passthrough
+provider body is therefore *not* quoted back to the customer whatever it
+contained. Where the gateway supplied no ``detail``, 400 falls back to a canned,
+actionable message and everything else falls back to ``UiPathAPIError.message``,
+the HTTP reason phrase (an unmarked 403 reports "Forbidden"). PC-5002: the
+reason-phrase fallback is what made 49% of fleet failures two words long, so the
+status that dominates that bucket now carries real text that is still free of
+provider content.
+
+The tests below pin all of that down as the current contract.
 """
 
 import httpx
@@ -221,12 +227,97 @@ def test_5xx_maps_to_system_http_error():
     assert "boom" in info.detail
 
 
-def test_unclassified_status_remains_unknown():
-    err = _api_error(400, {"status": 400, "detail": "bad request"})
+@pytest.mark.parametrize("status_code", [404, 408, 413, 422, 429])
+def test_unclassified_4xx_remains_unknown(status_code: int):
+    """Only 400 and 403 are classified; the rest of 4xx stays UNKNOWN.
+
+    404 is here on purpose. Every LLM-gateway 404 in prd over 30 days was a
+    missing or unreachable deployment -- BYO relay not connected, Azure
+    ``DeploymentNotFound``, a retired Bedrock model -- i.e. Deployment, not
+    User. It is left UNKNOWN until that is decided on its own evidence rather
+    than folded into the 400 change.
+    """
+    err = _api_error(status_code, {"status": status_code, "detail": "nope"})
     info = _raise(err).error_info
 
     assert info.category == UiPathErrorCategory.UNKNOWN
     assert info.code.endswith(AgentRuntimeErrorCode.HTTP_ERROR.value)
+    assert info.title == f"LLM provider returned HTTP {status_code}"
+
+
+# --------------------------------------------------------------------------
+# 400: User, with a canned detail instead of the reason phrase
+# --------------------------------------------------------------------------
+
+# The body of the 400 that failed 192/192 runs on gpt-4.1-mini-e2e-custom
+# (job 1fab7e97-...): max_tokens=65535 written by Agent Builder itself.
+_MAX_TOKENS_BODY: dict[str, object] = {
+    "error": {
+        "message": (
+            "max_tokens is too large: 65535. This model supports at most 32768 "
+            "completion tokens, whereas you provided 65535."
+        ),
+        "code": "invalid_value",
+        "param": "max_tokens",
+    }
+}
+
+
+@pytest.mark.parametrize(
+    "err_factory",
+    [
+        pytest.param(lambda: _api_error(400, _MAX_TOKENS_BODY), id="vendor-envelope"),
+        pytest.param(
+            lambda: _api_error(400, {"message": "Malformed input request."}),
+            id="bedrock-envelope",
+        ),
+        pytest.param(lambda: _api_error_text(400, _EDGE_HTML), id="raw-html"),
+        pytest.param(lambda: _api_error(400, {}), id="empty-body"),
+    ],
+)
+def test_400_maps_to_user_with_a_canned_detail(err_factory):
+    info = _raise(err_factory()).error_info
+
+    assert info.status == 400
+    assert info.category == UiPathErrorCategory.USER
+    assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+    assert info.title == "LLM provider rejected the request"
+    # The bare reason phrase is what PC-5002 is about -- it must be gone.
+    assert info.detail != "Bad Request"
+    assert "model settings" in info.detail
+
+
+@pytest.mark.parametrize(
+    "err_factory",
+    [
+        pytest.param(lambda: _api_error(400, _MAX_TOKENS_BODY), id="vendor-envelope"),
+        pytest.param(lambda: _api_error_text(400, _EDGE_HTML), id="raw-html"),
+    ],
+)
+def test_400_does_not_quote_the_provider_body(err_factory):
+    error = _raise(err_factory())
+
+    for rendered in (error.error_info.detail, str(error), repr(error)):
+        assert "65535" not in rendered
+        assert "doctype" not in rendered.lower()
+
+
+def test_400_prefers_the_gateway_detail_over_the_canned_text():
+    """A ProblemDetails ``detail`` is first-party UiPath text and more specific."""
+    err = _api_error(400, {"status": 400, "detail": "Model not enabled."})
+    info = _raise(err).error_info
+
+    assert info.detail == "Model not enabled."
+    assert info.category == UiPathErrorCategory.USER
+    assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+
+
+def test_user_category_is_not_wrapped_in_the_generic_prefix():
+    """USER is outside _SHOULD_WRAP_CATEGORIES, so the canned detail stands alone."""
+    info = _raise(_api_error(400, _MAX_TOKENS_BODY)).error_info
+
+    assert not info.detail.startswith("An unexpected error occurred")
+    assert info.detail.startswith("The model provider rejected the request")
 
 
 def test_legacy_raw_provider_error_is_normalized_and_mapped():

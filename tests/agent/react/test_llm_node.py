@@ -429,6 +429,59 @@ class TestLLMNodeProviderErrorHandling:
         assert info.status == 403
         assert info.code.endswith(AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE.value)
 
+    @staticmethod
+    def _http_400() -> httpx.Response:
+        """The 400 from job 1fab7e97-...: max_tokens written by Agent Builder."""
+        request = httpx.Request("POST", "http://gateway/")
+        return httpx.Response(
+            400,
+            request=request,
+            json={
+                "error": {
+                    "message": (
+                        "max_tokens is too large: 65535. This model supports at "
+                        "most 32768 completion tokens."
+                    ),
+                    "code": "invalid_value",
+                    "param": "max_tokens",
+                }
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_new_client_400_maps_to_user_without_the_provider_body(self):
+        # PC-5002: this reached telemetry as the two words "Bad Request",
+        # categorized Unknown. It is now User, with a canned actionable detail
+        # and no provider text.
+        node = self._node_raising(UiPathAPIError.from_response(self._http_400()))
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await node(self.state)
+
+        info = exc_info.value.error_info
+        assert info.status == 400
+        assert info.category == UiPathErrorCategory.USER
+        assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+        assert info.detail != "Bad Request"
+        assert "65535" not in info.detail
+
+    @pytest.mark.asyncio
+    async def test_legacy_400_maps_to_user(self):
+        raw = openai.BadRequestError(
+            "Bad Request",
+            response=self._http_400(),
+            body={"error": {"message": "max_tokens is too large: 65535."}},
+        )
+        node = self._node_raising(raw)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await node(self.state)
+
+        info = exc_info.value.error_info
+        assert info.status == 400
+        assert info.category == UiPathErrorCategory.USER
+        assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+
     @pytest.mark.asyncio
     async def test_unmarked_403_maps_to_provider_forbidden_not_license(self):
         # Regression for PC-5000 / SRE-654983: an edge or BYOM endpoint refuses
