@@ -22,6 +22,7 @@ class ContextGroundingRetriever(BaseRetriever):
     scope_folder: str | None = None
     scope_extension: str | None = None
     include_system_indexes: bool = False
+    search_during_ingestion: bool = False
 
     def _build_scope(self) -> UnifiedSearchScope | None:
         if self.scope_folder or self.scope_extension:
@@ -54,6 +55,7 @@ class ContextGroundingRetriever(BaseRetriever):
             folder_path=self.folder_path,
             folder_key=self.folder_key,
             include_system_indexes=self.include_system_indexes,
+            search_during_ingestion=self.search_during_ingestion,
         )
 
         values = result.semantic_results.values if result.semantic_results else []
@@ -100,6 +102,7 @@ class ContextGroundingRetriever(BaseRetriever):
             folder_path=self.folder_path,
             folder_key=self.folder_key,
             include_system_indexes=self.include_system_indexes,
+            search_during_ingestion=self.search_during_ingestion,
         )
 
         values = result.semantic_results.values if result.semantic_results else []
