@@ -148,7 +148,9 @@ class McpClient(UiPathDisposableProtocol):
         self._http_client: httpx2.AsyncClient | None = None
         self._session_info: SessionInfo | None = None
         self._stack: AsyncExitStack | None = None
-        self._connection_stack: AsyncExitStack | None = None
+        self._connection_task: asyncio.Task[None] | None = None
+        self._ready: asyncio.Future[None] | None = None
+        self._close_requested: asyncio.Event | None = None
 
         # Session state (replaced on recovery while the HTTP client is reused)
         self._session: ClientSession | None = None
@@ -236,34 +238,124 @@ class McpClient(UiPathDisposableProtocol):
         logger.info("MCP client initialized")
 
     async def _open_connection(self) -> None:
-        """Open a fresh transport and ClientSession over the reusable HTTP client."""
+        """Open a transport and ClientSession on a task that owns them.
+
+        The transport's task group and the session both live in anyio cancel
+        scopes, which have to be exited by the task that entered them and, on
+        that task, in reverse order of entry. Callers satisfy neither: langgraph
+        opens the connection inside a tool task while teardown runs on the main
+        one, and an agent disposes its servers oldest-first. Keeping the
+        connection on its own task makes the caller's task and ordering
+        irrelevant -- closing is a signal, not an unwind.
+        """
         if self._url is None or self._http_client is None or self._session_info is None:
             raise RuntimeError(
                 "Cannot open MCP connection: client prerequisites missing"
             )
 
-        connection_stack = AsyncExitStack()
-        await connection_stack.__aenter__()
+        ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._ready = ready
+        self._close_requested = asyncio.Event()
+        self._connection_task = asyncio.create_task(
+            self._run_connection(
+                ready, self._url, self._http_client, self._session_info
+            ),
+            name=f"mcp-connection-{self._config.slug}",
+        )
         try:
-            read_stream, write_stream = await connection_stack.enter_async_context(
-                streamable_http_client(
-                    url=self._url,
-                    http_client=self._http_client,
-                    session_info=self._session_info,
-                    terminate_on_close=self._terminate_on_close,
-                    identity=self._strategy.identity,
-                )
-            )
-            self._session = await connection_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
-            self._connection_stack = connection_stack
-            await self._initialize_session()
+            # Shielded so a cancelled caller does not cancel `ready` with it:
+            # _close_connection reads it to tell a finished handshake (signal)
+            # from one still in flight (cancel).
+            await asyncio.shield(ready)
         except BaseException:
-            await connection_stack.aclose()
-            self._session = None
-            self._connection_stack = None
+            await self._close_connection()
             raise
+
+    async def _run_connection(
+        self,
+        ready: asyncio.Future[None],
+        url: str,
+        http_client: httpx2.AsyncClient,
+        session_info: SessionInfo,
+    ) -> None:
+        """Hold the transport and session open until asked to close.
+
+        Resolves *ready* once the session is negotiated, so ``_open_connection``
+        fails the same way it did when it opened the stack inline.
+        """
+        close_requested = self._close_requested
+        assert close_requested is not None
+        # Unwinding the transport's task group wraps whatever went wrong in a
+        # BaseExceptionGroup. Callers used to see the original error, so keep it.
+        setup_error: BaseException | None = None
+        try:
+            async with AsyncExitStack() as connection_stack:
+                try:
+                    streams = await connection_stack.enter_async_context(
+                        streamable_http_client(
+                            url=url,
+                            http_client=http_client,
+                            session_info=session_info,
+                            terminate_on_close=self._terminate_on_close,
+                            identity=self._strategy.identity,
+                        )
+                    )
+                    read_stream, write_stream = streams
+                    self._session = await connection_stack.enter_async_context(
+                        ClientSession(read_stream, write_stream)
+                    )
+                    await self._initialize_session()
+                except BaseException as error:
+                    setup_error = error
+                    raise
+                if not ready.done():
+                    ready.set_result(None)
+                await close_requested.wait()
+        except BaseException as error:
+            failure = setup_error if setup_error is not None else error
+            if isinstance(failure, asyncio.CancelledError):
+                # _close_connection cancelled us mid-handshake, or the loop is
+                # going down. End as cancelled, not as failed.
+                if not ready.done():
+                    ready.cancel()
+                if failure is error:
+                    raise
+                raise failure from error
+            if not ready.done():
+                ready.set_exception(failure)
+            else:
+                logger.debug("MCP connection ended with an error: %s", failure)
+        finally:
+            self._session = None
+
+    async def _close_connection(self) -> None:
+        """Ask the connection task to unwind, and wait for it to finish.
+
+        A task still in the handshake would not see the signal until the
+        handshake returned -- up to the 600s transport timeout -- so it is
+        cancelled instead.
+        """
+        task = self._connection_task
+        ready = self._ready
+        close_requested = self._close_requested
+        self._connection_task = None
+        self._ready = None
+        self._close_requested = None
+        self._session = None
+        if task is None:
+            return
+
+        if ready is not None and ready.done() and close_requested is not None:
+            close_requested.set()
+        else:
+            task.cancel()
+
+        # asyncio.wait rather than `await task`: the task's own cancellation
+        # must not read as ours, while a real cancellation of this task still
+        # propagates.
+        await asyncio.wait({task})
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.debug("Error closing MCP connection: %s", error)
 
     async def _initialize_session(self) -> None:
         """Negotiate the newly-created MCP session through the protocol strategy.
@@ -309,16 +401,8 @@ class McpClient(UiPathDisposableProtocol):
             return self._session
 
     async def _close_connection_for_recovery(self) -> None:
-        """Detach and best-effort close the current connection stack."""
-        connection_stack = self._connection_stack
-        self._connection_stack = None
-        self._session = None
-        if connection_stack is None:
-            return
-        try:
-            await connection_stack.aclose()
-        except Exception as error:
-            logger.debug("Error closing failed MCP connection: %s", error)
+        """Detach and best-effort close the current connection."""
+        await self._close_connection()
 
     async def _reinitialize_session(
         self,
@@ -489,14 +573,7 @@ class McpClient(UiPathDisposableProtocol):
         async with self._tools_lock:
             self._tools_cache = None
             async with self._lock:
-                if self._connection_stack is not None:
-                    try:
-                        await self._connection_stack.aclose()
-                    except Exception as e:
-                        logger.debug(f"Error during MCP connection cleanup: {e}")
-                    finally:
-                        self._connection_stack = None
-                        self._session = None
+                await self._close_connection()
 
                 if self._stack is not None:
                     try:

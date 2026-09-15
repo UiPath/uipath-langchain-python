@@ -378,7 +378,8 @@ MCP connections for tool invocations with **two distinct initialization phases**
 ├─────────────────────────────────────────────────────────────┤
 │  Connection State (replaced after session loss)             │
 │  ──────────────────────────────────────────────             │
-│  _connection_stack: AsyncExitStack | None                   │
+│  _connection_task: asyncio.Task | None  # owns the scopes   │
+│  _close_requested: asyncio.Event | None                     │
 │  _session: ClientSession | None                             │
 ├─────────────────────────────────────────────────────────────┤
 │  Public Methods                                             │
@@ -526,8 +527,8 @@ Phase 1: Base Client Initialization (expensive, done once)
 Phase 2: Connection Initialization (repeated after session loss)
 ──────────────────────────────────────────────────────────────
 ┌─────────────────┐
-│ SDK transport + │ ─── Fresh connection AsyncExitStack
-│ ClientSession   │
+│ SDK transport + │ ─── Opened on a dedicated connection task,
+│ ClientSession   │     which holds them until dispose() signals
 └─────────────────┘
 
 ┌─────────────────┐
@@ -727,26 +728,39 @@ async def _reinitialize_session(
             await self._open_connection()
 ```
 
-### 4. No `with` Statement for AsyncExitStack
+### 4. Two Stacks, Two Lifecycles
 
-Manual lifecycle management:
+The base stack (HTTP client) outlives any single method, so it is managed by
+hand:
 
 ```python
-# Correct - manual management
 self._stack = AsyncExitStack()
 await self._stack.__aenter__()
-# ... use stack ...
+# ... reused across sessions ...
 await self._stack.aclose()
-
-# Wrong - exits too early
-async with AsyncExitStack() as stack:
-    ...  # Stack closes here!
 ```
+
+The connection stack (transport + `ClientSession`) is different. anyio cancel
+scopes must be exited by the task that entered them, in reverse order, and
+neither is under the caller's control: langgraph opens the connection inside a
+tool task, and an agent disposes several servers oldest-first. So
+`_run_connection` owns the stack with a plain `async with` and stays inside it
+until told to leave:
+
+```python
+async with AsyncExitStack() as connection_stack:
+    ...  # enter transport and session
+    ready.set_result(None)
+    await close_requested.wait()  # dispose() sets this
+```
+
+`dispose()` never touches the connection stack. It signals the task, or cancels
+it if the handshake has not finished yet, and waits for it to exit.
 
 ### 5. Reinitialization Reuses the HTTP Client
 
-On a recoverable session error, `_reinitialize_session()` closes the old
-connection stack, calls `strategy.reset` to clear the ID unless
+On a recoverable session error, `_reinitialize_session()` signals the old
+connection task to close and waits for it, calls `strategy.reset` to clear the ID unless
 `is_session_rejected(error)` is False -- a dropped transport is not the server's
 verdict, so the ID is kept and the reconnect resumes the same session -- and
 opens a fresh SDK transport and `ClientSession`. The authenticated `httpx2.AsyncClient`
