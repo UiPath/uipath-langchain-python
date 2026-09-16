@@ -30,8 +30,6 @@ from uipath.platform.guardrails import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import get_execution_folder_path
-
 from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
@@ -40,6 +38,13 @@ from ...tools.escalation_recipient import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
+
+# Solution-local apps carry the solutions-service sentinel "solution_folder" (or an
+# empty string) as their agent.json folder instead of a real folder FQN, which Action
+# Center cannot resolve. Escalation channels persist null in that case and pass it
+# through verbatim (see tools/escalation_tool.py:_resolve_channel_folder_path);
+# decode the sentinel to the same "no folder" semantics.
+_SOLUTION_FOLDER_SENTINEL = "solution_folder"
 
 
 class EscalateAction(GuardrailAction):
@@ -66,13 +71,24 @@ class EscalateAction(GuardrailAction):
             recipient: Recipient object (StandardRecipient or AssetRecipient).
         """
         self.app_name = app_name
-        # Not used for app resolution: solution-local apps carry the solutions-service
-        # sentinel "solution_folder" (or an empty string) instead of a real folder FQN,
-        # which Action Center cannot resolve. The app is resolved in the execution
-        # folder instead, exactly like escalation tools (see tools/escalation_tool.py).
         self.app_folder_path = app_folder_path
         self.version = version
         self.recipient = recipient
+
+    def _resolve_app_folder_path(self) -> str | None:
+        """Folder the escalation app is resolved in, matching escalation channels.
+
+        Explicit folder FQNs (apps deployed in another folder) are preserved;
+        the solution-local sentinel / empty value decodes to None, letting
+        Action Center resolve the app the same way it does for escalation
+        channels that persist a null folder.
+        """
+        if (
+            not self.app_folder_path
+            or self.app_folder_path == _SOLUTION_FOLDER_SENTINEL
+        ):
+            return None
+        return self.app_folder_path
 
     @property
     def action_type(self) -> str:
@@ -223,7 +239,7 @@ class EscalateAction(GuardrailAction):
                 title="Agents Guardrail Task",
                 data=data,
                 app_name=self.app_name,
-                app_folder_path=get_execution_folder_path(),
+                app_folder_path=self._resolve_app_folder_path(),
                 recipient=task_recipient,
             )
 
@@ -271,7 +287,7 @@ class EscalateAction(GuardrailAction):
                 WaitEscalation(
                     action=created_task,
                     app_name=self.app_name,
-                    app_folder_path=get_execution_folder_path(),
+                    app_folder_path=self._resolve_app_folder_path(),
                     recipient=task_recipient,
                 )
             )
