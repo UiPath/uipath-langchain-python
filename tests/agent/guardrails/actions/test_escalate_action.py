@@ -250,6 +250,9 @@ class TestEscalateAction:
             (GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, "PreExecution"),
         ],
     )
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.get_execution_folder_path"
+    )
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
     @patch(
@@ -260,6 +263,7 @@ class TestEscalateAction:
         mock_resolve_recipient,
         mock_uipath_class,
         mock_config,
+        mock_get_execution_folder_path,
         scope: GuardrailScope,
         stage: ExecutionStage,
         expected_stage: str,
@@ -270,6 +274,7 @@ class TestEscalateAction:
         )
         mock_config.base_url = None
         mock_config.tenant_name = "TestTenant"
+        mock_get_execution_folder_path.return_value = "ExecutionFolder"
 
         mock_task = _make_mock_task(recipient=MOCK_TASK_RECIPIENT)
         mock_client = MagicMock()
@@ -309,7 +314,8 @@ class TestEscalateAction:
 
         assert call_kwargs["title"] == "Agents Guardrail Task"
         assert call_kwargs["app_name"] == "TestApp"
-        assert call_kwargs["app_folder_path"] == "TestFolder"
+        # The execution folder is used, not the persisted app folder (same as escalation tools).
+        assert call_kwargs["app_folder_path"] == "ExecutionFolder"
 
         data = call_kwargs["data"]
         assert data["GuardrailName"] == "Test Guardrail"
@@ -328,6 +334,73 @@ class TestEscalateAction:
         # Verify state update includes task info
         assert "inner_state" in result
         assert create_task_name in result["inner_state"]["hitl_task_info"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "persisted_folder_path",
+        [
+            # Agents saved before the Studio fix persisted the solutions-service
+            # sentinel for solution-local apps.
+            "solution_folder",
+            # Newer agents persist an empty folder for solution-local apps.
+            "",
+            # Persisted folder FQNs are ignored either way; the execution folder
+            # decides, exactly like the escalation tool.
+            "Finance/Apps",
+        ],
+    )
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.get_execution_folder_path"
+    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
+    )
+    async def test_create_task_node_uses_execution_folder_not_persisted_folder(
+        self,
+        mock_resolve_recipient,
+        mock_uipath_class,
+        mock_config,
+        mock_get_execution_folder_path,
+        persisted_folder_path: str,
+    ) -> None:
+        """The app is resolved in the execution folder, like the escalation tool."""
+        mock_resolve_recipient.return_value = TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
+        mock_config.base_url = None
+        mock_config.tenant_name = "TestTenant"
+        mock_get_execution_folder_path.return_value = "Shared/DebugSolution"
+
+        mock_task = _make_mock_task(recipient=MOCK_TASK_RECIPIENT)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=mock_task)
+        mock_uipath_class.return_value = mock_client
+
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path=persisted_folder_path,
+            version=1,
+            recipient=DEFAULT_RECIPIENT,
+        )
+        guardrail = _make_default_guardrail()
+
+        _, create_task_fn, _, _ = _get_action_nodes(
+            action, guardrail, GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_validation_details="Validation failed"
+            ),
+        )
+
+        await create_task_fn(state)
+
+        call_kwargs = mock_client.tasks.create_async.call_args[1]
+        assert call_kwargs["app_folder_path"] == "Shared/DebugSolution"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
@@ -654,11 +727,15 @@ class TestEscalateAction:
         assert "create-task node must run before" in excinfo.value.error_info.detail
 
     @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.get_execution_folder_path"
+    )
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
     async def test_interrupt_node_calls_with_wait_escalation(
-        self, mock_interrupt
+        self, mock_interrupt, mock_get_execution_folder_path
     ) -> None:
         """Interrupt node calls interrupt() with a WaitEscalation containing the task."""
+        mock_get_execution_folder_path.return_value = "ExecutionFolder"
         from uipath.platform.common import WaitEscalation
 
         mock_escalation_result = MagicMock()
@@ -685,13 +762,20 @@ class TestEscalateAction:
         mock_interrupt.assert_called_once()
         wait_escalation = mock_interrupt.call_args[0][0]
         assert isinstance(wait_escalation, WaitEscalation)
-        assert wait_escalation.app_folder_path == "TestFolder"
+        # The execution folder is used, not the persisted app folder (same as escalation tools).
+        assert wait_escalation.app_folder_path == "ExecutionFolder"
         assert wait_escalation.action.id == 123
 
     @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.get_execution_folder_path"
+    )
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    async def test_interrupt_node_without_recipient(self, mock_interrupt) -> None:
+    async def test_interrupt_node_without_recipient(
+        self, mock_interrupt, mock_get_execution_folder_path
+    ) -> None:
         """Interrupt node handles task info without recipient (recipient=None)."""
+        mock_get_execution_folder_path.return_value = "ExecutionFolder"
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
         mock_escalation_result.data = {}
@@ -716,7 +800,7 @@ class TestEscalateAction:
 
         wait_escalation = mock_interrupt.call_args[0][0]
         # WaitEscalation doesn't store recipient as a model field
-        assert wait_escalation.app_folder_path == "TestFolder"
+        assert wait_escalation.app_folder_path == "ExecutionFolder"
         assert wait_escalation.action.id == 123
 
     # ── Approval / rejection ──────────────────────────────────────────────

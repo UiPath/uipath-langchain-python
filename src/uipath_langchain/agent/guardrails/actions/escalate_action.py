@@ -30,6 +30,8 @@ from uipath.platform.guardrails import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils import get_execution_folder_path
+
 from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
@@ -64,6 +66,10 @@ class EscalateAction(GuardrailAction):
             recipient: Recipient object (StandardRecipient or AssetRecipient).
         """
         self.app_name = app_name
+        # Not used for app resolution: solution-local apps carry the solutions-service
+        # sentinel "solution_folder" (or an empty string) instead of a real folder FQN,
+        # which Action Center cannot resolve. The app is resolved in the execution
+        # folder instead, exactly like escalation tools (see tools/escalation_tool.py).
         self.app_folder_path = app_folder_path
         self.version = version
         self.recipient = recipient
@@ -217,7 +223,7 @@ class EscalateAction(GuardrailAction):
                 title="Agents Guardrail Task",
                 data=data,
                 app_name=self.app_name,
-                app_folder_path=self.app_folder_path,
+                app_folder_path=get_execution_folder_path(),
                 recipient=task_recipient,
             )
 
@@ -265,7 +271,7 @@ class EscalateAction(GuardrailAction):
                 WaitEscalation(
                     action=created_task,
                     app_name=self.app_name,
-                    app_folder_path=self.app_folder_path,
+                    app_folder_path=get_execution_folder_path(),
                     recipient=task_recipient,
                 )
             )
