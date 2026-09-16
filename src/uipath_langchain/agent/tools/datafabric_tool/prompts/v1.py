@@ -93,6 +93,12 @@ Choice-Set Join Paths"), their columns can be directly compared in a JOIN: \
    - "average" / "mean" -> AVG
    If no aggregation word appears, do NOT aggregate.
    {aggregation_hints}
+   If query needs COUNT(*) - remember that COUNT(*) is not supported. Handle COUNT(*) as follows: 
+   - If the entity schema contains the literal Id field (an exact, case-sensitive field-name match) - COUNT(*) can be replaced with COUNT(Id) since the Id field is UNIQUEIDENTIFIER.
+   - If there is no Id field, but the schema marks a field as primary key, then that field can be used instead of COUNT(*).
+   - If neither Id nor a Primary Key field exists, do not arbitrarily replace COUNT(*) with another column since that may produce an incorrect result. \
+First, determine whether an alternative set of queries and computation can produce the required result without COUNT(*). If no reliable alternative exists, \
+explain the limitation to the user and ask them to provide a column that is guaranteed to be non-NULL and suitable for counting, explaining why that column is required.
 7. DISTINCT DETECTION — Does the question ask for a deduplicated list?
    - "list the distinct / different / unique X" -> SELECT DISTINCT X
    - "list all X" when X can repeat across rows and the question implies \
@@ -121,6 +127,8 @@ extreme row.
    - Do NOT add LIMIT to queries that already naturally return a bounded \
 set: an equality filter on a unique key, an aggregation that returns one row, \
 or a question asking for "all X meeting Y".
+   - If a query containing a LIMIT clause returns a number of rows equal to its LIMIT, do not assume that this represents the complete result set. \
+The LIMIT bounds the number of rows returned, so additional matching rows may exist.
 10. Write the SQL query and call ``execute_sql``.
     Do NOT terminate the SQL query with a semicolon.
 
@@ -201,6 +209,8 @@ join conditions, remove an assumed filter).
 short explanation.
 4. Do NOT silently add LIKE or LOWER() wrappers to make an EMPTY_RESULT go \
 away — first verify the stored value via the entity metadata.
+5. If, even after trying different approaches, you cannot confidently arrive at the result due to query limitations or insufficient information,\
+do not answer from general knowledge. Clearly explain the limitation to the user and ask for clarification or additional information.
 
 OUTPUT:
 Once ``execute_sql`` returns a successful result, return a concise \
