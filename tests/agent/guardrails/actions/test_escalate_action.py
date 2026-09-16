@@ -2293,3 +2293,44 @@ class TestHelperFunctions:
         data = [1, 2, 3]
         result = _parse_reviewed_data(data)
         assert result is data
+
+
+class TestAppFolderPathNormalization:
+    """A guardrail app inside the solution has no folder of its own.
+
+    The definition records a placeholder for it, which must not be forwarded as a
+    real folder — Action Center would resolve the app in a folder that does not
+    exist and the task creation fails.
+    """
+
+    @pytest.mark.parametrize("placeholder", ["solution_folder", ".", ""])
+    def test_placeholder_becomes_none(self, placeholder: str) -> None:
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path=placeholder,
+            version=1,
+            recipient=DEFAULT_RECIPIENT,
+        )
+        assert action.app_folder_path is None
+
+    def test_none_stays_none(self) -> None:
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path=None,
+            version=1,
+            recipient=DEFAULT_RECIPIENT,
+        )
+        assert action.app_folder_path is None
+
+    @pytest.mark.parametrize(
+        "folder", ["TestFolder", "Shared/Apps", "Debug_Solution 1"]
+    )
+    def test_real_folder_is_preserved(self, folder: str) -> None:
+        """A deployed app — including one in a debug folder — keeps its folder."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path=folder,
+            version=1,
+            recipient=DEFAULT_RECIPIENT,
+        )
+        assert action.app_folder_path == folder
