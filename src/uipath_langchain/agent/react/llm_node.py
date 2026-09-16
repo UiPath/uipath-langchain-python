@@ -18,7 +18,11 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    max_iterations_error,
+)
 from ..exceptions.llm import (
     raise_for_llm_client_error,
     raise_for_provider_http_error,
@@ -95,12 +99,7 @@ def create_llm_node(
             1 for msg in current_turn_messages if isinstance(msg, AIMessage)
         )
         if agent_ai_messages >= llm_messages_limit:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.TERMINATION_MAX_ITERATIONS,
-                title=f"Maximum iterations of '{llm_messages_limit}' reached.",
-                detail="Verify the agent's trajectory or consider increasing the max iterations in the agent's settings.",
-                category=UiPathErrorCategory.USER,
-            )
+            raise max_iterations_error(llm_messages_limit)
 
         static_schema_tools = static_args_handler.initialize(
             bindable_tools, state, input_schema or type(state)

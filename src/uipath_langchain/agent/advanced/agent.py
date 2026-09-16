@@ -2,13 +2,12 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, NotRequired, cast
+from typing import Any, Literal, NotRequired, cast
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
-from deepagents.backends import BackendProtocol
-from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.backends.protocol import BackendFactory
+from deepagents.backends import BackendProtocol, FilesystemBackend
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
@@ -17,15 +16,35 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
+from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from uipath.core.chat import UiPathConversationMessageData
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_unique_model_field_name
+from uipath_langchain.agent.attachments.constants import OUTPUT_FILE_TOOL_NAME
 from uipath_langchain.agent.attachments.job_attachments import get_job_attachment_paths
+from uipath_langchain.agent.attachments.output_files import (
+    DEFAULT_MAX_OUTPUT_FILE_RETRIES,
+    diagnose_output_files,
+    get_output_file_fields,
+)
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    max_iterations_error,
+)
+from uipath_langchain.agent.react.conversational_output_node import (
+    create_conversational_output_extractor,
+)
+from uipath_langchain.agent.react.utils import (
+    has_custom_conversational_output_fields,
+)
+from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .types import (
@@ -37,6 +56,7 @@ from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
     resolve_input_attachments,
+    resolve_message_attachments,
 )
 
 
@@ -84,6 +104,61 @@ class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return await handler(self._prepare_request(request))
 
 
+class _MaxIterationsMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Stop the loop once it has spent its iteration budget for this turn.
+
+    Counts the AI messages the agent produced since the turn started, the way the
+    standard agent's llm node does, and raises the same termination error. Counting
+    messages rather than model calls keeps the budget spent across a suspend and
+    resume, where any per-run counter starts over.
+    """
+
+    def __init__(
+        self, max_iterations: int, initial_message_count_key: str | None = None
+    ) -> None:
+        self.max_iterations = max_iterations
+        self.initial_message_count_key = initial_message_count_key
+        if initial_message_count_key is not None:
+            self.state_schema = type(
+                "MaxIterationsState",
+                (AgentState,),
+                {
+                    "__annotations__": {
+                        initial_message_count_key: NotRequired[int | None]
+                    }
+                },
+            )
+
+    def _check_budget(self, request: ModelRequest[Any]) -> None:
+        initial_count = (
+            cast("int | None", request.state.get(self.initial_message_count_key)) or 0
+            if self.initial_message_count_key is not None
+            else 0
+        )
+        messages = cast("list[Any]", request.state.get("messages") or [])
+        produced = sum(
+            1 for message in messages[initial_count:] if isinstance(message, AIMessage)
+        )
+        if produced >= self.max_iterations:
+            raise max_iterations_error(self.max_iterations)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        self._check_budget(request)
+        return handler(request)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        self._check_budget(request)
+        return await handler(request)
+
+
 @dataclass(frozen=True)
 class _RuntimeSystemPrompt:
     """A system prompt that is either fixed or resolved from each invocation's input."""
@@ -124,12 +199,171 @@ def _resolve_runtime_system_prompt(
     return _RuntimeSystemPrompt(None, system_prompt, state_key)
 
 
+def _max_iterations_middleware(
+    max_iterations: int | None, initial_message_count_key: str | None = None
+) -> list[AgentMiddleware[Any, Any]]:
+    if max_iterations is None:
+        return []
+    return [_MaxIterationsMiddleware(max_iterations, initial_message_count_key)]
+
+
+# A subagent returns only a text report, so a reference it produces never reaches
+# the main agent -- the only agent that fills the typed output.
+class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Route deep-agent model calls through the provider's payload handler.
+
+    The react path shapes every call and checks the finish reason. Deep agents
+    do neither, so a Gemini subagent turn reaches Vertex with no function
+    calling mode and its malformed replies read as final answers.
+    """
+
+    def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
+        # create_agent derives the bound tool_choice after middleware runs, as
+        # `"any" if structured_output_tools else request.tool_choice`, and
+        # langchain_google_genai rejects a request carrying both that and a mode.
+        if request.tool_choice or request.response_format is not None:
+            return request
+        bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
+        tool_config = (
+            get_payload_handler(request.model)
+            .get_tool_binding_kwargs(
+                tools=bound_tools,
+                tool_choice="auto",
+                strict_mode=True,
+            )
+            .get("tool_config")
+        )
+        if tool_config is None:
+            return request
+        return request.override(
+            model_settings={**request.model_settings, "tool_config": tool_config}
+        )
+
+    def _validate_response(
+        self, request: ModelRequest[Any], response: ModelResponse[Any]
+    ) -> None:
+        handler = get_payload_handler(request.model)
+        for message in response.result:
+            if isinstance(message, AIMessage):
+                handler.check_stop_reason(message)
+        self._reject_empty_answer(response)
+
+    def _reject_empty_answer(self, response: ModelResponse[Any]) -> None:
+        """Refuse a turn with no text and no tool calls, which ends the loop."""
+        if response.structured_response is not None:
+            return
+        messages = [m for m in response.result if isinstance(m, AIMessage)]
+        if not messages:
+            return
+        last = messages[-1]
+        if last.text.strip() or last.tool_calls:
+            return
+        # A reasoning-only turn has no text and no tool calls either.
+        if any(block.get("type") != "text" for block in last.content_blocks):
+            return
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+            title="The model returned an empty response.",
+            detail=(
+                "The model produced neither text nor a tool call, which ends the "
+                "agent loop with nothing to report. If you are using a BYOM "
+                "configuration, verify your model deployment returns tool calls "
+                "for the tools it is given."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        response = handler(self._prepare_request(request))
+        self._validate_response(request, response)
+        return response
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        response = await handler(self._prepare_request(request))
+        self._validate_response(request, response)
+        return response
+
+
+MAIN_AGENT_ONLY_TOOLS: frozenset[str] = frozenset({OUTPUT_FILE_TOOL_NAME})
+
+
+def _partition_main_agent_tools(
+    tools: Sequence[BaseTool],
+) -> tuple[list[BaseTool], list[BaseTool]]:
+    """Split ``tools`` into (shared with subagents, main agent only)."""
+    shared: list[BaseTool] = []
+    main_only: list[BaseTool] = []
+    for tool in tools:
+        (main_only if tool.name in MAIN_AGENT_ONLY_TOOLS else shared).append(tool)
+    return shared, main_only
+
+
+def _subagents_without_main_agent_tools(
+    subagents: Sequence[SubAgent | CompiledSubAgent],
+    shared_tools: Sequence[BaseTool],
+    skills: Sequence[str] | None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+) -> list[SubAgent | CompiledSubAgent]:
+    """Give every subagent the shared tool list instead of the parent's.
+
+    deepagents hands a subagent the parent's ``tools`` unless its spec declares its
+    own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``), so
+    pinning ``tools`` on each spec is what actually withholds a main-agent-only tool.
+
+    The auto-added ``general-purpose`` subagent is replaced with an explicit spec,
+    since it would otherwise inherit the parent list too. Supplying a spec under
+    that name suppresses the built-in one. That branch is also the only reader of
+    ``profile.general_purpose_subagent``, so its ``enabled`` / ``description`` /
+    ``system_prompt`` overrides do not apply here. ``skills`` has to be repeated into the
+    spec: the built-in branch reads the top-level ``skills`` argument, while a
+    caller-supplied spec reads ``spec["skills"]``, so omitting it silently drops
+    skills from that subagent.
+
+    ``middleware`` rides along for the same reason: ``create_deep_agent`` gives its
+    own ``middleware`` argument to the main agent alone.
+    """
+    resolved: list[SubAgent | CompiledSubAgent] = []
+    for spec in subagents:
+        # A CompiledSubAgent brings its own graph and tools; nothing to filter.
+        if "runnable" in spec or "tools" in spec:
+            resolved.append(spec)
+            continue
+        resolved.append(
+            {
+                **spec,
+                "tools": list(shared_tools),
+                "middleware": [*spec.get("middleware", []), *middleware],
+            }
+        )
+
+    if not any(
+        spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in resolved
+    ):
+        gp: dict[str, Any] = {
+            **GENERAL_PURPOSE_SUBAGENT,
+            "tools": list(shared_tools),
+            "middleware": list(middleware),
+        }
+        if skills:
+            gp["skills"] = list(skills)
+        resolved.append(gp)  # type: ignore[arg-type]
+    return resolved
+
+
 def create_advanced_agent(
     model: BaseChatModel,
     system_prompt: str | SystemMessage | None = "",
     tools: Sequence[BaseTool] = (),
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
-    backend: BackendProtocol | BackendFactory | None = None,
+    backend: BackendProtocol | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
@@ -143,16 +377,22 @@ def create_advanced_agent(
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
+
+    Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
+    shared_tools, _ = _partition_main_agent_tools(tools)
+    payload_handler = _PayloadHandlerMiddleware()
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=list(subagents),
+        subagents=_subagents_without_main_agent_tools(
+            subagents, shared_tools, skills, [payload_handler]
+        ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=list(middleware),
+        middleware=[*middleware, payload_handler],
         skills=list(skills) if skills else None,
     )
 
@@ -161,12 +401,15 @@ def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str | Callable[[dict[str, Any]], str],
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     response_format: ResponseFormat[Any] | None,
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
     skills: Sequence[str] | None = None,
+    output_files_enabled: bool = False,
+    max_iterations: int | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -175,12 +418,23 @@ def create_advanced_agent_graph(
     ``FilesystemBackend`` also enables workspace memory: deepagents'
     ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
     Memory stays disabled for non-filesystem backends, which carry no workspace.
+
+    With ``output_files_enabled``, a job-attachment field in the output schema
+    is gated by a verification node: an unfilled required file field, or a
+    reference to an attachment that is not linked to this job, sends the agent
+    back for another turn instead of emitting an output it cannot honor.
+
+    ``max_iterations`` caps the model calls the agent loop may make; ``None``
+    leaves it uncapped.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
     )
     runtime_prompt = _resolve_runtime_system_prompt(
         system_prompt, AdvancedAgentGraphState, input_schema
+    )
+    output_file_fields = (
+        get_output_file_fields(output_schema) if output_files_enabled else []
     )
 
     inner_graph = create_advanced_agent(
@@ -190,20 +444,29 @@ def create_advanced_agent_graph(
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=[
+            *runtime_prompt.middleware,
+            *_max_iterations_middleware(max_iterations),
+            *middleware,
+        ],
         skills=skills,
     )
 
+    output_file_retries_key = get_unique_model_field_name(
+        "uipath__output_file_retries", AdvancedAgentGraphState, input_schema
+    )
+    state_fields: dict[str, Any] = dict(runtime_prompt.state_fields)
+    if output_file_fields:
+        state_fields[output_file_retries_key] = (int, 0)
+
     wrapper_state = create_state_with_input(input_schema)
-    if runtime_prompt.state_fields:
+    if state_fields:
         wrapper_state = create_model(
             "RuntimeAdvancedAgentGraphState",
             __base__=wrapper_state,
-            **runtime_prompt.state_fields,
+            **state_fields,
         )
-    internal_fields = set(AdvancedAgentGraphState.model_fields) | set(
-        runtime_prompt.state_fields
-    )
+    internal_fields = set(AdvancedAgentGraphState.model_fields) | set(state_fields)
     attachment_paths = (
         get_job_attachment_paths(input_schema) if input_schema is not None else []
     )
@@ -231,6 +494,38 @@ def create_advanced_agent_graph(
         structured = getattr(state, "structured_response", {})
         return output_schema.model_validate(structured).model_dump()
 
+    async def verify_output_files(
+        state: BaseModel,
+    ) -> Command[Literal["advanced_agent", "transform_output"]]:
+        structured = getattr(state, "structured_response", {}) or {}
+        problem = await diagnose_output_files(output_file_fields, structured)
+        if problem is None:
+            return Command(goto="transform_output")
+
+        retries = getattr(state, output_file_retries_key, 0) or 0
+        if retries >= DEFAULT_MAX_OUTPUT_FILE_RETRIES:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+                title="Agent did not produce the required output file",
+                detail=(
+                    f"{problem} The agent was given "
+                    f"{DEFAULT_MAX_OUTPUT_FILE_RETRIES} chance(s) to correct this "
+                    "and did not. Verify the agent's prompt asks for the file, and "
+                    "that the output schema's file fields are the ones you intend."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
+
+        # The structured-output tool call is already answered by this point, so the
+        # correction goes in as a new user turn rather than a tool result.
+        return Command(
+            goto="advanced_agent",
+            update={
+                "messages": [HumanMessage(content=problem)],
+                output_file_retries_key: retries + 1,
+            },
+        )
+
     wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(
         wrapper_state, input_schema=input_schema, output_schema=output_schema
     )
@@ -239,7 +534,11 @@ def create_advanced_agent_graph(
     wrapper.add_node("transform_output", transform_output)
     wrapper.add_edge(START, "transform_input")
     wrapper.add_edge("transform_input", "advanced_agent")
-    wrapper.add_edge("advanced_agent", "transform_output")
+    if output_file_fields:
+        wrapper.add_node("verify_output_files", verify_output_files)
+        wrapper.add_edge("advanced_agent", "verify_output_files")
+    else:
+        wrapper.add_edge("advanced_agent", "transform_output")
     wrapper.add_edge("transform_output", END)
 
     return wrapper
@@ -249,9 +548,12 @@ def create_conversational_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     system_prompt: str | Callable[[dict[str, Any]], str],
-    backend: BackendProtocol | BackendFactory | None,
+    backend: BackendProtocol | None,
     skills: Sequence[str] | None = None,
     input_schema: type[BaseModel] | None = None,
+    output_schema: type[BaseModel] | None = None,
+    max_iterations: int | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -260,6 +562,14 @@ def create_conversational_advanced_agent_graph(
     messages as ``uipath__agent_response_messages``. Callable system prompts
     are resolved once from the exchange input and used by the deep agent for
     that invocation.
+
+    When ``output_schema`` declares fields beyond the response messages, they are
+    filled the same way the standard conversational agent fills them: a focused
+    extraction call over the exchange's messages, after the loop has finished.
+    The loop itself produces messages, so nothing in it can produce those fields.
+
+    ``max_iterations`` caps the model calls the agent loop may make per exchange;
+    ``None`` leaves it uncapped.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -279,7 +589,11 @@ def create_conversational_advanced_agent_graph(
         system_prompt=runtime_prompt.static_prompt,
         backend=backend,
         memory=memory_sources,
-        middleware=runtime_prompt.middleware,
+        middleware=[
+            *runtime_prompt.middleware,
+            *_max_iterations_middleware(max_iterations, initial_message_count_key),
+            *middleware,
+        ],
         skills=skills,
     )
 
@@ -287,6 +601,13 @@ def create_conversational_advanced_agent_graph(
         uipath__agent_response_messages: list[UiPathConversationMessageData] = Field(
             default_factory=list
         )
+
+    with_output_extraction = has_custom_conversational_output_fields(output_schema)
+    graph_output: type[BaseModel] = (
+        output_schema
+        if with_output_extraction and output_schema is not None
+        else ConversationalAdvancedAgentOutput
+    )
 
     graph_input: type[BaseModel] = _ConversationalAdvancedAgentGraphInput
     wrapper_input: type[BaseModel] = _ConversationalAdvancedAgentGraphInput
@@ -311,10 +632,17 @@ def create_conversational_advanced_agent_graph(
             input_schema if "messages" in input_schema.model_fields else wrapper_input
         )
 
+    conversational_output_key = get_unique_model_field_name(
+        "uipath__conversational_output",
+        _ConversationalAdvancedAgentGraphInput,
+        input_schema,
+    )
     state_fields: dict[str, Any] = {
         initial_message_count_key: (int | None, None),
         **runtime_prompt.state_fields,
     }
+    if with_output_extraction:
+        state_fields[conversational_output_key] = (dict[str, Any] | None, None)
     wrapper_state = cast(
         type[BaseModel],
         create_model(
@@ -340,17 +668,23 @@ def create_conversational_advanced_agent_graph(
             }
         ).model_dump(by_alias=True, exclude_unset=True)
 
-    def capture_exchange_start(state: BaseModel) -> dict[str, Any]:
+    async def capture_exchange_start(state: BaseModel) -> dict[str, Any]:
         messages = cast(ConversationalAdvancedAgentGraphState, state).messages
         update: dict[str, Any] = {initial_message_count_key: len(messages)}
+        hydrated_messages = await resolve_message_attachments(backend, messages)
+        if hydrated_messages:
+            update["messages"] = hydrated_messages
         if runtime_prompt.build_prompt is not None:
             update.update(runtime_prompt.resolve(declared_input(state)))
         return update
 
-    def transform_output(state: BaseModel) -> dict[str, Any]:
+    def _new_messages(state: BaseModel) -> list[Any]:
         initial_count = getattr(state, initial_message_count_key) or 0
         messages = cast(ConversationalAdvancedAgentGraphState, state).messages
-        new_messages = messages[initial_count:]
+        return list(messages[initial_count:])
+
+    def transform_output(state: BaseModel) -> dict[str, Any]:
+        new_messages = _new_messages(state)
         converted = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
                 messages=new_messages, include_tool_results=False
@@ -358,19 +692,49 @@ def create_conversational_advanced_agent_graph(
             if new_messages
             else []
         )
-        return {"uipath__agent_response_messages": converted}
+        if not with_output_extraction or output_schema is None:
+            return {"uipath__agent_response_messages": converted}
+
+        custom_fields = getattr(state, conversational_output_key, None) or {}
+        output = {
+            **custom_fields,
+            "uipath__agent_response_messages": [
+                message.model_dump(by_alias=True) for message in converted
+            ],
+        }
+        return output_schema.model_validate(output).model_dump(
+            by_alias=True, exclude_none=True
+        )
+
+    extract_output = (
+        create_conversational_output_extractor(model, output_schema)
+        if with_output_extraction and output_schema is not None
+        else None
+    )
+
+    async def generate_conversational_output(state: BaseModel) -> dict[str, Any]:
+        assert extract_output is not None  # guarded by with_output_extraction
+        messages = cast(ConversationalAdvancedAgentGraphState, state).messages
+        return {conversational_output_key: await extract_output(messages)}
 
     wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(
         wrapper_state,
         input_schema=graph_input,
-        output_schema=ConversationalAdvancedAgentOutput,
+        output_schema=graph_output,
     )
     wrapper.add_node("capture_exchange_start", capture_exchange_start)
     wrapper.add_node("advanced_agent", inner_graph)
     wrapper.add_node("transform_output", transform_output)
     wrapper.add_edge(START, "capture_exchange_start")
     wrapper.add_edge("capture_exchange_start", "advanced_agent")
-    wrapper.add_edge("advanced_agent", "transform_output")
+    if with_output_extraction:
+        wrapper.add_node(
+            "generate_conversational_output", generate_conversational_output
+        )
+        wrapper.add_edge("advanced_agent", "generate_conversational_output")
+        wrapper.add_edge("generate_conversational_output", "transform_output")
+    else:
+        wrapper.add_edge("advanced_agent", "transform_output")
     wrapper.add_edge("transform_output", END)
 
     return wrapper

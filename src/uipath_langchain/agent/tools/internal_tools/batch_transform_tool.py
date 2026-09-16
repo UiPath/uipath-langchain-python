@@ -26,6 +26,7 @@ from uipath.platform.context_grounding.context_grounding_index import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils.durable_interrupt import (
+    SUSPENDS_RUN,
     SkipInterruptValue,
     durable_interrupt,
 )
@@ -205,6 +206,7 @@ def create_batch_transform_tool(
             "args_schema": input_model,
             "output_schema": output_model,
             "retrieval_mode": "BatchTransform",
+            SUSPENDS_RUN: True,
             "output_columns": [
                 {"name": col.name, "description": col.description}
                 for col in batch_transform_output_columns

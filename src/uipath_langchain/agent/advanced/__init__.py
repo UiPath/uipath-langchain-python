@@ -2,12 +2,18 @@
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents.backends import BackendProtocol, FilesystemBackend
-from deepagents.backends.protocol import BackendFactory
 
 from .agent import (
     create_advanced_agent,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
+)
+from .code_interpreter import (
+    PTC_FILESYSTEM_TOOLS,
+    PersistenceMode,
+    build_code_interpreter_middleware,
+    ptc_tool_names,
+    subagent_dispatch_is_replay_safe,
 )
 from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
 from .utils import (
@@ -21,15 +27,19 @@ __all__ = [
     "MEMORY_DIR_NAME",
     "MEMORY_INDEX_FILENAME",
     "MEMORY_INDEX_VIRTUAL_PATH",
+    "PTC_FILESYSTEM_TOOLS",
+    "PersistenceMode",
     "AdvancedAgentGraphState",
-    "BackendFactory",
     "BackendProtocol",
     "CompiledSubAgent",
     "ConversationalAdvancedAgentGraphState",
     "FilesystemBackend",
     "SubAgent",
+    "build_code_interpreter_middleware",
     "create_advanced_agent",
     "create_advanced_agent_graph",
     "create_conversational_advanced_agent_graph",
     "create_state_with_input",
+    "ptc_tool_names",
+    "subagent_dispatch_is_replay_safe",
 ]

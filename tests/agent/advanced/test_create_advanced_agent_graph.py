@@ -1,5 +1,6 @@
 """Tests for the create_advanced_agent_graph wrapper builder."""
 
+from collections.abc import Sequence
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,6 +40,21 @@ class _PromptNamedInput(BaseModel):
     uipath__system_prompt_1: str
 
 
+def _runtime_prompt_middleware(
+    middleware: Sequence[Any],
+) -> _RuntimeSystemPromptMiddleware | None:
+    """The runtime-prompt middleware in the stack handed to deepagents, if any.
+
+    Located by type rather than by index, since callers may append middleware of
+    their own and the stack order is not part of the contract.
+    """
+    found = [m for m in middleware if isinstance(m, _RuntimeSystemPromptMiddleware)]
+    assert len(found) <= 1, (
+        f"expected at most one runtime-prompt middleware, got {found}"
+    )
+    return found[0] if found else None
+
+
 def _mock_model() -> MagicMock:
     model = MagicMock(spec=BaseChatModel)
     model.profile = None
@@ -76,9 +92,9 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system_prompt"] is None
-    assert len(call_kwargs["middleware"]) == 1
-    assert isinstance(call_kwargs["middleware"][0], _RuntimeSystemPromptMiddleware)
-    assert call_kwargs["middleware"][0].state_key == "uipath__system_prompt"
+    runtime_middleware = _runtime_prompt_middleware(call_kwargs["middleware"])
+    assert runtime_middleware is not None
+    assert runtime_middleware.state_key == "uipath__system_prompt"
 
 
 def test_static_system_prompt_skips_runtime_middleware() -> None:
@@ -91,7 +107,7 @@ def test_static_system_prompt_skips_runtime_middleware() -> None:
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system_prompt"] == "sys"
-    assert call_kwargs["middleware"] == []
+    assert _runtime_prompt_middleware(call_kwargs["middleware"]) is None
 
 
 @pytest.mark.asyncio
@@ -182,7 +198,8 @@ async def test_runtime_system_prompt_crosses_into_deep_agent_once() -> None:
         return f"runtime:{args['question']}"
 
     def create_inner_graph(**kwargs: Any) -> Any:
-        middleware = kwargs["middleware"][0]
+        middleware = _runtime_prompt_middleware(kwargs["middleware"])
+        assert middleware is not None
         runtime_key = middleware.state_key
 
         def capture_model_request(state: BaseModel) -> dict[str, Any]:
@@ -366,3 +383,78 @@ async def test_runtime_system_prompt_middleware_supports_async_model_calls() -> 
 
     assert captured[0].system_message is not None
     assert captured[0].system_message.text == ("runtime prompt\n\ndeepagents prompt")
+
+
+class TestOutputFileVerification:
+    """The wrapper gates typed output on the declared output file fields."""
+
+    ATTACHMENT_ID = "11111111-1111-1111-1111-111111111111"
+
+    @staticmethod
+    def _output_model(required: bool = True) -> type[BaseModel]:
+        from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+            create_model as create_model_from_schema,
+        )
+        from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+            JOB_ATTACHMENT_DEFINITION,
+        )
+
+        return create_model_from_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "report": {"$ref": "#/definitions/job-attachment"},
+                },
+                "required": ["report"] if required else [],
+                "definitions": {"job-attachment": JOB_ATTACHMENT_DEFINITION},
+            }
+        )
+
+    def test_file_output_inserts_the_verification_node(self) -> None:
+        graph = _build(output_schema=self._output_model(), output_files_enabled=True)
+
+        assert "verify_output_files" in set(graph.nodes)
+
+    def test_no_file_output_keeps_the_direct_edge(self) -> None:
+        graph = _build(output_schema=_Output, output_files_enabled=True)
+
+        assert "verify_output_files" not in set(graph.nodes)
+
+    def test_disabled_flag_leaves_the_graph_unchanged(self) -> None:
+        graph = _build(output_schema=self._output_model(), output_files_enabled=False)
+
+        assert "verify_output_files" not in set(graph.nodes)
+
+    def test_no_tool_of_ours_is_still_verified(self) -> None:
+        """Any tool can return a real ticket, so the gate cannot key off ours."""
+        graph = _build(
+            output_schema=self._output_model(), tools=[], output_files_enabled=True
+        )
+
+        assert "verify_output_files" in set(graph.nodes)
+
+    def test_retry_budget_is_carried_in_state(self) -> None:
+        """It has to survive a suspend and resume, so a closure will not do."""
+        graph = _build(output_schema=self._output_model(), output_files_enabled=True)
+
+        assert "uipath__output_file_retries" in graph.state_schema.model_fields
+
+    def test_no_file_output_adds_no_verification_state(self) -> None:
+        graph = _build(output_schema=_Output, output_files_enabled=True)
+
+        assert "uipath__output_file_retries" not in graph.state_schema.model_fields
+
+    async def test_verification_state_is_not_forwarded_as_agent_input(self) -> None:
+        """The keys are internal, so transform_input must not treat them as inputs."""
+        graph = _build(
+            input_schema=_Input,
+            output_schema=self._output_model(),
+            output_files_enabled=True,
+        )
+        state = graph.state_schema(book={"title": "x"}, question="q")
+
+        update = await graph.nodes["transform_input"].runnable.ainvoke(state)
+
+        assert "messages" in update
+        assert "uipath__output_file_retries" not in update
