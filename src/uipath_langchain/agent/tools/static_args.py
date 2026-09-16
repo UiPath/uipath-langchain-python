@@ -55,6 +55,20 @@ _INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
 _SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
 
 
+def has_argument_bindings(tool: BaseTool) -> bool:
+    """Whether ``tool`` carries configured argument bindings.
+
+    True for a structured tool whose ``argument_properties`` bind at least one
+    argument to a static value, an agent input, or a text or array built from
+    inputs. These are the tools :class:`StaticArgsHandler` rewrites.
+    """
+    return (
+        isinstance(tool, ArgumentPropertiesMixin)
+        and isinstance(tool, StructuredTool)
+        and bool(tool.argument_properties)
+    )
+
+
 def _resolve_argument_properties(
     argument_properties: Mapping[str, AgentToolArgumentProperties],
     agent_input: dict[str, Any],
