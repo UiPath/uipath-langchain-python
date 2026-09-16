@@ -1,0 +1,10 @@
+{
+  "employee_id": "EMP004",
+  "employee_name": "Emily Davis",
+  "department": "engineering",
+  "expense_amount": 125.00,
+  "expense_category": "meals",
+  "expense_description": "Team dinner during product launch",
+  "receipt_attached": true,
+  "expense_date": "2025-05-01"
+}
