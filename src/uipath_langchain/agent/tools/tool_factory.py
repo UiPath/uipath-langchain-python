@@ -27,6 +27,7 @@ from .integration_tool import create_integration_tool
 from .internal_tools import create_internal_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
 from .process_tool import create_process_tool
+from .static_args import wrap_tools_with_static_args
 
 logger = getLogger(__name__)
 
@@ -92,7 +93,9 @@ async def create_tools_from_resources(
                             tool.metadata = {}
                         tool.metadata[REQUIRE_CONVERSATIONAL_CONFIRMATION] = True
 
-    return tools
+    # Hide statically-configured tool parameters from the model and inject them
+    # at call time (e.g. a fixed Integration Service search `provider`).
+    return wrap_tools_with_static_args(tools)
 
 
 async def _build_tool_for_resource(
