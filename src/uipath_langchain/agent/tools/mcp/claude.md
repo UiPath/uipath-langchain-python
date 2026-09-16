@@ -182,14 +182,17 @@ MCP connections for tool invocations with **two distinct initialization phases**
 │  ───────────────                                            │
 │  _lock: asyncio.Lock     # Protects both init phases        │
 ├─────────────────────────────────────────────────────────────┤
-│  Client State (created once, reused on session reinit)      │
-│  ─────────────────────────────────────────────────────      │
+│  Connection State (owned by the connection task)            │
+│  ───────────────────────────────────────────────            │
+│  _connection_task: asyncio.Task | None                      │
+│  _ready: asyncio.Future | None     # handshake done         │
+│  _close_requested: asyncio.Event | None                     │
+│  _stack: AsyncExitStack | None     # set while it runs      │
 │  _http_client: httpx.AsyncClient | None                     │
 │  _read_stream: MemoryObjectReceiveStream | None             │
 │  _write_stream: MemoryObjectSendStream | None               │
 │  _session_info: SessionInfo | None                          │
-│  _stack: AsyncExitStack | None                              │
-│  _client_initialized: bool                                  │
+│  _client_initialized: bool         # after ready only       │
 ├─────────────────────────────────────────────────────────────┤
 │  Session State (can be reinitialized without recreating)    │
 │  ───────────────────────────────────────────────────────    │
@@ -362,8 +365,10 @@ Phase 2: Session Initialization (lightweight, can repeat)
            └──────┬───────┘
                   │ 1. UiPath SDK retrieves MCP URL
                   │ 2. Factory creates SessionInfo
-                  │ 3. Creates HTTP client, streams, session
-                  │ 4. Calls _initialize_session()
+                  │ 3. Starts the connection task, which opens
+                  │    HTTP client, streams and session on itself
+                  │ 4. The task runs _initialize_session(),
+                  │    then resolves `ready`
                   ▼
            ┌──────────────┐
            │   Session    │
@@ -463,13 +468,14 @@ tool invocation, we ensure the bindings are properly loaded and applied.
 
 ### 2. HTTP Client Configuration
 
-The HTTP client MUST use `get_httpx_client_kwargs()` for proper SSL/proxy configuration:
+The HTTP client MUST use `get_httpx_client_kwargs()` for proper SSL/proxy configuration.
+It is entered inside `_run_connection`, on the connection task's own stack:
 
 ```python
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
 default_client_kwargs = get_httpx_client_kwargs()
-self._http_client = await self._stack.enter_async_context(
+self._http_client = await stack.enter_async_context(  # inside _run_connection
     httpx.AsyncClient(
         **default_client_kwargs,
         headers=self._headers,
@@ -500,21 +506,27 @@ async def _reinitialize_session(self) -> None:
             await self._initialize_session()  # Lightweight!
 ```
 
-### 4. No `with` Statement for AsyncExitStack
+### 4. The Connection Lives on Its Own Task
 
-Manual lifecycle management:
+The HTTP client, the streamable HTTP transport and the `ClientSession` all sit
+in one `AsyncExitStack`. Its anyio cancel scopes must be exited by the task that
+entered them, in reverse order of entry, and neither is under the caller's
+control: langgraph opens the connection inside a tool task, and an agent
+disposes several servers oldest-first. So `_run_connection` owns the stack with
+a plain `async with` and stays inside it until told to leave:
 
 ```python
-# Correct - manual management
-self._stack = AsyncExitStack()
-await self._stack.__aenter__()
-# ... use stack ...
-await self._stack.__aexit__(None, None, None)
-
-# Wrong - exits too early
 async with AsyncExitStack() as stack:
-    ...  # Stack closes here!
+    ...  # enter HTTP client, transport and session
+    await self._initialize_session()
+    ready.set_result(None)
+    await close_requested.wait()  # dispose() sets this
 ```
+
+`dispose()` never touches the stack. It signals the task, or cancels it if the
+handshake has not finished yet, and waits for it to exit. Recovery
+(`_reinitialize_session`) still re-runs the handshake on the same session; that
+is a request over the streams and can run from any task.
 
 ### 5. Reinitialization Reuses Client
 
@@ -599,11 +611,17 @@ When the upstream MCP SDK changes its transport:
 
 ### Modifying Client Initialization
 
-1. Changes go in `_initialize_client()`
-2. All resources must be added to `_stack` via `enter_async_context()`
-3. Set `_client_initialized = True` before calling `_initialize_session()`
+1. Resolving the server (SDK lookup, `SessionInfo`) stays in `_initialize_client()`;
+   opening resources goes in `_run_connection()`
+2. All resources must be entered on the connection task's `AsyncExitStack` via
+   `enter_async_context()` — never on the caller's task
+3. `_client_initialized = True` is set only after `ready` resolves, i.e. after
+   `_initialize_session()` succeeded; the task's `finally` clears it again, so a
+   connection that dies on its own is rebuilt by the next call
 4. Always use `get_httpx_client_kwargs()` for HTTP client
 5. The `SessionInfo` is created via the factory — do not construct it directly
+6. `dispose()` never touches the stack: `_close_connection()` signals the task (or
+   cancels it mid-handshake) and waits for it
 
 ### Modifying Session Initialization
 
