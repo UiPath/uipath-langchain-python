@@ -185,7 +185,7 @@ SQL_CONSTRAINTS = """\
 
 **Examples:**
 - SELECT country, COUNT(id) FROM Customer GROUP BY country
-- SELECT dept, SUM(price*qty) as total FROM LineItem GROUP BY dept
+- SELECT dept, SUM(price) as total FROM LineItem GROUP BY dept
 - SELECT country, COUNT(id) as cnt FROM Customer GROUP BY country HAVING COUNT(id)>10
 
 ### 5. Expressions (Minimal)
@@ -350,4 +350,6 @@ SQL_CONSTRAINTS = """\
 9. **Simple aggregations only** - No DISTINCT in aggregates
 10. **ORDER BY only selected columns** - Cannot ORDER BY columns not in SELECT list
 11. **Limit unbounded row queries** - Queries without WHERE that could return many rows must include a LIMIT clause (e.g., LIMIT 100). Scalar aggregate queries do not require LIMIT
-12. **Choice-set fields use display labels** - Choice-set fields list their allowed values in the Description column of the schema table. Use the display label as a string in WHERE clauses (e.g. ``WHERE Priority = 'Critical'``). Multi-select (array) choice-set fields cannot be filtered via SQL — only SELECT them."""
+12. **Choice-set fields use display labels** - Choice-set fields list their allowed values in the Description column of the schema table. Use the display label as a string in WHERE clauses (e.g. ``WHERE Priority = 'Critical'``). Multi-select (array) choice-set fields cannot be filtered via SQL — only SELECT them.
+13. **More than 4 columns needs a filter** - Selecting more than 4 columns is only allowed when the query has a WHERE clause
+14. **Aggregate arguments are a single column** - COUNT/SUM/AVG/MIN/MAX take one plain column, never a CASE or a calculation; keep to 5 aggregate functions and 5 GROUP BY columns per query"""
