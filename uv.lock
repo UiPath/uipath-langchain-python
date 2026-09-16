@@ -4671,7 +4671,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.16.19"
+version = "0.16.20"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4988,8 +4988,8 @@ name = "uvicorn"
 version = "0.49.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click" },
-    { name = "h11" },
+    { name = "click", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "h11", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/1f/fa18009dea8469069cca78a4e877a008ab78f08b064bfc9ab891579077ff/uvicorn-0.49.0.tar.gz", hash = "sha256:ebf4271aa580d9de97f93192d4595176df6e91f9aae919ca73e4fc07df1e66a3", size = 91284, upload-time = "2026-06-03T22:01:30.448Z" }
 wheels = [
