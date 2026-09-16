@@ -1,0 +1,65 @@
+%% LTL Claims Processing Agent - Architecture Diagram
+%% Shows the multi-agent system with specialized sub-agents
+
+graph TB
+    subgraph "Main Graph (LangGraph)"
+        MAIN[Main Orchestration Flow<br/>11 Nodes + Conditional Routing]
+    end
+    
+    subgraph "Specialized Sub-Agents"
+        ORCH[Orchestrator Agent<br/>Model: GPT-4o<br/>Purpose: Planning & Coordination]
+        DOC[Document Processor Agent<br/>Model: GPT-4o-mini<br/>Purpose: Document Download & Extraction]
+        RISK[Risk Assessor Agent<br/>Model: GPT-4o-mini<br/>Purpose: Risk Analysis & Scoring]
+        COMP[Compliance Validator Agent<br/>Model: GPT-4o-mini<br/>Purpose: Policy Validation]
+    end
+    
+    subgraph "Decision Strategy"
+        DEC[Hybrid Decision Strategy<br/>Model: GPT-4o<br/>LLM + Rule-Based Fallback]
+    end
+    
+    subgraph "UiPath Services"
+        DF[Data Fabric<br/>Entities API]
+        IXP[Document Understanding<br/>IXP/DU API]
+        CG[Context Grounding<br/>Knowledge Base]
+        AC[Action Center<br/>Human-in-the-Loop]
+        QUEUE[Queue Management<br/>Orchestrator Queues]
+        BUCKET[Storage Buckets<br/>Document Storage]
+    end
+    
+    subgraph "Memory System"
+        MEM[Long-Term Memory<br/>SQLite/PostgreSQL<br/>Historical Context & Patterns]
+    end
+    
+    %% Main Flow Connections
+    MAIN -->|Create Plan| ORCH
+    MAIN -->|Process Documents| DOC
+    MAIN -->|Assess Risk| RISK
+    MAIN -->|Validate Policy| COMP
+    MAIN -->|Make Decision| DEC
+    
+    %% Sub-Agent to Service Connections
+    ORCH -.->|Query Tools| CG
+    DOC -->|Download| BUCKET
+    DOC -->|Extract| IXP
+    RISK -.->|Search Similar Claims| MEM
+    COMP -->|Search Policies| CG
+    COMP -->|Search Carriers| CG
+    DEC -.->|Historical Context| MEM
+    
+    %% Main to Service Connections
+    MAIN -->|Validate| DF
+    MAIN -->|Escalate| AC
+    MAIN -->|Update Status| QUEUE
+    MAIN -->|Store Results| DF
+    MAIN -->|Store Outcome| MEM
+    
+    %% Styling
+    classDef agentClass fill:#e1f5ff,stroke:#0288d1,stroke-width:2px
+    classDef serviceClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef mainClass fill:#fff9c4,stroke:#f57f17,stroke-width:3px
+    classDef memoryClass fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    
+    class ORCH,DOC,RISK,COMP,DEC agentClass
+    class DF,IXP,CG,AC,QUEUE,BUCKET serviceClass
+    class MAIN mainClass
+    class MEM memoryClass

@@ -1,0 +1,18 @@
+[project]
+name = "ltl-claims-agents"
+version = "3.0.6"
+description = "ltl-claims-agents"
+authors = [{ name = "Satish Prasad", email = "prasadsatish@outlook.com" }]
+dependencies = [
+    "uipath-langchain>=0.0.106",
+    "langchain-anthropic>=0.3.8",
+    "debugpy>=1.8.17",
+]
+requires-python = ">=3.10"
+
+[tool.setuptools]
+# Include .env file in the package
+include-package-data = true
+
+[tool.setuptools.package-data]
+"*" = [".env"]
