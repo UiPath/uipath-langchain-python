@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -11,13 +12,18 @@ from uipath.core.guardrails import (
     GuardrailValidationResultType,
 )
 from uipath.platform import UiPath
+from uipath.platform.errors import EnrichedException
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
+    GuardrailAttachment,
     GuardrailScope,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.guardrails.attachment_refs import (
+    resolve_guardrail_attachments,
+)
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
     _extract_tool_args_from_message,
@@ -30,6 +36,9 @@ from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
 logger = logging.getLogger(__name__)
+
+#: Scopes whose guardrails may inspect attached files (tool scope excluded on purpose).
+_ATTACHMENT_SCOPES = frozenset({GuardrailScope.AGENT, GuardrailScope.LLM})
 
 
 def _evaluate_deterministic_guardrail(
@@ -67,24 +76,42 @@ def _evaluate_deterministic_guardrail(
         )
 
 
-def _evaluate_builtin_guardrail(
-    state: AgentGuardrailsGraphState,
+async def _evaluate_builtin_guardrail(
     guardrail: BuiltInValidatorGuardrail,
-    payload_generator: Callable[[AgentGuardrailsGraphState], str],
+    text: str,
+    attachments: list[GuardrailAttachment] | None = None,
 ):
     """Evaluate built-in validator guardrail.
 
     Args:
-        state: The current agent graph state.
         guardrail: The built-in validator guardrail to evaluate.
-        payload_generator: Function to generate payload text from state.
+        text: The payload text to validate.
+        attachments: Resolved attachment references the validator may inspect.
 
     Returns:
         The guardrail evaluation result.
     """
-    text = payload_generator(state)
     uipath = UiPath()
-    return uipath.guardrails.evaluate_guardrail(text, guardrail)
+    try:
+        return await asyncio.to_thread(
+            uipath.guardrails.evaluate_guardrail,
+            text,
+            guardrail,
+            attachments=attachments,
+        )
+    except EnrichedException as exc:
+        # A 400 with attachments means the references were rejected; a file must never
+        # fail the run, so evaluate the text alone.
+        if not attachments or exc.status_code != 400:
+            raise
+        logger.warning(
+            "Guardrail '%s' rejected the attachment references (HTTP 400); "
+            "re-evaluating without attachments.",
+            guardrail.name,
+        )
+        return await asyncio.to_thread(
+            uipath.guardrails.evaluate_guardrail, text, guardrail, attachments=None
+        )
 
 
 def _create_validation_command(
@@ -208,8 +235,16 @@ def _create_guardrail_node(
                 else:
                     metadata["payload"]["output"] = payload
 
-                result = _evaluate_builtin_guardrail(
-                    state, guardrail, payload_generator
+                attachments = (
+                    await resolve_guardrail_attachments(
+                        state.inner_state.job_attachments, guardrail
+                    )
+                    if scope in _ATTACHMENT_SCOPES
+                    else []
+                )
+
+                result = await _evaluate_builtin_guardrail(
+                    guardrail, payload, attachments
                 )
             else:
                 # Provide specific error message for DeterministicGuardrails with wrong scope
