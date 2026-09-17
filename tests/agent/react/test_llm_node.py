@@ -431,7 +431,7 @@ class TestLLMNodeProviderErrorHandling:
 
     @staticmethod
     def _http_400() -> httpx.Response:
-        """The 400 from job 1fab7e97-...: max_tokens written by Agent Builder."""
+        """A gateway 400 as seen in prod: max_tokens above the model's limit."""
         request = httpx.Request("POST", "http://gateway/")
         return httpx.Response(
             400,
