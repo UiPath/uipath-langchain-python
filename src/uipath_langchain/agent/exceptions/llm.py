@@ -27,7 +27,7 @@ _BAD_REQUEST_DETAIL = (
     "is recorded on the LLM call span for this run."
 )
 
-_Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str]
+_Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]
 
 _NOT_FOUND_SIGNATURES: tuple[tuple[tuple[str, ...], _Verdict], ...] = (
     (
@@ -136,10 +136,27 @@ def _match_not_found_signature(body: object) -> _Verdict | None:
     return None
 
 
-def _classify(
-    status_code: int, body: object
-) -> tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]:
-    """Map an LLM provider HTTP status onto (code, category, title, detail).
+def _forbidden_verdict(body: object) -> _Verdict:
+    """The verdict for a 403, whose meaning is in the body rather than the status."""
+    if not _is_license_error(body):
+        return (
+            AgentRuntimeErrorCode.LLM_PROVIDER_FORBIDDEN,
+            UiPathErrorCategory.DEPLOYMENT,
+            "LLM provider returned HTTP 403",
+            None,
+        )
+
+    title = body.get("title") if isinstance(body, dict) else None
+    return (
+        AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
+        UiPathErrorCategory.DEPLOYMENT,
+        title if isinstance(title, str) and title.strip() else "License not available",
+        None,
+    )
+
+
+def _status_verdict(status_code: int, body: object) -> _Verdict:
+    """The verdict this mapping decides for a status, before the gateway's detail.
 
     Only 400, 403 and 404 are classified beyond the 5xx/other split.
 
@@ -148,32 +165,9 @@ def _classify(
     apart. Both name a cause only for a body that names its own --
     ``_is_license_error`` for 403, ``_NOT_FOUND_SIGNATURES`` for 404 -- and
     leave the rest unnamed rather than guessing.
-
-    The gateway's own ProblemDetails ``detail`` is first-party UiPath text and
-    more specific, so it wins over anything decided here. A ``detail`` of
-    ``None`` means "fall back to the HTTP reason phrase" -- the useless
-    two-word message, so only statuses whose cause we cannot name are left
-    with it.
     """
-    gateway_detail = body.get("detail") if isinstance(body, dict) else None
-
     if status_code == 403:
-        if _is_license_error(body):
-            title = body.get("title") if isinstance(body, dict) else None
-            return (
-                AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE,
-                UiPathErrorCategory.DEPLOYMENT,
-                title
-                if isinstance(title, str) and title.strip()
-                else "License not available",
-                gateway_detail,
-            )
-        return (
-            AgentRuntimeErrorCode.LLM_PROVIDER_FORBIDDEN,
-            UiPathErrorCategory.DEPLOYMENT,
-            "LLM provider returned HTTP 403",
-            gateway_detail,
-        )
+        return _forbidden_verdict(body)
 
     if status_code == 400:
         # The relayed provider message is deliberately not read out of the
@@ -183,28 +177,34 @@ def _classify(
             AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST,
             UiPathErrorCategory.USER,
             "LLM provider rejected the request",
-            gateway_detail or _BAD_REQUEST_DETAIL,
+            _BAD_REQUEST_DETAIL,
         )
 
-    if status_code == 404:
-        if (verdict := _match_not_found_signature(body)) is not None:
-            code, category, title, signature_detail = verdict
-            return code, category, title, gateway_detail or signature_detail
+    if status_code == 404 and (verdict := _match_not_found_signature(body)) is not None:
+        return verdict
 
-    title = f"LLM provider returned HTTP {status_code}"
-    if status_code >= 500:
-        return (
-            AgentRuntimeErrorCode.HTTP_ERROR,
-            UiPathErrorCategory.SYSTEM,
-            title,
-            gateway_detail,
-        )
     return (
         AgentRuntimeErrorCode.HTTP_ERROR,
-        UiPathErrorCategory.UNKNOWN,
-        title,
-        gateway_detail,
+        UiPathErrorCategory.SYSTEM
+        if status_code >= 500
+        else UiPathErrorCategory.UNKNOWN,
+        f"LLM provider returned HTTP {status_code}",
+        None,
     )
+
+
+def _classify(status_code: int, body: object) -> _Verdict:
+    """Map an LLM provider HTTP status onto (code, category, title, detail).
+
+    The gateway's own ProblemDetails ``detail`` is first-party UiPath text and
+    more specific, so it wins over the detail ``_status_verdict`` decided. A
+    ``detail`` of ``None`` means "fall back to the HTTP reason phrase" -- the
+    useless two-word message, so only statuses whose cause neither the gateway
+    nor this mapping can name are left with it.
+    """
+    code, category, title, own_detail = _status_verdict(status_code, body)
+    gateway_detail = body.get("detail") if isinstance(body, dict) else None
+    return code, category, title, gateway_detail or own_detail
 
 
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
