@@ -244,8 +244,8 @@ def test_unclassified_4xx_remains_unknown(status_code: int):
 # 400: User, with a canned detail instead of the reason phrase
 # --------------------------------------------------------------------------
 
-# The body of the 400 that failed 192/192 runs on gpt-4.1-mini-e2e-custom
-# (job 1fab7e97-...): max_tokens=65535 written by Agent Builder itself.
+# The body of the 400 that failed 192/192 runs on gpt-4.1-mini-e2e-custom:
+# max_tokens=65535 written by Agent Builder itself.
 _MAX_TOKENS_BODY: dict[str, object] = {
     "error": {
         "message": (
