@@ -21,11 +21,6 @@ from uipath_langchain.agent.exceptions.exceptions import (
 _LICENSE_ERROR_CODE = 10000
 _LICENSE_TITLE = "license not available"
 
-# A canned, provider-free replacement for the useless HTTP reason phrase. The
-# relayed provider message is deliberately NOT read out of the body:
-# it may carry customer PII, and it is already recorded on the LLM call span,
-# which is tenant-scoped. It has to stand on its own -- USER is not in
-# _SHOULD_WRAP_CATEGORIES, so nothing else is prepended to it.
 _BAD_REQUEST_DETAIL = (
     "The model provider rejected the request as invalid. Review the agent's model "
     "settings (output-token limit, temperature, effort). The provider's own message "
@@ -144,21 +139,24 @@ def _match_not_found_signature(body: object) -> _Verdict | None:
 def _classify(
     status_code: int, body: object
 ) -> tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]:
-    """Map an LLM provider HTTP status onto (code, category, title, fallback_detail).
+    """Map an LLM provider HTTP status onto (code, category, title, detail).
 
     Only 400, 403 and 404 are classified beyond the 5xx/other split.
 
     403 and 404 are the statuses whose meaning depends on the body; keeping the
-    code, category, title and fallback detail decided in one place stops them
-    drifting apart. Both name a cause only for a body that names its own --
+    code, category, title and detail decided in one place stops them drifting
+    apart. Both name a cause only for a body that names its own --
     ``_is_license_error`` for 403, ``_NOT_FOUND_SIGNATURES`` for 404 -- and
     leave the rest unnamed rather than guessing.
 
-    ``fallback_detail`` is the customer-facing text to use when the gateway
-    supplied no ProblemDetails ``detail`` of its own. ``None`` means "fall back
-    to the HTTP reason phrase" -- the useless two-word message, so only
-    statuses whose cause we cannot name are left with it.
+    The gateway's own ProblemDetails ``detail`` is first-party UiPath text and
+    more specific, so it wins over anything decided here. A ``detail`` of
+    ``None`` means "fall back to the HTTP reason phrase" -- the useless
+    two-word message, so only statuses whose cause we cannot name are left
+    with it.
     """
+    gateway_detail = body.get("detail") if isinstance(body, dict) else None
+
     if status_code == 403:
         if _is_license_error(body):
             title = body.get("title") if isinstance(body, dict) else None
@@ -168,26 +166,30 @@ def _classify(
                 title
                 if isinstance(title, str) and title.strip()
                 else "License not available",
-                None,
+                gateway_detail,
             )
         return (
             AgentRuntimeErrorCode.LLM_PROVIDER_FORBIDDEN,
             UiPathErrorCategory.DEPLOYMENT,
             "LLM provider returned HTTP 403",
-            None,
+            gateway_detail,
         )
 
     if status_code == 400:
+        # The relayed provider message is deliberately not read out of the
+        # body: it may carry customer PII, and it is already recorded on the
+        # LLM call span, which is tenant-scoped.
         return (
             AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST,
             UiPathErrorCategory.USER,
             "LLM provider rejected the request",
-            _BAD_REQUEST_DETAIL,
+            gateway_detail or _BAD_REQUEST_DETAIL,
         )
 
     if status_code == 404:
         if (verdict := _match_not_found_signature(body)) is not None:
-            return verdict
+            code, category, title, signature_detail = verdict
+            return code, category, title, gateway_detail or signature_detail
 
     title = f"LLM provider returned HTTP {status_code}"
     if status_code >= 500:
@@ -195,31 +197,31 @@ def _classify(
             AgentRuntimeErrorCode.HTTP_ERROR,
             UiPathErrorCategory.SYSTEM,
             title,
-            None,
+            gateway_detail,
         )
     return (
         AgentRuntimeErrorCode.HTTP_ERROR,
         UiPathErrorCategory.UNKNOWN,
         title,
-        None,
+        gateway_detail,
     )
 
 
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
 
-    Reads the HTTP status code and the gateway's ``detail`` (from ``error.body``)
-    and re-raises as an ``AgentRuntimeError`` chained on the original.
+    Reads the HTTP status code and ``error.body``, and re-raises as an
+    ``AgentRuntimeError`` chained on the original. When ``_classify`` names no
+    detail, the error's own message -- the HTTP reason phrase -- is all that is
+    left.
     """
     status_code = error.status_code
-    body = error.body
-    code, category, title, fallback_detail = _classify(status_code, body)
-    gateway_detail = body.get("detail") if isinstance(body, dict) else None
+    code, category, title, detail = _classify(status_code, error.body)
 
     raise AgentRuntimeError(
         code=code,
         title=title,
-        detail=gateway_detail or fallback_detail or error.message or str(error),
+        detail=detail or error.message or str(error),
         category=category,
         status=status_code,
     ) from error
