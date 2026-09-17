@@ -59,9 +59,7 @@ def _specs(subagents: Any, extra: Any, shared: Any = ()) -> list[dict[str, Any]]
     """Resolved subagent specs as plain dicts, for key assertions."""
     return [
         dict(spec)
-        for spec in _subagents_without_main_agent_tools(
-            subagents, list(shared), None, extra
-        )
+        for spec in _subagents_without_main_agent_tools(subagents, list(shared), extra)
     ]
 
 
@@ -388,13 +386,6 @@ class TestGeneralPurposeSubagentParity:
             m.name for m in baseline["middleware"]
         ]
         assert _PayloadHandlerMiddleware.__name__ in names
-
-    def test_skills_reach_the_subagent(self) -> None:
-        """Restated on the spec: deepagents reads a supplied spec's skills from it."""
-        baseline, ours = self._build(skills=["/skills"])
-
-        assert "SkillsMiddleware" in [m.name for m in baseline["middleware"]]
-        assert "SkillsMiddleware" in [m.name for m in ours["middleware"]]
 
     def test_prompt_and_tools_match(self) -> None:
         baseline, ours = self._build()

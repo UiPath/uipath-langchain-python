@@ -309,7 +309,6 @@ def _partition_main_agent_tools(
 def _subagents_without_main_agent_tools(
     subagents: Sequence[SubAgent | CompiledSubAgent],
     shared_tools: Sequence[BaseTool],
-    skills: Sequence[str] | None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> list[SubAgent | CompiledSubAgent]:
     """Give every subagent the shared tool list instead of the parent's.
@@ -322,10 +321,7 @@ def _subagents_without_main_agent_tools(
     since it would otherwise inherit the parent list too. Supplying a spec under
     that name suppresses the built-in one. That branch is also the only reader of
     ``profile.general_purpose_subagent``, so its ``enabled`` / ``description`` /
-    ``system_prompt`` overrides do not apply here. ``skills`` has to be repeated into the
-    spec: the built-in branch reads the top-level ``skills`` argument, while a
-    caller-supplied spec reads ``spec["skills"]``, so omitting it silently drops
-    skills from that subagent.
+    ``system_prompt`` overrides do not apply here.
 
     ``middleware`` rides along for the same reason: ``create_deep_agent`` gives its
     own ``middleware`` argument to the main agent alone.
@@ -352,8 +348,6 @@ def _subagents_without_main_agent_tools(
             "tools": list(shared_tools),
             "middleware": list(middleware),
         }
-        if skills:
-            gp["skills"] = list(skills)
         resolved.append(gp)  # type: ignore[arg-type]
     return resolved
 
@@ -374,7 +368,6 @@ def create_advanced_agent(
     each is read from ``backend`` and injected into the system prompt every turn,
     and the model maintains them with ``edit_file``. Empty disables the middleware.
 
-
     Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
     shared_tools, _ = _partition_main_agent_tools(tools)
@@ -384,7 +377,7 @@ def create_advanced_agent(
         system_prompt=system_prompt,
         tools=list(tools),
         subagents=_subagents_without_main_agent_tools(
-            subagents, shared_tools, skills, [payload_handler]
+            subagents, shared_tools, [payload_handler]
         ),
         backend=backend,
         response_format=response_format,
