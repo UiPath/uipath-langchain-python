@@ -10,6 +10,7 @@ Requires the ``code-interpreter`` extra, which CI installs via
 """
 
 import asyncio
+import importlib
 import sys
 from pathlib import Path
 from typing import Any, Sequence, cast, get_args
@@ -29,6 +30,7 @@ from uipath_langchain.agent.advanced import (
     create_advanced_agent,
     ptc_tool_names,
     subagent_dispatch_is_replay_safe,
+    warm_code_interpreter,
 )
 from uipath_langchain.agent.advanced.code_interpreter import (
     EVAL_TOOL_NAME,
@@ -291,6 +293,75 @@ def test_factory_closes_the_repl_registry_at_exit(
     middleware = build_code_interpreter_middleware([_tool("read_invoice")])[0]
 
     assert registered == [cast(Any, middleware)._registry.close]
+
+
+def test_factory_warms_the_interpreter_before_building_the_repl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The WebAssembly compile happens at graph build, outside any eval deadline.
+
+    Upstream compiles its source-transform module inside the first eval, under
+    the per-call deadline. On a slow instance that compile alone exceeds the
+    deadline and the first model call fails, so the factory must pay it first.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "uipath_langchain.agent.advanced.code_interpreter.warm_code_interpreter",
+        lambda: calls.append("warm"),
+    )
+
+    build_code_interpreter_middleware([_tool("read_invoice")])
+
+    assert calls == ["warm"]
+
+
+def test_warm_up_compiles_the_transform_module_upstream_uses_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import quickjs_rs
+
+    seen: list[Any] = []
+    monkeypatch.setattr(
+        quickjs_rs,
+        "transform_source",
+        lambda name, source, *, flags=None: seen.append(flags) or source,
+    )
+    warm_code_interpreter.cache_clear()
+
+    warm_code_interpreter()
+    warm_code_interpreter()
+
+    assert seen == [quickjs_rs.SourceTransform.TOP_LEVEL_CONST_TO_VAR]
+    warm_code_interpreter.cache_clear()
+
+
+def test_warm_up_without_the_extra_is_a_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "quickjs_rs", None)
+    warm_code_interpreter.cache_clear()
+
+    warm_code_interpreter()
+
+    warm_code_interpreter.cache_clear()
+
+
+def test_preload_module_warms_on_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``uipath server`` can only import modules, so the import must do the work."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "uipath_langchain.agent.advanced.code_interpreter.warm_code_interpreter",
+        lambda: calls.append("warm"),
+    )
+    monkeypatch.delitem(
+        sys.modules,
+        "uipath_langchain.agent.advanced.code_interpreter_preload",
+        raising=False,
+    )
+
+    importlib.import_module("uipath_langchain.agent.advanced.code_interpreter_preload")
+
+    assert calls == ["warm"]
 
 
 def test_factory_without_the_extra_raises_install_guidance(
