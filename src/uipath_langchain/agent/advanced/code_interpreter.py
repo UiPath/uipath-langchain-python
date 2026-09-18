@@ -17,6 +17,7 @@ Requires the ``code-interpreter`` extra::
 """
 
 import atexit
+import functools
 import logging
 from collections.abc import Iterable, Sequence
 from typing import Any, Literal, get_args
@@ -214,6 +215,7 @@ def build_code_interpreter_middleware(
         ImportError: If the ``code-interpreter`` extra is not installed.
     """
     middleware_cls = _code_interpreter_middleware_cls()
+    warm_code_interpreter()
     exposed = ptc_tool_names(tools)
     dispatch = subagent_dispatch_is_replay_safe(subagents, tools)
     logger.info(
@@ -232,6 +234,32 @@ def build_code_interpreter_middleware(
     _append_single_in_flight_note(middleware)
     _close_at_exit(middleware)
     return [middleware]
+
+
+@functools.cache
+def warm_code_interpreter() -> None:
+    """Compile the interpreter's WebAssembly modules before any eval deadline is armed.
+
+    quickjs_rs compiles its source-transform module lazily, inside the first eval of
+    the process, and that eval runs under the same per-call deadline as user code.
+    On a CPU-starved instance the compile alone can outlast the deadline, which
+    fails the run at its first model call, before the model ever asks for ``eval``.
+    The compiled modules are cached for the life of the process, so one call here
+    serves every REPL built afterwards. Without the ``code-interpreter`` extra it
+    does nothing.
+    """
+    try:
+        from quickjs_rs import Runtime, SourceTransform, transform_source
+    except ImportError:
+        return
+    transform_source(
+        "warmup.js", "const x = 1;", flags=SourceTransform.TOP_LEVEL_CONST_TO_VAR
+    )
+    runtime = Runtime()
+    try:
+        runtime.new_context().close()
+    finally:
+        runtime.close()
 
 
 def _close_at_exit(middleware: Any) -> None:
