@@ -4773,7 +4773,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.14.19"
+version = "2.14.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -4794,12 +4794,13 @@ dependencies = [
     { name = "tenacity" },
     { name = "truststore" },
     { name = "uipath-core" },
+    { name = "uipath-ipc" },
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/07/05/060273b1c92d94e6b1cbb3b6d4510b52659734625079c67947abb1ae9ed7/uipath-2.14.19.tar.gz", hash = "sha256:b00ebfc3282232e376653e677a6217d502145206aa26c371c55be68e1cfd2932", size = 4572912, upload-time = "2026-09-15T21:03:26.378Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/f3/7fa28f50bb2c8d53074daa33172e47ad6e52d593a5bafd69301259d0343d/uipath-2.14.21.tar.gz", hash = "sha256:19da203089a15f541ab3df9fcf9280725e523d84a27a27de872f8d8e80af2209", size = 4575500, upload-time = "2026-09-16T17:32:54.369Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4c/35/51004acf112828ac4e4b68045942a8be992054675d7362ad7bf705a8360d/uipath-2.14.19-py3-none-any.whl", hash = "sha256:d99004ea9dca8762a6c6e5cc074aeb562da792c8c5c5e604e8e26793fed77df1", size = 449212, upload-time = "2026-09-15T21:03:24.183Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/58/b3d6e0b4f66c07ba7dc7dc2c9a72b54728ddf48d55591f0addb883f1847c/uipath-2.14.21-py3-none-any.whl", hash = "sha256:543b54f9c6893b2bd0bc5db2bb7f6b794b96e03b11ac5260bf342da3570896f8", size = 450144, upload-time = "2026-09-16T17:32:52.528Z" },
 ]
 
 [[package]]
@@ -4817,8 +4818,17 @@ wheels = [
 ]
 
 [[package]]
+name = "uipath-ipc"
+version = "2.5.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/6b/53d9725d6abd1dab447300a7f999332f530678e3fabd38fc31171a5a9a6f/uipath_ipc-2.5.2.tar.gz", hash = "sha256:d69c3d7c1ad1a25ef7f9f1d78c505f5d2ed7daa7227bb202404fa3d47e0ba12e", size = 86360, upload-time = "2026-07-24T09:44:35.159Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/eb/6def505a0d351119da27b342c11eb0767a31a7f100022d35e349c5194eb3/uipath_ipc-2.5.2-py3-none-any.whl", hash = "sha256:617f25f35377d87956165a875b0966a3cd69ae6724fcd533c93a7a6a9460fc4f", size = 50345, upload-time = "2026-07-24T09:44:33.7Z" },
+]
+
+[[package]]
 name = "uipath-langchain"
-version = "0.18.10"
+version = "0.18.11"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4912,7 +4922,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2.0.0" },
     { name = "rdflib", specifier = ">=7.0.0,<8.0.0" },
-    { name = "uipath", specifier = ">=2.14.19,<2.15.0" },
+    { name = "uipath", specifier = ">=2.14.21,<2.15.0" },
     { name = "uipath-core", specifier = ">=0.5.29,<0.6.0" },
     { name = "uipath-langchain", extras = ["code-interpreter"], marker = "extra == 'all'" },
     { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.20.0,<1.21.0" },
