@@ -275,6 +275,24 @@ def test_factory_returns_one_middleware() -> None:
     assert len(build_code_interpreter_middleware([_tool("read_invoice")])) == 1
 
 
+def test_factory_closes_the_repl_registry_at_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The REPL registry is closed from ``atexit``, not left to ``__del__``.
+
+    Upstream closes QuickJS contexts from ``__del__`` by blocking on its daemon
+    worker thread. At interpreter finalization that thread is gone and the wait
+    never returns, so a process that built this middleware cannot exit. Asserted
+    on the ``atexit`` registration because the hang itself only shows at exit.
+    """
+    registered: list[Any] = []
+    monkeypatch.setattr("atexit.register", registered.append)
+
+    middleware = build_code_interpreter_middleware([_tool("read_invoice")])[0]
+
+    assert registered == [cast(Any, middleware)._registry.close]
+
+
 def test_factory_without_the_extra_raises_install_guidance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
