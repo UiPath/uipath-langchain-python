@@ -16,6 +16,7 @@ Requires the ``code-interpreter`` extra::
     uv add "uipath-langchain[code-interpreter]"
 """
 
+import atexit
 import logging
 from collections.abc import Iterable, Sequence
 from typing import Any, Literal, get_args
@@ -229,7 +230,26 @@ def build_code_interpreter_middleware(
         timeout=timeout,
     )
     _append_single_in_flight_note(middleware)
+    _close_at_exit(middleware)
     return [middleware]
+
+
+def _close_at_exit(middleware: Any) -> None:
+    """Close the REPL registry from ``atexit`` instead of leaving it to ``__del__``.
+
+    langchain-quickjs 0.3.7 closes its QuickJS contexts from ``__del__`` by posting
+    to the daemon worker thread and waiting on the result with no timeout. During
+    interpreter finalization that thread no longer runs, so the wait never returns
+    and the process cannot exit. ``atexit`` handlers run before finalization, while
+    the worker still serves requests.
+    """
+    registry = getattr(middleware, "_registry", None)
+    if registry is None or not callable(getattr(registry, "close", None)):
+        logger.warning(
+            "Code interpreter: middleware exposes no REPL registry to close at exit"
+        )
+        return
+    atexit.register(registry.close)
 
 
 def _append_single_in_flight_note(middleware: Any) -> None:
