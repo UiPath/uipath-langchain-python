@@ -26,6 +26,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import BaseTool
 
 from uipath_langchain._utils.durable_interrupt import suspends_run
+from uipath_langchain.agent.tools.static_args import has_argument_bindings
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ calls and loses a turn to ``ConcurrentEvalError``.
 def ptc_tool_names(tools: Sequence[BaseTool]) -> list[str]:
     """Names of the agent tools that may be called from inside the REPL.
 
-    Three exclusions, each for a different reason:
+    Four exclusions, each for a different reason:
 
     - **Tools that suspend the run.** One raising ``GraphInterrupt`` never returns
       a value into the JS ``await``. Worse, the node is replayed from its
@@ -90,6 +91,12 @@ def ptc_tool_names(tools: Sequence[BaseTool]) -> list[str]:
       call made before the interrupt fires a second time. Upstream also documents
       that PTC bridges bypass ``interrupt_on`` approval hooks, so an escalation
       reached this way would skip its own approval.
+    - **Tools with configured argument bindings.** A static, argument or
+      text-builder binding is applied at the model-call boundary by
+      :class:`~uipath_langchain.agent.advanced.static_args.StaticArgsMiddleware`,
+      which rewrites the tool calls the model returns. The REPL bridge invokes
+      the tool object directly with whatever the script passes, so a bound
+      value would not be enforced on that path.
     - **Names that cannot be JavaScript identifiers.** A tool name is caller
       supplied and may hold spaces, dots or non-ASCII characters. Upstream raises
       ``ValueError`` for those from inside ``wrap_model_call``, faulting the run
@@ -114,6 +121,12 @@ def ptc_tool_names(tools: Sequence[BaseTool]) -> list[str]:
             continue
         if suspends_run(tool):
             logger.debug("Tool %r withheld from PTC: it suspends the run", tool.name)
+            continue
+        if has_argument_bindings(tool):
+            logger.debug(
+                "Tool %r withheld from PTC: it has configured argument bindings",
+                tool.name,
+            )
             continue
         if not is_valid(tool.name):
             logger.info(
