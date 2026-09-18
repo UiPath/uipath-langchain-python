@@ -42,7 +42,6 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
-from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
 HTTP_REQUEST_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
@@ -420,6 +419,8 @@ def create_http_request_tool(
             "headers": dict(response.headers),
             "body": response.text,
         }
+
+    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 

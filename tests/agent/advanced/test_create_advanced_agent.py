@@ -44,13 +44,25 @@ class TestCreateAdvancedAgent:
         assert "_sample_tool" in tool_names
 
     def test_advanced_agent_without_tools(self, mock_model: MagicMock) -> None:
-        """Built-in advanced agent tools are present even with no custom tools."""
+        """Built-in filesystem tools are present even with no custom tools."""
         result = create_advanced_agent(mock_model, system_prompt="test", tools=[])
         assert isinstance(result, CompiledStateGraph)
         tools_node = result.nodes["tools"].bound
         assert isinstance(tools_node, ToolNode)
         tool_names = set(tools_node.tools_by_name.keys())
-        assert "write_todos" in tool_names
+        assert {"ls", "read_file", "write_file"} <= tool_names
+
+    def test_advanced_agent_has_no_todo_tool(self, mock_model: MagicMock) -> None:
+        """``write_todos`` is deliberately absent.
+
+        deepagents 0.7.0 dropped ``TodoListMiddleware`` from its defaults on
+        benchmark evidence (langchain-ai/deepagents#4929) and we do not restore it.
+        This pins that decision so a future change has to be deliberate.
+        """
+        result = create_advanced_agent(mock_model, system_prompt="test", tools=[])
+        tools_node = result.nodes["tools"].bound
+        assert isinstance(tools_node, ToolNode)
+        assert "write_todos" not in set(tools_node.tools_by_name.keys())
 
     def test_advanced_agent_converts_sequences_to_lists(
         self, mock_model: MagicMock
