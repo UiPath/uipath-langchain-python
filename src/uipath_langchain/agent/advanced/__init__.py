@@ -14,6 +14,7 @@ from .code_interpreter import (
     build_code_interpreter_middleware,
     ptc_tool_names,
     subagent_dispatch_is_replay_safe,
+    warm_code_interpreter,
 )
 from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
 from .utils import (
@@ -42,4 +43,5 @@ __all__ = [
     "create_state_with_input",
     "ptc_tool_names",
     "subagent_dispatch_is_replay_safe",
+    "warm_code_interpreter",
 ]
