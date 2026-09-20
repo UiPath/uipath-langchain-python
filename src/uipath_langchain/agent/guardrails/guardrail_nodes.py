@@ -23,6 +23,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.guardrails.attachment_refs import (
     resolve_guardrail_attachments,
+    resolve_referenced_attachments,
 )
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
@@ -36,9 +37,6 @@ from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
 logger = logging.getLogger(__name__)
-
-#: Scopes whose guardrails may inspect attached files (tool scope excluded on purpose).
-_ATTACHMENT_SCOPES = frozenset({GuardrailScope.AGENT, GuardrailScope.LLM})
 
 
 def _evaluate_deterministic_guardrail(
@@ -168,6 +166,48 @@ def _create_validation_command(
     )
 
 
+async def _resolve_attachments(
+    state: AgentGuardrailsGraphState,
+    guardrail: BuiltInValidatorGuardrail,
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    input_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
+    output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
+) -> list[GuardrailAttachment]:
+    """Attachment references for one built-in guardrail evaluation.
+
+    Agent and LLM scope judge the conversation, so they read the run's whole attachment
+    registry. Tool scope judges one call, so it reads only the files that call's
+    arguments (pre-execution) or result (post-execution) mention: a tool call without a
+    file forwards nothing even when the run has files elsewhere. Never raises.
+    """
+    registry = state.inner_state.job_attachments
+    if scope != GuardrailScope.TOOL:
+        return await resolve_guardrail_attachments(registry, guardrail)
+
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        extractor, source_name = input_data_extractor, "arguments"
+    else:
+        extractor, source_name = output_data_extractor, "result"
+        # A mention always carries the literal ``ID`` key; skip parsing plain-text
+        # results, which the output extractor would otherwise warn about.
+        if not state.messages or "ID" not in get_message_content(state.messages[-1]):
+            return []
+    if extractor is None:
+        return []
+    try:
+        source = extractor(state)
+    except Exception:
+        logger.warning(
+            "Could not read the tool %s for guardrail '%s'; evaluating without files.",
+            source_name,
+            guardrail.name,
+            exc_info=True,
+        )
+        return []
+    return resolve_referenced_attachments(source, registry, guardrail)
+
+
 def _create_guardrail_node(
     guardrail: BaseGuardrail,
     scope: GuardrailScope,
@@ -235,12 +275,13 @@ def _create_guardrail_node(
                 else:
                     metadata["payload"]["output"] = payload
 
-                attachments = (
-                    await resolve_guardrail_attachments(
-                        state.inner_state.job_attachments, guardrail
-                    )
-                    if scope in _ATTACHMENT_SCOPES
-                    else []
+                attachments = await _resolve_attachments(
+                    state,
+                    guardrail,
+                    scope,
+                    execution_stage,
+                    input_data_extractor,
+                    output_data_extractor,
                 )
 
                 result = await _evaluate_builtin_guardrail(

@@ -14,6 +14,7 @@ from uipath.core.guardrails import (
 from uipath.platform.guardrails import BuiltInValidatorGuardrail
 
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
+    _create_guardrail_node,
     create_agent_init_guardrail_node,
     create_agent_terminate_guardrail_node,
     create_llm_guardrail_node,
@@ -1003,7 +1004,8 @@ class TestGuardrailNodeMetadata:
 
 
 class TestGuardrailNodeAttachments:
-    """Agent- and LLM-scope nodes forward the run's job attachments to the judge."""
+    """Built-in guardrail nodes forward attachment references to the judge: the run's
+    registry at Agent and LLM scope, the files one tool call mentions at Tool scope."""
 
     _UUID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
 
@@ -1087,18 +1089,41 @@ class TestGuardrailNodeAttachments:
 
         assert fake.guardrails.last_attachments == [attachment]
 
-    @pytest.mark.asyncio
-    async def test_tool_scope_node_never_resolves_attachments(self, monkeypatch):
-        """Tool scope is excluded by product decision: a tool-scope judge would ship file
-        contents on every tool call."""
-        from unittest.mock import AsyncMock
-
-        fake = _patch_uipath(monkeypatch, reason="ok")
-        resolver = AsyncMock(return_value=[])
-        monkeypatch.setattr(
-            "uipath_langchain.agent.guardrails.guardrail_nodes.resolve_guardrail_attachments",
-            resolver,
+    def _tool_pre_state(self, args):
+        return AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "my_tool", "args": args, "id": "c1"}],
+                )
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._state_with_attachment().inner_state.job_attachments
+            ),
         )
+
+    def _tool_post_state(self, content):
+        return AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "my_tool", "args": {}, "id": "c1"}],
+                ),
+                ToolMessage(content=content, tool_call_id="c1"),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._state_with_attachment().inner_state.job_attachments
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_pre_node_forwards_attachments_referenced_in_tool_args(
+        self, monkeypatch
+    ):
+        """Before the tool runs, the judge reads the file the call names. The model
+        passes ``{"ID": ...}`` only, so name and type come from the run's registry."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        args = {"attachment": {"ID": self._UUID}, "question": "summarize"}
 
         _, node = create_tool_guardrail_node(
             guardrail=self._judge_guardrail(),
@@ -1107,21 +1132,156 @@ class TestGuardrailNodeAttachments:
             failure_node="nope",
             tool_name="my_tool",
         )
-        state = AgentGuardrailsGraphState(
-            messages=[
-                AIMessage(
-                    content="",
-                    tool_calls=[{"name": "my_tool", "args": {"q": 1}, "id": "c1"}],
-                )
-            ],
-            inner_state=InnerAgentGuardrailsGraphState(
-                job_attachments=self._state_with_attachment().inner_state.job_attachments
-            ),
-        )
-        await node(state)
+        cmd = await node(self._tool_pre_state(args))
 
-        resolver.assert_not_awaited()
+        assert cmd.goto == "ok"
+        assert json.loads(fake.guardrails.last_text) == args
+        assert [
+            a.model_dump(by_alias=True) for a in fake.guardrails.last_attachments
+        ] == [{"id": self._UUID, "fileName": "Tickets.csv", "mimeType": "text/csv"}]
+
+    @pytest.mark.asyncio
+    async def test_tool_pre_node_ignores_registry_when_args_reference_nothing(
+        self, monkeypatch
+    ):
+        """A tool call without a file forwards nothing even though the run holds one;
+        otherwise every tool call would ship every file to the backend."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        await node(self._tool_pre_state({"q": 1}))
+
         assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    async def test_tool_post_node_forwards_attachment_returned_by_the_tool(
+        self, monkeypatch
+    ):
+        """After the tool runs, the judge reads the file the result names."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        content = json.dumps(
+            {
+                "file": {
+                    "ID": self._UUID,
+                    "FullName": "Tickets.csv",
+                    "MimeType": "text/csv",
+                }
+            }
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        await node(self._tool_post_state(content))
+
+        assert fake.guardrails.last_text == content
+        assert [a.id for a in fake.guardrails.last_attachments] == [self._UUID]
+
+    @pytest.mark.asyncio
+    async def test_tool_post_node_with_plain_text_result_forwards_nothing(
+        self, monkeypatch
+    ):
+        fake = _patch_uipath(monkeypatch, reason="ok")
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        await node(self._tool_post_state("tool output"))
+
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    async def test_tool_node_without_extractors_forwards_nothing(self, monkeypatch):
+        """A tool-scope built-in node built without the argument/result extractors has
+        no source to scan and must not fall back to the whole registry."""
+        from uipath.platform.guardrails import GuardrailScope
+
+        fake = _patch_uipath(monkeypatch, reason="ok")
+
+        _, node = _create_guardrail_node(
+            self._judge_guardrail(),
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
+            lambda state: "payload",
+            "ok",
+            "nope",
+        )
+        cmd = await node(self._tool_pre_state({"attachment": {"ID": self._UUID}}))
+
+        assert cmd.goto == "ok"
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    async def test_tool_post_node_evaluates_without_files_when_the_result_cannot_be_read(
+        self, monkeypatch
+    ):
+        """A file must never fail the run: if the result extractor blows up, the judge
+        still sees the text payload, just without attachments."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+
+        def broken(_state):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes._extract_tool_output_data",
+            broken,
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        cmd = await node(self._tool_post_state('{"ID": "not-json-but-mentions-ID"'))
+
+        assert cmd.goto == "ok"
+        assert fake.guardrails.last_text == '{"ID": "not-json-but-mentions-ID"'
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "factory", [create_agent_init_guardrail_node, create_llm_guardrail_node]
+    )
+    async def test_agent_and_llm_pre_nodes_forward_files_scoped_attachments(
+        self, monkeypatch, factory
+    ):
+        """Pre-execution at Agent and LLM scope with ``appliesTo = Files`` still hands
+        the run's files to the judge (real resolver, nothing patched)."""
+        from uipath.platform.guardrails.guardrails import EnumParameterValue
+
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        guardrail = self._judge_guardrail()
+        guardrail.validator_parameters = [
+            EnumParameterValue.model_validate(
+                {"$parameterType": "enum", "id": "appliesTo", "value": "Files"}
+            )
+        ]
+
+        _, node = factory(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        await node(self._state_with_attachment())
+
+        assert [a.id for a in fake.guardrails.last_attachments] == [self._UUID]
 
     @pytest.mark.asyncio
     async def test_attachment_rejection_falls_back_to_text_only(self, monkeypatch):
