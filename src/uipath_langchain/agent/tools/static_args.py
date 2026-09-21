@@ -1,9 +1,19 @@
 """Handles static arguments for tool calls."""
 
 import copy
+import json
 import logging
 import re
-from typing import Any, Iterator, Mapping, Sequence, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+    TypeGuard,
+    TypeVar,
+)
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from jsonpath_ng.exceptions import JsonPathParserError  # type: ignore[import-untyped]
@@ -26,7 +36,7 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeErrorCode,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.utils import extract_input_data_from_state
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.schema_editing import (
     InvalidStaticArgError,
     SchemaNavigationError,
@@ -34,6 +44,11 @@ from uipath_langchain.agent.tools.schema_editing import (
 )
 
 from .utils import sanitize_dict_for_serialization
+
+if TYPE_CHECKING:
+    from .structured_tool_with_argument_properties import (
+        StructuredToolWithArgumentProperties,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +70,9 @@ _INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
 _SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
 
 
-def has_argument_bindings(tool: BaseTool) -> bool:
+def has_argument_bindings(
+    tool: BaseTool,
+) -> TypeGuard["StructuredToolWithArgumentProperties"]:
     """Whether ``tool`` carries configured argument bindings.
 
     True for a structured tool whose ``argument_properties`` bind at least one
@@ -67,6 +84,40 @@ def has_argument_bindings(tool: BaseTool) -> bool:
         and isinstance(tool, StructuredTool)
         and bool(tool.argument_properties)
     )
+
+
+def _plain_data(value: Any) -> Any:
+    """``value`` with pydantic models turned into dicts, recursively, so JSONPath can walk it."""
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, Mapping):
+        return {key: _plain_data(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_data(item) for item in value]
+    return value
+
+
+def agent_input_from_state(
+    state: BaseModel | Mapping[str, Any],
+    field_names: Iterable[str],
+) -> dict[str, Any]:
+    """The agent input fields named in ``field_names``, read off a graph state as plain data.
+
+    Reads only those fields, so the rest of the state, the message history above
+    all, is neither dumped nor validated, and a field the state does not carry is
+    left out rather than failing a whole-schema validation.
+    """
+    if isinstance(state, BaseModel):
+        present = {
+            name: getattr(state, name) for name in field_names if hasattr(state, name)
+        }
+    else:
+        present = {name: state[name] for name in field_names if name in state}
+    return {name: _plain_data(value) for name, value in present.items()}
+
+
+def _input_key(agent_input: Mapping[str, Any]) -> str:
+    return json.dumps(agent_input, sort_keys=True, default=str)
 
 
 def _resolve_argument_properties(
@@ -312,14 +363,17 @@ def apply_static_args(
 
 
 class StaticArgsHandler:
-    """Resolves and applies static args to tool schemas and tool calls."""
+    """Resolves configured argument bindings and applies them to tool schemas and tool calls.
 
-    _sanitized_static_values: dict[str, dict[str, Any]] | None
-    _processed_tools: list[BaseTool] | None
+    Bindings are resolved against the agent input and kept until that input
+    changes, so the model calls of one run share a resolution while a compiled
+    graph invoked again with different input pins the values of that invocation.
+    """
 
     def __init__(self) -> None:
-        self._sanitized_static_values = None
-        self._processed_tools = None
+        self._input_key: str | None = None
+        self._processed_tools: dict[str, BaseTool] = {}
+        self._sanitized_static_values: dict[str, dict[str, Any]] = {}
 
     def initialize(
         self,
@@ -327,44 +381,69 @@ class StaticArgsHandler:
         state: BaseModel,
         input_schema: type[BaseModel],
     ) -> list[BaseTool]:
-        """Resolves static args with the agent input and returns the schema-modified tools. Initializes once."""
-        if self._processed_tools is not None:
-            return self._processed_tools
+        """Resolves the bindings against the input fields held in ``state``; see :meth:`resolve`.
 
-        agent_input = extract_input_data_from_state(state, input_schema)
+        Only the input schema's fields are read from the state. Channels the graph
+        owns (``messages`` and the rest of ``AgentGraphState``) are left out even
+        when the input schema also declares them.
+        """
+        input_fields = [
+            name
+            for name in input_schema.model_fields
+            if name not in AgentGraphState.model_fields
+        ]
+        return self.resolve(tools, agent_input_from_state(state, input_fields))
 
-        self._processed_tools = []
-        self._sanitized_static_values = {}
+    def resolve(
+        self,
+        tools: Sequence[BaseTool],
+        agent_input: Mapping[str, Any],
+    ) -> list[BaseTool]:
+        """Resolves the bindings against ``agent_input`` and returns ``tools`` with pinned schemas, in order.
+
+        A tool without bindings is returned as is. The resolution is kept while
+        ``agent_input`` is unchanged; a tool first seen on a later call is resolved
+        on demand against that same input.
+        """
+        key = _input_key(agent_input)
+        if key != self._input_key:
+            self._input_key = key
+            self._processed_tools = {}
+            self._sanitized_static_values = {}
+
+        resolved: list[BaseTool] = []
         for tool in tools:
-            if (
-                isinstance(tool, ArgumentPropertiesMixin)
-                and isinstance(tool, StructuredTool)
-                and tool.argument_properties
-            ):
-                static_args = _resolve_argument_properties(
-                    tool.argument_properties, agent_input, tool_name=tool.name
-                )
-                modified_tool, applied_paths = _apply_static_arguments_to_schema(
-                    tool, static_args
-                )
-                self._processed_tools.append(modified_tool)
-                # Only thread args that survived schema modification: paths the
-                # schema rejected would fail the synthesized strict validator.
-                applied_static_values = {
-                    path: sa.value
-                    for path, sa in static_args.items()
-                    if path in applied_paths
-                }
-                self._sanitized_static_values[tool.name] = (
-                    sanitize_dict_for_serialization(applied_static_values)
-                )
-            else:
-                self._processed_tools.append(tool)
+            if not has_argument_bindings(tool):
+                resolved.append(tool)
+                continue
+            if tool.name not in self._processed_tools:
+                self._process(tool, dict(agent_input))
+            resolved.append(self._processed_tools[tool.name])
+        return resolved
 
-        return self._processed_tools
+    def _process(
+        self,
+        tool: "StructuredToolWithArgumentProperties",
+        agent_input: dict[str, Any],
+    ) -> None:
+        static_args = _resolve_argument_properties(
+            tool.argument_properties, agent_input, tool_name=tool.name
+        )
+        modified_tool, applied_paths = _apply_static_arguments_to_schema(
+            tool, static_args
+        )
+        self._processed_tools[tool.name] = modified_tool
+        # Only thread args that survived schema modification: paths the
+        # schema rejected would fail the synthesized strict validator.
+        applied_static_values = {
+            path: sa.value for path, sa in static_args.items() if path in applied_paths
+        }
+        self._sanitized_static_values[tool.name] = sanitize_dict_for_serialization(
+            applied_static_values
+        )
 
     def apply_to_response(self, tool_calls: list[ToolCall]) -> None:
-        """Applies cached static args to tool calls in-place."""
+        """Applies the resolved bindings to tool calls in-place."""
         if not tool_calls or not self._sanitized_static_values:
             return
 

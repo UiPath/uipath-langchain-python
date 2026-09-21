@@ -313,11 +313,13 @@ def _subagents_without_main_agent_tools(
     skills: Sequence[str] | None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> list[SubAgent | CompiledSubAgent]:
-    """Give every subagent the shared tool list instead of the parent's.
+    """Give every subagent the shared tool list instead of the parent's, and ``middleware``.
 
     deepagents hands a subagent the parent's ``tools`` unless its spec declares its
     own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``), so
     pinning ``tools`` on each spec is what actually withholds a main-agent-only tool.
+    A spec that declares its own tools keeps them and still receives ``middleware``;
+    a ``CompiledSubAgent`` brings its own graph and is passed through unchanged.
 
     The auto-added ``general-purpose`` subagent is replaced with an explicit spec,
     since it would otherwise inherit the parent list too. Supplying a spec under
@@ -333,14 +335,16 @@ def _subagents_without_main_agent_tools(
     """
     resolved: list[SubAgent | CompiledSubAgent] = []
     for spec in subagents:
-        # A CompiledSubAgent brings its own graph and tools; nothing to filter.
-        if "runnable" in spec or "tools" in spec:
+        if "runnable" in spec:
             resolved.append(spec)
             continue
+        declared_tools = cast("dict[str, Any]", spec).get("tools")
         resolved.append(
             {
                 **spec,
-                "tools": list(shared_tools),
+                "tools": list(declared_tools)
+                if declared_tools is not None
+                else list(shared_tools),
                 "middleware": [*spec.get("middleware", []), *middleware],
             }
         )
@@ -381,9 +385,10 @@ def create_advanced_agent(
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
 
     ``middleware`` reaches the main agent only, the way ``create_deep_agent``
-    treats it. ``shared_middleware`` reaches the main agent and every subagent,
-    after ``middleware`` on the main agent, for behavior a subagent's tool calls
-    need as much as the main agent's do.
+    treats it. ``shared_middleware`` reaches the main agent, after ``middleware``,
+    and every subagent deepagents builds from a spec, for behavior a subagent's
+    tool calls need as much as the main agent's do. A precompiled subagent
+    (``runnable``) brings its own graph and is left unchanged.
 
     Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """

@@ -32,6 +32,7 @@ from uipath.platform.connections import Connection
 from uipath_langchain.agent.advanced import (
     StaticArgsMiddleware,
     build_static_args_middleware,
+    create_advanced_agent,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
 )
@@ -152,6 +153,19 @@ def _bound_schema(bound: BaseTool) -> dict[str, Any]:
     return schema.model_json_schema()
 
 
+def _multi_run_model(runs: Sequence[dict[str, Any]]) -> _RecordingModel:
+    """A model that, per run, calls ``web_search`` with the run's args and then answers."""
+    turns: list[AIMessage] = []
+    for index, args in enumerate(runs):
+        turns.append(
+            AIMessage(
+                content="", tool_calls=[_tool_call("web_search", args, f"c{index}")]
+            )
+        )
+        turns.append(AIMessage(content="done"))
+    return _RecordingModel(messages=iter(turns), bound_tools=[])
+
+
 def _field_schema(bound: BaseTool, field: str) -> dict[str, Any]:
     """The schema of one bound tool argument, with ``$ref`` resolved.
 
@@ -252,6 +266,35 @@ class TestAutonomousAdvancedAgent:
 
         assert calls == [{"query": "cats", "search_engine": "Bing"}]
         assert _field_schema(_main_agent_bound(model), "query")["enum"] == ["cats"]
+
+    async def test_bindings_follow_the_input_across_invocations(
+        self, tmp_path: Path
+    ) -> None:
+        """One compiled graph, two invocations: each pins its own input."""
+        search_tool, calls = _web_search_tool({"$['query']": _argument("topic")})
+        model = _multi_run_model(
+            [
+                {"query": "x", "search_engine": "Bing"},
+                {"query": "y", "search_engine": "Bing"},
+            ]
+        )
+        graph = create_advanced_agent_graph(
+            model=model,
+            tools=[search_tool],
+            system_prompt="You search the web.",
+            backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+            response_format=None,
+            input_schema=_AgentInput,
+            output_schema=_AgentOutput,
+            build_user_message=lambda args: f"Search for {args['topic']}",
+        ).compile()
+
+        await graph.ainvoke({"topic": "cats"})
+        await graph.ainvoke({"topic": "birds"})
+
+        assert [call["query"] for call in calls] == ["cats", "birds"]
+        last_binding = next(t for t in model.bound_tools[-2] if t.name == "web_search")
+        assert _field_schema(last_binding, "query")["enum"] == ["birds"]
 
     async def test_unbound_tool_is_left_alone(self, tmp_path: Path) -> None:
         search_tool, calls = _web_search_tool({})
@@ -396,6 +439,31 @@ class TestConversationalAdvancedAgent:
 
         assert calls == [{"query": "cats", "search_engine": "GoogleSearchCustom"}]
 
+    async def test_input_schema_declaring_messages_still_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        """A required ``messages`` input is the graph's own channel, not an input to validate."""
+
+        class _ChatInput(BaseModel):
+            messages: list[Any]
+            topic: str
+
+        search_tool, calls = _web_search_tool({"$['query']": _argument("topic")})
+        model = _scripted_model({"query": "dogs", "search_engine": "Bing"})
+        graph = create_conversational_advanced_agent_graph(
+            model=model,
+            tools=[search_tool],
+            system_prompt="You search the web.",
+            backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+            input_schema=_ChatInput,
+        ).compile()
+
+        await graph.ainvoke(
+            {"messages": [HumanMessage(content="find cats")], "topic": "cats"}
+        )
+
+        assert calls == [{"query": "cats", "search_engine": "Bing"}]
+
 
 class _Marker(AgentMiddleware[Any, Any]):
     """A caller-supplied middleware, to check where static args land relative to it."""
@@ -480,6 +548,35 @@ class TestWiring:
         assert middleware.index(marker) < middleware.index(static_args)
 
 
+def test_declared_subagent_with_its_own_tools_gets_shared_middleware() -> None:
+    """Only a precompiled subagent is out of reach; a spec with its own tools is not."""
+    bound, _ = _web_search_tool({"$['search_engine']": _static("x")})
+    marker = _Marker()
+    with patch(
+        "uipath_langchain.agent.advanced.agent._create_deep_agent",
+        return_value=MagicMock(),
+    ) as mock_create:
+        create_advanced_agent(
+            model=MagicMock(profile=None),
+            tools=[bound],
+            subagents=[
+                {
+                    "name": "worker",
+                    "description": "d",
+                    "system_prompt": "p",
+                    "tools": [bound],
+                }
+            ],
+            shared_middleware=[marker],
+        )
+
+    worker = next(
+        s for s in mock_create.call_args.kwargs["subagents"] if s["name"] == "worker"
+    )
+    assert worker["tools"] == [bound]
+    assert marker in worker["middleware"]
+
+
 class TestBuildStaticArgsMiddleware:
     def test_no_bindings_means_no_middleware(self) -> None:
         @tool
@@ -516,13 +613,19 @@ class TestStateSchema:
         class _Colliding(BaseModel):
             files: dict[str, Any]
             messages: list[str]
+            todos: list[str]
+            skills_metadata: dict[str, Any]
+            _summarization_event: str
             topic: str
 
         middleware = StaticArgsMiddleware(_Colliding)
 
-        assert "files" not in middleware.state_schema.__annotations__
-        assert "topic" in middleware.state_schema.__annotations__
-        assert "['files', 'messages']" in caplog.text
+        declared = middleware.state_schema.__annotations__
+        assert {"files", "todos", "skills_metadata", "_summarization_event"}.isdisjoint(
+            declared
+        )
+        assert "topic" in declared
+        assert "['files', 'messages', 'skills_metadata', 'todos']" in caplog.text
 
     def test_no_input_schema(self) -> None:
         middleware = StaticArgsMiddleware(None)

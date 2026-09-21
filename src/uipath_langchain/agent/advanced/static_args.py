@@ -17,7 +17,12 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, NotRequired, cast
 
+from deepagents.middleware.async_subagents import AsyncSubAgentState
 from deepagents.middleware.filesystem import FilesystemState
+from deepagents.middleware.memory import MemoryState
+from deepagents.middleware.rubric import RubricState
+from deepagents.middleware.skills import SkillsState
+from deepagents.middleware.summarization import SummarizationState
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
@@ -31,20 +36,33 @@ from pydantic import BaseModel
 
 from uipath_langchain.agent.tools.static_args import (
     StaticArgsHandler,
+    agent_input_from_state,
     has_argument_bindings,
 )
 
 logger = logging.getLogger(__name__)
 
-# Channels the deep agent already owns. Declaring an agent input under one of
-# these names would replace the channel (and its reducer) rather than add a key.
+# Channels declared by the deep agent's own middleware. Declaring an agent input
+# under one of these names would replace the channel (and its reducer) rather
+# than add a key.
 _RESERVED_STATE_KEYS: frozenset[str] = frozenset(
     {
         *AgentState.__annotations__,
-        *FilesystemState.__annotations__,
         *PlanningState.__annotations__,
+        *FilesystemState.__annotations__,
+        *SkillsState.__annotations__,
+        *SummarizationState.__annotations__,
+        *MemoryState.__annotations__,
+        *AsyncSubAgentState.__annotations__,
+        *RubricState.__annotations__,
     }
 )
+
+
+def _is_reserved(name: str) -> bool:
+    # deepagents keeps its private channels underscored (summarization, rubric,
+    # forked context), so the prefix is reserved wholesale.
+    return name in _RESERVED_STATE_KEYS or name.startswith("_")
 
 
 def build_static_args_middleware(
@@ -68,24 +86,18 @@ class StaticArgsMiddleware(AgentMiddleware[AgentState[Any], Any]):
     wrapper graph's state. Declaring the input fields on ``state_schema`` is what
     carries them into the deep agent's state, where ``request.state`` exposes
     them; deepagents copies that state into each subagent it dispatches, so a
-    subagent carrying this middleware resolves the same bindings. Bindings are
-    resolved once, on the first model call, the way the standard llm node does;
-    a resumed run resolves them again from the checkpointed state.
+    subagent carrying this middleware resolves the same bindings. The input is
+    read from the state on every model call and the bindings are re-resolved
+    whenever it changes, so a compiled graph invoked again with other input, or
+    resumed from a checkpoint, pins the values of that invocation.
     """
 
     def __init__(self, input_schema: type[BaseModel] | None) -> None:
-        self._input_schema: type[BaseModel] = input_schema or BaseModel
         self._handler = StaticArgsHandler()
-        self._schema_tools_by_name: dict[str, BaseTool] | None = None
 
-        self._input_fields = [
-            name
-            for name in self._input_schema.model_fields
-            if name not in _RESERVED_STATE_KEYS
-        ]
-        reserved = sorted(
-            set(self._input_schema.model_fields) - set(self._input_fields)
-        )
+        declared = list((input_schema or BaseModel).model_fields)
+        self._input_fields = [name for name in declared if not _is_reserved(name)]
+        reserved = sorted(set(declared) - set(self._input_fields))
         if reserved:
             logger.warning(
                 "Agent inputs %s share a name with deep-agent state and cannot be "
@@ -105,33 +117,28 @@ class StaticArgsMiddleware(AgentMiddleware[AgentState[Any], Any]):
             ),
         )
 
-    def _agent_input(self, state: Mapping[str, Any]) -> BaseModel:
-        values = {name: state[name] for name in self._input_fields if name in state}
-        return self._input_schema.model_validate(values, from_attributes=True)
-
-    def _schema_tools(self, request: ModelRequest[Any]) -> dict[str, BaseTool]:
-        """Tools whose model-facing schema pins a bound field, by name."""
-        if self._schema_tools_by_name is None:
-            bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
-            processed = self._handler.initialize(
-                bound_tools,
-                self._agent_input(cast(Mapping[str, Any], request.state)),
-                self._input_schema,
-            )
-            self._schema_tools_by_name = {
-                original.name: modified
-                for original, modified in zip(bound_tools, processed, strict=True)
-                if modified is not original
-            }
-        return self._schema_tools_by_name
-
     def _prepare_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
-        schema_tools = self._schema_tools(request)
-        if not schema_tools:
+        bound_tools = [tool for tool in request.tools if isinstance(tool, BaseTool)]
+        if not any(has_argument_bindings(tool) for tool in bound_tools):
+            return request
+
+        agent_input = agent_input_from_state(
+            cast(Mapping[str, Any], request.state), self._input_fields
+        )
+        pinned_by_name = {
+            original.name: pinned
+            for original, pinned in zip(
+                bound_tools,
+                self._handler.resolve(bound_tools, agent_input),
+                strict=True,
+            )
+            if pinned is not original
+        }
+        if not pinned_by_name:
             return request
         return request.override(
             tools=[
-                schema_tools.get(tool.name, tool)
+                pinned_by_name.get(tool.name, tool)
                 if isinstance(tool, BaseTool)
                 else tool
                 for tool in request.tools
