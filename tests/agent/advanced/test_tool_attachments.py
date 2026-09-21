@@ -34,7 +34,7 @@ def _request(tool_name: str = "produce_file") -> MagicMock:
     return request
 
 
-def _client(*, failing: set[uuid.UUID] = frozenset()) -> MagicMock:
+def _client(*, failing: frozenset[uuid.UUID] = frozenset()) -> MagicMock:
     """A UiPath client whose download writes the destination file."""
 
     async def download(*, key: uuid.UUID, destination_path: str, **_: Any) -> str:
@@ -130,6 +130,7 @@ class TestResolve:
         assert isinstance(result, ToolMessage)
         blocks = list(result.content)
         assert blocks[0] == {"type": "text", "text": "prose"}
+        assert isinstance(blocks[1], dict)
         assert json.loads(blocks[1]["text"])["FilePath"] == (
             f"/{attachment_id}_report.csv"
         )
@@ -156,6 +157,7 @@ class TestResolve:
 
         assert isinstance(result, Command)
         assert result.goto == "somewhere"
+        assert isinstance(result.update, dict)
         assert result.update["todos"] == ["keep me"]
         content = json.loads(str(result.update["messages"][0].content))
         assert content["FilePath"] == f"/{attachment_id}_report.csv"
@@ -238,7 +240,7 @@ class TestResolve:
             tool_call_id="c1",
         )
 
-        with patch(_UIPATH, return_value=_client(failing={bad})):
+        with patch(_UIPATH, return_value=_client(failing=frozenset({bad}))):
             result = await ToolAttachmentsMiddleware(backend).resolve(message)
 
         assert isinstance(result, ToolMessage)
