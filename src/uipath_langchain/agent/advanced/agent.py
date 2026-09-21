@@ -47,6 +47,7 @@ from uipath_langchain.agent.react.utils import (
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
+from .tool_attachments import ToolAttachmentsMiddleware
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -379,20 +380,26 @@ def create_advanced_agent(
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
 
     Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
+
+    With a ``FilesystemBackend``, every job attachment a tool returns is downloaded
+    into the workspace and given a ``FilePath``, for the main agent and for every
+    subagent, which share that workspace.
     """
     shared_tools, _ = _partition_main_agent_tools(tools)
-    payload_handler = _PayloadHandlerMiddleware()
+    shared_middleware: list[AgentMiddleware[Any, Any]] = [_PayloadHandlerMiddleware()]
+    if isinstance(backend, FilesystemBackend):
+        shared_middleware.append(ToolAttachmentsMiddleware(backend))
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
         subagents=_subagents_without_main_agent_tools(
-            subagents, shared_tools, skills, [payload_handler]
+            subagents, shared_tools, skills, shared_middleware
         ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*middleware, payload_handler],
+        middleware=[*middleware, *shared_middleware],
         skills=list(skills) if skills else None,
     )
 
@@ -414,7 +421,8 @@ def create_advanced_agent_graph(
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
     With a ``FilesystemBackend``, attachment-shaped inputs are downloaded into the
-    workspace and given a ``FilePath`` before the user message is built. A
+    workspace and given a ``FilePath`` before the user message is built, and so is
+    every attachment a tool returns during the run. A
     ``FilesystemBackend`` also enables workspace memory: deepagents'
     ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
     Memory stays disabled for non-filesystem backends, which carry no workspace.
