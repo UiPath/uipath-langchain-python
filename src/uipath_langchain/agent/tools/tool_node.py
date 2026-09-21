@@ -16,6 +16,8 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
 )
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.react.utils import (
@@ -323,6 +325,12 @@ class ToolWrapperMixin:
         self.awrapper = awrapper
 
 
+def _describe_tool_origin(tool: BaseTool) -> str:
+    """Name the resource a tool came from, for a name-collision message."""
+    resource = (tool.metadata or {}).get("resource_name")
+    return f"'{tool.name}' from resource '{resource}'" if resource else f"'{tool.name}'"
+
+
 def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
     """Create individual ToolNode for each tool.
 
@@ -332,9 +340,25 @@ def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
     Returns:
         Dict mapping tool.name -> UiPathToolNode.
         Each tool gets its own dedicated node for middleware composition.
+
+    Raises:
+        AgentStartupError: Two tools share a name. The name keys both this mapping
+            and the flat tool list the model is given, so it has to be unique.
     """
     dict_mapping: dict[str, UiPathToolNode] = {}
     for tool in tools:
+        if (clash := dict_mapping.get(tool.name)) is not None:
+            raise AgentStartupError(
+                code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+                title="Two tools share a name",
+                detail=(
+                    f"The agent exposes two tools named '{tool.name}': "
+                    f"{_describe_tool_origin(clash.tool)} and "
+                    f"{_describe_tool_origin(tool)}. Rename one of them so the "
+                    f"model can tell the two tools apart."
+                ),
+                category=UiPathErrorCategory.USER,
+            )
         if isinstance(tool, ToolWrapperMixin):
             dict_mapping[tool.name] = UiPathToolNode(
                 tool,

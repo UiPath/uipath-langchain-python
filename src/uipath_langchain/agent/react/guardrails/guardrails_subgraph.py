@@ -29,6 +29,7 @@ from uipath_langchain.agent.react.types import (
     AgentGuardrailsGraphState,
 )
 from uipath_langchain.agent.react.utils import create_guardrails_state_with_input
+from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 _VALIDATOR_ALLOWED_STAGES = {
     "prompt_injection": {ExecutionStage.PRE_EXECUTION},
@@ -275,6 +276,13 @@ def create_llm_guardrails_subgraph(
     )
 
 
+def _tool_metadata(tool_node: RunnableCallable) -> dict[str, Any] | None:
+    """A UiPathToolNode's underlying tool metadata, when it carries any."""
+    tool = getattr(tool_node, "tool", None)
+    metadata = getattr(tool, "metadata", None) if tool is not None else None
+    return metadata if isinstance(metadata, dict) else None
+
+
 def _extract_tool_type(tool_node: RunnableCallable) -> str | None:
     """Extract tool_type from a UiPathToolNode's underlying tool metadata.
 
@@ -284,12 +292,8 @@ def _extract_tool_type(tool_node: RunnableCallable) -> str | None:
     Returns:
         The tool_type string if available, otherwise None.
     """
-    tool = getattr(tool_node, "tool", None)
-    if tool is not None:
-        metadata = getattr(tool, "metadata", None)
-        if isinstance(metadata, dict):
-            return metadata.get("tool_type")
-    return None
+    metadata = _tool_metadata(tool_node)
+    return metadata.get("tool_type") if metadata else None
 
 
 def create_tools_guardrails_subgraph(
@@ -309,12 +313,13 @@ def create_tools_guardrails_subgraph(
     """
     result: dict[str, RunnableCallable] = {}
     for tool_name, tool_node in tool_nodes.items():
-        tool_type = _extract_tool_type(tool_node)
+        metadata = _tool_metadata(tool_node)
         subgraph = create_tool_guardrails_subgraph(
             (tool_name, tool_node),
             guardrails,
             input_schema=input_schema,
-            tool_type=tool_type,
+            tool_type=metadata.get("tool_type") if metadata else None,
+            display_name=metadata.get("display_name") if metadata else None,
         )
         result[tool_name] = subgraph
 
@@ -420,6 +425,7 @@ def create_tool_guardrails_subgraph(
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     input_schema: type[BaseModel] | None = None,
     tool_type: str | None = None,
+    display_name: str | None = None,
 ):
     """Create a guarded tool node.
 
@@ -428,19 +434,29 @@ def create_tool_guardrails_subgraph(
         guardrails: Optional sequence of (guardrail, action) tuples.
         input_schema: Optional input schema to include in state.
         tool_type: Optional type of the tool (e.g., "process", "escalation", "mcp").
+        display_name: The tool's own name, where it differs from the node key. A
+            selector naming an MCP tool holds that name sanitized, not the qualified
+            key, and ``guardrails_factory`` accepts it when validating the same
+            selector.
 
     Returns:
         Either the original tool node callable (if no matching guardrails) or a compiled
         LangGraph subgraph that enforces the matching tool guardrails.
     """
     tool_name, _ = tool_node
+    # Tool-scope selectors are sanitized before they reach here
+    # (_sanitize_selector_tool_names), so the display name is normalized the same
+    # way before being matched against them.
+    selector_names = {tool_name}
+    if display_name:
+        selector_names.add(sanitize_tool_name(display_name))
     applicable_guardrails = [
         (guardrail, action)
         for (guardrail, action) in (guardrails or [])
         if guardrail.selector is not None
         and GuardrailScope.TOOL in guardrail.selector.scopes
         and guardrail.selector.match_names is not None
-        and tool_name in guardrail.selector.match_names
+        and not selector_names.isdisjoint(guardrail.selector.match_names)
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return tool_node[1]

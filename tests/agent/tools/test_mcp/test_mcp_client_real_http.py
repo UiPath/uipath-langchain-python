@@ -544,7 +544,11 @@ async def test_tool_built_by_the_factory_invokes_over_real_http() -> None:
     async with serve(gateway) as url:
         async with connected_client(url) as client:
             tools = await create_mcp_tools(make_resource_config(), client)
-            add_tool = next(tool for tool in tools if tool.name == "add")
+            add_tool = next(
+                tool
+                for tool in tools
+                if (tool.metadata or {}).get("display_name") == "add"
+            )
             result = await add_tool.ainvoke({"a": 2, "b": 3})
 
     blocks = result if isinstance(result, list) else [result]

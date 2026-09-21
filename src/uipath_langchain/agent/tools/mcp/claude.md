@@ -457,6 +457,15 @@ finally:
 
 Creates tools for a single MCP resource config using an existing McpClient.
 
+**Tool naming:** the LLM-facing name is `mcp-{resource}-tool-{tool}`, built by
+`mcp_tool_identity()`. MCP scopes tool names per server, so the resource is what
+makes the name unique across the flat tool list the model is given; resource names
+are unique within an agent definition, so the pair is unique by construction. A pair
+past the provider's 64-character cap spends the cap on the tool name first, since that
+is the part the model reads when choosing between tools, and shortens the resource to
+a stub; a digest of the full pair keeps two shortened names apart. The tool's own name
+stays on `metadata["display_name"]`, which is what span titles show.
+
 The discovery mode comes from `config.tools_configuration.discovery_mode`, defaulting
 to cached when `tools_configuration` is unset.
 
