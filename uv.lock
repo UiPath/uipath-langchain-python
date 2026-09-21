@@ -10,7 +10,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-09-19T13:56:34.8761628Z"
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
@@ -4828,7 +4828,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.18.12"
+version = "0.18.13"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },

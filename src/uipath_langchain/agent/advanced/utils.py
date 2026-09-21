@@ -168,7 +168,7 @@ async def _download_missing(
     if not missing:
         return paths
 
-    logger.info("Downloading %d message attachment(s) into %s", len(missing), workspace)
+    logger.info("Downloading %d attachment(s) into %s", len(missing), workspace)
     client = UiPath()
     outcomes = await asyncio.gather(
         *(
