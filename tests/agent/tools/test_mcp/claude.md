@@ -561,7 +561,7 @@ assert len(clients) == 2  # One per MCP server
 with patch(..., return_value=mock_uipath_class):
     tools, clients = await create_mcp_tools_and_clients(agent)
 assert len(tools) == 1  # Only enabled server's tool
-assert tools[0].name == "enabled_tool"
+assert tools[0].name == "mcp-enabled_server-tool-enabled_tool"
 ```
 
 #### test_returns_empty_for_empty_resources

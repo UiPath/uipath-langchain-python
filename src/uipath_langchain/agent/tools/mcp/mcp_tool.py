@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator
@@ -25,6 +26,53 @@ from ..utils import sanitize_tool_name
 from .mcp_client import McpClient, SessionInfoFactory
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# Providers cap a tool name at 64 characters; the digest that keeps a shortened
+# name unique costs 8 hex characters plus its separator.
+_MAX_TOOL_NAME_LENGTH = 64
+_DIGEST_LENGTH = 8
+# A separator no name can contain, so distinct pairs cannot hash alike.
+_IDENTITY_SEPARATOR = "\x00"
+# "mcp-" + "-tool-", the scaffolding the resource and tool names sit in.
+_SCAFFOLDING_LENGTH = 10
+# What a shortened resource keeps, enough to tell two servers apart by eye.
+_MIN_RESOURCE_LENGTH = 8
+
+
+def mcp_tool_identity(resource_name: str, tool_name: str) -> str:
+    """The LLM-facing name for an MCP tool, qualified by the resource that owns it.
+
+    MCP scopes tool names per server, so the resource is what makes the name unique
+    across the one flat tool list the model is given. Resource names are unique
+    within an agent definition, so ``<resource, tool>`` identifies one tool. Two
+    resource names that normalize alike, such as ``Case Management`` and
+    ``Case_Management``, share an identity; ``create_tool_node`` reports that pair
+    at startup.
+
+    The format matches the Temporal runtime's, so a trace or an eval assertion reads
+    the same on either runtime.
+
+    A pair past the 64-character cap spends the cap on the tool name first, since
+    that is the part the model reads when choosing between tools, and shortens the
+    resource down to a stub. A digest of the full pair keeps two shortened names
+    apart.
+    """
+    resource = sanitize_tool_name(resource_name).lower()
+    tool = sanitize_tool_name(tool_name).lower()
+    qualified = f"mcp-{resource}-tool-{tool}"
+    if len(qualified) <= _MAX_TOOL_NAME_LENGTH:
+        return qualified
+
+    budget = (
+        _MAX_TOOL_NAME_LENGTH - _SCAFFOLDING_LENGTH - _DIGEST_LENGTH - 1
+    )  # shared by the two names
+    tool = tool[: budget - min(len(resource), _MIN_RESOURCE_LENGTH)]
+    resource = resource[: budget - len(tool)]
+    digest = hashlib.blake2s(
+        _IDENTITY_SEPARATOR.join((resource_name, tool_name)).encode(),
+        digest_size=_DIGEST_LENGTH // 2,
+    ).hexdigest()
+    return f"mcp-{resource}-tool-{tool}-{digest}"
 
 
 def _breaking_schema_change(cached: dict[str, Any], live: dict[str, Any]) -> bool:
@@ -278,7 +326,7 @@ async def create_mcp_tools(
         # it can refresh its own args_schema on schema drift (see _refresh_tool_schema).
         tool_holder: dict[str, BaseTool] = {}
         structured_tool = StructuredToolWithArgumentProperties(
-            name=sanitize_tool_name(mcp_tool.name),
+            name=mcp_tool_identity(config.name, mcp_tool.name),
             description=mcp_tool.description,
             args_schema=mcp_tool.input_schema,
             coroutine=build_mcp_tool(

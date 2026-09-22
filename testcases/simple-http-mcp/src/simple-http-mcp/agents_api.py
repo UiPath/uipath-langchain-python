@@ -40,6 +40,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import (
@@ -349,6 +350,11 @@ def _negotiated_version(client: McpClient) -> str | None:
     return None if version is None else str(version)
 
 
+def _mcp_name(tool: BaseTool) -> str:
+    """The tool's name on the MCP server, which its LLM-facing name qualifies."""
+    return (tool.metadata or {}).get("display_name", tool.name)
+
+
 async def _run_leg(
     label: str,
     resource: AgentMcpResourceConfig,
@@ -393,12 +399,12 @@ async def _run_leg(
             )
             clients = [client]
             tools = await create_mcp_tools(resource, client)
-        add_tool = next(tool for tool in tools if tool.name == "add")
+        add_tool = next(tool for tool in tools if _mcp_name(tool) == "add")
         blocks = await add_tool.ainvoke({"a": a, "b": b})
         summary = LegSummary(
             label=label,
             protocol_mode=protocol_mode,
-            tools=sorted(tool.name for tool in tools),
+            tools=sorted(_mcp_name(tool) for tool in tools),
             tool_result=_first_text(blocks),
             session_id=await clients[0].get_session_id(),
             negotiated_version=_negotiated_version(clients[0]),

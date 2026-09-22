@@ -58,6 +58,53 @@ class TestToolGuardrailsSubgraph:
         )
         assert result_wrong_scope == inner[1]
 
+    def test_selector_matches_the_tools_display_name(self):
+        """An MCP selector holds the tool's own name, not the qualified node key."""
+        inner = ("mcp-sales_mcp-tool-add", lambda s: s)
+        guardrail = MagicMock()
+        guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL], match_names=["add"]
+        )
+
+        result = mod.create_tool_guardrails_subgraph(
+            tool_node=inner,
+            guardrails=[(guardrail, MagicMock())],
+            display_name="add",
+        )
+
+        assert result != inner[1]
+
+    def test_selector_matches_a_sanitized_display_name(self):
+        """Selectors arrive sanitized, so a display name with spaces still matches."""
+        inner = ("mcp-sales_mcp-tool-search_tool", lambda s: s)
+        guardrail = MagicMock()
+        guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL], match_names=["Search_Tool"]
+        )
+
+        result = mod.create_tool_guardrails_subgraph(
+            tool_node=inner,
+            guardrails=[(guardrail, MagicMock())],
+            display_name="Search Tool!",
+        )
+
+        assert result != inner[1]
+
+    def test_selector_ignores_a_display_name_it_does_not_name(self):
+        inner = ("mcp-sales_mcp-tool-add", lambda s: s)
+        guardrail = MagicMock()
+        guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL], match_names=["subtract"]
+        )
+
+        result = mod.create_tool_guardrails_subgraph(
+            tool_node=inner,
+            guardrails=[(guardrail, MagicMock())],
+            display_name="add",
+        )
+
+        assert result == inner[1]
+
     def test_two_guardrails_build_chains_pre_and_post(self, monkeypatch):
         """Two guardrails should create reverse-ordered pre/post chains with failure edges."""
         monkeypatch.setattr(mod, "StateGraph", FakeStateGraph)

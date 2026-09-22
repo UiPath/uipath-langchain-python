@@ -24,15 +24,23 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.agent.tools.mcp import McpClient
 from uipath_langchain.agent.tools.mcp.mcp_tool import (
+    _MAX_TOOL_NAME_LENGTH,
     _schema_change_message,
     build_mcp_tool,
     create_mcp_tools,
     create_mcp_tools_and_clients,
+    mcp_tool_identity,
     open_mcp_tools,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
+
+
+def display_name(tool: BaseTool) -> str:
+    """The MCP tool's own name, which the qualified tool name shortens."""
+    assert tool.metadata is not None
+    return tool.metadata["display_name"]
 
 
 class TestMcpToolMetadata:
@@ -165,8 +173,8 @@ class TestMcpToolCreation:
         tools = await create_mcp_tools(mcp_resource_multiple_tools, mock_mcp_client)
 
         assert len(tools) == 2
-        assert tools[0].name == "tool_one"
-        assert tools[1].name == "tool_two"
+        assert tools[0].name == "mcp-multi_tool_server-tool-tool_one"
+        assert tools[1].name == "mcp-multi_tool_server-tool-tool_two"
 
     @pytest.mark.asyncio
     async def test_tool_has_correct_description(
@@ -292,7 +300,7 @@ class TestCreateMcpToolsFromAgent:
 
         # Should have 3 tools total (2 from server 1, 1 from server 2)
         assert len(tools) == 3
-        tool_names = [t.name for t in tools]
+        tool_names = [display_name(t) for t in tools]
         assert "tool_a" in tool_names
         assert "tool_b" in tool_names
         assert "tool_c" in tool_names
@@ -312,7 +320,7 @@ class TestCreateMcpToolsFromAgent:
 
         # Only enabled server's tool should be created
         assert len(tools) == 1
-        assert tools[0].name == "enabled_tool"
+        assert tools[0].name == "mcp-enabled_server-tool-enabled_tool"
 
         # Only one client for enabled server
         assert len(clients) == 1
@@ -655,7 +663,7 @@ class TestToolsConfiguration:
         """Dynamic with allow_all=False only includes tools listed in available_tools."""
         tools = await create_mcp_tools(mcp_resource_curated_dynamic, mock_mcp_client)
 
-        tool_names = [t.name for t in tools]
+        tool_names = [display_name(t) for t in tools]
         assert "tool_a" in tool_names
         assert "tool_b" in tool_names
         assert "tool_c" not in tool_names
@@ -668,7 +676,7 @@ class TestToolsConfiguration:
         """Dynamic with allow_all=False uses input/output schemas and descriptions from the server."""
         tools = await create_mcp_tools(mcp_resource_curated_dynamic, mock_mcp_client)
 
-        tool_a = next(t for t in tools if t.name == "tool_a")
+        tool_a = next(t for t in tools if display_name(t) == "tool_a")
         assert tool_a.description == "Tool A from server"
         assert isinstance(tool_a.args_schema, dict)
         assert "x" in tool_a.args_schema["properties"]
@@ -703,7 +711,7 @@ class TestToolsConfiguration:
         with caplog.at_level(logging.WARNING):
             tools = await create_mcp_tools(resource, mock_mcp_client)
 
-        tool_names = [t.name for t in tools]
+        tool_names = [display_name(t) for t in tools]
         assert "tool_a" in tool_names
         assert "phantom" not in tool_names
         assert any(
@@ -728,7 +736,7 @@ class TestToolsConfiguration:
         """Test that Dynamic mode returns every tool from the server."""
         tools = await create_mcp_tools(mcp_resource_dynamic, mock_mcp_client)
 
-        tool_names = [t.name for t in tools]
+        tool_names = [display_name(t) for t in tools]
         assert "tool_a" in tool_names
         assert "tool_b" in tool_names
         assert "tool_c" in tool_names
@@ -751,7 +759,7 @@ class TestToolsConfiguration:
         """Test that Dynamic mode uses schemas and descriptions from the server."""
         tools = await create_mcp_tools(mcp_resource_dynamic, mock_mcp_client)
 
-        tool_a = next(t for t in tools if t.name == "tool_a")
+        tool_a = next(t for t in tools if display_name(t) == "tool_a")
         assert tool_a.description == "Tool A from server"
         assert isinstance(tool_a.args_schema, dict)
         assert "x" in tool_a.args_schema["properties"]
@@ -780,7 +788,7 @@ class TestToolsConfiguration:
 
         client.list_tools.assert_not_awaited()
         assert len(tools) == 1
-        assert tools[0].name == "local_tool"
+        assert tools[0].name == "mcp-default_server-tool-local_tool"
 
     @pytest.mark.asyncio
     async def test_cached_uses_resource_schemas(self):
@@ -1267,13 +1275,100 @@ class TestMcpToolArgumentProperties:
         divide_tool = next(
             cast(StructuredToolWithArgumentProperties, t)
             for t in tools
-            if t.name == "divide"
+            if display_name(t) == "divide"
         )
         new_tool = next(
             cast(StructuredToolWithArgumentProperties, t)
             for t in tools
-            if t.name == "new_tool"
+            if display_name(t) == "new_tool"
         )
 
         assert "$['a']" in divide_tool.argument_properties
         assert not new_tool.argument_properties
+
+
+class TestMcpToolIdentity:
+    """The LLM-facing name carries the resource, so two servers cannot collide."""
+
+    def test_name_is_qualified_by_the_resource(self):
+        assert (
+            mcp_tool_identity("Case Management", "get_case")
+            == "mcp-case_management-tool-get_case"
+        )
+
+    def test_same_tool_name_on_two_servers_stays_distinct(self):
+        """Both servers expose ``aggregate_table_data``."""
+        first = mcp_tool_identity("Sales MCP", "aggregate_table_data")
+        second = mcp_tool_identity("Finance MCP", "aggregate_table_data")
+
+        assert first != second
+
+    def test_long_pair_is_shortened_within_the_provider_cap(self):
+        name = mcp_tool_identity("A" * 60, "B" * 60)
+
+        assert len(name) == _MAX_TOOL_NAME_LENGTH
+
+    def test_shortening_spends_the_cap_on_the_tool_name(self):
+        """The tool name is what the model reads, so the resource gives way."""
+        name = mcp_tool_identity(
+            "Reporting Connector For Finance", "aggregate_table_data_monthly"
+        )
+
+        assert "aggregate_table_data_monthly" in name
+        assert name.startswith("mcp-reporting_connect")
+
+    def test_shortened_tools_stay_distinguishable_by_name(self):
+        """Two tools on one server whose names differ only near the end."""
+        resource = "Reporting Connector For Finance"
+        monthly = mcp_tool_identity(resource, "aggregate_table_data_monthly")
+        yearly = mcp_tool_identity(resource, "aggregate_table_data_yearly")
+
+        assert len(monthly) == len(yearly) == _MAX_TOOL_NAME_LENGTH
+        assert "aggregate_table_data_monthly" in monthly
+        assert "aggregate_table_data_yearly" in yearly
+
+    def test_pairs_sharing_a_truncated_prefix_stay_distinct(self):
+        prefix = "identical_resource_name_long_enough_to_be_truncated"
+        first = mcp_tool_identity(prefix, "tool_name_that_also_runs_past_the_cap_one")
+        second = mcp_tool_identity(prefix, "tool_name_that_also_runs_past_the_cap_two")
+
+        assert first != second
+
+    def test_identity_is_stable_across_processes(self):
+        """A salted digest would rebind a resumed run to a different name."""
+        assert (
+            mcp_tool_identity("A" * 60, "B" * 60)
+            == "mcp-aaaaaaaa-tool-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-af65f768"
+        )
+
+    def test_resource_names_normalizing_alike_share_an_identity(self):
+        """``create_tool_node`` reports the pair; the name alone cannot separate them."""
+        assert mcp_tool_identity("Case Management", "add") == mcp_tool_identity(
+            "Case_Management", "add"
+        )
+
+    @pytest.mark.asyncio
+    async def test_two_resources_sharing_a_tool_name_produce_distinct_tools(self):
+        """End to end over create_mcp_tools, which is what builds the flat list."""
+
+        def resource(name: str) -> AgentMcpResourceConfig:
+            return AgentMcpResourceConfig(
+                name=name,
+                description="",
+                folder_path="/Shared",
+                slug=name.lower(),
+                available_tools=[
+                    AgentMcpTool(
+                        name="aggregate_table_data",
+                        description="Aggregate",
+                        input_schema={"type": "object", "properties": {}},
+                    )
+                ],
+            )
+
+        client = MagicMock(spec=McpClient)
+        sales = await create_mcp_tools(resource("Sales"), client)
+        finance = await create_mcp_tools(resource("Finance"), client)
+
+        assert sales[0].name != finance[0].name
+        assert display_name(sales[0]) == display_name(finance[0])

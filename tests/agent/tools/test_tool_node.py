@@ -14,6 +14,8 @@ from pydantic import BaseModel
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
 )
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
@@ -431,6 +433,28 @@ class TestCreateToolNode:
         result = create_tool_node([])
 
         assert result == {}
+
+    def test_duplicate_tool_names_are_refused(self):
+        """Two tools under one name are refused."""
+        tools = [MockTool(name="shared"), MockTool(name="shared")]
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            create_tool_node(tools)
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
+        assert "shared" in exc_info.value.error_info.detail
+
+    def test_duplicate_tool_names_report_the_resources_they_came_from(self):
+        first = MockTool(name="shared", metadata={"resource_name": "Sales MCP"})
+        second = MockTool(name="shared", metadata={"resource_name": "Finance MCP"})
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            create_tool_node([first, second])
+
+        assert "Sales MCP" in exc_info.value.error_info.detail
+        assert "Finance MCP" in exc_info.value.error_info.detail
 
     async def test_wrap_tools_with_error_handling_captures_error(self):
         """Test that wrap_tools_with_error_handling captures tool errors as error ToolMessages."""
