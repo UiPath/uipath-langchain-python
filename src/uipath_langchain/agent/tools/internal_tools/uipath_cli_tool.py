@@ -88,6 +88,10 @@ def _parse_uip_command(command: str) -> list[str]:
                 f"Shell operator '{token}' is not allowed; run one command at a time."
             )
 
+    words = [t.lower() for t in tokens if not t.startswith("-")]
+    if "run" in words and {"codedagent", "function", "functions"} & set(words):
+        raise ValueError("`uip codedagent run` and `uip function run` are blocked.")
+
     return tokens
 
 
