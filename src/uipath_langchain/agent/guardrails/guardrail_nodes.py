@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any, Callable
 
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 from uipath.core.guardrails import (
     DeterministicGuardrail,
@@ -23,6 +24,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.guardrails.attachment_refs import (
     resolve_guardrail_attachments,
+    resolve_referenced_attachments,
 )
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
@@ -32,13 +34,14 @@ from uipath_langchain.agent.guardrails.utils import (
     get_message_content,
 )
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.utils import (
+    extract_current_tool_call_index,
+    find_latest_ai_message,
+)
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
 logger = logging.getLogger(__name__)
-
-#: Scopes whose guardrails may inspect attached files (tool scope excluded on purpose).
-_ATTACHMENT_SCOPES = frozenset({GuardrailScope.AGENT, GuardrailScope.LLM})
 
 
 def _evaluate_deterministic_guardrail(
@@ -168,6 +171,48 @@ def _create_validation_command(
     )
 
 
+async def _resolve_attachments(
+    state: AgentGuardrailsGraphState,
+    guardrail: BuiltInValidatorGuardrail,
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    input_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
+    output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
+) -> list[GuardrailAttachment]:
+    """Attachment references for one built-in guardrail evaluation.
+
+    Agent and LLM scope judge the conversation, so they read the run's whole attachment
+    registry. Tool scope judges one call, so it reads only the files that call's
+    arguments (pre-execution) or result (post-execution) mention: a tool call without a
+    file forwards nothing even when the run has files elsewhere. Never raises.
+    """
+    registry = state.inner_state.job_attachments
+    if scope != GuardrailScope.TOOL:
+        return await resolve_guardrail_attachments(registry, guardrail)
+
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        extractor, source_name = input_data_extractor, "arguments"
+    else:
+        extractor, source_name = output_data_extractor, "result"
+        # A mention always carries the literal ``ID`` key; skip parsing plain-text
+        # results, which the output extractor would otherwise warn about.
+        if not state.messages or "ID" not in get_message_content(state.messages[-1]):
+            return []
+    if extractor is None:
+        return []
+    try:
+        source = extractor(state)
+    except Exception:
+        logger.warning(
+            "Could not read the tool %s for guardrail '%s'; evaluating without files.",
+            source_name,
+            guardrail.name,
+            exc_info=True,
+        )
+        return []
+    return resolve_referenced_attachments(source, registry, guardrail)
+
+
 def _create_guardrail_node(
     guardrail: BaseGuardrail,
     scope: GuardrailScope,
@@ -235,12 +280,13 @@ def _create_guardrail_node(
                 else:
                     metadata["payload"]["output"] = payload
 
-                attachments = (
-                    await resolve_guardrail_attachments(
-                        state.inner_state.job_attachments, guardrail
-                    )
-                    if scope in _ATTACHMENT_SCOPES
-                    else []
+                attachments = await _resolve_attachments(
+                    state,
+                    guardrail,
+                    scope,
+                    execution_stage,
+                    input_data_extractor,
+                    output_data_extractor,
                 )
 
                 result = await _evaluate_builtin_guardrail(
@@ -346,6 +392,13 @@ def create_agent_terminate_guardrail_node(
     )
 
 
+def _tool_call_field(tool_call: Any, field: str) -> Any:
+    """Read ``field`` from a tool call given as a dict or an object."""
+    if isinstance(tool_call, dict):
+        return tool_call.get(field)
+    return getattr(tool_call, field, None)
+
+
 def create_tool_guardrail_node(
     guardrail: BaseGuardrail,
     execution_stage: ExecutionStage,
@@ -368,6 +421,51 @@ def create_tool_guardrail_node(
         A tuple of (node_name, node_function) for the guardrail evaluation node.
     """
 
+    def _current_call_args(state: AgentGuardrailsGraphState) -> dict[str, Any]:
+        """Arguments of the tool call this evaluation is about.
+
+        One AI message can carry several calls to the same tool, executed one after
+        another with a ToolMessage appended after each. The call under evaluation is
+        therefore not "the first call named ``tool_name``" but, before execution, the
+        first one without a ToolMessage yet (the same selection the tool node makes),
+        and after execution, the one the last ToolMessage answers. Falls back to the
+        first matching call when the history has no ToolMessage bookkeeping.
+        """
+        messages = state.messages
+        if not messages:
+            return {}
+
+        ai_message = find_latest_ai_message(messages)
+        if ai_message is None or not ai_message.tool_calls:
+            return {}
+
+        selected: Any = None
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            try:
+                index = extract_current_tool_call_index(messages, tool_name)
+            except AgentRuntimeError:
+                index = None
+            if index is not None and index < len(ai_message.tool_calls):
+                selected = ai_message.tool_calls[index]
+        else:  # POST_EXECUTION
+            last_message = messages[-1]
+            if isinstance(last_message, ToolMessage):
+                selected = next(
+                    (
+                        call
+                        for call in ai_message.tool_calls
+                        if _tool_call_field(call, "id") == last_message.tool_call_id
+                    ),
+                    None,
+                )
+
+        if selected is None:
+            return _extract_tool_args_from_message(ai_message, tool_name)
+
+        return _extract_tool_args_from_message(
+            AIMessage(content="", tool_calls=[selected]), tool_name
+        )
+
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         """Extract tool call arguments for the specified tool name.
 
@@ -381,24 +479,13 @@ def create_tool_guardrail_node(
             return ""
 
         if execution_stage == ExecutionStage.PRE_EXECUTION:
-            last_message = state.messages[-1]
-            args_dict = _extract_tool_args_from_message(last_message, tool_name)
-            return json.dumps(args_dict)
+            return json.dumps(_current_call_args(state))
 
         return get_message_content(state.messages[-1])
 
     # Create closures for input/output data extraction (for deterministic guardrails)
     def _input_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
-        if execution_stage == ExecutionStage.PRE_EXECUTION:
-            if len(state.messages) < 1:
-                return {}
-            message = state.messages[-1]
-        else:  # POST_EXECUTION
-            if len(state.messages) < 2:
-                return {}
-            message = state.messages[-2]
-
-        return _extract_tool_args_from_message(message, tool_name)
+        return _current_call_args(state)
 
     def _output_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
         return _extract_tool_output_data(state)
