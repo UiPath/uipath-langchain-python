@@ -4,9 +4,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, cast
 
-from deepagents import CompiledSubAgent, SubAgent
+from deepagents import CompiledSubAgent, FilesystemPermission, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
-from deepagents.backends import BackendProtocol, FilesystemBackend
+from deepagents.backends import BackendProtocol, CompositeBackend, FilesystemBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import (
     AgentMiddleware,
@@ -368,6 +368,7 @@ def create_advanced_agent(
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
     skills: Sequence[str] | None = None,
+    permissions: Sequence[FilesystemPermission] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
@@ -377,6 +378,9 @@ def create_advanced_agent(
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
+
+    ``permissions`` are deepagents ``FilesystemPermission`` rules, enforced by its
+    filesystem tools for the main agent and inherited by every subagent.
 
     Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
@@ -394,6 +398,7 @@ def create_advanced_agent(
         memory=list(memory) or None,
         middleware=[*middleware, payload_handler],
         skills=list(skills) if skills else None,
+        permissions=list(permissions) if permissions else None,
     )
 
 
@@ -410,6 +415,7 @@ def create_advanced_agent_graph(
     output_files_enabled: bool = False,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    permissions: Sequence[FilesystemPermission] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -427,8 +433,10 @@ def create_advanced_agent_graph(
     ``max_iterations`` caps the model calls the agent loop may make; ``None``
     leaves it uncapped.
     """
+    # A CompositeBackend's default is the workspace; routed mounts are not.
+    workspace = backend.default if isinstance(backend, CompositeBackend) else backend
     memory_sources = (
-        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(workspace, FilesystemBackend) else []
     )
     runtime_prompt = _resolve_runtime_system_prompt(
         system_prompt, AdvancedAgentGraphState, input_schema
@@ -450,6 +458,7 @@ def create_advanced_agent_graph(
             *middleware,
         ],
         skills=skills,
+        permissions=permissions,
     )
 
     output_file_retries_key = get_unique_model_field_name(
@@ -481,7 +490,7 @@ def create_advanced_agent_graph(
         )
         if attachment_paths:
             input_args = await resolve_input_attachments(
-                backend, attachment_paths, input_args
+                workspace, attachment_paths, input_args
             )
         user_text = build_user_message(input_args)
         update: dict[str, Any] = {
@@ -554,6 +563,7 @@ def create_conversational_advanced_agent_graph(
     output_schema: type[BaseModel] | None = None,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    permissions: Sequence[FilesystemPermission] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -571,8 +581,10 @@ def create_conversational_advanced_agent_graph(
     ``max_iterations`` caps the model calls the agent loop may make per exchange;
     ``None`` leaves it uncapped.
     """
+    # A CompositeBackend's default is the workspace; routed mounts are not.
+    workspace = backend.default if isinstance(backend, CompositeBackend) else backend
     memory_sources = (
-        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(workspace, FilesystemBackend) else []
     )
     runtime_prompt = _resolve_runtime_system_prompt(
         system_prompt, _ConversationalAdvancedAgentGraphInput, input_schema
@@ -595,6 +607,7 @@ def create_conversational_advanced_agent_graph(
             *middleware,
         ],
         skills=skills,
+        permissions=permissions,
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
@@ -671,7 +684,7 @@ def create_conversational_advanced_agent_graph(
     async def capture_exchange_start(state: BaseModel) -> dict[str, Any]:
         messages = cast(ConversationalAdvancedAgentGraphState, state).messages
         update: dict[str, Any] = {initial_message_count_key: len(messages)}
-        hydrated_messages = await resolve_message_attachments(backend, messages)
+        hydrated_messages = await resolve_message_attachments(workspace, messages)
         if hydrated_messages:
             update["messages"] = hydrated_messages
         if runtime_prompt.build_prompt is not None:

@@ -7,7 +7,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from deepagents.backends import FilesystemBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -602,3 +602,33 @@ async def test_chat_attachments_need_a_filesystem_backend() -> None:
     unchanged = next(seen_message for seen_message in seen if seen_message.id == "u1")
     assert unchanged.content == message.content
     assert "file_path" not in unchanged.additional_kwargs["attachments"][0]
+
+
+@pytest.mark.asyncio
+async def test_message_attachments_resolve_into_a_composite_default(
+    tmp_path: Path,
+) -> None:
+    """A CompositeBackend's default is the workspace, so attachments land there."""
+    workspace = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    backend = CompositeBackend(default=workspace, routes={"/skills/": StateBackend()})
+    with patch(
+        "uipath_langchain.agent.advanced.agent.resolve_message_attachments",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as mock_resolve:
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt="sys",
+            backend=backend,
+            input_schema=_Input,
+        )
+        state = graph.state_schema(
+            messages=[HumanMessage(content="hi")],
+            tenant="finance",
+            uipath__user_settings={"name": "Ada"},
+        )
+        await cast(Any, graph.nodes["capture_exchange_start"].runnable).ainvoke(state)
+
+    assert mock_resolve.await_args is not None
+    assert mock_resolve.await_args.args[0] is workspace
