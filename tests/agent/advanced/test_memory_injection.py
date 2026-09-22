@@ -12,12 +12,14 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 
 from uipath_langchain.agent.advanced.agent import (
     create_advanced_agent_graph,
+    create_conversational_advanced_agent_graph,
 )
 from uipath_langchain.agent.advanced.utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
@@ -72,6 +74,43 @@ class TestWorkspaceMemoryWiring:
         # The default in-state backend (None) carries no durable workspace, so
         # passing memory=None leaves MemoryMiddleware out of the stack entirely.
         assert _memory_kwarg(None) is None
+
+
+class TestCompositeBackendMemoryWiring:
+    """A CompositeBackend's default decides memory, as a plain backend would."""
+
+    def test_enables_memory_for_a_filesystem_default(self, tmp_path: Any) -> None:
+        backend = CompositeBackend(
+            default=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+            routes={"/skills/": StateBackend()},
+        )
+
+        assert _memory_kwarg(backend) == [MEMORY_INDEX_VIRTUAL_PATH]
+
+    def test_disables_memory_for_a_state_default(self) -> None:
+        backend = CompositeBackend(default=StateBackend(), routes={})
+
+        assert _memory_kwarg(backend) is None
+
+    def test_conversational_enables_memory_for_a_filesystem_default(
+        self, tmp_path: Any
+    ) -> None:
+        backend = CompositeBackend(
+            default=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+            routes={"/skills/": StateBackend()},
+        )
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent",
+            return_value=MagicMock(),
+        ) as mock_create:
+            create_conversational_advanced_agent_graph(
+                model=MagicMock(spec=BaseChatModel),
+                tools=[],
+                system_prompt="",
+                backend=backend,
+            )
+
+        assert mock_create.call_args.kwargs["memory"] == [MEMORY_INDEX_VIRTUAL_PATH]
 
 
 @pytest.mark.asyncio

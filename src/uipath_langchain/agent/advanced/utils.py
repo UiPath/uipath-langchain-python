@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
-from deepagents.backends import BackendProtocol, FilesystemBackend
+from deepagents.backends import BackendProtocol, CompositeBackend, FilesystemBackend
 from jsonpath_ng import parse as jsonpath_parse  # type: ignore[import-untyped]
 from langchain_core.messages import AnyMessage
 from pydantic import BaseModel, ConfigDict
@@ -34,6 +34,16 @@ MEMORY_INDEX_FILENAME = "MEMORY.md"
 # Virtual path handed to MemoryMiddleware as a source; the agent's virtual-mode
 # FilesystemBackend resolves it under the workspace root.
 MEMORY_INDEX_VIRTUAL_PATH = f"/{MEMORY_DIR_NAME}/{MEMORY_INDEX_FILENAME}"
+
+
+def resolve_backend(backend: BackendProtocol | None) -> FilesystemBackend | None:
+    """Return the FilesystemBackend the agent works in, or None if there is none.
+
+    A CompositeBackend's default is the one that counts; routed mounts are not.
+    """
+    if isinstance(backend, CompositeBackend):
+        backend = backend.default
+    return backend if isinstance(backend, FilesystemBackend) else None
 
 
 def create_state_with_input(
@@ -79,10 +89,11 @@ async def resolve_input_attachments(
     Each ticket is streamed to ``<backend.cwd>/<ID>_<name>`` and augmented with a
     ``FilePath`` so the agent's file tools can open it. FilesystemBackend only.
     """
-    if not isinstance(backend, FilesystemBackend):
+    backend = resolve_backend(backend)
+    if backend is None:
         raise NotImplementedError(
             "Advanced agent with input attachments requires a FilesystemBackend, "
-            f"got {type(backend).__name__}"
+            "got a backend without one"
         )
 
     result = copy.deepcopy(input_args)
@@ -209,10 +220,11 @@ async def resolve_message_attachments(
     ]
     if not candidates:
         return []
-    if not isinstance(backend, FilesystemBackend):
+    backend = resolve_backend(backend)
+    if backend is None:
         logger.warning(
-            "Message attachments stay unopenable: %s has no workspace to download into",
-            type(backend).__name__,
+            "Message attachments stay unopenable: backend has no filesystem to "
+            "download into"
         )
         return []
 
