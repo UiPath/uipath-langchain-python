@@ -8,6 +8,7 @@ from uipath.agent.models.agent import (
     AgentClientSideToolResourceConfig,
     AgentContextResourceConfig,
     AgentEscalationResourceConfig,
+    AgentGenericToolResourceConfig,
     AgentIntegrationToolResourceConfig,
     AgentInternalToolResourceConfig,
     AgentIxpExtractionResourceConfig,
@@ -23,6 +24,7 @@ from .client_side_tool import create_client_side_tool
 from .context_tool import create_context_tool
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
+from .generic_tools import create_generic_tool
 from .integration_tool import create_integration_tool
 from .internal_tools import create_internal_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
@@ -124,5 +126,8 @@ async def _build_tool_for_resource(
 
     elif isinstance(resource, AgentClientSideToolResourceConfig):
         return create_client_side_tool(resource)
+
+    elif isinstance(resource, AgentGenericToolResourceConfig):
+        return create_generic_tool(resource, llm)
 
     return None
