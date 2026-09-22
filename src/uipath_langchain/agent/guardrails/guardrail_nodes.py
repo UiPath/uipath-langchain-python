@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any, Callable
 
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 from uipath.core.guardrails import (
     DeterministicGuardrail,
@@ -33,6 +34,10 @@ from uipath_langchain.agent.guardrails.utils import (
     get_message_content,
 )
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.utils import (
+    extract_current_tool_call_index,
+    find_latest_ai_message,
+)
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
@@ -387,6 +392,13 @@ def create_agent_terminate_guardrail_node(
     )
 
 
+def _tool_call_field(tool_call: Any, field: str) -> Any:
+    """Read ``field`` from a tool call given as a dict or an object."""
+    if isinstance(tool_call, dict):
+        return tool_call.get(field)
+    return getattr(tool_call, field, None)
+
+
 def create_tool_guardrail_node(
     guardrail: BaseGuardrail,
     execution_stage: ExecutionStage,
@@ -409,6 +421,51 @@ def create_tool_guardrail_node(
         A tuple of (node_name, node_function) for the guardrail evaluation node.
     """
 
+    def _current_call_args(state: AgentGuardrailsGraphState) -> dict[str, Any]:
+        """Arguments of the tool call this evaluation is about.
+
+        One AI message can carry several calls to the same tool, executed one after
+        another with a ToolMessage appended after each. The call under evaluation is
+        therefore not "the first call named ``tool_name``" but, before execution, the
+        first one without a ToolMessage yet (the same selection the tool node makes),
+        and after execution, the one the last ToolMessage answers. Falls back to the
+        first matching call when the history has no ToolMessage bookkeeping.
+        """
+        messages = state.messages
+        if not messages:
+            return {}
+
+        ai_message = find_latest_ai_message(messages)
+        if ai_message is None or not ai_message.tool_calls:
+            return {}
+
+        selected: Any = None
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            try:
+                index = extract_current_tool_call_index(messages, tool_name)
+            except AgentRuntimeError:
+                index = None
+            if index is not None and index < len(ai_message.tool_calls):
+                selected = ai_message.tool_calls[index]
+        else:  # POST_EXECUTION
+            last_message = messages[-1]
+            if isinstance(last_message, ToolMessage):
+                selected = next(
+                    (
+                        call
+                        for call in ai_message.tool_calls
+                        if _tool_call_field(call, "id") == last_message.tool_call_id
+                    ),
+                    None,
+                )
+
+        if selected is None:
+            return _extract_tool_args_from_message(ai_message, tool_name)
+
+        return _extract_tool_args_from_message(
+            AIMessage(content="", tool_calls=[selected]), tool_name
+        )
+
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         """Extract tool call arguments for the specified tool name.
 
@@ -422,24 +479,13 @@ def create_tool_guardrail_node(
             return ""
 
         if execution_stage == ExecutionStage.PRE_EXECUTION:
-            last_message = state.messages[-1]
-            args_dict = _extract_tool_args_from_message(last_message, tool_name)
-            return json.dumps(args_dict)
+            return json.dumps(_current_call_args(state))
 
         return get_message_content(state.messages[-1])
 
     # Create closures for input/output data extraction (for deterministic guardrails)
     def _input_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
-        if execution_stage == ExecutionStage.PRE_EXECUTION:
-            if len(state.messages) < 1:
-                return {}
-            message = state.messages[-1]
-        else:  # POST_EXECUTION
-            if len(state.messages) < 2:
-                return {}
-            message = state.messages[-2]
-
-        return _extract_tool_args_from_message(message, tool_name)
+        return _current_call_args(state)
 
     def _output_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
         return _extract_tool_output_data(state)

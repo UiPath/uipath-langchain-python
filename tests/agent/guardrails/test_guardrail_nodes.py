@@ -1117,6 +1117,91 @@ class TestGuardrailNodeAttachments:
         )
 
     @pytest.mark.asyncio
+    async def test_tool_pre_node_judges_the_current_call_when_a_tool_is_called_twice(
+        self, monkeypatch
+    ):
+        """One AI message, two calls to the same tool: after the first call's ToolMessage
+        lands, the second evaluation must judge the second call's arguments and file,
+        not the first call's (the tool node selects the call the same way)."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        other = "00000000-0000-4000-8000-000000000001"
+        first_args = {"attachment": {"ID": other}, "question": "first"}
+        second_args = {"attachment": {"ID": self._UUID}, "question": "second"}
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "my_tool", "args": first_args, "id": "c1"},
+                        {"name": "my_tool", "args": second_args, "id": "c2"},
+                    ],
+                ),
+                ToolMessage(content="first done", tool_call_id="c1"),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._state_with_attachment().inner_state.job_attachments
+            ),
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        cmd = await node(state)
+
+        assert cmd.goto == "ok"
+        assert json.loads(fake.guardrails.last_text) == second_args
+        assert [a.id for a in fake.guardrails.last_attachments] == [self._UUID]
+
+    @pytest.mark.asyncio
+    async def test_tool_post_node_judges_the_answered_call_when_a_tool_is_called_twice(
+        self, monkeypatch
+    ):
+        """After the second of two calls returns, the post evaluation reads that
+        call's result (the last ToolMessage), which here names the file."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        second_result = json.dumps(
+            {
+                "file": {
+                    "ID": self._UUID,
+                    "FullName": "Tickets.csv",
+                    "MimeType": "text/csv",
+                }
+            }
+        )
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "my_tool", "args": {"n": 1}, "id": "c1"},
+                        {"name": "my_tool", "args": {"n": 2}, "id": "c2"},
+                    ],
+                ),
+                ToolMessage(content="first done", tool_call_id="c1"),
+                ToolMessage(content=second_result, tool_call_id="c2"),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._state_with_attachment().inner_state.job_attachments
+            ),
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=self._judge_guardrail(),
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        await node(state)
+
+        assert fake.guardrails.last_text == second_result
+        assert [a.id for a in fake.guardrails.last_attachments] == [self._UUID]
+
+    @pytest.mark.asyncio
     async def test_tool_pre_node_forwards_attachments_referenced_in_tool_args(
         self, monkeypatch
     ):
