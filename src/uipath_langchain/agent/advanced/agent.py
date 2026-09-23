@@ -47,6 +47,7 @@ from uipath_langchain.agent.react.utils import (
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
+from .static_args import build_static_args_middleware
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -312,11 +313,13 @@ def _subagents_without_main_agent_tools(
     skills: Sequence[str] | None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> list[SubAgent | CompiledSubAgent]:
-    """Give every subagent the shared tool list instead of the parent's.
+    """Give every subagent the shared tool list instead of the parent's, and ``middleware``.
 
     deepagents hands a subagent the parent's ``tools`` unless its spec declares its
     own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``), so
     pinning ``tools`` on each spec is what actually withholds a main-agent-only tool.
+    A spec that declares its own tools keeps them and still receives ``middleware``;
+    a ``CompiledSubAgent`` brings its own graph and is passed through unchanged.
 
     The auto-added ``general-purpose`` subagent is replaced with an explicit spec,
     since it would otherwise inherit the parent list too. Supplying a spec under
@@ -332,14 +335,16 @@ def _subagents_without_main_agent_tools(
     """
     resolved: list[SubAgent | CompiledSubAgent] = []
     for spec in subagents:
-        # A CompiledSubAgent brings its own graph and tools; nothing to filter.
-        if "runnable" in spec or "tools" in spec:
+        if "runnable" in spec:
             resolved.append(spec)
             continue
+        declared_tools = cast("dict[str, Any]", spec).get("tools")
         resolved.append(
             {
                 **spec,
-                "tools": list(shared_tools),
+                "tools": list(declared_tools)
+                if declared_tools is not None
+                else list(shared_tools),
                 "middleware": [*spec.get("middleware", []), *middleware],
             }
         )
@@ -368,6 +373,7 @@ def create_advanced_agent(
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
     skills: Sequence[str] | None = None,
+    shared_middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
@@ -378,21 +384,27 @@ def create_advanced_agent(
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
 
+    ``middleware`` reaches the main agent only, the way ``create_deep_agent``
+    treats it. ``shared_middleware`` reaches the main agent, after ``middleware``,
+    and every subagent deepagents builds from a spec, for behavior a subagent's
+    tool calls need as much as the main agent's do. A precompiled subagent
+    (``runnable``) brings its own graph and is left unchanged.
+
     Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
     shared_tools, _ = _partition_main_agent_tools(tools)
-    payload_handler = _PayloadHandlerMiddleware()
+    every_agent_middleware = [*shared_middleware, _PayloadHandlerMiddleware()]
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
         subagents=_subagents_without_main_agent_tools(
-            subagents, shared_tools, skills, [payload_handler]
+            subagents, shared_tools, skills, every_agent_middleware
         ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*middleware, payload_handler],
+        middleware=[*middleware, *every_agent_middleware],
         skills=list(skills) if skills else None,
     )
 
@@ -426,6 +438,11 @@ def create_advanced_agent_graph(
 
     ``max_iterations`` caps the model calls the agent loop may make; ``None``
     leaves it uncapped.
+
+    A tool carrying argument bindings (``argument_properties``) gets
+    :class:`~uipath_langchain.agent.advanced.static_args.StaticArgsMiddleware`
+    on the main agent and every subagent, after ``middleware``, so the bound
+    values are pinned for the model and written into its tool calls.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -450,6 +467,7 @@ def create_advanced_agent_graph(
             *middleware,
         ],
         skills=skills,
+        shared_middleware=build_static_args_middleware(tools, input_schema),
     )
 
     output_file_retries_key = get_unique_model_field_name(
@@ -570,6 +588,9 @@ def create_conversational_advanced_agent_graph(
 
     ``max_iterations`` caps the model calls the agent loop may make per exchange;
     ``None`` leaves it uncapped.
+
+    A tool carrying argument bindings gets the static-args middleware on the
+    main agent and every subagent, as in :func:`create_advanced_agent_graph`.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -595,6 +616,7 @@ def create_conversational_advanced_agent_graph(
             *middleware,
         ],
         skills=skills,
+        shared_middleware=build_static_args_middleware(tools, input_schema),
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
