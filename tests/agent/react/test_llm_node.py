@@ -682,3 +682,88 @@ class TestForcedExtractionEscalation:
         node = create_llm_node(model, [tool])
         await node(AgentGraphState(messages=[HumanMessage(content="q")]))
         assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
+
+
+class TestModelRejectsForcedToolChoice:
+    """Models flagged `shouldSkipForcedToolChoice` (e.g. Claude Opus 5.5) 400 on a forced
+    tool_choice and can't turn thinking off, so the node sends `auto` and re-asks a
+    stalled turn with thinking kept instead of running the thinking-off extraction."""
+
+    def _flagged_model(self) -> Any:
+        model: Any = _StubAzureChatOpenAI.model_construct()
+        model.model_details = {"shouldSkipForcedToolChoice": True}
+        model.thinking = {"type": "adaptive"}
+        model.bind_tools = Mock(return_value=model)
+        model.bind = Mock(return_value=model)
+        return model
+
+    def _tool(self) -> Any:
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        return tool
+
+    def _end_call(self) -> AIMessage:
+        return AIMessage(
+            content="",
+            tool_calls=[
+                create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+            ],
+        )
+
+    def _stalled_state(self, stalls: int = 1) -> AgentGraphState:
+        prior = AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "think", "signature": "s"},
+                {"type": "text", "text": "answer"},
+            ]
+        )
+        return AgentGraphState(
+            messages=[HumanMessage(content="q"), *([prior] * stalls)]
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("configured", ["auto", "any"])
+    async def test_first_turn_sends_auto(
+        self, configured: Literal["auto", "any"]
+    ) -> None:
+        model = self._flagged_model()
+        model.ainvoke = AsyncMock(return_value=self._end_call())
+
+        node = create_llm_node(model, [self._tool()], tool_choice=configured)
+        await node(AgentGraphState(messages=[HumanMessage(content="q")]))
+
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
+
+    @pytest.mark.asyncio
+    async def test_stall_is_nudged_with_thinking_kept(self) -> None:
+        model = self._flagged_model()
+        captured: dict[str, Any] = {}
+
+        async def fake_ainvoke(msgs: Any) -> AIMessage:
+            captured["msgs"] = msgs
+            return self._end_call()
+
+        model.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+        with patch(
+            "uipath_langchain.agent.react.llm_node.build_extraction_call"
+        ) as spy:
+            await create_llm_node(model, [self._tool()])(self._stalled_state())
+
+        spy.assert_not_called()
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
+        msgs = captured["msgs"]
+        assert msgs[-2].content[0]["type"] == "thinking"
+        assert isinstance(msgs[-1], HumanMessage)
+
+    @pytest.mark.asyncio
+    async def test_second_stall_raises_thinking_limit(self) -> None:
+        model = self._flagged_model()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="still stalling"))
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await create_llm_node(model, [self._tool()])(self._stalled_state(stalls=2))
+
+        assert exc_info.value.error_info.code.endswith(
+            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value
+        )
+        model.ainvoke.assert_not_awaited()

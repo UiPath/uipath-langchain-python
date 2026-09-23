@@ -43,6 +43,17 @@ def thinking_rejects_forced_tool_choice(model: Any) -> bool:
     return False
 
 
+def model_rejects_forced_tool_choice(model: Any) -> bool:
+    """True if the gateway flags the model as rejecting any forced tool_choice.
+
+    Discovery's ``modelDetails.shouldSkipForcedToolChoice`` (e.g. Claude Opus 5.5, which
+    400s on tool_choice ``any`` / ``tool`` and whose thinking can't be turned off, so the
+    thinking-off extraction retry isn't an option either).
+    """
+    details = getattr(model, "model_details", None)
+    return isinstance(details, dict) and bool(details.get("shouldSkipForcedToolChoice"))
+
+
 def strip_thinking(model: BaseChatModel) -> BaseChatModel:
     """Copy of the model with thinking config stripped, so forcing is honored.
 

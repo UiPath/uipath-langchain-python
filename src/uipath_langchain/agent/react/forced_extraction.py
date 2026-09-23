@@ -39,6 +39,13 @@ def _ensure_trailing_user_turn(messages: list[AnyMessage]) -> list[AnyMessage]:
     ]
 
 
+def build_nudge_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """Messages for re-asking a model that can't be forced: thinking and reasoning blocks
+    stay (its thinking can't be turned off), and the request ends on a user turn asking
+    for a tool call."""
+    return _ensure_trailing_user_turn(messages)
+
+
 def build_extraction_call(
     model: BaseChatModel, messages: list[AnyMessage]
 ) -> tuple[BaseChatModel, list[AnyMessage]]:
