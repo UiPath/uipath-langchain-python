@@ -1,0 +1,10 @@
+{
+    "document_id": "DOC-2025-004",
+    "document_type": "incident_report",
+    "title": "Critical System Outage - Database Server DB-01",
+    "content": "Critical incident: Primary database server DB-01 experienced complete failure at 03:45 UTC. System automatically failed over to backup server. Root cause appears to be hardware failure in RAID controller. Immediate technical intervention required to restore primary server and prevent data loss.",
+    "sender_email": "monitoring@company.com",
+    "sender_department": "it",
+    "urgency_level": "critical",
+    "tags": ["incident", "database", "critical", "outage"]
+}
