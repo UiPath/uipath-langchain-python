@@ -1,0 +1,10 @@
+{
+  "alert_id": "AML-2026-0150",
+  "customer": "Nordvik Marine AS (Norway, established 2016)",
+  "narrative": "Outbound payment of USD 680,000 to a shipyard in a jurisdiction subject to enhanced due diligence requirements. Customer provided a vessel repair contract and photographs of the vessel in dry dock. The shipyard entity is not on any sanctions list but shares a registered address with two entities that were delisted from sanctions in 2024.",
+  "account_age_days": 3600,
+  "prior_alerts": 0,
+  "benchmark": true,
+  "decider": "jev",
+  "expected_disposition": "need_info"
+}

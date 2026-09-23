@@ -1,0 +1,16 @@
+[project]
+name = "aml-triage-agent"
+version = "0.0.1"
+description = "AML alert triage: UiPath coded agent with TypeSafe Jev as the decision layer"
+authors = [{ name = "UiPath" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath>=2.0",
+    "uipath-langchain>=0.16",
+    "typesafe-sdk>=0.7",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]

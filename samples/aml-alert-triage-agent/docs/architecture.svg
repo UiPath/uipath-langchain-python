@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="720" viewBox="0 0 980 720" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="980" height="720" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+
+  <text x="40" y="46" font-size="23" font-weight="700" fill="#1f2328">AML Alert Triage · UiPath Coded Agent × TypeSafe Jev</text>
+  <text x="40" y="70" font-size="14" fill="#57606a">The LLM does the language. Jev makes every decision.</text>
+
+  <!-- input -->
+  <rect x="40" y="92" width="900" height="58" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="58" y="115" font-size="10.5" font-weight="700" fill="#57606a" letter-spacing="0.6">INCOMING ALERT · UNSTRUCTURED</text>
+  <text x="58" y="137" font-size="12.5" fill="#1f2328">“Nine inbound wires of USD 9,400–9,800 from four unrelated remitters over 11 days, withdrawn within 48 hours…”</text>
+
+  <line x1="320" y1="152" x2="320" y2="172" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="314,170 326,170 320,179" fill="#8c959f"/>
+
+  <!-- agent -->
+  <rect x="40" y="181" width="560" height="308" rx="10" fill="#ffffff" stroke="#1f2328" stroke-width="1.5"/>
+  <text x="58" y="205" font-size="10.5" font-weight="700" fill="#57606a" letter-spacing="0.6">UIPATH CODED AGENT · SERVERLESS · PYTHON</text>
+
+  <rect x="60" y="216" width="520" height="66" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="78" y="239" font-size="13" font-weight="700" fill="#1f2328">1 · EXTRACT</text>
+  <text x="78" y="257" font-size="11.5" fill="#57606a">UiPath LLM Gateway · gpt-5-mini</text>
+  <text x="78" y="273" font-size="11.5" fill="#57606a">parties · amounts · dates · all arithmetic → tight digest</text>
+
+  <line x1="320" y1="282" x2="320" y2="292" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="314,290 326,290 320,298" fill="#8c959f"/>
+
+  <rect x="60" y="299" width="520" height="84" rx="6" fill="#eef7f5" stroke="#0f9d8f" stroke-width="2"/>
+  <text x="78" y="323" font-size="13" font-weight="700" fill="#0b6e63">2 · DECIDE</text>
+  <text x="78" y="341" font-size="11.5" fill="#0b6e63">TypeSafe Jev · jev-latest</text>
+  <text x="78" y="357" font-size="11.5" fill="#0b6e63">one API call · seven questions answered in parallel</text>
+  <text x="78" y="373" font-size="11.5" fill="#0b6e63" font-weight="700">every decision in the agent happens here</text>
+  <rect x="404" y="311" width="158" height="25" rx="12.5" fill="#0f9d8f"/>
+  <text x="483" y="328" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">398 ms · $0.000036</text>
+
+  <line x1="320" y1="383" x2="320" y2="393" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="314,391 326,391 320,399" fill="#8c959f"/>
+
+  <rect x="60" y="400" width="520" height="66" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="78" y="423" font-size="13" font-weight="700" fill="#1f2328">3 · EXPLAIN</text>
+  <text x="78" y="441" font-size="11.5" fill="#57606a">UiPath LLM Gateway · gpt-5-mini</text>
+  <text x="78" y="457" font-size="11.5" fill="#57606a">rationale + verbatim evidence quotes for the analyst</text>
+
+  <!-- jev panel -->
+  <rect x="620" y="181" width="320" height="308" rx="10" fill="#ffffff" stroke="#0f9d8f" stroke-width="1.5"/>
+  <text x="638" y="205" font-size="10.5" font-weight="700" fill="#0b6e63" letter-spacing="0.6">WHAT JEV RETURNS</text>
+
+  <text x="638" y="234" font-size="12.5" font-weight="700" fill="#1f2328">Noul ×5</text>
+  <text x="920" y="234" font-size="11" fill="#0b6e63" text-anchor="end">0.0 – 1.0</text>
+  <text x="638" y="252" font-size="11" fill="#57606a">structuring · rapid pass-through</text>
+  <text x="638" y="267" font-size="11" fill="#57606a">shell indicators · high-risk jurisdiction</text>
+  <text x="638" y="282" font-size="11" fill="#57606a">purpose mismatch</text>
+  <line x1="638" y1="296" x2="922" y2="296" stroke="#d0d7de"/>
+
+  <text x="638" y="320" font-size="12.5" font-weight="700" fill="#1f2328">Score ×1</text>
+  <text x="920" y="320" font-size="11" fill="#0b6e63" text-anchor="end">ordered rubric</text>
+  <text x="638" y="338" font-size="11" fill="#57606a">Low · Medium · High · Critical</text>
+  <line x1="638" y1="352" x2="922" y2="352" stroke="#d0d7de"/>
+
+  <text x="638" y="376" font-size="12.5" font-weight="700" fill="#1f2328">Choice ×1</text>
+  <text x="920" y="376" font-size="11" fill="#0b6e63" text-anchor="end">+ probabilities</text>
+  <text x="638" y="394" font-size="11" fill="#57606a">escalate · close · need_info</text>
+
+  <rect x="637" y="412" width="286" height="58" rx="6" fill="#eef7f5"/>
+  <text x="651" y="433" font-size="10.5" fill="#0b6e63">Typed values only — Jev cannot emit free</text>
+  <text x="651" y="448" font-size="10.5" fill="#0b6e63">text. That is exactly why the language work</text>
+  <text x="651" y="463" font-size="10.5" fill="#0b6e63">and the judgement are split apart.</text>
+
+  <line x1="320" y1="491" x2="320" y2="507" stroke="#8c959f" stroke-width="1.5"/>
+  <polygon points="314,505 326,505 320,513" fill="#8c959f"/>
+
+  <!-- result -->
+  <rect x="40" y="514" width="900" height="72" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="58" y="536" font-size="10.5" font-weight="700" fill="#57606a" letter-spacing="0.6">RESULT · STRICT SCHEMA, VALIDATED</text>
+  <text x="58" y="558" font-size="13.5" font-weight="700" fill="#1f2328">escalate · Critical · confidence 1.00</text>
+  <text x="58" y="576" font-size="11.5" fill="#57606a">red_flags{5} · parties_extracted[] · rationale · evidence[] · rubric_version 1.0.0</text>
+
+  <!-- head to head -->
+  <rect x="40" y="600" width="900" height="96" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="58" y="622" font-size="10.5" font-weight="700" fill="#57606a" letter-spacing="0.6">SAME SEVEN QUESTIONS, HEAD TO HEAD · 12 ALERTS</text>
+
+  <text x="58" y="648" font-size="11.5" font-weight="700" fill="#0b6e63">Jev</text>
+  <rect x="104" y="638" width="42" height="12" rx="3" fill="#0f9d8f"/>
+  <text x="156" y="648" font-size="11.5" fill="#1f2328">398 ms</text>
+
+  <text x="58" y="670" font-size="11.5" font-weight="700" fill="#57606a">LLM</text>
+  <rect x="104" y="660" width="650" height="12" rx="3" fill="#8250df"/>
+  <text x="764" y="670" font-size="11.5" fill="#1f2328">6160 ms</text>
+
+  <text x="58" y="688" font-size="11" fill="#57606a">accuracy 10/12 for both · Jev 15.5× faster per decision · $0.000426 vs 2.4 platform units for the whole set</text>
+</svg>
