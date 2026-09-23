@@ -27,6 +27,13 @@ from uipath.platform.entities import DataFabricEntityItem
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from .models import DataFabricQueryInput
 
+# Tags applied to the inner sub-graph invocation to exclude its messages from
+# the outer graph's stream_mode="messages" output. LangGraph's stream handler
+# emits inner messages via two paths: `nostream` excludes chat-model messages
+# (the inner LLM), `langsmith:hidden` excludes node-output messages (the inner
+# ToolMessages). Both are required to exclude the full set.
+_INTERNAL_SUBGRAPH_TAGS = ["nostream", "langsmith:hidden"]
+
 logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
@@ -119,7 +126,8 @@ class DataFabricTextQueryHandler:
 
         compiled_graph = await self._ensure_datafabric_graph()
         result_state = await compiled_graph.ainvoke(
-            {"messages": [HumanMessage(content=user_query)]}
+            {"messages": [HumanMessage(content=user_query)]},
+            config={"tags": _INTERNAL_SUBGRAPH_TAGS},
         )
         messages = result_state["messages"]
         last_message = messages[-1] if messages else None
