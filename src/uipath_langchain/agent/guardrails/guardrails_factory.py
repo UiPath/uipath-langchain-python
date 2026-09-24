@@ -44,6 +44,7 @@ from uipath_langchain.agent.guardrails.actions import (
     LogAction,
 )
 from uipath_langchain.agent.guardrails.utils import _sanitize_selector_tool_names
+from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 
 def _has_schema(tool: BaseTool, attribute_name: str) -> bool:
@@ -320,11 +321,15 @@ def _compute_field_sources_for_guardrail(
         and len(guardrail.selector.match_names) > 0
     ):
         match_name = guardrail.selector.match_names[0]
+        # The selector holds the name as the author typed it; tools are registered
+        # under the sanitized name. The selector itself is sanitized only after
+        # the rules are converted.
+        sanitized_match_name = sanitize_tool_name(match_name)
         matching_tool = next(
             (
                 t
                 for t in tools
-                if t.name == match_name
+                if t.name == sanitized_match_name
                 or (
                     isinstance(t.metadata, dict)
                     and t.metadata.get("display_name") == match_name
