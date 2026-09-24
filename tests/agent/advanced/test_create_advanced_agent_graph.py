@@ -5,6 +5,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -458,3 +459,33 @@ class TestOutputFileVerification:
 
         assert "messages" in update
         assert "uipath__output_file_retries" not in update
+
+
+@pytest.mark.asyncio
+async def test_transform_input_resolves_attachments_into_a_composite_default(
+    tmp_path: Any,
+) -> None:
+    """A CompositeBackend's default is the workspace, so attachments land there."""
+    workspace = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    backend = CompositeBackend(default=workspace, routes={"/skills/": StateBackend()})
+    with (
+        patch(
+            "uipath_langchain.agent.advanced.agent.get_job_attachment_paths",
+            return_value=["$.book"],
+        ),
+        patch(
+            "uipath_langchain.agent.advanced.agent.resolve_input_attachments",
+            new_callable=AsyncMock,
+        ) as mock_resolve,
+    ):
+        mock_resolve.return_value = {"book": {"FilePath": "/x"}, "question": "q"}
+        graph = _build(
+            backend=backend,
+            input_schema=_Input,
+            build_user_message=lambda args: f"msg:{args['question']}",
+        )
+        state = create_state_with_input(_Input)(book={"ID": "1"}, question="q")
+        await graph.nodes["transform_input"].runnable.ainvoke(state)
+
+    assert mock_resolve.await_args is not None
+    assert mock_resolve.await_args.args[0] is workspace
