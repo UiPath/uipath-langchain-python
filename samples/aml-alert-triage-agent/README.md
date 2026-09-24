@@ -75,8 +75,10 @@ flowchart TB
 ```
 
 Only two calls leave the container — the LLM Gateway call stays inside UiPath, and the Jev
-call goes outside it carrying every decision. The Jev key never travels in the package; it
-is read from an Orchestrator Asset at runtime, because `.env` does not reach serverless.
+call goes outside it carrying every decision. The Jev call carries only the derived digest
+(customer profile, account age, prior alerts and the extracted facts); the raw alert
+narrative never leaves UiPath. The Jev key never travels in the package; it is read from an
+Orchestrator Asset at runtime, because `.env` does not reach serverless.
 
 ---
 
@@ -174,6 +176,11 @@ to judge against, or when volume is low enough that a person reads everything an
 ---
 
 ## Measured results
+
+> ⏳ **Pending re-measurement.** The figures in this README and in `docs/` were recorded with
+> an earlier version that also sent the raw alert narrative to Jev. The current version
+> sends only the derived digest, so accuracy and calibration may differ. Run
+> `python evaluate.py --compare` for current figures.
 
 12 synthetic alerts, hand-authored ground truth, **both deciders answering the same seven
 questions** so the comparison is like-for-like:
@@ -361,6 +368,19 @@ Locally the Jev key comes from `.env` (`JEV_API_KEY` or `TYPESAFE_API_KEY`).
 **`.env` does not propagate to the serverless runtime** — in the cloud the agent reads the
 Orchestrator asset `JevApiKey`. The fallback is in `main.py:_jev_key()`.
 
+### Untrusted input
+
+The alert text is attacker-influenced, so it is never mixed into the instructions. Each LLM
+call puts it in its own message inside `<alert>` tags, and the system prompt says to treat
+the tag contents as data. Model output is validated before it is used:
+
+- Extraction output is parsed into `ExtractedFacts`. Unknown keys are dropped, so the LLM
+  cannot overwrite the input fields.
+- When the LLM is the decider, its answer is parsed into `LLMDecision`. Probabilities outside
+  0–1, an unknown disposition or a missing red flag fail the run instead of passing as a
+  valid decision.
+- `Output` enforces the same bounds for both deciders.
+
 ---
 
 ## Verified, not assumed
@@ -369,7 +389,8 @@ Orchestrator asset `JevApiKey`. The fallback is in `main.py:_jev_key()`.
   in UiPath's docs states this either way, so it was spiked before anything was built.
 - Orchestrator asset read from inside a serverless coded-agent run — **works**.
 - Published and run as `ServerlessJobType: PythonCodedAgent` — **Successful**.
-- All numbers in this README come from real runs, not estimates.
+- All numbers in this README come from real runs, not estimates (see the note under
+  [Measured results](#measured-results)).
 
 ## Licence
 

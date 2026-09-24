@@ -46,7 +46,8 @@ flowchart TB
 ```
 
 **The one thing to notice:** only two things leave the container — the LLM Gateway call
-(inside UiPath) and the Jev call (outside it). The Jev key never travels in the package; it
+(inside UiPath) and the Jev call (outside it). The Jev call carries only the derived digest;
+the raw alert narrative never leaves UiPath. The Jev key never travels in the package; it
 is read from an Orchestrator Asset at runtime, because `.env` does not reach serverless.
 
 ---

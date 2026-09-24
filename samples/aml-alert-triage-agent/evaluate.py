@@ -188,7 +188,7 @@ def main() -> int:
         Path("evals/results.json").write_text(
             json.dumps({"jev": jev["rows"], "llm": llm["rows"]}, indent=2), encoding="utf-8")
         print("\n  wrote evals/results.json")
-        return 0 if jev["schema_rate"] >= BAR_SCHEMA else 1
+        return 0 if min(jev["schema_rate"], llm["schema_rate"]) >= BAR_SCHEMA else 1
 
     r = run_set(alerts, args.decider)
     report(r)
