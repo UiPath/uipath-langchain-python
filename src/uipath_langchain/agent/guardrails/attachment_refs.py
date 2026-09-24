@@ -10,10 +10,10 @@ Two sources feed the same reference shape:
   file forwards nothing, even when the run holds files elsewhere; otherwise every tool
   call would ship every file to the backend.
 
-Any built-in guardrail forwards references unless it is scoped to prompts. The runtime
-forwards id, file name and mime type only; the backend's feature flag decides whether
-they are used at all, the backend decides which validators and file types it can
-inspect, and it resolves the id through Orchestrator.
+Any built-in guardrail forwards references unless its ``appliesTo`` scope is text only.
+The runtime forwards id, file name and mime type only; the backend's feature flag
+decides whether they are used at all, the backend decides which validators and file
+types it can inspect, and it resolves the id through Orchestrator.
 
 Nothing in this module raises: the guardrail node re-raises any exception, which would
 end the run over a single malformed attachment.
@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 #: Limits enforced by the validate API.
 _MAX_ATTACHMENTS = 5
 _MAX_FILE_NAME_LENGTH = 260
-#: ``appliesTo`` guardrail parameter; only ``Prompts`` excludes files (default is ``Both``).
+#: ``appliesTo``: an allow-list, so an unknown value narrows to text only. Absent takes the backend default.
 _APPLIES_TO_PARAMETER = "appliesto"
-_PROMPTS_ONLY = "prompts"
+_FILE_SCOPES: frozenset[str] = frozenset({"files", "both"})
 #: Wire key of a job attachment reference as the model and the tools exchange it.
 _ID_KEY = "ID"
 #: Bounds for scanning a tool payload, which can be arbitrarily large or deep.
@@ -49,7 +49,10 @@ def _scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> bool:
             if parameter.id.lower() != _APPLIES_TO_PARAMETER:
                 continue
             if isinstance(parameter.value, str):
-                return parameter.value.strip().lower() != _PROMPTS_ONLY
+                # Empty means absent, as the backend reads it.
+                scope = parameter.value.strip().lower()
+                if scope:
+                    return scope in _FILE_SCOPES
     except Exception:
         logger.debug(
             "Could not read the guardrail scope; assuming files apply.", exc_info=True
@@ -64,14 +67,14 @@ async def resolve_guardrail_attachments(
     """Return up to five references for every attachment the run knows about.
 
     For Agent- and LLM-scope guardrails, which evaluate the conversation as a whole.
-    Empty when the guardrail is scoped to prompts or the run has no attachments. Never
+    Empty when the guardrail is scoped to text only or the run has no attachments. Never
     raises.
     """
     if not job_attachments:
         return []
     if not _scope_includes_files(guardrail):
         logger.debug(
-            "Guardrail '%s' is scoped to prompts; skipping attachment resolution.",
+            "Guardrail '%s' is scoped to text only; skipping attachment resolution.",
             guardrail.name,
         )
         return []
@@ -92,13 +95,13 @@ def resolve_referenced_attachments(
     set of files this run legitimately has (agent input plus files its tools returned),
     so a mention the run never held, or a non-attachment resource id, is skipped rather
     than sent to the backend for lookup. Empty when nothing is mentioned or the guardrail
-    is scoped to prompts. Never raises.
+    is scoped to text only. Never raises.
     """
     if data is None:
         return []
     if not _scope_includes_files(guardrail):
         logger.debug(
-            "Guardrail '%s' is scoped to prompts; skipping attachment resolution.",
+            "Guardrail '%s' is scoped to text only; skipping attachment resolution.",
             guardrail.name,
         )
         return []
