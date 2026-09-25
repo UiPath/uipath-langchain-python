@@ -67,8 +67,10 @@ class _NoopReferenceContextAccessor:
 
 ReferenceContext: Any = None
 ReferenceContextAccessor: Any = _NoopReferenceContextAccessor
+resolve_project_id: Any = None
 
 try:
+    from uipath.platform.common._span_utils import resolve_project_id
     from uipath.tracing import (
         ReferenceContext,
         ReferenceContextAccessor,
@@ -117,19 +119,33 @@ class UiPathLangGraphRuntime:
         ``langgraph`` entry for this runtime.  Returns the ContextVar token
         so the caller can reset in a ``finally`` block.
 
+        The entry must carry the id the span's ReferenceId resolves to, so the
+        hierarchy leaf and ReferenceId name the same entity. ``_SpanUtils``
+        derives ReferenceId as ``agentId or referenceId`` and overwrites
+        ``agentId`` with ``resolve_project_id()`` — so that is the id to push,
+        with ``UIPATH_AGENT_ID`` as the fallback for when it resolves to nothing.
+
         Returns a no-op token when the installed uipath package predates
         reference-context support.
         """
         if ReferenceContext is None:
             return ReferenceContextAccessor.set(None)
-        agent_id = os.environ.get("UIPATH_AGENT_ID")
+        env_agent_id = os.environ.get("UIPATH_AGENT_ID")
+        hierarchy_id = (
+            resolve_project_id() if resolve_project_id else None
+        ) or env_agent_id
         agent_version = os.environ.get("UIPATH_PROCESS_VERSION") or None
         parent_ctx = ReferenceContextAccessor.get() or ReferenceContext.Empty
-        ref_ctx = (
-            parent_ctx.add("langgraph", agent_id, agent_version)
-            if agent_id
-            else parent_ctx
-        )
+        try:
+            ref_ctx = (
+                parent_ctx.add("langgraph", hierarchy_id, agent_version)
+                if hierarchy_id
+                else parent_ctx
+            )
+        except ValueError:
+            # Not a UUID (env-var sources are unvalidated). Skip this entry
+            # rather than failing the run.
+            ref_ctx = parent_ctx
         return ReferenceContextAccessor.set(ref_ctx)
 
     async def execute(
