@@ -321,9 +321,6 @@ def _compute_field_sources_for_guardrail(
         and len(guardrail.selector.match_names) > 0
     ):
         match_name = guardrail.selector.match_names[0]
-        # The selector holds the name as the author typed it; tools are registered
-        # under the sanitized name. The selector itself is sanitized only after
-        # the rules are converted.
         sanitized_match_name = sanitize_tool_name(match_name)
         matching_tool = next(
             (
