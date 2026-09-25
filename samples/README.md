@@ -1,5 +1,8 @@
 # Project Samples
 
+## [AML alert triage agent](aml-alert-triage-agent)
+This sample demonstrates a coded LangGraph agent that triages anti-money-laundering alerts by splitting the work: the UiPath LLM Gateway extracts facts and writes the rationale, while an external decision model (TypeSafe Jev) makes every typed, calibrated decision. It includes a 12-alert eval set and a switchable decider for a head-to-head comparison.
+
 ## [Calculator agent](calculator-agent)
 This sample demonstrates a simple LangGraph agent that performs basic arithmetic operations and showcases nested traced invocations.
 
