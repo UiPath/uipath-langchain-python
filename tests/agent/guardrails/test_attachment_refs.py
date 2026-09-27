@@ -26,15 +26,44 @@ def _judge() -> MagicMock:
     return guardrail
 
 
-def _scoped_judge(applies_to: str, parameter_id: str = "appliesTo") -> MagicMock:
-    """A judge guardrail carrying the ``appliesTo`` parameter the designer writes."""
+def _scoped_judge(applies_to: str | None, parameter_id: str = "appliesTo") -> MagicMock:
+    """A judge guardrail carrying the ``appliesTo`` parameter the designer writes.
+
+    ``applies_to=None`` carries no ``appliesTo`` parameter at all.
+    """
     guardrail = _judge()
-    guardrail.validator_parameters = [
-        EnumParameterValue.model_validate(
-            {"$parameterType": "enum", "id": parameter_id, "value": applies_to}
-        )
-    ]
+    guardrail.validator_parameters = (
+        []
+        if applies_to is None
+        else [
+            EnumParameterValue.model_validate(
+                {"$parameterType": "enum", "id": parameter_id, "value": applies_to}
+            )
+        ]
+    )
     return guardrail
+
+
+#: ``appliesTo`` values and whether files stay in scope. ``None`` is a guardrail with no such
+#: parameter, which leaves the decision to the backend's default.
+_SCOPE_CASES = [
+    ("Text", False),
+    ("text", False),
+    ("  TEXT  ", False),
+    # The pre-rename spelling: no longer recognised, but must still resolve to text only.
+    ("Prompts", False),
+    ("prompts", False),
+    ("  PROMPTS  ", False),
+    ("something-we-never-shipped", False),
+    ("", True),
+    ("   ", True),
+    ("Files", True),
+    ("files", True),
+    ("  FILES  ", True),
+    ("Both", True),
+    ("both", True),
+    (None, True),
+]
 
 
 def _registry(mime: str = "text/csv", name: str = "a.csv") -> dict[str, Attachment]:
@@ -140,37 +169,25 @@ class TestResolveGuardrailAttachments:
 
         assert len(result[0].file_name) == 260
 
-    @pytest.mark.parametrize("applies_to", ["Prompts", "prompts", "  PROMPTS  "])
-    async def test_returns_empty_when_scoped_to_prompts(self, monkeypatch, applies_to):
-        """A prompts-only guardrail must not forward any file reference."""
+    @pytest.mark.parametrize("applies_to,includes_files", _SCOPE_CASES)
+    async def test_honors_the_applies_to_scope(
+        self, monkeypatch, applies_to, includes_files
+    ):
+        """Only Files and Both forward references; anything else present is text only."""
         result = await resolve_guardrail_attachments(
             _registry(), _scoped_judge(applies_to)
         )
 
-        assert result == []
+        assert [r.file_name for r in result] == (["a.csv"] if includes_files else [])
 
     async def test_matches_the_scope_parameter_id_case_insensitively(self, monkeypatch):
         """The backend matches parameter ids ignoring case; a mismatch here would resolve
         files the author scoped out."""
         result = await resolve_guardrail_attachments(
-            _registry(), _scoped_judge("Prompts", parameter_id="AppliesTo")
+            _registry(), _scoped_judge("Text", parameter_id="AppliesTo")
         )
 
         assert result == []
-
-    @pytest.mark.parametrize(
-        "applies_to", ["Files", "Both", "both", "something-we-never-shipped"]
-    )
-    async def test_resolves_when_the_scope_is_not_prompts_only(
-        self, monkeypatch, applies_to
-    ):
-        """Anything but Prompts keeps files in scope, matching the backend's default of Both.
-        An unrecognized value must not silently stop scanning files."""
-        result = await resolve_guardrail_attachments(
-            _registry(), _scoped_judge(applies_to)
-        )
-
-        assert [r.file_name for r in result] == ["a.csv"]
 
     async def test_resolves_when_the_scope_parameter_is_malformed(self, monkeypatch):
         """Never raises: the caller re-raises, which would end the run over a bad parameter."""
@@ -271,13 +288,13 @@ class TestResolveReferencedAttachments:
 
         assert len(result) == _MAX_ATTACHMENTS
 
-    @pytest.mark.parametrize("applies_to", ["Prompts", "prompts"])
-    async def test_returns_empty_when_scoped_to_prompts(self, applies_to):
+    @pytest.mark.parametrize("applies_to,includes_files", _SCOPE_CASES)
+    async def test_honors_the_applies_to_scope(self, applies_to, includes_files):
         result = resolve_referenced_attachments(
             {"attachment": {"ID": _UUID}}, _registry(), _scoped_judge(applies_to)
         )
 
-        assert result == []
+        assert [r.file_name for r in result] == (["a.csv"] if includes_files else [])
 
     async def test_accepts_attachment_instances_and_models(self):
         """Arguments may already carry expanded objects, not only wire dicts; they are

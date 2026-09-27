@@ -22,6 +22,9 @@ from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentGuardrailUnknownAction,
     AgentNumberOperator,
     AgentNumberRule,
+    AgentProcessToolProperties,
+    AgentProcessToolResourceConfig,
+    AgentToolType,
     AgentWordOperator,
     AgentWordRule,
     AssetRecipient,
@@ -58,6 +61,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
     _create_word_rule_func,
     build_guardrails_with_actions,
 )
+from uipath_langchain.agent.tools.process_tool import create_process_tool
 
 
 class TestGuardrailsFactory:
@@ -1388,3 +1392,103 @@ class TestConvertAgentCustomGuardrailToDeterministic:
 
         assert isinstance(result, DeterministicGuardrail)
         assert len(result.rules) == 0
+
+
+class TestToolScopeMatchNames:
+    """A Tool-scope selector names a tool as the author typed it, not sanitized."""
+
+    @pytest.mark.parametrize("tool_name", ["My Function", "Send E-mail (v2)!"])
+    def test_all_fields_rule_resolves_a_process_tool_named_with_special_characters(
+        self, tool_name: str
+    ) -> None:
+        tool = create_process_tool(
+            AgentProcessToolResourceConfig(
+                type=AgentToolType.FUNCTION,
+                name=tool_name,
+                description="Test function",
+                input_schema={
+                    "type": "object",
+                    "properties": {"amount": {"type": "number"}},
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {"total": {"type": "number"}},
+                },
+                properties=AgentProcessToolProperties(
+                    process_name="Function_1",
+                    folder_path="solution_folder",
+                ),
+            )
+        )
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "guardrail-1",
+                "name": "Guardrail 1",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {"scopes": ["Tool"], "matchNames": [tool_name]},
+                "rules": [
+                    {
+                        "$ruleType": "number",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "equals",
+                        "value": 10,
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "blocked"},
+            }
+        )
+
+        [(converted, _)] = build_guardrails_with_actions([guardrail], [tool])
+
+        assert isinstance(converted, DeterministicGuardrail)
+        assert converted.selector is not None
+        # The tool guardrails subgraph attaches the guardrail by this name.
+        assert converted.selector.match_names == [tool.name]
+        [rule] = converted.rules
+        assert isinstance(rule, NumberRule)
+        assert isinstance(rule.field_selector, AllFieldsSelector)
+        assert rule.field_selector.sources == [FieldSource.INPUT, FieldSource.OUTPUT]
+
+    def test_all_fields_rule_resolves_an_mcp_tool_by_its_display_name(self) -> None:
+        """An MCP tool's name is qualified by its resource; the selector names the
+        tool's own name, which the tool keeps as its display name."""
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        class ToolInput(BaseModel):
+            query: str
+
+        tool = Mock(spec=BaseTool)
+        tool.name = "mcp-sales_mcp-tool-search_tool"
+        tool.args_schema = ToolInput
+        tool.metadata = {"tool_type": "mcp", "display_name": "Search Tool!"}
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "guardrail-1",
+                "name": "Guardrail 1",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {"scopes": ["Tool"], "matchNames": ["Search Tool!"]},
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "blocked"},
+            }
+        )
+
+        [(converted, _)] = build_guardrails_with_actions([guardrail], [tool])
+
+        assert isinstance(converted, DeterministicGuardrail)
+        [rule] = converted.rules
+        assert isinstance(rule, WordRule)
+        assert isinstance(rule.field_selector, AllFieldsSelector)
+        assert rule.field_selector.sources == [FieldSource.INPUT]
