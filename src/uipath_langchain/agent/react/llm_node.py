@@ -16,7 +16,10 @@ from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.chat.handlers import get_payload_handler
-from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
+from uipath_langchain.chat.thinking import (
+    model_rejects_forced_tool_choice,
+    thinking_rejects_forced_tool_choice,
+)
 
 from ..exceptions import (
     AgentRuntimeError,
@@ -30,7 +33,7 @@ from ..exceptions.llm import (
 from ..messages.message_utils import replace_tool_calls
 from ..tools.static_args import StaticArgsHandler
 from .constants import DEFAULT_MAX_LLM_MESSAGES
-from .forced_extraction import build_extraction_call
+from .forced_extraction import build_extraction_call, build_nudge_messages
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_tool_less_turns
 
@@ -108,6 +111,7 @@ def create_llm_node(
         current_tool_choice: Literal["auto", "any"] = tool_choice
         consecutive_tool_less = count_consecutive_tool_less_turns(messages)
         thinking_rejects_forcing = thinking_rejects_forced_tool_choice(model)
+        model_rejects_forcing = model_rejects_forced_tool_choice(model)
         call_model: BaseChatModel = model
         call_messages: list[AnyMessage] = messages
         handler = payload_handler
@@ -122,10 +126,13 @@ def create_llm_node(
                     "configuration, verify your model deployment respects tool_choice.",
                     category=UiPathErrorCategory.SYSTEM,
                 )
-            current_tool_choice = "any"
-            if thinking_rejects_forcing and consecutive_tool_less > 0:
-                call_model, call_messages = build_extraction_call(model, messages)
-                handler = get_payload_handler(call_model)
+            current_tool_choice = "auto" if model_rejects_forcing else "any"
+            if consecutive_tool_less > 0:
+                if model_rejects_forcing:
+                    call_messages = build_nudge_messages(messages)
+                elif thinking_rejects_forcing:
+                    call_model, call_messages = build_extraction_call(model, messages)
+                    handler = get_payload_handler(call_model)
 
         binding_kwargs = handler.get_tool_binding_kwargs(
             tools=static_schema_tools,
