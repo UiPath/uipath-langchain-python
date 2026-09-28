@@ -15,6 +15,7 @@ from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
     AgentToolArrayBuilderArgumentProperties,
+    AgentToolObjectBuilderArgumentProperties,
     AgentToolStaticArgumentProperties,
     AgentToolTextBuilderArgumentProperties,
 )
@@ -108,6 +109,9 @@ def _resolve_argument_properties(
                 )
             case AgentToolArrayBuilderArgumentProperties():
                 return resolve_arraybuilder(json_path, argument_properties)
+            case AgentToolObjectBuilderArgumentProperties():
+                # A marker: the object's properties are resolved individually.
+                return None
             case _:
                 raise ValueError(f"Unsupported argument property type: {type(props)}")
 
@@ -163,11 +167,18 @@ def _resolve_argument_properties(
     def deduplicate_argument_properties(
         properties: Mapping[str, AgentToolArgumentProperties],
     ) -> Iterator[tuple[str, AgentToolArgumentProperties]]:
-        """Skips more specific argument properties. In effect, prioritizes parent paths over child paths."""
+        """Skips more specific argument properties. In effect, prioritizes parent paths over child paths.
+
+        An objectBuilder is only a marker and never shadows its children, which
+        carry their own argument properties."""
 
         last_yielded: str | None = None
         for json_path in sorted(properties.keys()):
             if last_yielded is not None and json_path.startswith(last_yielded):
+                continue
+            if isinstance(
+                properties[json_path], AgentToolObjectBuilderArgumentProperties
+            ):
                 continue
             yield json_path, properties[json_path]
             last_yielded = json_path
