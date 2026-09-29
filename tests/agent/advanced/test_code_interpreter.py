@@ -20,6 +20,7 @@ from deepagents.backends import FilesystemBackend
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, StructuredTool, tool
+from uipath.agent.models.agent import AgentToolStaticArgumentProperties
 
 from uipath_langchain._utils.durable_interrupt import SUSPENDS_RUN
 from uipath_langchain.agent.advanced import (
@@ -35,6 +36,9 @@ from uipath_langchain.agent.advanced.code_interpreter import (
     EVAL_TOOL_NAME,
     SINGLE_IN_FLIGHT_NOTE,
 )
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 
 pytest.importorskip("langchain_quickjs", reason="needs the code-interpreter extra")
 
@@ -46,6 +50,22 @@ def _tool(name: str, *, suspends: bool = False) -> BaseTool:
         name=name,
         description=f"tool {name}",
         metadata={SUSPENDS_RUN: True} if suspends else {},
+    )
+
+
+def _bound_tool(name: str) -> BaseTool:
+    """An agent tool with one argument pinned to a static value."""
+    return StructuredToolWithArgumentProperties(
+        name=name,
+        description=f"tool {name}",
+        args_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+        func=lambda value="": value,
+        output_type=None,
+        argument_properties={
+            "$['value']": AgentToolStaticArgumentProperties(
+                value="pinned", is_sensitive=False
+            )
+        },
     )
 
 
@@ -123,6 +143,18 @@ def test_suspending_tools_are_withheld() -> None:
     assert ptc_tool_names(
         [_tool("read_invoice"), _tool("escalate", suspends=True)]
     ) == ["read_invoice"]
+
+
+def test_tools_with_argument_bindings_are_withheld() -> None:
+    """A bound argument is enforced on the model's tool calls, not on a bridged call.
+
+    ``StaticArgsMiddleware`` rewrites what the model returns; the REPL invokes the
+    tool object directly with whatever the script passes, so the pin would not
+    hold there. The tool stays available as an ordinary tool call.
+    """
+    assert ptc_tool_names([_tool("read_invoice"), _bound_tool("web_search")]) == [
+        "read_invoice"
+    ]
 
 
 @pytest.mark.parametrize(

@@ -290,8 +290,8 @@ class TestStaticArgsHandler:
         handler.apply_to_response([call])
         assert call["args"] == {"query": "hello"}
 
-    def test_initialize_caches_results(self):
-        """Test that initialize returns cached tools on subsequent calls."""
+    def test_initialize_keeps_the_resolution_for_the_same_input(self):
+        """Repeated calls with unchanged input reuse the schema-modified tool."""
         tool = _create_tool(
             "test_tool",
             {
@@ -301,9 +301,10 @@ class TestStaticArgsHandler:
             },
         )
         handler = StaticArgsHandler()
-        tools_first = handler.initialize([tool], EmptyInput(), EmptyInput)
-        tools_second = handler.initialize([tool], EmptyInput(), EmptyInput)
-        assert tools_first is tools_second
+        [tool_first] = handler.initialize([tool], EmptyInput(), EmptyInput)
+        [tool_second] = handler.initialize([tool], EmptyInput(), EmptyInput)
+        assert tool_first is tool_second
+        assert tool_first is not tool
 
     def test_initialize_returns_schema_modified_tools(self):
         """Test that initialize returns tools with schema modifications applied."""
@@ -1019,3 +1020,89 @@ class TestDeduplicationOfArgumentProperties:
         assert result == {"$['items']": ["a", "b"]}
         assert "$['items'][0]" not in result
         assert "$['items'][1]" not in result
+
+
+class TestStaticArgsHandlerFollowsTheInput:
+    """The resolution tracks the agent input instead of freezing on the first one."""
+
+    class InputSchema(BaseModel):
+        hostName: str
+
+    def _tool(self) -> StructuredToolWithArgumentProperties:
+        return _create_tool(
+            "t",
+            {
+                "$['host']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="hostName"
+                )
+            },
+        )
+
+    def _applied_host(self, handler: StaticArgsHandler) -> Any:
+        call = _make_tool_call("t", {"host": "from-model", "api_key": "k"})
+        handler.apply_to_response([call])
+        return call["args"]["host"]
+
+    def test_re_resolves_when_the_input_changes(self) -> None:
+        tool = self._tool()
+        handler = StaticArgsHandler()
+
+        handler.initialize(
+            [tool], self.InputSchema(hostName="a.example.com"), self.InputSchema
+        )
+        assert self._applied_host(handler) == "a.example.com"
+
+        handler.initialize(
+            [tool], self.InputSchema(hostName="b.example.com"), self.InputSchema
+        )
+        assert self._applied_host(handler) == "b.example.com"
+
+    def test_keeps_the_resolution_while_the_input_is_unchanged(self) -> None:
+        tool = self._tool()
+        handler = StaticArgsHandler()
+        state = self.InputSchema(hostName="a.example.com")
+
+        [first] = handler.initialize([tool], state, self.InputSchema)
+        [again] = handler.initialize([tool], state, self.InputSchema)
+
+        assert again is first
+
+    def test_input_schema_may_declare_graph_channels(self) -> None:
+        """A conversational schema lists ``messages``; that is the graph's channel, not input."""
+
+        class ChatInput(BaseModel):
+            messages: list[Any]
+            hostName: str
+
+        class State(BaseModel):
+            messages: list[Any] = Field(default_factory=list)
+            hostName: str = "a.example.com"
+
+        handler = StaticArgsHandler()
+
+        handler.initialize([self._tool()], State(), ChatInput)
+
+        assert self._applied_host(handler) == "a.example.com"
+
+    def test_nested_input_models_are_walked_as_data(self) -> None:
+        class Server(BaseModel):
+            name: str
+
+        class NestedInput(BaseModel):
+            server: Server
+
+        tool = _create_tool(
+            "t",
+            {
+                "$['host']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="server.name"
+                )
+            },
+        )
+        handler = StaticArgsHandler()
+
+        handler.initialize(
+            [tool], NestedInput(server=Server(name="n.example.com")), NestedInput
+        )
+
+        assert self._applied_host(handler) == "n.example.com"
