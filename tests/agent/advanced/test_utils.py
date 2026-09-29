@@ -7,7 +7,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from deepagents.backends import FilesystemBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
@@ -19,6 +19,7 @@ from uipath_langchain._utils._attachments import (
 from uipath_langchain.agent.advanced.types import AdvancedAgentGraphState
 from uipath_langchain.agent.advanced.utils import (
     create_state_with_input,
+    resolve_backend,
     resolve_input_attachments,
     resolve_message_attachments,
 )
@@ -26,6 +27,15 @@ from uipath_langchain.agent.advanced.utils import (
 
 class _InputSchema(BaseModel):
     question: str = ""
+
+
+def test_resolve_backend_unwraps_a_composite_default(tmp_path: Path) -> None:
+    fs = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    assert resolve_backend(fs) is fs
+    assert resolve_backend(CompositeBackend(default=fs, routes={})) is fs
+    assert resolve_backend(CompositeBackend(default=StateBackend(), routes={})) is None
+    assert resolve_backend(StateBackend()) is None
+    assert resolve_backend(None) is None
 
 
 def test_create_state_returns_base_state_when_schema_is_none() -> None:
