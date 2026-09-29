@@ -17,7 +17,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
     _PayloadHandlerMiddleware,
-    _subagents_without_main_agent_tools,
+    _resolve_subagent_specs,
     create_advanced_agent,
 )
 from uipath_langchain.agent.exceptions import (
@@ -59,9 +59,7 @@ def _specs(subagents: Any, extra: Any, shared: Any = ()) -> list[dict[str, Any]]
     """Resolved subagent specs as plain dicts, for key assertions."""
     return [
         dict(spec)
-        for spec in _subagents_without_main_agent_tools(
-            subagents, list(shared), None, extra
-        )
+        for spec in _resolve_subagent_specs(subagents, list(shared), None, extra)
     ]
 
 

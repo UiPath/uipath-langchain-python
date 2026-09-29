@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from uipath.agent.models.agent import AgentInternalToolResourceConfig
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -21,17 +22,17 @@ from uipath_langchain.agent.react.types import (
     AgentGraphNode,
     AgentGraphState,
 )
-from uipath_langchain.agent.tools.internal_tools.output_file_tool import (
-    OUTPUT_FILE_TOOL_NAME,
-    create_output_file_tool,
+from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
+    create_file_tool,
 )
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     JOB_ATTACHMENT_DEFINITION,
 )
 
+from ..attachments.fake_orchestrator import patch_orchestrator
+
 ATTACHMENT_ID = "11111111-1111-1111-1111-111111111111"
 OTHER_ATTACHMENT_ID = "22222222-2222-2222-2222-222222222222"
-JOB_KEY = "33333333-3333-3333-3333-333333333333"
 
 
 def output_schema(required: list[str] | None = None) -> dict[str, Any]:
@@ -63,6 +64,7 @@ def state_ending_with(args: dict[str, Any], *, tool_name: str | None = None) -> 
         messages=[
             HumanMessage(content="go"),
             AIMessage(
+                id="ai-1",
                 content="",
                 tool_calls=[
                     {
@@ -83,20 +85,9 @@ def fields():
 
 @pytest.fixture
 def linked_job(monkeypatch):
-    """A current job whose only linked attachment is ATTACHMENT_ID."""
-    monkeypatch.setenv("UIPATH_JOB_KEY", JOB_KEY)
-    monkeypatch.delenv("UIPATH_FOLDER_KEY", raising=False)
-
-    class FakeJobs:
-        async def list_attachments_async(self, **kwargs: Any) -> list[str]:
-            return [ATTACHMENT_ID]
-
-    class FakeUiPath:
-        jobs = FakeJobs()
-
-    monkeypatch.setattr(
-        "uipath_langchain.agent.attachments.output_files.UiPath",
-        lambda *args, **kwargs: FakeUiPath(),
+    """A current job where only ATTACHMENT_ID exists, already linked to it."""
+    return patch_orchestrator(
+        monkeypatch, existing={ATTACHMENT_ID: "report.md"}, linked=[ATTACHMENT_ID]
     )
 
 
@@ -107,7 +98,20 @@ class TestOutputFilesNode:
         command = await node(state_ending_with({"summary": "s", "report": ticket()}))
 
         assert command.goto == AgentGraphNode.TERMINATE
-        assert not command.update
+        (message,) = command.update["messages"]
+        assert message.tool_calls[0]["args"]["report"]["ID"] == ATTACHMENT_ID
+
+    async def test_an_edited_reference_reaches_termination_rebuilt(
+        self, fields, linked_job
+    ):
+        node = create_output_files_node(fields, max_retries=2)
+        edited = {**ticket(), "FullName": "/report.md"}
+
+        command = await node(state_ending_with({"summary": "s", "report": edited}))
+
+        (message,) = command.update["messages"]
+        assert message.id == "ai-1"
+        assert message.tool_calls[0]["args"]["report"]["FullName"] == "report.md"
 
     async def test_missing_required_file_returns_a_corrective_tool_message(
         self, fields, linked_job
@@ -121,11 +125,10 @@ class TestOutputFilesNode:
         assert isinstance(message, ToolMessage)
         assert message.tool_call_id == "call-1"
         assert message.status == "error"
-        assert OUTPUT_FILE_TOOL_NAME in message.content
         assert "'report'" in message.content
         assert command.update["inner_state"]["output_file_retries"] == 1
 
-    async def test_unlinked_attachment_returns_a_corrective_tool_message(
+    async def test_unknown_attachment_returns_a_corrective_tool_message(
         self, fields, linked_job
     ):
         node = create_output_files_node(fields, max_retries=2)
@@ -179,11 +182,34 @@ class TestOutputFilesNode:
         assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
 
 
+def make_tool():
+    return create_file_tool(
+        AgentInternalToolResourceConfig.model_validate(
+            {
+                "$resourceType": "tool",
+                "type": "Internal",
+                "name": "Create File",
+                "description": "Make a file.",
+                "properties": {"toolType": "create-file"},
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fileName": {"type": "string"},
+                        "content": {"type": "string"},
+                        "filePath": {"type": "string"},
+                    },
+                    "required": ["fileName"],
+                },
+            }
+        )
+    )
+
+
 class TestGraphWiring:
     def build(self, schema: dict[str, Any], *, enabled: bool = True, tools=None):
         return create_agent(
             model=GenericFakeChatModel(messages=iter([])),
-            tools=tools if tools is not None else [create_output_file_tool()],
+            tools=tools if tools is not None else [make_tool()],
             messages=[SystemMessage(content="sys"), HumanMessage(content="go")],
             output_schema=create_model(schema),
             config=AgentGraphConfig(output_files_enabled=enabled),
