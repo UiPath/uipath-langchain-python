@@ -10,7 +10,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-28T12:08:15.8686945Z"
+exclude-newer = "2026-09-28T20:18:47.4821631Z"
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
@@ -4933,7 +4933,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.20.0,<1.21.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.20.0,<1.21.0" },
     { name = "uipath-llm-client", specifier = ">=1.20.0,<1.21.0" },
-    { name = "uipath-platform", specifier = ">=0.2.31,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.33,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.13.0,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpreter", "all"]
