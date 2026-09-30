@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from langchain_core.messages import ToolCall
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextQuerySetting,
@@ -482,11 +483,12 @@ class TestCreateDeepRagTool:
         expected = "  exact {{literal}}\n task "
         handler = StaticArgsHandler()
         handler.initialize([tool], input_model(task=expected), input_model)
-        call = {"name": tool.name, "args": {"query": "model query"}, "id": "call-1"}
+        call = ToolCall(name=tool.name, args={"query": "model query"}, id="call-1")
         handler.apply_to_response([call])
         attachment = MockAttachment(
             ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
         )
         mock_interrupt.return_value = {"text": "done"}
+        assert tool.coroutine is not None
         await tool.coroutine(**call["args"], attachment=attachment)
         assert mock_interrupt.call_args.args[0].prompt == expected

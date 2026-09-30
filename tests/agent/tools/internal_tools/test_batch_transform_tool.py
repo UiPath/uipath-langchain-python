@@ -5,7 +5,8 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from langchain_core.messages import ToolCall
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextOutputColumn,
     AgentContextQuerySetting,
@@ -26,6 +27,7 @@ from uipath.platform.context_grounding.context_grounding_index import (
 from uipath_langchain.agent.tools.internal_tools.batch_transform_tool import (
     create_batch_transform_tool,
 )
+from uipath_langchain.agent.tools.static_args import StaticArgsHandler
 
 
 class MockAttachment(BaseModel):
@@ -333,6 +335,7 @@ class TestCreateBatchTransformTool:
         lambda **kwargs: lambda f: f,
     )
     @patch.dict(os.environ, {"UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1"})
+    @pytest.mark.parametrize("variant", ["dynamic", "argument"])
     async def test_create_batch_transform_tool_dynamic_query(
         self,
         mock_interrupt,
@@ -341,8 +344,9 @@ class TestCreateBatchTransformTool:
         mock_get_wrapper,
         resource_config_dynamic,
         mock_llm,
+        variant,
     ):
-        """Test Batch Transform tool with dynamic query."""
+        """Test model-supplied and argument-bound Batch Transform queries."""
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
@@ -371,8 +375,19 @@ class TestCreateBatchTransformTool:
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
 
-        # Create tool
+        if variant == "argument":
+            resource_config_dynamic.properties.settings.query = (
+                AgentContextQuerySetting(variant="argument", value="{{task}}")
+            )
         tool = create_batch_transform_tool(resource_config_dynamic, mock_llm)
+        expected = "Extract all names"
+        call = ToolCall(name=tool.name, args={"query": expected}, id="call-1")
+        if variant == "argument":
+            expected = "  exact {{literal}}\n task "
+            input_model = create_model("Input", task=(str, ...))
+            handler = StaticArgsHandler()
+            handler.initialize([tool], input_model(task=expected), input_model)
+            handler.apply_to_response([call])
 
         # Test tool execution with dynamic query
         mock_attachment = MockAttachment(
@@ -380,9 +395,8 @@ class TestCreateBatchTransformTool:
         )
 
         assert tool.coroutine is not None
-        result = await tool.coroutine(
-            attachment=mock_attachment, query="Extract all names"
-        )
+        result = await tool.coroutine(attachment=mock_attachment, **call["args"])
+        assert mock_interrupt.call_args.args[0].prompt == expected
 
         # Verify result contains attachment info
         assert result == {
