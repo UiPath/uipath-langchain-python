@@ -10,6 +10,7 @@ from .utils import (
     is_image,
     is_pdf,
     is_tiff,
+    normalize_mime_type,
     sanitize_filename,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "is_pdf",
     "is_tiff",
     "llm_call_with_files",
+    "normalize_mime_type",
     "sanitize_filename",
 ]

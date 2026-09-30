@@ -30,6 +30,83 @@ def sanitize_filename(filename: str) -> str:
     return sanitized if sanitized else "document"
 
 
+_XLS_MIME = "application/vnd.ms-excel"
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+# Canonical MIME type per file extension (first entry), followed by aliases that
+# are equally acceptable. Curated on purpose: ``mimetypes.guess_type`` consults
+# the OS registry on Windows and reports ``.csv`` as ``application/vnd.ms-excel``
+# when Excel is installed, which is exactly the mislabel this table repairs.
+_EXTENSION_MIME_TYPES: dict[str, tuple[str, ...]] = {
+    # Spreadsheets and delimited text
+    "csv": ("text/csv", "application/csv"),
+    "tsv": ("text/tab-separated-values", "text/tsv"),
+    "xls": (_XLS_MIME,),
+    "xlsx": (_XLSX_MIME,),
+    # Documents
+    "pdf": ("application/pdf",),
+    "doc": ("application/msword",),
+    "docx": (_DOCX_MIME,),
+    "ppt": ("application/vnd.ms-powerpoint",),
+    "pptx": (_PPTX_MIME,),
+    "rtf": ("application/rtf", "text/rtf"),
+    # Text
+    "txt": ("text/plain",),
+    "md": ("text/markdown", "text/x-markdown"),
+    "json": ("application/json",),
+    "xml": ("application/xml", "text/xml"),
+    "html": ("text/html",),
+    "htm": ("text/html",),
+    # Images
+    "png": ("image/png",),
+    "jpg": ("image/jpeg", "image/jpg"),
+    "jpeg": ("image/jpeg", "image/jpg"),
+    "gif": ("image/gif",),
+    "webp": ("image/webp",),
+    "tif": ("image/tiff", "image/x-tiff"),
+    "tiff": ("image/tiff", "image/x-tiff"),
+}
+
+
+def _file_extension(filename: str) -> str:
+    """Return the lower-cased extension of ``filename`` without the dot, or ``""``."""
+    name = (filename or "").strip()
+    if "." not in name:
+        return ""
+    ext = name.rsplit(".", 1)[1].strip().lower()
+    return ext if ext.isalnum() else ""
+
+
+def normalize_mime_type(mime_type: str, filename: str) -> str:
+    """Return the MIME type to send to the provider for ``filename``.
+
+    The declared type comes from whoever uploaded the attachment and is not
+    always right: Windows clients label ``.csv`` as ``application/vnd.ms-excel``
+    (the registry mapping when Excel is installed), others send
+    ``application/octet-stream`` for everything, and some send nothing at all.
+    Providers trust the MIME type — OpenAI reads it from the data URL and
+    Bedrock maps it to the document ``format`` — so a mislabeled CSV is parsed
+    as a legacy binary workbook and rejected as corrupted. The sanitized
+    filename cannot compensate because it no longer carries an extension.
+
+    When the filename has a known extension and the declared type is missing,
+    generic, or does not match that extension, the extension wins. An unknown
+    extension, or a declared type that already matches (parameters such as
+    ``; charset=utf-8`` are ignored for the comparison), leaves the declared
+    value untouched, so correctly labeled attachments are sent exactly as before.
+    """
+    declared = (mime_type or "").strip()
+    accepted = _EXTENSION_MIME_TYPES.get(_file_extension(filename))
+    if not accepted:
+        return declared
+    base_type = declared.split(";", 1)[0].strip().lower()
+    if base_type in accepted:
+        return declared
+    return accepted[0]
+
+
 def is_pdf(mime_type: str) -> bool:
     """Check if the MIME type represents a PDF document."""
     return mime_type.lower() == "application/pdf"

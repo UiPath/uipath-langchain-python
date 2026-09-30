@@ -13,6 +13,7 @@ from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInf
 from uipath_langchain.agent.multimodal.utils import (
     download_file_base64,
     encode_streamed_base64,
+    normalize_mime_type,
 )
 
 FILE_URL = "https://blob.storage.example.com/file.pdf"
@@ -89,6 +90,80 @@ class TestEncodeStreamedBase64:
         chunks = [b"x" * (limit + 1)]
         with pytest.raises(ValueError, match=r"10 MB.*limit"):
             await encode_streamed_base64(_async_iter(chunks), max_size=limit)
+
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+class TestNormalizeMimeType:
+    """Tests for normalize_mime_type — the filename extension repairs a wrong label."""
+
+    def test_csv_declared_as_excel_becomes_text_csv(self) -> None:
+        """The prod failure: Windows labels .csv as application/vnd.ms-excel and
+        OpenAI then parses the text as a corrupt binary workbook."""
+        result = normalize_mime_type(
+            "application/vnd.ms-excel", "Factset_Output_20260923.csv"
+        )
+        assert result == "text/csv"
+
+    def test_matching_type_is_unchanged(self) -> None:
+        assert normalize_mime_type("text/csv", "data.csv") == "text/csv"
+        assert normalize_mime_type("application/pdf", "doc.pdf") == "application/pdf"
+        assert normalize_mime_type(XLSX_MIME, "EOD Pricing_EM.xlsx") == XLSX_MIME
+
+    def test_real_xls_keeps_excel_type(self) -> None:
+        result = normalize_mime_type("application/vnd.ms-excel", "legacy.xls")
+        assert result == "application/vnd.ms-excel"
+
+    def test_accepted_alias_is_unchanged(self) -> None:
+        assert normalize_mime_type("application/csv", "data.csv") == "application/csv"
+        assert normalize_mime_type("image/jpg", "photo.jpg") == "image/jpg"
+        assert normalize_mime_type("text/xml", "feed.xml") == "text/xml"
+
+    def test_parameters_do_not_trigger_a_rewrite(self) -> None:
+        declared = "text/csv; charset=utf-8"
+        assert normalize_mime_type(declared, "data.csv") == declared
+
+    def test_comparison_is_case_insensitive(self) -> None:
+        assert normalize_mime_type("Text/CSV", "DATA.CSV") == "Text/CSV"
+        assert (
+            normalize_mime_type("Application/Vnd.MS-Excel", "Report.CSV") == "text/csv"
+        )
+
+    def test_xlsx_declared_as_legacy_excel_becomes_xlsx(self) -> None:
+        result = normalize_mime_type("application/vnd.ms-excel", "book.xlsx")
+        assert result == XLSX_MIME
+
+    def test_generic_octet_stream_is_replaced_for_known_extension(self) -> None:
+        result = normalize_mime_type("application/octet-stream", "scan.png")
+        assert result == "image/png"
+
+    def test_missing_type_is_derived_from_known_extension(self) -> None:
+        assert normalize_mime_type("", "report.pdf") == "application/pdf"
+        assert normalize_mime_type("", "notes.txt") == "text/plain"
+
+    def test_unknown_extension_keeps_declared_type(self) -> None:
+        declared = "application/octet-stream"
+        assert normalize_mime_type(declared, "blob.bin") == declared
+        assert normalize_mime_type("", "blob.bin") == ""
+
+    def test_no_extension_keeps_declared_type(self) -> None:
+        assert normalize_mime_type("text/plain", "README") == "text/plain"
+        assert normalize_mime_type("text/plain", "trailing.") == "text/plain"
+        assert normalize_mime_type("text/plain", "") == "text/plain"
+
+    def test_only_the_last_suffix_counts(self) -> None:
+        assert (
+            normalize_mime_type("application/gzip", "dump.csv.gz") == "application/gzip"
+        )
+        assert normalize_mime_type("application/x-tar", "data.tar.csv") == "text/csv"
+
+    def test_masked_filename_keeps_its_extension(self) -> None:
+        """PII-masked copies are renamed with a prefix and must normalize the same."""
+        result = normalize_mime_type(
+            "application/vnd.ms-excel", "pii_masked_Factset_Output_20260923.csv"
+        )
+        assert result == "text/csv"
 
 
 class TestDownloadFileBase64:
@@ -275,6 +350,73 @@ class TestBuildFileContentBlocksFor:
 
         with pytest.raises(ValueError, match="report.pdf"):
             await build_file_content_blocks_for(file_info, max_size=100)
+
+    async def test_csv_declared_as_excel_is_sent_as_text_csv(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """Regression: a Windows uploader labels .csv as application/vnd.ms-excel.
+        With the sanitized filename carrying no extension, OpenAI parsed the CSV
+        text as a binary workbook and rejected it as corrupted (invalid_file).
+        The block must carry text/csv while the filename stays sanitized."""
+        content = b"Ticker,Price\r\nEM001,11.37\r\n"
+        httpx_mock.add_response(url=FILE_URL, content=content)
+        file_info = FileInfo(
+            url=FILE_URL,
+            name="Factset_Output_20260923.csv",
+            mime_type="application/vnd.ms-excel",
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "text/csv"
+        assert blocks[0]["extras"]["filename"] == "Factset-Output-20260923-csv"
+        assert base64.b64decode(blocks[0]["base64"]) == content
+
+    async def test_image_declared_as_octet_stream_becomes_image_block(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """The normalized type also drives the image/file block decision."""
+        content = b"tiny image bytes"
+        httpx_mock.add_response(url=FILE_URL, content=content)
+        file_info = FileInfo(
+            url=FILE_URL, name="photo.png", mime_type="application/octet-stream"
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
+        assert blocks[0]["mime_type"] == "image/png"
+
+    async def test_tiff_declared_as_octet_stream_is_split_into_pages(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        tiff_bytes = _make_tiff(num_pages=2)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(
+            url=FILE_URL, name="scan.tiff", mime_type="application/octet-stream"
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 2
+        assert all(block["type"] == "image" for block in blocks)
+
+    async def test_correctly_labeled_file_is_unchanged(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        content = b"%PDF-1.4 tiny"
+        httpx_mock.add_response(url=FILE_URL, content=content)
+        file_info = FileInfo(
+            url=FILE_URL, name="EOD Pricing_EM.pdf", mime_type="application/pdf"
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert blocks[0]["mime_type"] == "application/pdf"
+        assert blocks[0]["extras"]["filename"] == "EOD Pricing-EM-pdf"
 
     async def test_single_page_tiff_returns_one_png_block(
         self, httpx_mock: HTTPXMock
