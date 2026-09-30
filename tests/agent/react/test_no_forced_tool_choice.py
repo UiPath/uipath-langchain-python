@@ -14,6 +14,7 @@ from uipath_langchain.agent.react.no_forced_tool_choice import (
     output_fields,
 )
 from uipath_langchain.agent.react.tools import create_flow_control_tools
+from uipath_langchain.chat.handlers.anthropic import AnthropicPayloadHandler
 from uipath_langchain.chat.handlers.base import DefaultModelPayloadHandler
 
 
@@ -53,7 +54,13 @@ class TestFinishWithoutForcing:
         tools = [_search_tool(), *create_flow_control_tools(_Output)]
 
         finish_without_forcing(
-            model, DefaultModelPayloadHandler(model), tools, [], AIMessage("x")
+            model,
+            DefaultModelPayloadHandler(model),
+            tools,
+            [],
+            AIMessage("x"),
+            parallel_tool_calls=True,
+            strict_mode=False,
         )
 
         bound, kwargs = model.bind_tools.call_args
@@ -74,6 +81,8 @@ class TestFinishWithoutForcing:
             create_flow_control_tools(_Output),
             history,
             answer,
+            parallel_tool_calls=True,
+            strict_mode=False,
         )
 
         assert messages[:-1] == [*history, answer]
@@ -81,6 +90,24 @@ class TestFinishWithoutForcing:
         assert END_EXECUTION_TOOL.name in messages[-1].text
         assert RAISE_ERROR_TOOL.name in messages[-1].text
         assert history == [HumanMessage("Which city is warmer?")]
+
+    def test_passes_parallel_tool_calls_and_strict_mode_through(self) -> None:
+        model = Mock(spec=BaseChatModel)
+        model.model = "claude-opus-5-5"
+
+        finish_without_forcing(
+            model,
+            AnthropicPayloadHandler(model),
+            create_flow_control_tools(_Output),
+            [],
+            AIMessage("x"),
+            parallel_tool_calls=False,
+            strict_mode=True,
+        )
+
+        kwargs = model.bind_tools.call_args.kwargs
+        assert kwargs["parallel_tool_calls"] is False
+        assert kwargs["strict"] is True
 
 
 _FIELDS = ["answer", "confidence"]
@@ -105,7 +132,12 @@ class TestFinishingToolCall:
         assert final.content == []
 
     def test_empty_end_execution_call_gives_none(self) -> None:
-        for empty in ({}, {"answer": None}, {"answer": "", "confidence": None}):
+        empties: list[dict[str, object]] = [
+            {},
+            {"answer": None},
+            {"answer": "", "confidence": None},
+        ]
+        for empty in empties:
             assert finishing_tool_call(_end_execution(empty), _FIELDS) is None
 
     def test_zero_and_false_are_output(self) -> None:

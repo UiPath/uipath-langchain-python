@@ -13,7 +13,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
-from uipath.agent.react import RAISE_ERROR_TOOL
+from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
@@ -90,6 +90,20 @@ async def _ainvoke(
 def _supports_forced_tool_choice(model: BaseChatModel) -> bool:
     model_details = getattr(model, "model_details", None) or {}
     return bool(model_details.get("supportsForcedToolChoice", True))
+
+
+def _no_finishing_tool_call_error() -> AgentRuntimeError:
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
+        title="Agent responded without calling a tool.",
+        detail="The model answered without calling a tool, and when asked to finish "
+        "it didn't call "
+        + END_EXECUTION_TOOL.name
+        + " or "
+        + RAISE_ERROR_TOOL.name
+        + ".",
+        category=UiPathErrorCategory.SYSTEM,
+    )
 
 
 def _tool_less_turns_error() -> AgentRuntimeError:
@@ -251,6 +265,8 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
     """For models whose discovery details say supportsForcedToolChoice: false.
 
     Runs on auto. A text answer gets one finish call; any other stall fails the run.
+    The finish call doesn't count against llm_messages_limit: it belongs to the same
+    turn and ends the run, so it can't loop.
     """
 
     def __init__(
@@ -274,7 +290,7 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
 
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
         if count_consecutive_tool_less_turns(messages) > 0:
-            raise _tool_less_turns_error()
+            raise _no_finishing_tool_call_error()
         return LLMCall(self.model, messages, self.payload_handler, tool_choice="auto")
 
     async def finish(
@@ -286,7 +302,13 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
         if self.output_fields is None or response.tool_calls or not response.text:
             return response
         finish_llm, finish_input = finish_without_forcing(
-            self.model, self.payload_handler, tools, messages, response
+            self.model,
+            self.payload_handler,
+            tools,
+            messages,
+            response,
+            parallel_tool_calls=self.parallel_tool_calls,
+            strict_mode=self.strict_mode,
         )
         reply = await _ainvoke(finish_llm, finish_input)
         if not isinstance(reply, AIMessage):
@@ -317,7 +339,8 @@ def create_llm_node(
         tools: Available tools to bind
         input_schema: Agent input schema
         is_conversational: Whether this is a conversational agent
-        llm_messages_limit: Maximum number of LLM calls allowed per execution
+        llm_messages_limit: Maximum number of LLM turns allowed per execution; the
+            AutoToolChoiceLLMNode's finish call is part of its turn
         tool_choice: Tool choice for the ConversationalLLMNode
         parallel_tool_calls: Allow parallel tool calls
         strict_mode: Validate tool call arguments
