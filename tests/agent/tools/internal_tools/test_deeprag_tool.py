@@ -5,7 +5,7 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextQuerySetting,
     AgentInternalDeepRagSettings,
@@ -25,6 +25,7 @@ from uipath.platform.context_grounding.context_grounding_index import (
 from uipath_langchain.agent.tools.internal_tools.deeprag_tool import (
     create_deeprag_tool,
 )
+from uipath_langchain.agent.tools.static_args import StaticArgsHandler
 
 
 class MockAttachment(BaseModel):
@@ -464,3 +465,28 @@ class TestCreateDeepRagTool:
         assert isinstance(create_payload, CreateDeepRag)
         assert create_payload.attachments == [attachment_id]
         assert create_payload.prompt == "What are the main points?"
+
+    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
+    async def test_argument_query_uses_selected_input(
+        self, mock_interrupt, resource_config_static, mock_llm
+    ):
+        resource_config_static.properties.settings.query = AgentContextQuerySetting(
+            variant="argument", value="{{task}}"
+        )
+        tool = create_deeprag_tool(resource_config_static, mock_llm)
+        input_model = create_model("Input", task=(str, ...))
+        expected = "  exact {{literal}}\n task "
+        handler = StaticArgsHandler()
+        handler.initialize([tool], input_model(task=expected), input_model)
+        call = {"name": tool.name, "args": {"query": "model query"}, "id": "call-1"}
+        handler.apply_to_response([call])
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
+        )
+        mock_interrupt.return_value = {"text": "done"}
+        await tool.coroutine(**call["args"], attachment=attachment)
+        assert mock_interrupt.call_args.args[0].prompt == expected
