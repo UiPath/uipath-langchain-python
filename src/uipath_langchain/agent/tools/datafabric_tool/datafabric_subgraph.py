@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any, Iterator
 
 from langchain_core.language_models import BaseChatModel
@@ -34,7 +34,6 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ValidationError
 from uipath.platform.entities import EntitiesService, Entity
-from uipath.platform.entities._entity_resolution import PreResolvedRoutingStrategy
 from uipath.platform.errors import DataFabricError, DataFabricErrorCategory
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
@@ -47,7 +46,9 @@ from .models import (
     READ_KIND,
     DataFabricExecuteOperationInput,
     DataFabricExecuteSqlInput,
+    OperationArgument,
     entity_operations,
+    operation_arguments,
     operation_kind,
 )
 
@@ -56,8 +57,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 CATEGORY_MARKER = "(category: "
-# Outcomes that answer the request; Refused and Faulted go back to the inner LLM.
+# Outcomes that answer the request. Refused and Faulted go back to the inner LLM,
+# unless the call was a Mutation that may have written.
 OPERATION_SUCCESS_OUTCOMES = frozenset({"Returned", "Wrote", "NoChange"})
+# The only outcomes of a sent Mutation that are known to have written nothing.
+MUTATION_UNWRITTEN_OUTCOMES = frozenset({"Refused", "NoChange"})
 MAX_MUTATIONS_PER_RUN = 2
 
 
@@ -76,6 +80,7 @@ class DataFabricSubgraphState(BaseModel):
     last_error_detail: str = ""
     allow_changes: bool = False
     mutation_count: int = 0
+    sent_mutations: list[str] = []
 
 
 class QueryExecutor:
@@ -209,6 +214,10 @@ class MutationBudget:
     """Mutation invokes left in one outer call, shared by a batch of tool calls."""
 
     remaining: int
+    # The canonical form of each Mutation sent in this outer call.
+    sent: list[str] = field(default_factory=list)
+    # Set once a sent Mutation may have written, which ends the inner loop.
+    may_have_written: bool = False
 
     def take(self) -> bool:
         """Claim one invoke; False when none are left."""
@@ -216,19 +225,6 @@ class MutationBudget:
             return False
         self.remaining -= 1
         return True
-
-
-def _routed_folders(entities_service: EntitiesService) -> dict[str, str]:
-    """Map each entity's effective name to the folder its resolution routes it to."""
-    # A resolution service carries routing it resolved up front, so this makes no
-    # request. Any other service leaves routing to the SDK.
-    strategy = getattr(entities_service, "_routing_strategy", None)
-    if not isinstance(strategy, PreResolvedRoutingStrategy):
-        return {}
-    return {
-        routing.override_entity_name or routing.entity_name: routing.folder_id
-        for routing in strategy.routing_context.entity_routings
-    }
 
 
 class OperationExecutor:
@@ -239,19 +235,17 @@ class OperationExecutor:
     ) -> None:
         self._entities = entities_service
         self._by_name = {e.name: e for e in entities if entity_operations(e)}
-        self._folders = _routed_folders(entities_service)
 
     async def __call__(
         self,
         entity_name: str,
         operation_name: str,
-        arguments: dict[str, Any] | None = None,
+        arguments: list[OperationArgument] | None = None,
         *,
         allow_changes: bool = False,
         budget: MutationBudget | None = None,
     ) -> dict[str, Any]:
         """Check the call against the declared operations, then invoke it once."""
-        arguments = arguments or {}
         entity = self._by_name.get(entity_name)
         if entity is None:
             return {
@@ -270,10 +264,11 @@ class OperationExecutor:
 
         call = {"entity": entity_name, "operation": operation_name}
         kind = operation_kind(operation)
+        values = operation_arguments(arguments or [], operation)
         missing = [
             p.name
             for p in operation.parameters
-            if p.is_required and p.name not in arguments
+            if p.is_required and p.name not in values
         ]
         if missing:
             return {
@@ -284,6 +279,7 @@ class OperationExecutor:
                         "name": p.name,
                         "sql_type": p.sql_type,
                         "is_required": p.is_required,
+                        "is_list": p.is_list,
                     }
                     for p in operation.parameters
                 ],
@@ -303,16 +299,37 @@ class OperationExecutor:
                         if operation_kind(op) == READ_KIND
                     ],
                 }
-            if budget is not None and not budget.take():
-                return {
-                    **call,
-                    "error": (
-                        f"At most {MAX_MUTATIONS_PER_RUN} operations that change "
-                        "data run per request."
-                    ),
-                }
+            if budget is not None:
+                sent = json.dumps(
+                    [entity.name, operation.name, values], sort_keys=True, default=str
+                )
+                if sent in budget.sent:
+                    return {
+                        **call,
+                        "error": (
+                            "This change was already sent in this request, so it "
+                            "is not sent again."
+                        ),
+                    }
+                if not budget.take():
+                    return {
+                        **call,
+                        "error": (
+                            f"At most {MAX_MUTATIONS_PER_RUN} operations that change "
+                            "data run per request."
+                        ),
+                    }
+                # Recorded before the await, so a repeat in the same batch is refused.
+                budget.sent.append(sent)
 
-        return await self._invoke(entity, operation, kind, arguments)
+        result = await self._invoke(entity, operation, kind, values)
+        if (
+            kind == MUTATION_KIND
+            and budget is not None
+            and result.get("outcome") not in MUTATION_UNWRITTEN_OUTCOMES
+        ):
+            budget.may_have_written = True
+        return result
 
     async def _invoke(
         self,
@@ -348,11 +365,9 @@ class OperationExecutor:
         call = {"entity": entity.name, "operation": operation.name, "kind": kind}
         with span_ctx as span:
             try:
+                # The resolution service routes the entity to its folder.
                 result = await self._entities.invoke_operation_async(
-                    entity.name,
-                    operation.name,
-                    arguments,
-                    folder_key=self._folders.get(entity.name),
+                    entity.name, operation.name, arguments
                 )
             except Exception as e:
                 return self._handle_invoke_error(e, span, call)
@@ -373,6 +388,7 @@ class OperationExecutor:
             "errors": result.errors,
             "invocation_id": result.invocation_id,
             "prints": result.prints,
+            "withheld": result.withheld,
         }
 
     @staticmethod
@@ -461,7 +477,10 @@ class DataFabricGraph:
         if not isinstance(last, AIMessage) or not last.tool_calls:
             return {"iteration_count": state.iteration_count}
 
-        budget = MutationBudget(MAX_MUTATIONS_PER_RUN - state.mutation_count)
+        budget = MutationBudget(
+            MAX_MUTATIONS_PER_RUN - state.mutation_count,
+            sent=list(state.sent_mutations),
+        )
         results = await asyncio.gather(
             *[
                 self._execute_tool_call(tc, state.allow_changes, budget)
@@ -483,10 +502,13 @@ class DataFabricGraph:
         return {
             "messages": tool_messages,
             "iteration_count": state.iteration_count + len(last.tool_calls),
-            "last_tool_success": all_succeeded,
+            # A Mutation that may have written ends the loop even when a sibling
+            # call failed, so the inner LLM cannot send it again.
+            "last_tool_success": all_succeeded or budget.may_have_written,
             "last_error_category": last_category or state.last_error_category,
             "last_error_detail": last_detail or state.last_error_detail,
             "mutation_count": MAX_MUTATIONS_PER_RUN - budget.remaining,
+            "sent_mutations": budget.sent,
         }
 
     async def _execute_tool_call(
@@ -500,9 +522,10 @@ class DataFabricGraph:
         Returns (message, succeeded, error_category, error_detail).
         """
         name = tool_call["name"]
-        if name == EXECUTE_SQL:
+        # Without operations every call runs as SQL, whatever its name.
+        if name == EXECUTE_SQL or self._operation_executor is None:
             return await self._execute_sql_call(tool_call)
-        if name == EXECUTE_OPERATION and self._operation_executor is not None:
+        if name == EXECUTE_OPERATION:
             return await self._execute_operation_call(
                 tool_call, self._operation_executor, allow_changes, budget
             )

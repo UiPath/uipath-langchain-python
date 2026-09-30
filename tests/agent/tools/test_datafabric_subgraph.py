@@ -6,18 +6,14 @@ from enum import Enum
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.constants import END
-from uipath.platform.entities import (
-    Entity,
-    EntityOperationResult,
-    EntityRouting,
-    QueryRoutingOverrideContext,
-)
-from uipath.platform.entities._entity_resolution import PreResolvedRoutingStrategy
+from uipath.platform.entities import Entity, EntityOperationResult
 from uipath.platform.errors import EnrichedException
 
+from uipath_langchain.agent.tools.datafabric_tool import datafabric_prompt_builder
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
     CATEGORY_MARKER,
     DataFabricGraph,
@@ -26,6 +22,11 @@ from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
     OperationExecutor,
     QueryExecutor,
     _noop_context,
+)
+from uipath_langchain.agent.tools.datafabric_tool.models import (
+    DataFabricExecuteOperationInput,
+    OperationArgument,
+    operation_arguments,
 )
 
 # ---------------------------------------------------------------------------
@@ -806,20 +807,8 @@ def _invoices_entity(with_operations: bool = True) -> Entity:
 
 
 def _operations_service(result: EntityOperationResult | None = None) -> MagicMock:
-    """A resolution service that routes the overwritten "Invoices" to folder fk-1."""
     svc = _make_entities_service()
     svc.invoke_operation_async = AsyncMock(return_value=result)
-    svc._routing_strategy = PreResolvedRoutingStrategy(
-        QueryRoutingOverrideContext(
-            entity_routings=[
-                EntityRouting(
-                    entity_name="InvoicesDev",
-                    folder_id="fk-1",
-                    override_entity_name="Invoices",
-                )
-            ]
-        )
-    )
     return svc
 
 
@@ -841,9 +830,15 @@ def _operation_call(call_id: str, operation: str, arguments: dict[str, Any]) -> 
         "args": {
             "entity_name": "Invoices",
             "operation_name": operation,
-            "arguments": arguments,
+            "arguments": [{"name": k, "value": v} for k, v in arguments.items()],
         },
     }
+
+
+def _operation_batch(*calls: Any, **state: Any) -> DataFabricSubgraphState:
+    return DataFabricSubgraphState(
+        messages=[AIMessage(content="", tool_calls=list(calls))], **state
+    )
 
 
 def test_graph_without_operations_binds_only_execute_sql() -> None:
@@ -869,13 +864,25 @@ def test_graph_with_operations_binds_both_tools_and_lists_them() -> None:
     assert "ENTITY OPERATIONS:" in prompt
 
 
+def test_operations_prompt_marks_lists_and_renders_domain_guidance_once() -> None:
+    entity = _invoices_entity()
+    assert entity.operations is not None
+    entity.operations[1].parameters[0].is_list = True
+
+    prompt = datafabric_prompt_builder.build([entity], "Invoices of ACME.")
+
+    assert "invoiceId (NVARCHAR, required, list)" in prompt
+    assert prompt.count("## Domain Guidance") == 1
+    assert prompt.index("ENTITY OPERATIONS:") < prompt.index("## Domain Guidance")
+
+
 @pytest.mark.asyncio
 async def test_execute_operation_refuses_unknown_operation() -> None:
     svc = _operations_service()
     executor = OperationExecutor(svc, [_invoices_entity()])
 
     result = await executor(
-        "Invoices", "Delete", {}, allow_changes=True, budget=MutationBudget(2)
+        "Invoices", "Delete", [], allow_changes=True, budget=MutationBudget(2)
     )
 
     assert "declares no operation 'Delete'" in result["error"]
@@ -891,7 +898,7 @@ async def test_execute_operation_refuses_mutation_without_allow_changes() -> Non
     result = await executor(
         "Invoices",
         "Approve",
-        {"invoiceId": "INV-7"},
+        [OperationArgument(name="invoiceId", value="INV-7")],
         allow_changes=False,
         budget=MutationBudget(2),
     )
@@ -932,10 +939,12 @@ async def test_execute_operation_returns_read_result_as_json() -> None:
         "errors": [],
         "invocation_id": 12,
         "prints": None,
+        "withheld": None,
     }
     assert result["last_tool_success"] is True
+    # No folder: the resolution service routes the entity itself.
     svc.invoke_operation_async.assert_awaited_once_with(
-        "Invoices", "GetOpen", {"top": 5}, folder_key="fk-1"
+        "Invoices", "GetOpen", {"top": 5}
     )
 
 
@@ -976,3 +985,173 @@ async def test_tool_node_dispatches_each_call_by_tool_name() -> None:
     svc.invoke_operation_async.assert_awaited_once()
     assert "Unknown tool 'drop_table'" in messages[2].content
     assert result["last_tool_success"] is False
+
+
+@pytest.mark.asyncio
+async def test_mutation_cap_holds_for_a_parallel_batch() -> None:
+    svc = _operations_service(EntityOperationResult(outcome="Wrote", rowsAffected=1))
+    graph, _ = _make_real_prompt_graph(_invoices_entity(), svc)
+    state = _operation_batch(
+        *[
+            _operation_call(f"tc{i}", "Approve", {"invoiceId": f"INV-{i}"})
+            for i in range(3)
+        ],
+        allow_changes=True,
+    )
+
+    result = await graph.tool_node(state)
+
+    assert svc.invoke_operation_async.await_count == 2
+    assert "At most 2 operations" in json.loads(result["messages"][2].content)["error"]
+    assert result["mutation_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_operation_without_kind_is_refused_without_allow_changes() -> None:
+    entity = _invoices_entity()
+    assert entity.operations is not None
+    entity.operations[1].kind = None
+    svc = _operations_service()
+    executor = OperationExecutor(svc, [entity])
+
+    result = await executor(
+        "Invoices",
+        "Approve",
+        [OperationArgument(name="invoiceId", value="INV-7")],
+        budget=MutationBudget(2),
+    )
+
+    assert "does not allow changes" in result["error"]
+    svc.invoke_operation_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sent_mutation_ends_the_loop_and_is_never_sent_again() -> None:
+    svc = _operations_service(EntityOperationResult(outcome="Wrote", rowsAffected=1))
+    graph, _ = _make_real_prompt_graph(_invoices_entity(), svc)
+    graph._execute_sql_tool = MagicMock()
+    graph._execute_sql_tool.ainvoke = AsyncMock(
+        return_value={"records": [], "total_count": 0, "sql_query": "SELECT 1"}
+    )
+    approve = _operation_call("tc2", "Approve", {"invoiceId": "INV-7"})
+    sql = {"id": "tc1", "name": "execute_sql", "args": {"sql_query": "SELECT 1"}}
+
+    first = await graph.tool_node(_operation_batch(sql, approve, allow_changes=True))
+    again = await graph.tool_node(
+        _operation_batch(
+            approve,
+            allow_changes=True,
+            mutation_count=first["mutation_count"],
+            sent_mutations=first["sent_mutations"],
+        )
+    )
+
+    # The SQL call found nothing, but the write still ends the loop.
+    assert first["last_tool_success"] is True
+    assert "already sent" in json.loads(again["messages"][0].content)["error"]
+    svc.invoke_operation_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        AsyncMock(return_value=EntityOperationResult(outcome="Faulted")),
+        AsyncMock(side_effect=httpx.ReadTimeout("no answer")),
+    ],
+)
+async def test_mutation_that_may_have_written_ends_the_loop(invoke: AsyncMock) -> None:
+    svc = _operations_service()
+    svc.invoke_operation_async = invoke
+    graph, _ = _make_real_prompt_graph(_invoices_entity(), svc)
+
+    result = await graph.tool_node(
+        _operation_batch(
+            _operation_call("tc1", "Approve", {"invoiceId": "INV-7"}),
+            allow_changes=True,
+        )
+    )
+
+    assert graph.tool_router(DataFabricSubgraphState(**result)) == END
+
+
+@pytest.mark.asyncio
+async def test_without_operations_any_tool_name_runs_as_sql() -> None:
+    graph = _make_graph()
+    graph._execute_sql_tool = MagicMock()
+    graph._execute_sql_tool.ainvoke = AsyncMock(
+        return_value={"records": [{"id": 1}], "total_count": 1, "sql_query": "SELECT 1"}
+    )
+
+    result = await graph.tool_node(
+        _operation_batch(
+            {"id": "tc1", "name": "sql", "args": {"sql_query": "SELECT 1"}}
+        )
+    )
+
+    assert result["messages"][0].name == "execute_sql"
+    assert result["last_tool_success"] is True
+    graph._execute_sql_tool.ainvoke.assert_awaited_once_with({"sql_query": "SELECT 1"})
+
+
+def test_operation_arguments_are_typed_by_parameter() -> None:
+    operation = Entity.model_validate(
+        {
+            "name": "Invoices",
+            "displayName": "Invoices",
+            "entityType": "Entity",
+            "isRbacEnabled": False,
+            "id": "e-1",
+            "operations": [
+                {
+                    "name": "Approve",
+                    "kind": "Mutation",
+                    "parameters": [
+                        {"name": "amount", "sqlType": {"name": "DECIMAL"}},
+                        {"name": "urgent", "sqlType": {"name": "BIT"}},
+                        {"name": "ids", "sqlType": {"name": "INT"}, "isList": True},
+                        {"name": "code", "sqlType": {"name": "NVARCHAR"}},
+                    ],
+                }
+            ],
+        }
+    ).operations[0]  # type: ignore[index]
+    call = DataFabricExecuteOperationInput.model_validate(
+        {
+            "entity_name": "Invoices",
+            "operation_name": "Approve",
+            "arguments": [
+                {"name": "amount", "value": "12.50"},
+                {"name": "urgent", "value": True},
+                {"name": "ids", "value": "[1, 2]"},
+                {"name": "code", "value": "007"},
+                {"name": "extra", "value": "x"},
+            ],
+        }
+    )
+
+    assert operation_arguments(call.arguments, operation) == {
+        "amount": 12.5,
+        "urgent": True,
+        "ids": [1, 2],
+        "code": "007",
+        "extra": "x",
+    }
+
+
+def test_execute_operation_schema_gives_gemini_argument_properties() -> None:
+    from langchain_google_genai._function_utils import (
+        convert_to_genai_function_declarations,
+    )
+
+    _, bind_tools = _make_real_prompt_graph(_invoices_entity(), _operations_service())
+    [tool] = convert_to_genai_function_declarations(
+        [t for t in bind_tools.call_args.args[0] if t.name == "execute_operation"]
+    )
+
+    [declaration] = tool.function_declarations or []
+    assert declaration.parameters is not None
+    properties = declaration.parameters.properties or {}
+    items = properties["arguments"].items
+    assert items is not None and items.properties is not None
+    assert set(items.properties) == {"name", "value"}

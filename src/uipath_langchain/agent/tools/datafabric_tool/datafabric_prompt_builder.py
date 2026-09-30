@@ -190,6 +190,7 @@ def build_entity_context(
                         name=param.name,
                         sql_type=param.sql_type,
                         is_required=param.is_required,
+                        is_list=param.is_list,
                     )
                     for param in op.parameters
                 ],

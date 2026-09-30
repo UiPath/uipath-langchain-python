@@ -171,7 +171,9 @@ class DataFabricTextQueryHandler:
             for index, content in enumerate(non_empty_contents, start=1)
         ]
         if any(msg.name == EXECUTE_OPERATION for msg in tool_messages):
-            header = "Multiple Data Fabric calls completed successfully. "
+            # Not "successfully": a change that may have been applied ends the
+            # batch even when a sibling call failed.
+            header = "Multiple Data Fabric calls completed. "
         else:
             header = "Multiple SQL queries executed successfully. "
         return (

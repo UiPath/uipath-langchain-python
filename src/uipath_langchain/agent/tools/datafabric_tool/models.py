@@ -1,8 +1,10 @@
 """Pydantic models for Data Fabric entity schemas."""
 
+import json
+import math
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 if TYPE_CHECKING:
     from uipath.platform.entities import EntityOperation
@@ -14,6 +16,9 @@ MUTATION_KIND = "Mutation"
 
 NUMERIC_TYPES = frozenset({"int", "decimal", "float", "double", "bigint"})
 TEXT_TYPES = frozenset({"varchar", "nvarchar", "text", "string", "ntext"})
+# Operation parameter types whose arguments are sent as JSON numbers or booleans.
+NUMBER_PARAMETER_TYPES = frozenset({"int", "bigint", "decimal", "float", "real"})
+BOOLEAN_PARAMETER_TYPE = "bit"
 
 
 class FieldSchema(BaseModel):
@@ -69,6 +74,7 @@ class OperationParameterSchema(BaseModel):
     name: str
     sql_type: str | None = None
     is_required: bool = False
+    is_list: bool = False
 
     @property
     def display(self) -> str:
@@ -76,6 +82,8 @@ class OperationParameterSchema(BaseModel):
         modifiers = [self.sql_type or "unknown"]
         if self.is_required:
             modifiers.append("required")
+        if self.is_list:
+            modifiers.append("list")
         return f"{self.name} ({', '.join(modifiers)})"
 
 
@@ -160,6 +168,27 @@ class DataFabricExecuteSqlInput(BaseModel):
     )
 
 
+class OperationArgument(BaseModel):
+    """One argument of an operation call, as a name and a text value."""
+
+    name: str = Field(..., description="Exact parameter name.")
+    value: str = Field(
+        ...,
+        description=(
+            "The value as text, e.g. 42, true or INV-7. For a list parameter, a "
+            'JSON array such as ["INV-1", "INV-2"].'
+        ),
+    )
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _as_text(cls, value: Any) -> Any:
+        # Models sometimes send a number, boolean or list despite the schema.
+        if isinstance(value, (bool, int, float, list)):
+            return json.dumps(value)
+        return value
+
+
 class DataFabricExecuteOperationInput(BaseModel):
     """Input schema for running an operation a Data Fabric entity declares."""
 
@@ -171,9 +200,11 @@ class DataFabricExecuteOperationInput(BaseModel):
         ...,
         description="Exact operation name, as listed under the entity's Operations.",
     )
-    arguments: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Arguments keyed by the exact parameter names the operation lists.",
+    # A list of pairs rather than an open map: Gemini rejects an object schema
+    # with no properties.
+    arguments: list[OperationArgument] = Field(
+        default_factory=list,
+        description="One name and value pair per parameter the operation lists.",
     )
 
 
@@ -187,3 +218,60 @@ def entity_operations(entity: Any) -> list["EntityOperation"]:
 def operation_kind(operation: "EntityOperation") -> str:
     """Return Read or Mutation; anything not declared Read is gated as a Mutation."""
     return READ_KIND if (operation.kind or "").lower() == "read" else MUTATION_KIND
+
+
+def operation_arguments(
+    arguments: list[OperationArgument], operation: "EntityOperation"
+) -> dict[str, Any]:
+    """Fold argument pairs into a dict, typed by the parameters the operation declares.
+
+    Later duplicate names win. A value whose parameter is unknown, or that does
+    not parse as its declared type, is kept as text.
+    """
+    parameters = {p.name: p for p in operation.parameters}
+    folded: dict[str, Any] = {}
+    for argument in arguments:
+        parameter = parameters.get(argument.name)
+        if parameter is None:
+            folded[argument.name] = argument.value
+        elif parameter.is_list:
+            folded[argument.name] = [
+                _typed_value(item, parameter.sql_type)
+                for item in _list_items(argument.value)
+            ]
+        else:
+            folded[argument.name] = _typed_value(argument.value, parameter.sql_type)
+    return folded
+
+
+def _list_items(text: str) -> list[str]:
+    """Split a list argument: a JSON array, or else comma-separated text."""
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [item if isinstance(item, str) else json.dumps(item) for item in parsed]
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def _typed_value(text: str, sql_type: str | None) -> Any:
+    """Convert text to a number or boolean when its SQL type calls for one."""
+    kind = (sql_type or "").lower()
+    if kind in NUMBER_PARAMETER_TYPES:
+        try:
+            return int(text)
+        except ValueError:
+            pass
+        try:
+            number = float(text)
+        except ValueError:
+            return text
+        return number if math.isfinite(number) else text
+    if kind == BOOLEAN_PARAMETER_TYPE:
+        flag = text.strip().lower()
+        if flag in ("true", "1"):
+            return True
+        if flag in ("false", "0"):
+            return False
+    return text
