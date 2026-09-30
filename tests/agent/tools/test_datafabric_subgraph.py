@@ -1,5 +1,6 @@
 """Tests for the Data Fabric sub-graph module."""
 
+import json
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -8,13 +9,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.constants import END
-from uipath.platform.entities import Entity
+from uipath.platform.entities import (
+    Entity,
+    EntityOperationResult,
+    EntityRouting,
+    QueryRoutingOverrideContext,
+)
+from uipath.platform.entities._entity_resolution import PreResolvedRoutingStrategy
 from uipath.platform.errors import EnrichedException
 
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
     CATEGORY_MARKER,
     DataFabricGraph,
     DataFabricSubgraphState,
+    MutationBudget,
+    OperationExecutor,
     QueryExecutor,
     _noop_context,
 )
@@ -754,3 +763,216 @@ async def test_llm_node_invokes_inner_llm() -> None:
     call_args = graph._inner_llm.ainvoke.call_args[0][0]
     assert call_args[0] == graph._system_message
     assert call_args[1].content == "How many orders?"
+
+
+# ---------------------------------------------------------------------------
+# execute_operation
+# ---------------------------------------------------------------------------
+
+
+def _invoices_entity(with_operations: bool = True) -> Entity:
+    operations = [
+        {
+            "name": "GetOpen",
+            "kind": "Read",
+            "description": "Open invoices",
+            "parameters": [
+                {"name": "top", "sqlType": {"name": "INT"}, "isRequired": True}
+            ],
+        },
+        {
+            "name": "Approve",
+            "kind": "Mutation",
+            "description": "Approve an invoice",
+            "parameters": [
+                {
+                    "name": "invoiceId",
+                    "sqlType": {"name": "NVARCHAR"},
+                    "isRequired": True,
+                }
+            ],
+        },
+    ]
+    return Entity.model_validate(
+        {
+            "name": "Invoices",
+            "displayName": "Invoices",
+            "entityType": "Entity",
+            "isRbacEnabled": False,
+            "id": "e-1",
+            **({"operations": operations} if with_operations else {}),
+        }
+    )
+
+
+def _operations_service(result: EntityOperationResult | None = None) -> MagicMock:
+    """A resolution service that routes the overwritten "Invoices" to folder fk-1."""
+    svc = _make_entities_service()
+    svc.invoke_operation_async = AsyncMock(return_value=result)
+    svc._routing_strategy = PreResolvedRoutingStrategy(
+        QueryRoutingOverrideContext(
+            entity_routings=[
+                EntityRouting(
+                    entity_name="InvoicesDev",
+                    folder_id="fk-1",
+                    override_entity_name="Invoices",
+                )
+            ]
+        )
+    )
+    return svc
+
+
+def _make_real_prompt_graph(
+    entity: Entity, svc: MagicMock
+) -> tuple[DataFabricGraph, MagicMock]:
+    """Build a graph with the real prompt builder; returns it and ``bind_tools``."""
+    llm = MagicMock(spec=["model_copy"])
+    copy = MagicMock()
+    copy.bind_tools = MagicMock(return_value=MagicMock())
+    llm.model_copy.return_value = copy
+    return DataFabricGraph(llm, [entity], svc), copy.bind_tools
+
+
+def _operation_call(call_id: str, operation: str, arguments: dict[str, Any]) -> Any:
+    return {
+        "id": call_id,
+        "name": "execute_operation",
+        "args": {
+            "entity_name": "Invoices",
+            "operation_name": operation,
+            "arguments": arguments,
+        },
+    }
+
+
+def test_graph_without_operations_binds_only_execute_sql() -> None:
+    _, bind_tools = _make_real_prompt_graph(
+        _invoices_entity(with_operations=False), _operations_service()
+    )
+
+    assert [t.name for t in bind_tools.call_args.args[0]] == ["execute_sql"]
+
+
+def test_graph_with_operations_binds_both_tools_and_lists_them() -> None:
+    graph, bind_tools = _make_real_prompt_graph(
+        _invoices_entity(), _operations_service()
+    )
+
+    assert [t.name for t in bind_tools.call_args.args[0]] == [
+        "execute_sql",
+        "execute_operation",
+    ]
+    prompt = str(graph._system_message.content)
+    assert "**Operations for Invoices:**" in prompt
+    assert "| GetOpen | Read | Open invoices | top (INT, required) |" in prompt
+    assert "ENTITY OPERATIONS:" in prompt
+
+
+@pytest.mark.asyncio
+async def test_execute_operation_refuses_unknown_operation() -> None:
+    svc = _operations_service()
+    executor = OperationExecutor(svc, [_invoices_entity()])
+
+    result = await executor(
+        "Invoices", "Delete", {}, allow_changes=True, budget=MutationBudget(2)
+    )
+
+    assert "declares no operation 'Delete'" in result["error"]
+    assert result["valid_operations"] == ["GetOpen", "Approve"]
+    svc.invoke_operation_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_operation_refuses_mutation_without_allow_changes() -> None:
+    svc = _operations_service()
+    executor = OperationExecutor(svc, [_invoices_entity()])
+
+    result = await executor(
+        "Invoices",
+        "Approve",
+        {"invoiceId": "INV-7"},
+        allow_changes=False,
+        budget=MutationBudget(2),
+    )
+
+    assert "does not allow changes" in result["error"]
+    assert result["read_operations"] == ["GetOpen"]
+    svc.invoke_operation_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_operation_returns_read_result_as_json() -> None:
+    svc = _operations_service(
+        EntityOperationResult(
+            outcome="Returned", rows=[{"Id": "INV-7"}], invocationId=12
+        )
+    )
+    graph, _ = _make_real_prompt_graph(_invoices_entity(), svc)
+    state = DataFabricSubgraphState(
+        messages=[
+            AIMessage(
+                content="", tool_calls=[_operation_call("tc1", "GetOpen", {"top": 5})]
+            )
+        ]
+    )
+
+    result = await graph.tool_node(state)
+
+    message = result["messages"][0]
+    assert message.name == "execute_operation"
+    assert json.loads(message.content) == {
+        "entity": "Invoices",
+        "operation": "GetOpen",
+        "kind": "Read",
+        "outcome": "Returned",
+        "rows_affected": 0,
+        "rows": [{"Id": "INV-7"}],
+        "result": None,
+        "errors": [],
+        "invocation_id": 12,
+        "prints": None,
+    }
+    assert result["last_tool_success"] is True
+    svc.invoke_operation_async.assert_awaited_once_with(
+        "Invoices", "GetOpen", {"top": 5}, folder_key="fk-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tool_node_dispatches_each_call_by_tool_name() -> None:
+    svc = _operations_service(EntityOperationResult(outcome="Returned"))
+    graph, _ = _make_real_prompt_graph(_invoices_entity(), svc)
+    graph._execute_sql_tool = MagicMock()
+    graph._execute_sql_tool.ainvoke = AsyncMock(
+        return_value={"records": [{"id": 1}], "total_count": 1, "sql_query": "SELECT 1"}
+    )
+    state = DataFabricSubgraphState(
+        messages=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "tc1",
+                        "name": "execute_sql",
+                        "args": {"sql_query": "SELECT 1"},
+                    },
+                    _operation_call("tc2", "GetOpen", {"top": 1}),
+                    {"id": "tc3", "name": "drop_table", "args": {}},
+                ],
+            )
+        ]
+    )
+
+    result = await graph.tool_node(state)
+
+    messages = result["messages"]
+    assert [m.name for m in messages] == [
+        "execute_sql",
+        "execute_operation",
+        "drop_table",
+    ]
+    graph._execute_sql_tool.ainvoke.assert_awaited_once_with({"sql_query": "SELECT 1"})
+    svc.invoke_operation_async.assert_awaited_once()
+    assert "Unknown tool 'drop_table'" in messages[2].content
+    assert result["last_tool_success"] is False

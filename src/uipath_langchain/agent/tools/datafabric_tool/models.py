@@ -1,6 +1,16 @@
 """Pydantic models for Data Fabric entity schemas."""
 
+from typing import TYPE_CHECKING, Any
+
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from uipath.platform.entities import EntityOperation
+
+EXECUTE_SQL = "execute_sql"
+EXECUTE_OPERATION = "execute_operation"
+READ_KIND = "Read"
+MUTATION_KIND = "Mutation"
 
 NUMERIC_TYPES = frozenset({"int", "decimal", "float", "double", "bigint"})
 TEXT_TYPES = frozenset({"varchar", "nvarchar", "text", "string", "ntext"})
@@ -53,6 +63,31 @@ class FieldSchema(BaseModel):
         return self.type.lower() in TEXT_TYPES
 
 
+class OperationParameterSchema(BaseModel):
+    """A parameter an entity operation declares."""
+
+    name: str
+    sql_type: str | None = None
+    is_required: bool = False
+
+    @property
+    def display(self) -> str:
+        """Name with type and modifiers for markdown display."""
+        modifiers = [self.sql_type or "unknown"]
+        if self.is_required:
+            modifiers.append("required")
+        return f"{self.name} ({', '.join(modifiers)})"
+
+
+class OperationSchema(BaseModel):
+    """An operation an entity declares, as the prompt describes it."""
+
+    name: str
+    kind: str
+    description: str | None = None
+    parameters: list[OperationParameterSchema] = []
+
+
 class EntitySchema(BaseModel):
     """Structured representation of a Data Fabric entity."""
 
@@ -62,6 +97,7 @@ class EntitySchema(BaseModel):
     description: str | None = None
     record_count: int | None = None
     fields: list[FieldSchema]
+    operations: list[OperationSchema] = []
 
 
 class QueryPattern(BaseModel):
@@ -100,6 +136,18 @@ class DataFabricQueryInput(BaseModel):
     )
 
 
+class DataFabricQueryV3Input(DataFabricQueryInput):
+    """Input schema when the entities may declare operations."""
+
+    allow_changes: bool = Field(
+        default=False,
+        description=(
+            "Set to true only when the user asked to change data. Operations "
+            "that change data are refused while it is false."
+        ),
+    )
+
+
 class DataFabricExecuteSqlInput(BaseModel):
     """Input schema for SQL queries against Data Fabric entities."""
 
@@ -110,3 +158,32 @@ class DataFabricExecuteSqlInput(BaseModel):
             "Use exact table and column names from the entity schemas."
         ),
     )
+
+
+class DataFabricExecuteOperationInput(BaseModel):
+    """Input schema for running an operation a Data Fabric entity declares."""
+
+    entity_name: str = Field(
+        ...,
+        description="SQL table name of the entity that declares the operation.",
+    )
+    operation_name: str = Field(
+        ...,
+        description="Exact operation name, as listed under the entity's Operations.",
+    )
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arguments keyed by the exact parameter names the operation lists.",
+    )
+
+
+def entity_operations(entity: Any) -> list["EntityOperation"]:
+    """Return the operations an entity declares, or none."""
+    # Entities from v1 metadata, older SDKs and test doubles carry no list.
+    operations = getattr(entity, "operations", None)
+    return list(operations) if isinstance(operations, list) else []
+
+
+def operation_kind(operation: "EntityOperation") -> str:
+    """Return Read or Mutation; anything not declared Read is gated as a Mutation."""
+    return READ_KIND if (operation.kind or "").lower() == "read" else MUTATION_KIND

@@ -9,6 +9,7 @@ SQL_CONSTRAINTS is NOT templated — it is appended verbatim by the prompt build
 
 from .context import SqlPromptContext
 from .registry import (
+    OPERATIONS_PROMPT_VERSION,
     PromptVersion,
     build_prompt_context,
     get_prompt_version,
@@ -16,6 +17,7 @@ from .registry import (
 )
 
 __all__ = [
+    "OPERATIONS_PROMPT_VERSION",
     "PromptVersion",
     "SqlPromptContext",
     "build_prompt_context",

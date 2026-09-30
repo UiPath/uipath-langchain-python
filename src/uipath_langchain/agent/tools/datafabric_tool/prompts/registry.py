@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from .context import SqlPromptContext
 from .v0 import TEMPLATE as V0_TEMPLATE
 from .v1 import TEMPLATE as V1_TEMPLATE
+from .v2 import TEMPLATE as V2_TEMPLATE
 
 if TYPE_CHECKING:
     from uipath.platform.entities import Entity
@@ -40,9 +41,12 @@ class PromptVersion:
 _REGISTRY: dict[str, PromptVersion] = {
     "v0": PromptVersion(name="v0", template=V0_TEMPLATE),
     "v1": PromptVersion(name="v1", template=V1_TEMPLATE),
+    "v2": PromptVersion(name="v2", template=V2_TEMPLATE),
 }
 
 DEFAULT_PROMPT_VERSION = "v1"
+# Replaces the default when any entity declares operations.
+OPERATIONS_PROMPT_VERSION = "v2"
 
 
 def get_prompt_version(name: str | None = None) -> PromptVersion:

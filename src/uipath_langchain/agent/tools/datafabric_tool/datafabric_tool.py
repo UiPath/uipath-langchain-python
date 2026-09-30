@@ -25,7 +25,7 @@ from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import DataFabricEntityItem
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
-from .models import DataFabricQueryInput
+from .models import EXECUTE_OPERATION, DataFabricQueryInput, DataFabricQueryV3Input
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,11 @@ BASE_SYSTEM_PROMPT = "base_system_prompt"
 
 # Flag routing Data Fabric entity-metadata resolution to the V3 API.
 ENTITY_V3_API_FF = "EnableEntityV3API"
+
+OPERATIONS_DESCRIPTION = (
+    "It can also run the operations these entities declare. Set allow_changes "
+    "to true only when the user asked to change data."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,9 +97,10 @@ class DataFabricTextQueryHandler:
 
             sdk = UiPath()
             # Flag on: resolve via the V3 API method; off: the default method.
+            # By name: the v3 metadata-by-name route is the one that lists operations.
             if FeatureFlags.is_flag_enabled(ENTITY_V3_API_FF, default=False):
                 resolution = await sdk.entities.resolve_entity_set_v3_async(
-                    self._entity_set
+                    self._entity_set, fetch_by_name=True
                 )
             else:
                 resolution = await sdk.entities.resolve_entity_set_async(
@@ -114,18 +120,21 @@ class DataFabricTextQueryHandler:
             )
             return self._compiled
 
-    async def __call__(self, user_query: str) -> str:
+    async def __call__(self, user_query: str, allow_changes: bool = False) -> str:
         logger.debug("query_datafabric called with: %s", user_query)
 
         compiled_graph = await self._ensure_datafabric_graph()
         result_state = await compiled_graph.ainvoke(
-            {"messages": [HumanMessage(content=user_query)]}
+            {
+                "messages": [HumanMessage(content=user_query)],
+                "allow_changes": allow_changes,
+            }
         )
         messages = result_state["messages"]
         last_message = messages[-1] if messages else None
 
         # On the happy path the sub-graph short-circuits at END after a
-        # successful execute_sql call, so the terminal state contains one or
+        # successful tool call, so the terminal state contains one or
         # more ToolMessages. Collapse the trailing batch into one synthetic
         # message so the outer agent can reason over the full result set.
         if isinstance(last_message, ToolMessage):
@@ -161,9 +170,13 @@ class DataFabricTextQueryHandler:
             f"Result {index}:\n{content}"
             for index, content in enumerate(non_empty_contents, start=1)
         ]
+        if any(msg.name == EXECUTE_OPERATION for msg in tool_messages):
+            header = "Multiple Data Fabric calls completed successfully. "
+        else:
+            header = "Multiple SQL queries executed successfully. "
         return (
-            "Multiple SQL queries executed successfully. "
-            "Use all of the following results to answer the user's question.\n\n"
+            header
+            + "Use all of the following results to answer the user's question.\n\n"
             + "\n\n".join(rendered_results)
         )
 
@@ -199,16 +212,25 @@ def _build_datafabric_tool(
     llm: BaseChatModel,
 ) -> BaseTool:
     """Build the shared LangChain tool used by coded and low-code agents."""
+    from uipath.core.feature_flags import FeatureFlags
+
     handler = DataFabricTextQueryHandler(
         entity_set=list(config.entities),
         llm=llm,
         resource_description=config.resource_description,
         base_system_prompt=config.base_system_prompt,
     )
+    # Operations come only with v3 metadata; flags are known when tools register.
+    if FeatureFlags.is_flag_enabled(ENTITY_V3_API_FF, default=False):
+        description = f"{config.description}\n{OPERATIONS_DESCRIPTION}"
+        args_schema: type[DataFabricQueryInput] = DataFabricQueryV3Input
+    else:
+        description = config.description
+        args_schema = DataFabricQueryInput
     return BaseUiPathStructuredTool(
         name=config.name,
-        description=config.description,
-        args_schema=DataFabricQueryInput,
+        description=description,
+        args_schema=args_schema,
         coroutine=handler.__call__,
         metadata={"tool_type": "datafabric_sql"},
     )

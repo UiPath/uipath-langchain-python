@@ -15,6 +15,7 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
 from uipath_langchain.agent.tools.context_tool import create_context_tool
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_tool import (
     ENTITY_V3_API_FF,
+    OPERATIONS_DESCRIPTION,
     DataFabricTextQueryHandler,
     create_datafabric_tool,
 )
@@ -60,7 +61,11 @@ def test_create_datafabric_tool_builds_directly_configured_tool():
     assert tool.coroutine is not None
     handler = cast(Any, tool.coroutine).__self__
     assert isinstance(handler, DataFabricTextQueryHandler)
-    assert get_type_hints(tool.coroutine) == {"user_query": str, "return": str}
+    assert get_type_hints(tool.coroutine) == {
+        "user_query": str,
+        "allow_changes": bool,
+        "return": str,
+    }
     assert handler._resource_description == "Query the agentTest entity."
     assert handler._base_system_prompt == "Answer only from Data Fabric."
     assert handler._entity_set == [_entity()]
@@ -274,5 +279,35 @@ async def test_entity_resolution_uses_v3_when_v3_flag_enabled():
     finally:
         FeatureFlags.reset_flags()
 
-    sdk.entities.resolve_entity_set_v3_async.assert_awaited_once_with([entity])
+    sdk.entities.resolve_entity_set_v3_async.assert_awaited_once_with(
+        [entity], fetch_by_name=True
+    )
     sdk.entities.resolve_entity_set_async.assert_not_called()
+
+
+def test_allow_changes_is_on_the_tool_schema_only_with_v3_flag():
+    """Flag off keeps today's schema and description; flag on adds allow_changes."""
+
+    def build() -> Any:
+        return create_datafabric_tool(
+            llm=MagicMock(),
+            name="query_agent_test",
+            description="Query the agentTest entity.",
+            entities=[_entity()],
+            base_system_prompt="",
+        )
+
+    FeatureFlags.configure_flags({ENTITY_V3_API_FF: False})
+    try:
+        flag_off = build()
+        FeatureFlags.configure_flags({ENTITY_V3_API_FF: True})
+        flag_on = build()
+    finally:
+        FeatureFlags.reset_flags()
+
+    assert list(flag_off.args) == ["user_query"]
+    assert flag_off.description == "Query the agentTest entity."
+    assert list(flag_on.args) == ["user_query", "allow_changes"]
+    assert flag_on.description == (
+        f"Query the agentTest entity.\n{OPERATIONS_DESCRIPTION}"
+    )

@@ -2,7 +2,8 @@
 
 Implements a self-contained ReAct loop where an inner LLM translates
 natural-language questions into SQL, executes them via ``execute_sql``,
-and retries on errors — all within a single outer tool call.
+and retries on errors — all within a single outer tool call. When the
+entities declare operations, ``execute_operation`` runs them too.
 
 On a successful SQL execution the graph short-circuits straight to END
 rather than invoking the LLM again to reformat the records into prose;
@@ -12,9 +13,11 @@ retry path remains intact.
 """
 
 import asyncio
+import json
 import logging
 from contextlib import contextmanager
-from typing import Annotated, Any, Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Iterator
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -29,16 +32,33 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from uipath.platform.entities import EntitiesService, Entity
+from uipath.platform.entities._entity_resolution import PreResolvedRoutingStrategy
 from uipath.platform.errors import DataFabricError, DataFabricErrorCategory
 
+from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
-from .models import DataFabricExecuteSqlInput
+from .models import (
+    EXECUTE_OPERATION,
+    EXECUTE_SQL,
+    MUTATION_KIND,
+    READ_KIND,
+    DataFabricExecuteOperationInput,
+    DataFabricExecuteSqlInput,
+    entity_operations,
+    operation_kind,
+)
+
+if TYPE_CHECKING:
+    from uipath.platform.entities import EntityOperation
 
 logger = logging.getLogger(__name__)
 CATEGORY_MARKER = "(category: "
+# Outcomes that answer the request; Refused and Faulted go back to the inner LLM.
+OPERATION_SUCCESS_OUTCOMES = frozenset({"Returned", "Wrote", "NoChange"})
+MAX_MUTATIONS_PER_RUN = 2
 
 
 @contextmanager
@@ -54,6 +74,8 @@ class DataFabricSubgraphState(BaseModel):
     last_tool_success: bool = False
     last_error_category: str = ""
     last_error_detail: str = ""
+    allow_changes: bool = False
+    mutation_count: int = 0
 
 
 class QueryExecutor:
@@ -182,6 +204,198 @@ class QueryExecutor:
         return str(exc)
 
 
+@dataclass
+class MutationBudget:
+    """Mutation invokes left in one outer call, shared by a batch of tool calls."""
+
+    remaining: int
+
+    def take(self) -> bool:
+        """Claim one invoke; False when none are left."""
+        if self.remaining <= 0:
+            return False
+        self.remaining -= 1
+        return True
+
+
+def _routed_folders(entities_service: EntitiesService) -> dict[str, str]:
+    """Map each entity's effective name to the folder its resolution routes it to."""
+    # A resolution service carries routing it resolved up front, so this makes no
+    # request. Any other service leaves routing to the SDK.
+    strategy = getattr(entities_service, "_routing_strategy", None)
+    if not isinstance(strategy, PreResolvedRoutingStrategy):
+        return {}
+    return {
+        routing.override_entity_name or routing.entity_name: routing.folder_id
+        for routing in strategy.routing_context.entity_routings
+    }
+
+
+class OperationExecutor:
+    """Runs the operations Data Fabric entities declare."""
+
+    def __init__(
+        self, entities_service: EntitiesService, entities: list[Entity]
+    ) -> None:
+        self._entities = entities_service
+        self._by_name = {e.name: e for e in entities if entity_operations(e)}
+        self._folders = _routed_folders(entities_service)
+
+    async def __call__(
+        self,
+        entity_name: str,
+        operation_name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        allow_changes: bool = False,
+        budget: MutationBudget | None = None,
+    ) -> dict[str, Any]:
+        """Check the call against the declared operations, then invoke it once."""
+        arguments = arguments or {}
+        entity = self._by_name.get(entity_name)
+        if entity is None:
+            return {
+                "error": f"Entity '{entity_name}' declares no operations.",
+                "valid_entities": list(self._by_name),
+            }
+
+        operations = {op.name: op for op in entity_operations(entity)}
+        operation = operations.get(operation_name)
+        if operation is None:
+            return {
+                "entity": entity_name,
+                "error": f"'{entity_name}' declares no operation '{operation_name}'.",
+                "valid_operations": list(operations),
+            }
+
+        call = {"entity": entity_name, "operation": operation_name}
+        kind = operation_kind(operation)
+        missing = [
+            p.name
+            for p in operation.parameters
+            if p.is_required and p.name not in arguments
+        ]
+        if missing:
+            return {
+                **call,
+                "error": f"Missing required parameters: {', '.join(missing)}.",
+                "parameters": [
+                    {
+                        "name": p.name,
+                        "sql_type": p.sql_type,
+                        "is_required": p.is_required,
+                    }
+                    for p in operation.parameters
+                ],
+            }
+
+        if kind == MUTATION_KIND:
+            if not allow_changes:
+                return {
+                    **call,
+                    "error": (
+                        f"'{operation_name}' changes data, and this request does "
+                        "not allow changes."
+                    ),
+                    "read_operations": [
+                        op.name
+                        for op in operations.values()
+                        if operation_kind(op) == READ_KIND
+                    ],
+                }
+            if budget is not None and not budget.take():
+                return {
+                    **call,
+                    "error": (
+                        f"At most {MAX_MUTATIONS_PER_RUN} operations that change "
+                        "data run per request."
+                    ),
+                }
+
+        return await self._invoke(entity, operation, kind, arguments)
+
+    async def _invoke(
+        self,
+        entity: Entity,
+        operation: "EntityOperation",
+        kind: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Invoke the operation inside an OTEL span; errors are returned as data."""
+        try:
+            from opentelemetry import trace as otel_trace
+
+            tracer = otel_trace.get_tracer("uipath_langchain.datafabric")
+        except ImportError:
+            tracer = None
+
+        span_ctx = (
+            tracer.start_as_current_span(
+                "Data Fabric operation",
+                attributes={
+                    "openinference.span.kind": "TOOL",
+                    "span_type": "datafabricOperation",
+                    "uipath.custom_instrumentation": True,
+                    "df.entity": entity.name,
+                    "df.operation": operation.name,
+                    "df.operation_kind": kind,
+                },
+            )
+            if tracer
+            else _noop_context()
+        )
+
+        call = {"entity": entity.name, "operation": operation.name, "kind": kind}
+        with span_ctx as span:
+            try:
+                result = await self._entities.invoke_operation_async(
+                    entity.name,
+                    operation.name,
+                    arguments,
+                    folder_key=self._folders.get(entity.name),
+                )
+            except Exception as e:
+                return self._handle_invoke_error(e, span, call)
+            if span is not None:
+                span.set_attribute("df.outcome", result.outcome)
+                span.set_attribute("df.rows_affected", result.rows_affected)
+                span.set_attribute(
+                    "df.success", result.outcome in OPERATION_SUCCESS_OUTCOMES
+                )
+                if result.invocation_id is not None:
+                    span.set_attribute("df.invocation_id", result.invocation_id)
+        return {
+            **call,
+            "outcome": result.outcome,
+            "rows_affected": result.rows_affected,
+            "rows": result.rows,
+            "result": result.result,
+            "errors": result.errors,
+            "invocation_id": result.invocation_id,
+            "prints": result.prints,
+        }
+
+    @staticmethod
+    def _handle_invoke_error(
+        e: Exception, span: Any, call: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Log a failed invoke, record it on the span and return it as data."""
+        logger.error("Entity operation failed: %s", e)
+        df_error = DataFabricError.from_exception(e)
+        if span is not None:
+            QueryExecutor._record_error_span(span, e, df_error)
+
+        if df_error and df_error.code:
+            detail = " ".join(filter(None, [f"[{df_error.code}]", df_error.message]))
+        else:
+            detail = str(e)
+        if call["kind"] == MUTATION_KIND:
+            # The invoke is never retried, but a failed response can still follow
+            # an applied write.
+            detail += " The change may already have been applied; do not run it again."
+        return {**call, "error": detail}
+
+
 class DataFabricGraph:
     """Inner ReAct sub-graph for Data Fabric SQL execution.
 
@@ -202,6 +416,14 @@ class DataFabricGraph:
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
+        tools = [self._execute_sql_tool]
+        self._operation_executor: OperationExecutor | None = None
+        if any(entity_operations(e) for e in entities):
+            self._operation_executor = OperationExecutor(entities_service, entities)
+            tools.append(
+                self._create_execute_operation_tool(self._operation_executor, entities)
+            )
+        self._tool_names = [tool.name for tool in tools]
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
                 entities,
@@ -211,7 +433,7 @@ class DataFabricGraph:
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
-            [self._execute_sql_tool]
+            tools
         )
 
         # Build and compile the graph
@@ -239,8 +461,12 @@ class DataFabricGraph:
         if not isinstance(last, AIMessage) or not last.tool_calls:
             return {"iteration_count": state.iteration_count}
 
+        budget = MutationBudget(MAX_MUTATIONS_PER_RUN - state.mutation_count)
         results = await asyncio.gather(
-            *[self._execute_tool_call(tc) for tc in last.tool_calls]
+            *[
+                self._execute_tool_call(tc, state.allow_changes, budget)
+                for tc in last.tool_calls
+            ]
         )
         tool_messages = [msg for msg, _, _, _ in results]
         all_succeeded = bool(results) and all(ok for _, ok, _, _ in results)
@@ -260,15 +486,44 @@ class DataFabricGraph:
             "last_tool_success": all_succeeded,
             "last_error_category": last_category or state.last_error_category,
             "last_error_detail": last_detail or state.last_error_detail,
+            "mutation_count": MAX_MUTATIONS_PER_RUN - budget.remaining,
         }
 
     async def _execute_tool_call(
-        self, tool_call: ToolCall
+        self,
+        tool_call: ToolCall,
+        allow_changes: bool,
+        budget: MutationBudget,
     ) -> tuple[ToolMessage, bool, str, str]:
-        """Execute a single tool call and report whether it succeeded.
+        """Dispatch a single tool call by name and report whether it succeeded.
 
         Returns (message, succeeded, error_category, error_detail).
         """
+        name = tool_call["name"]
+        if name == EXECUTE_SQL:
+            return await self._execute_sql_call(tool_call)
+        if name == EXECUTE_OPERATION and self._operation_executor is not None:
+            return await self._execute_operation_call(
+                tool_call, self._operation_executor, allow_changes, budget
+            )
+        error = (
+            f"Unknown tool '{name}'. Available tools: {', '.join(self._tool_names)}."
+        )
+        return (
+            ToolMessage(
+                content=json.dumps({"error": error}),
+                tool_call_id=tool_call["id"],
+                name=name,
+            ),
+            False,
+            "",
+            error,
+        )
+
+    async def _execute_sql_call(
+        self, tool_call: ToolCall
+    ) -> tuple[ToolMessage, bool, str, str]:
+        """Run an ``execute_sql`` call; it succeeds when rows come back."""
         args = tool_call.get("args", {})
         try:
             result = await self._execute_sql_tool.ainvoke(args)
@@ -296,10 +551,53 @@ class DataFabricGraph:
             ToolMessage(
                 content=str(result),
                 tool_call_id=tool_call["id"],
-                name="execute_sql",
+                name=EXECUTE_SQL,
             ),
             succeeded,
             error_category,
+            error_str,
+        )
+
+    async def _execute_operation_call(
+        self,
+        tool_call: ToolCall,
+        executor: OperationExecutor,
+        allow_changes: bool,
+        budget: MutationBudget,
+    ) -> tuple[ToolMessage, bool, str, str]:
+        """Run an ``execute_operation`` call; it succeeds on a final outcome."""
+        try:
+            call = DataFabricExecuteOperationInput.model_validate(
+                tool_call.get("args", {})
+            )
+        except ValidationError as e:
+            result: dict[str, Any] = {"error": f"Invalid arguments: {e}"}
+        else:
+            # Called directly rather than through the tool, so this run's
+            # allow_changes and budget reach it; the model can set neither.
+            result = await executor(
+                call.entity_name,
+                call.operation_name,
+                call.arguments,
+                allow_changes=allow_changes,
+                budget=budget,
+            )
+        outcome = result.get("outcome")
+        succeeded = outcome in OPERATION_SUCCESS_OUTCOMES
+        error_str = ""
+        if not succeeded:
+            error_str = str(
+                result.get("error")
+                or f"{outcome}: {'; '.join(result.get('errors') or [])}"
+            )
+        return (
+            ToolMessage(
+                content=json.dumps(result, default=str),
+                tool_call_id=tool_call["id"],
+                name=EXECUTE_OPERATION,
+            ),
+            succeeded,
+            "",
             error_str,
         )
 
@@ -345,7 +643,7 @@ class DataFabricGraph:
         """Create the inner ``execute_sql`` tool."""
         entity_names = ", ".join(e.name for e in entities)
         return DataFabricQueryTool(
-            name="execute_sql",
+            name=EXECUTE_SQL,
             description=(
                 f"Execute a SQL SELECT query against Data Fabric entities: {entity_names}. "
                 "Refer to the entity schemas in the system message for available "
@@ -354,6 +652,28 @@ class DataFabricGraph:
             args_schema=DataFabricExecuteSqlInput,
             coroutine=QueryExecutor(entities_service, entities),
             metadata={"tool_type": "datafabric_sql"},
+        )
+
+    def _create_execute_operation_tool(
+        self, executor: OperationExecutor, entities: list[Entity]
+    ) -> BaseTool:
+        """Create the inner ``execute_operation`` tool, bound for its schema.
+
+        Its calls are run by ``_execute_operation_call``. Invoked on its own it
+        refuses every Mutation.
+        """
+        entity_names = ", ".join(e.name for e in entities if entity_operations(e))
+        return BaseUiPathStructuredTool(
+            name=EXECUTE_OPERATION,
+            description=(
+                f"Run an operation declared by a Data Fabric entity: {entity_names}. "
+                "The operations, their kind and parameters are listed in the system "
+                "message. A Mutation changes data and is refused unless the request "
+                "allows changes."
+            ),
+            args_schema=DataFabricExecuteOperationInput,
+            coroutine=executor,
+            metadata={"tool_type": "datafabric_operation"},
         )
 
     @staticmethod

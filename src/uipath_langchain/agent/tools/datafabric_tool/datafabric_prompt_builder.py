@@ -18,10 +18,18 @@ from .models import (
     EntitySchema,
     EntitySQLContext,
     FieldSchema,
+    OperationParameterSchema,
+    OperationSchema,
     QueryPattern,
     SQLContext,
+    entity_operations,
+    operation_kind,
 )
-from .prompts import build_prompt_context, get_prompt_version
+from .prompts import (
+    OPERATIONS_PROMPT_VERSION,
+    build_prompt_context,
+    get_prompt_version,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +180,22 @@ def build_entity_context(
         description=entity.description,
         record_count=entity.record_count,
         fields=field_schemas,
+        operations=[
+            OperationSchema(
+                name=op.name,
+                kind=operation_kind(op),
+                description=op.description,
+                parameters=[
+                    OperationParameterSchema(
+                        name=param.name,
+                        sql_type=param.sql_type,
+                        is_required=param.is_required,
+                    )
+                    for param in op.parameters
+                ],
+            )
+            for op in entity_operations(entity)
+        ],
     )
     return EntitySQLContext(entity_schema=schema, query_patterns=query_patterns)
 
@@ -192,10 +216,13 @@ def build_sql_context(
         base_system_prompt: Optional outer-agent system prompt prepended as
             ``## Agent Instructions``.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
-            Defaults to the registry's default.
+            Defaults to the registry's default, or to the operations version
+            when any entity declares operations.
         entities_service: Optional platform service for fetching choice-set
             value labels during schema resolution.
     """
+    if prompt_version is None and any(entity_operations(e) for e in entities):
+        prompt_version = OPERATIONS_PROMPT_VERSION
     version = get_prompt_version(prompt_version)
     ctx = build_prompt_context(
         entities=entities,
@@ -262,8 +289,27 @@ def _format_relationships(entity: EntitySchema, entity_tables: set[str]) -> list
     return lines
 
 
+def _format_operations(entity: EntitySchema) -> list[str]:
+    """Render the Operations subsection for one entity, if it declares any."""
+    if not entity.operations:
+        return []
+
+    lines = [
+        f"**Operations for {entity.entity_name}:**",
+        "",
+        "| Operation | Kind | Description | Parameters |",
+        "|-----------|------|-------------|------------|",
+    ]
+    for op in entity.operations:
+        desc = (op.description or "").replace("|", r"\|").replace("\n", " ")
+        params = ", ".join(param.display for param in op.parameters) or "none"
+        lines.append(f"| {op.name} | {op.kind} | {desc} | {params} |")
+    lines.append("")
+    return lines
+
+
 def _format_entity(entity_ctx: EntitySQLContext, entity_tables: set[str]) -> list[str]:
-    """Render one entity's schema table, relationships, and query patterns."""
+    """Render one entity's schema, relationships, query patterns and operations."""
     entity = entity_ctx.entity_schema
     lines = [f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"]
     if entity.description:
@@ -285,6 +331,8 @@ def _format_entity(entity_ctx: EntitySQLContext, entity_tables: set[str]) -> lis
     for p in entity_ctx.query_patterns:
         lines.append(f"| '{p.intent}' | `{p.sql}` |")
     lines.append("")
+
+    lines.extend(_format_operations(entity))
     return lines
 
 
@@ -326,7 +374,8 @@ def build(
             folded into the rendered prompt as domain guidance.
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
-            Defaults to the registry's default.
+            Defaults to the registry's default, or to the operations version
+            when any entity declares operations.
         entities_service: Optional platform service for fetching choice-set
             value labels.
 
