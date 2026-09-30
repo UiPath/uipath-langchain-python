@@ -6,11 +6,14 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import openai
 import pytest
+from langchain_anthropic import ChatAnthropic
+from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.content import create_text_block, create_tool_call
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import AzureChatOpenAI
+from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.runtime.errors import UiPathErrorCategory
@@ -19,8 +22,15 @@ from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.react.llm_node import create_llm_node
+from uipath_langchain.agent.react.llm_node import (
+    AutoToolChoiceLLMNode,
+    ConversationalLLMNode,
+    ForcedToolChoiceLLMNode,
+    create_llm_node,
+)
+from uipath_langchain.agent.react.tools import create_flow_control_tools
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.chat.exceptions import ChatModelError
 
 
 class _StubAzureChatOpenAI(AzureChatOpenAI):
@@ -682,3 +692,400 @@ class TestForcedExtractionEscalation:
         node = create_llm_node(model, [tool])
         await node(AgentGraphState(messages=[HumanMessage(content="q")]))
         assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
+
+
+class _StubChatAnthropic(ChatAnthropic):
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+
+
+class _Output(BaseModel):
+    answer: str
+
+
+class _UntypedListOutput(BaseModel):
+    sources: list[Any]
+
+
+_REJECTS_FORCING = {"supportsForcedToolChoice": False}
+
+
+class _StubChatBedrockConverse(ChatBedrockConverse):
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+
+
+class TestBedrockConverseFinishWithoutForcing:
+    """Bedrock Converse Claude finishes the same way as Vertex."""
+
+    @pytest.mark.asyncio
+    async def test_text_answer_finishes_by_calling_end_execution(self) -> None:
+        model: Any = _StubChatBedrockConverse.model_construct(
+            model_id="anthropic.claude-opus-5-5-v1:0",
+        )
+        model.model_details = _REJECTS_FORCING
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(content=[{"type": "text", "text": "Lisbon is warmer."}]),
+                AIMessage(
+                    content=[],
+                    tool_calls=[
+                        create_tool_call(
+                            name=END_EXECUTION_TOOL.name,
+                            args={"answer": "Lisbon"},
+                            id="t1",
+                        )
+                    ],
+                ),
+            ]
+        )
+        search = StructuredTool(
+            name="search",
+            description="search",
+            args_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+            func=lambda **_: None,
+        )
+        tools = [search, *create_flow_control_tools(_Output)]
+
+        result = await create_llm_node(model, tools, auto_tool_choice_llm_node=True)(
+            AgentGraphState(messages=[HumanMessage("q")])
+        )
+
+        finish_binding = model.bind_tools.call_args_list[1]
+        assert [t.name for t in finish_binding.args[0]] == [
+            END_EXECUTION_TOOL.name,
+            RAISE_ERROR_TOOL.name,
+        ]
+        assert finish_binding.kwargs["tool_choice"] == "auto"
+        assert "output_config" not in finish_binding.kwargs
+        assert result["messages"][0].tool_calls[0]["args"] == {"answer": "Lisbon"}
+
+
+class TestFinishWithoutForcing:
+    """Opus 5.5 rejects forced tool choice, so its turns run with tool_choice auto and a
+    text answer is turned into end_execution by one finish call."""
+
+    def _model(self, *responses: AIMessage) -> Any:
+        model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
+        model.model_details = _REJECTS_FORCING
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(side_effect=list(responses))
+        return model
+
+    def _tools(self) -> list[BaseTool]:
+        search = StructuredTool(
+            name="search",
+            description="search",
+            args_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+            func=lambda **_: None,
+        )
+        return [search, *create_flow_control_tools(_Output)]
+
+    def _node(self, model: Any) -> Any:
+        return create_llm_node(model, self._tools(), auto_tool_choice_llm_node=True)
+
+    @staticmethod
+    def _prose(stop_reason: str = "end_turn") -> AIMessage:
+        return AIMessage(
+            content=[{"type": "text", "text": "Lisbon is warmer (27 °C)."}],
+            response_metadata={"stop_reason": stop_reason},
+        )
+
+    @pytest.mark.asyncio
+    async def test_turns_run_with_auto(self) -> None:
+        model = self._model(
+            AIMessage(
+                content="",
+                tool_calls=[create_tool_call(name="search", args={}, id="c1")],
+            )
+        )
+
+        await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "auto"
+        assert "output_config" not in model.bind_tools.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_anthropic_text_answer_finishes_by_calling_end_execution(
+        self,
+    ) -> None:
+        reply = AIMessage(
+            content=[],
+            tool_calls=[
+                create_tool_call(
+                    name=END_EXECUTION_TOOL.name, args={"answer": "Lisbon"}, id="t1"
+                )
+            ],
+            response_metadata={"stop_reason": "tool_use"},
+        )
+        model = self._model(self._prose(), reply)
+
+        result = await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+
+        assert model.ainvoke.await_count == 2
+        finish_binding = model.bind_tools.call_args_list[1]
+        assert [t.name for t in finish_binding.args[0]] == [
+            END_EXECUTION_TOOL.name,
+            RAISE_ERROR_TOOL.name,
+        ]
+        assert finish_binding.kwargs["tool_choice"] == "auto"
+        assert "output_config" not in finish_binding.kwargs
+        sent = model.ainvoke.call_args_list[1].args[0]
+        assert sent[-2].text == "Lisbon is warmer (27 °C)."
+        assert isinstance(sent[-1], HumanMessage)
+        assert END_EXECUTION_TOOL.name in sent[-1].text
+        [response] = result["messages"]
+        assert [(tc["name"], tc["args"]) for tc in response.tool_calls] == [
+            (END_EXECUTION_TOOL.name, {"answer": "Lisbon"})
+        ]
+
+    def _untyped_list_node(self, model: Any) -> Any:
+        tools = [self._tools()[0], *create_flow_control_tools(_UntypedListOutput)]
+        return create_llm_node(model, tools, auto_tool_choice_llm_node=True)
+
+    @pytest.mark.asyncio
+    async def test_untyped_output_finishes_by_calling_end_execution(
+        self,
+    ) -> None:
+        reply = AIMessage(
+            content=[{"type": "thinking", "thinking": "", "signature": "s"}],
+            tool_calls=[
+                create_tool_call(
+                    name=END_EXECUTION_TOOL.name,
+                    args={"sources": ["https://example.com"]},
+                    id="toolu_1",
+                )
+            ],
+            response_metadata={"stop_reason": "tool_use"},
+        )
+        model = self._model(self._prose(), reply)
+
+        result = await self._untyped_list_node(model)(
+            AgentGraphState(messages=[HumanMessage("q")])
+        )
+
+        assert model.ainvoke.await_count == 2
+        finish_binding = model.bind_tools.call_args_list[1]
+        assert [t.name for t in finish_binding.args[0]] == [
+            END_EXECUTION_TOOL.name,
+            RAISE_ERROR_TOOL.name,
+        ]
+        assert finish_binding.kwargs["tool_choice"] == "auto"
+        assert "output_config" not in finish_binding.kwargs
+        sent = model.ainvoke.call_args_list[1].args[0]
+        assert sent[-2].text == "Lisbon is warmer (27 °C)."
+        assert isinstance(sent[-1], HumanMessage)
+        assert END_EXECUTION_TOOL.name in sent[-1].text
+        [response] = result["messages"]
+        assert [(tc["name"], tc["args"]) for tc in response.tool_calls] == [
+            (END_EXECUTION_TOOL.name, {"sources": ["https://example.com"]})
+        ]
+        assert response.content == []
+
+    @pytest.mark.asyncio
+    async def test_finish_call_without_end_execution_keeps_the_answer(
+        self,
+    ) -> None:
+        model = self._model(self._prose(), self._prose())
+
+        result = await self._untyped_list_node(model)(
+            AgentGraphState(messages=[HumanMessage("q")])
+        )
+
+        assert model.ainvoke.await_count == 2
+        [response] = result["messages"]
+        assert not response.tool_calls
+        assert response.text == "Lisbon is warmer (27 °C)."
+
+    @pytest.mark.asyncio
+    async def test_empty_finish_call_keeps_the_answer(self) -> None:
+        reply = AIMessage(
+            content=[],
+            tool_calls=[
+                create_tool_call(
+                    name=END_EXECUTION_TOOL.name, args={"answer": None}, id="t1"
+                )
+            ],
+        )
+        model = self._model(self._prose(), reply)
+
+        result = await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+
+        [response] = result["messages"]
+        assert not response.tool_calls
+        assert response.text == "Lisbon is warmer (27 °C)."
+
+    @pytest.mark.asyncio
+    async def test_tool_calls_need_no_finish_call(self) -> None:
+        model = self._model(
+            AIMessage(
+                content=[{"type": "text", "text": "Looking it up."}],
+                tool_calls=[create_tool_call(name="search", args={"q": "x"}, id="c1")],
+                response_metadata={"stop_reason": "tool_use"},
+            )
+        )
+
+        result = await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+
+        assert model.ainvoke.await_count == 1
+        assert result["messages"][0].tool_calls[0]["name"] == "search"
+
+    @pytest.mark.asyncio
+    async def test_text_answer_finishes_whatever_the_stop_reason(self) -> None:
+        reply = AIMessage(
+            content=[],
+            tool_calls=[
+                create_tool_call(
+                    name=END_EXECUTION_TOOL.name, args={"answer": "Lisbon"}, id="t1"
+                )
+            ],
+        )
+        model = self._model(self._prose("stop_sequence"), reply)
+
+        result = await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+
+        assert model.ainvoke.await_count == 2
+        [response] = result["messages"]
+        assert response.tool_calls[0]["args"] == {"answer": "Lisbon"}
+
+    @pytest.mark.asyncio
+    async def test_truncated_finish_call_raises(self) -> None:
+        truncated = AIMessage(
+            content=[{"type": "text", "text": "..."}],
+            response_metadata={"stop_reason": "max_tokens"},
+        )
+        model = self._model(self._prose(), truncated)
+
+        with pytest.raises(ChatModelError):
+            await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+
+    @pytest.mark.asyncio
+    async def test_a_tool_less_turn_already_in_the_history_fails_visibly(self) -> None:
+        model = self._model()
+        state = AgentGraphState(
+            messages=[
+                HumanMessage("q"),
+                AIMessage(
+                    content=[{"type": "thinking", "thinking": "", "signature": "s"}]
+                ),
+            ]
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._node(model)(state)
+
+        assert exc_info.value.error_info.code.endswith(
+            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value
+        )
+        model.ainvoke.assert_not_awaited()
+
+
+class TestOtherClaudeThinkingModelsKeepTheForcedRetry:
+    @pytest.mark.asyncio
+    async def test_stall_is_retried_with_thinking_off_and_forced(self) -> None:
+        model: Any = _StubChatAnthropic.model_construct(
+            model="claude-opus-4-6", thinking={"type": "adaptive"}
+        )
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+        )
+        tool = Mock(spec=BaseTool)
+        tool.name = "t"
+        stalled = AIMessage(content=[{"type": "text", "text": "answer"}])
+
+        await create_llm_node(model, [tool])(
+            AgentGraphState(messages=[HumanMessage(content="q"), stalled])
+        )
+
+        assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
+        sent = model.ainvoke.call_args.args[0]
+        assert isinstance(sent[-1], HumanMessage)
+        assert len(sent) == 3
+
+
+class TestFinishWithoutForcingCanRaiseError:
+    @pytest.mark.asyncio
+    async def test_failure_answered_in_text_is_raised(self) -> None:
+        model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
+        model.model_details = _REJECTS_FORCING
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(content=[{"type": "text", "text": "No such city."}]),
+                AIMessage(
+                    content=[],
+                    tool_calls=[
+                        create_tool_call(
+                            name=RAISE_ERROR_TOOL.name,
+                            args={"message": "No such city."},
+                            id="t1",
+                        )
+                    ],
+                ),
+            ]
+        )
+
+        result = await create_llm_node(
+            model, create_flow_control_tools(_Output), auto_tool_choice_llm_node=True
+        )(AgentGraphState(messages=[HumanMessage("q")]))
+
+        sent = model.ainvoke.call_args_list[1].args[0]
+        assert RAISE_ERROR_TOOL.name in sent[-1].text
+        [response] = result["messages"]
+        assert [(tc["name"], tc["args"]) for tc in response.tool_calls] == [
+            (RAISE_ERROR_TOOL.name, {"message": "No such city."})
+        ]
+
+
+class TestCreateLlmNode:
+    """The factory picks the LLM node by discovery's supportsForcedToolChoice."""
+
+    @staticmethod
+    def _tools() -> list[BaseTool]:
+        return create_flow_control_tools(_Output)
+
+    @staticmethod
+    def _model(model_details: dict[str, Any] | None) -> Any:
+        model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
+        model.model_details = model_details
+        return model
+
+    def test_models_that_reject_forcing_get_the_auto_tool_choice_node(self) -> None:
+        node = create_llm_node(
+            self._model(_REJECTS_FORCING), self._tools(), auto_tool_choice_llm_node=True
+        )
+        assert isinstance(node, AutoToolChoiceLLMNode)
+
+    def test_without_the_feature_flag_every_model_gets_the_forced_node(self) -> None:
+        node = create_llm_node(self._model(_REJECTS_FORCING), self._tools())
+        assert isinstance(node, ForcedToolChoiceLLMNode)
+
+    def test_models_without_the_discovery_flag_get_the_forced_node(self) -> None:
+        for model_details in (None, {}, {"supportsForcedToolChoice": True}):
+            node = create_llm_node(
+                self._model(model_details),
+                self._tools(),
+                auto_tool_choice_llm_node=True,
+            )
+            assert isinstance(node, ForcedToolChoiceLLMNode), model_details
+
+    def test_conversational_agents_get_the_conversational_node(self) -> None:
+        for model_details in (_REJECTS_FORCING, None):
+            node = create_llm_node(
+                self._model(model_details),
+                self._tools(),
+                is_conversational=True,
+                auto_tool_choice_llm_node=True,
+            )
+            assert isinstance(node, ConversationalLLMNode), model_details
+
+    def test_agents_without_tools_get_the_conversational_node(self) -> None:
+        model = _StubChatAnthropic.model_construct(model="claude-opus-4-6")
+        assert isinstance(create_llm_node(model, []), ConversationalLLMNode)
