@@ -1,0 +1,55 @@
+# LTL Claims Agent - All Dependencies
+# Python 3.11+ required
+
+# Core dependencies
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# HTTP client for API calls
+httpx>=0.24.0
+requests>=2.28.0
+aiofiles>=23.0.0
+
+# Data processing and utilities
+numpy>=1.21.0
+pandas>=1.5.0
+openpyxl>=3.0.0
+
+# Logging and monitoring
+structlog>=23.0.0
+
+# Async utilities
+tenacity>=8.0.0
+
+# UiPath Python SDK and LangChain integration
+uipath>=2.1.76
+uipath-langchain>=0.0.140
+
+# LangChain ecosystem
+langchain>=0.3.4,<1.0.0
+langchain-core>=0.3.72,<1.0.0
+langchain-community>=0.3.21
+langchain-openai>=0.3.3,<1.0.0
+langchain-anthropic>=0.3.22,<1.0.0
+
+# LangGraph for agentic workflow orchestration
+langgraph>=0.5.0,<0.7.0
+langgraph-checkpoint>=2.1.0,<4.0.0
+langgraph-checkpoint-sqlite>=2.0.3,<4.0.0
+langgraph-prebuilt>=0.6.0,<0.7.0
+
+# OpenAI integration
+openai>=1.65.5
+
+# Additional LangChain dependencies
+langchain-text-splitters>=0.3.11
+tiktoken>=0.12.0
+
+# Testing dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+
+# Development dependencies
+black>=23.0.0
+isort>=5.12.0
