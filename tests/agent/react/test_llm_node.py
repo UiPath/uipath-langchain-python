@@ -961,6 +961,49 @@ class TestFinishWithoutForcing:
             await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
 
     @pytest.mark.asyncio
+    async def test_finish_call_keeps_parallel_tool_calls_and_strict_mode(
+        self,
+    ) -> None:
+        model = self._model(
+            self._prose(),
+            AIMessage(
+                content=[],
+                tool_calls=[
+                    create_tool_call(
+                        name=END_EXECUTION_TOOL.name, args={"answer": "L"}, id="t1"
+                    )
+                ],
+            ),
+        )
+        node = create_llm_node(
+            model,
+            self._tools(),
+            parallel_tool_calls=False,
+            strict_mode=True,
+            auto_tool_choice_llm_node=True,
+        )
+
+        await node(AgentGraphState(messages=[HumanMessage("q")]))
+
+        finish_kwargs = model.bind_tools.call_args_list[1].kwargs
+        assert finish_kwargs["parallel_tool_calls"] is False
+        assert finish_kwargs["strict"] is True
+
+    @pytest.mark.asyncio
+    async def test_stall_error_explains_the_finish_call(self) -> None:
+        state = AgentGraphState(
+            messages=[HumanMessage("q"), AIMessage(content="still prose")]
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._node(self._model())(state)
+
+        detail = exc_info.value.error_info.detail
+        assert "forced extraction" not in detail
+        assert END_EXECUTION_TOOL.name in detail
+        assert RAISE_ERROR_TOOL.name in detail
+
+    @pytest.mark.asyncio
     async def test_a_tool_less_turn_already_in_the_history_fails_visibly(self) -> None:
         model = self._model()
         state = AgentGraphState(

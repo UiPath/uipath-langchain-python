@@ -44,6 +44,9 @@ def finish_without_forcing(
     tools: Sequence[BaseTool],
     messages: Sequence[AnyMessage],
     answer: AIMessage,
+    *,
+    parallel_tool_calls: bool,
+    strict_mode: bool,
 ) -> tuple[Runnable[Sequence[AnyMessage], BaseMessage], list[AnyMessage]]:
     """The finish call: end_execution and raise_error only, on auto."""
     finishing_tools = [
@@ -51,9 +54,13 @@ def finish_without_forcing(
         for tool in tools
         if tool.name in (END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name)
     ]
-    llm = model.bind_tools(
-        finishing_tools, **handler.get_tool_binding_kwargs(finishing_tools, "auto")
+    binding_kwargs = handler.get_tool_binding_kwargs(
+        finishing_tools,
+        "auto",
+        parallel_tool_calls=parallel_tool_calls,
+        strict_mode=strict_mode,
     )
+    llm = model.bind_tools(finishing_tools, **binding_kwargs)
     return llm, [*messages, answer, HumanMessage(content=FINISH_REQUEST)]
 
 

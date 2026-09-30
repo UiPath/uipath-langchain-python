@@ -398,7 +398,7 @@ class TestCreateAgentPicksTheLlmNode:
                 ],
             )
         )
-        graph = create_agent(
+        graph: Any = create_agent(
             model,
             [],
             [SystemMessage(content="system")],
