@@ -319,7 +319,7 @@ def test_legacy_cached_card_remains_usable_as_tool_metadata() -> None:
 
     tools, clients = create_a2a_tools_and_clients([resource])
 
-    assert tools[0].name == "Remote_Agent"
+    assert tools[0].name == "remote-agent"
     assert "cached description" in tools[0].description
     assert "Answer questions" in tools[0].description
     assert clients[0]._agent_card.name == "Remote Agent"
