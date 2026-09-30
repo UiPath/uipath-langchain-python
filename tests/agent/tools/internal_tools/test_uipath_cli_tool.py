@@ -55,6 +55,12 @@ def test_parse_rejects_shell_operators(command: str) -> None:
         _parse_uip_command(command)
 
 
+@pytest.mark.parametrize("command", ["codedagent run", "function run"])
+def test_parse_blocks_local_run_commands(command: str) -> None:
+    with pytest.raises(ValueError, match="blocked"):
+        _parse_uip_command(command)
+
+
 # --- command examples stay aligned with the real CLI -----------------------
 
 

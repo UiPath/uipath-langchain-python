@@ -88,6 +88,9 @@ def _parse_uip_command(command: str) -> list[str]:
                 f"Shell operator '{token}' is not allowed; run one command at a time."
             )
 
+    if tokens[:2] in (["codedagent", "run"], ["function", "run"]):
+        raise ValueError(f"`uip {' '.join(tokens[:2])}` is blocked.")
+
     return tokens
 
 
