@@ -17,6 +17,7 @@ from .utils import (
     download_file_base64,
     is_image,
     is_tiff,
+    normalize_mime_type,
     sanitize_filename,
     stream_tiff_to_content_blocks,
 )
@@ -31,7 +32,11 @@ async def build_file_content_blocks_for(
 ) -> list[DataContentBlock]:
     """Build LangChain content blocks for a single file attachment.
 
-    Images become image blocks, TIFFs are split into per-page PNG blocks,
+    The declared MIME type is first reconciled with the filename extension
+    (see :func:`normalize_mime_type`), so a ``.csv`` labeled
+    ``application/vnd.ms-excel`` by a Windows uploader is sent as ``text/csv``
+    instead of being parsed by the provider as a corrupt binary workbook.
+    Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
     compatibility for non-image formats is delegated to the LLM.
@@ -47,7 +52,17 @@ async def build_file_content_blocks_for(
     Raises:
         ValueError: If the file exceeds the size limit for LLM payloads.
     """
-    if is_tiff(file_info.mime_type):
+    mime_type = normalize_mime_type(file_info.mime_type, file_info.name)
+    if mime_type != file_info.mime_type:
+        logger.info(
+            "Attachment '%s' was declared as %r; sending it as %r based on its "
+            "file extension",
+            file_info.name,
+            file_info.mime_type,
+            mime_type,
+        )
+
+    if is_tiff(mime_type):
         try:
             return await stream_tiff_to_content_blocks(file_info.url, max_size=max_size)
         except ValueError as exc:
@@ -58,13 +73,13 @@ async def build_file_content_blocks_for(
     except ValueError as exc:
         raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
-    if is_image(file_info.mime_type):
-        return [create_image_block(base64=base64_file, mime_type=file_info.mime_type)]
+    if is_image(mime_type):
+        return [create_image_block(base64=base64_file, mime_type=mime_type)]
 
     return [
         create_file_block(
             base64=base64_file,
-            mime_type=file_info.mime_type or "application/octet-stream",
+            mime_type=mime_type or "application/octet-stream",
             filename=sanitize_filename(file_info.name),
         )
     ]

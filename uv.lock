@@ -10,7 +10,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-09-28T20:18:47.4821631Z"
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
@@ -4773,7 +4773,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.14.21"
+version = "2.14.27"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -4798,9 +4798,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/f3/7fa28f50bb2c8d53074daa33172e47ad6e52d593a5bafd69301259d0343d/uipath-2.14.21.tar.gz", hash = "sha256:19da203089a15f541ab3df9fcf9280725e523d84a27a27de872f8d8e80af2209", size = 4575500, upload-time = "2026-09-16T17:32:54.369Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/39/3d050ed20974c72adf657b95489917783c37e139df080d2b348a778b2b89/uipath-2.14.27.tar.gz", hash = "sha256:d613fe9e0bcc5da0b0208f86c4ca60c8476a96628d25c0af5553823a1c7ffd8b", size = 4588101, upload-time = "2026-09-29T22:04:21.644Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/58/b3d6e0b4f66c07ba7dc7dc2c9a72b54728ddf48d55591f0addb883f1847c/uipath-2.14.21-py3-none-any.whl", hash = "sha256:543b54f9c6893b2bd0bc5db2bb7f6b794b96e03b11ac5260bf342da3570896f8", size = 450144, upload-time = "2026-09-16T17:32:52.528Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/9c/5fad4b24ea14354f737e843b67110f8d54883745cc1227e1c5452c136e52/uipath-2.14.27-py3-none-any.whl", hash = "sha256:73d8a3d10bcd187241e6d209ba4fb98e6a17416c3581b84499dad278150ff3df", size = 452678, upload-time = "2026-09-29T22:04:19.338Z" },
 ]
 
 [[package]]
@@ -4828,7 +4828,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.18.16"
+version = "0.18.18"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4933,7 +4933,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.20.0,<1.21.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.20.0,<1.21.0" },
     { name = "uipath-llm-client", specifier = ">=1.20.0,<1.21.0" },
-    { name = "uipath-platform", specifier = ">=0.2.31,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.33,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.13.0,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpreter", "all"]
@@ -5024,7 +5024,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.2.31"
+version = "0.2.33"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -5035,9 +5035,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/fa/087feadb32c9a8b82ee7398cfe4eb1b2d60335f4ca6e9f78b8629dc290a7/uipath_platform-0.2.31.tar.gz", hash = "sha256:2d9f7904006a0b68cca2535df5172d905ad8e19e453eeafbfc20def0d149947d", size = 454031, upload-time = "2026-09-17T07:34:58.067Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/f5/85ae81277cbb2f07cc99fcafadff7ac6c655db312086b529673274d3ef3b/uipath_platform-0.2.33.tar.gz", hash = "sha256:3164a36abb5548f70190a8f9ea115a4aea4e3274be9af347199711e525334c6a", size = 454622, upload-time = "2026-09-29T22:03:03.944Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/e4/45b8f27c012ddfd03076c3f07c4c248ccc59ce19ec7e9c5141c5aee3c3a0/uipath_platform-0.2.31-py3-none-any.whl", hash = "sha256:9e88470bcbb2c31dcdf23dc4e2152f73220ce29c7db7495828d10cb2c9b29814", size = 295171, upload-time = "2026-09-17T07:34:56.461Z" },
+    { url = "https://files.pythonhosted.org/packages/62/8b/c42ff0c94bb2c767862a567d8bb14e3be97affa185558b1f11b9b4ba77da/uipath_platform-0.2.33-py3-none-any.whl", hash = "sha256:3e2d4d1ec1ca05e10418073c1905e965e8b191cd671d5b9fbab9103a90e9fd6c", size = 294638, upload-time = "2026-09-29T22:03:02.273Z" },
 ]
 
 [[package]]
