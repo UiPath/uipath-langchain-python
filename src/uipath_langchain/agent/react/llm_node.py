@@ -326,13 +326,12 @@ def create_llm_node(
     tool_choice: Literal["auto", "any"] = "auto",
     parallel_tool_calls: bool = True,
     strict_mode: bool = False,
-    auto_tool_choice_llm_node: bool = False,
 ) -> LLMNode[AgentGraphState]:
     """Pick the LLM node for the agent and model.
 
-    Conversational or no tools: ConversationalLLMNode. auto_tool_choice_llm_node on
-    and discovery says supportsForcedToolChoice: false: AutoToolChoiceLLMNode.
-    Otherwise: ForcedToolChoiceLLMNode.
+    Conversational or no tools: ConversationalLLMNode. Discovery says
+    supportsForcedToolChoice: false: AutoToolChoiceLLMNode. Otherwise:
+    ForcedToolChoiceLLMNode.
 
     Args:
         model: The chat model to use
@@ -344,7 +343,6 @@ def create_llm_node(
         tool_choice: Tool choice for the ConversationalLLMNode
         parallel_tool_calls: Allow parallel tool calls
         strict_mode: Validate tool call arguments
-        auto_tool_choice_llm_node: Allow the AutoToolChoiceLLMNode (feature flag)
     """
     if is_conversational or not tools:
         return ConversationalLLMNode(
@@ -356,7 +354,7 @@ def create_llm_node(
             strict_mode=strict_mode,
             tool_choice=tool_choice,
         )
-    if auto_tool_choice_llm_node and not _supports_forced_tool_choice(model):
+    if not _supports_forced_tool_choice(model):
         return AutoToolChoiceLLMNode(
             model,
             tools,

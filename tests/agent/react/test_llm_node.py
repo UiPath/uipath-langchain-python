@@ -748,7 +748,7 @@ class TestBedrockConverseFinishWithoutForcing:
         )
         tools = [search, *create_flow_control_tools(_Output)]
 
-        result = await create_llm_node(model, tools, auto_tool_choice_llm_node=True)(
+        result = await create_llm_node(model, tools)(
             AgentGraphState(messages=[HumanMessage("q")])
         )
 
@@ -783,7 +783,7 @@ class TestFinishWithoutForcing:
         return [search, *create_flow_control_tools(_Output)]
 
     def _node(self, model: Any) -> Any:
-        return create_llm_node(model, self._tools(), auto_tool_choice_llm_node=True)
+        return create_llm_node(model, self._tools())
 
     @staticmethod
     def _prose(stop_reason: str = "end_turn") -> AIMessage:
@@ -842,7 +842,7 @@ class TestFinishWithoutForcing:
 
     def _untyped_list_node(self, model: Any) -> Any:
         tools = [self._tools()[0], *create_flow_control_tools(_UntypedListOutput)]
-        return create_llm_node(model, tools, auto_tool_choice_llm_node=True)
+        return create_llm_node(model, tools)
 
     @pytest.mark.asyncio
     async def test_untyped_output_finishes_by_calling_end_execution(
@@ -976,11 +976,7 @@ class TestFinishWithoutForcing:
             ),
         )
         node = create_llm_node(
-            model,
-            self._tools(),
-            parallel_tool_calls=False,
-            strict_mode=True,
-            auto_tool_choice_llm_node=True,
+            model, self._tools(), parallel_tool_calls=False, strict_mode=True
         )
 
         await node(AgentGraphState(messages=[HumanMessage("q")]))
@@ -1075,9 +1071,9 @@ class TestFinishWithoutForcingCanRaiseError:
             ]
         )
 
-        result = await create_llm_node(
-            model, create_flow_control_tools(_Output), auto_tool_choice_llm_node=True
-        )(AgentGraphState(messages=[HumanMessage("q")]))
+        result = await create_llm_node(model, create_flow_control_tools(_Output))(
+            AgentGraphState(messages=[HumanMessage("q")])
+        )
 
         sent = model.ainvoke.call_args_list[1].args[0]
         assert RAISE_ERROR_TOOL.name in sent[-1].text
@@ -1101,31 +1097,18 @@ class TestCreateLlmNode:
         return model
 
     def test_models_that_reject_forcing_get_the_auto_tool_choice_node(self) -> None:
-        node = create_llm_node(
-            self._model(_REJECTS_FORCING), self._tools(), auto_tool_choice_llm_node=True
-        )
-        assert isinstance(node, AutoToolChoiceLLMNode)
-
-    def test_without_the_feature_flag_every_model_gets_the_forced_node(self) -> None:
         node = create_llm_node(self._model(_REJECTS_FORCING), self._tools())
-        assert isinstance(node, ForcedToolChoiceLLMNode)
+        assert isinstance(node, AutoToolChoiceLLMNode)
 
     def test_models_without_the_discovery_flag_get_the_forced_node(self) -> None:
         for model_details in (None, {}, {"supportsForcedToolChoice": True}):
-            node = create_llm_node(
-                self._model(model_details),
-                self._tools(),
-                auto_tool_choice_llm_node=True,
-            )
+            node = create_llm_node(self._model(model_details), self._tools())
             assert isinstance(node, ForcedToolChoiceLLMNode), model_details
 
     def test_conversational_agents_get_the_conversational_node(self) -> None:
         for model_details in (_REJECTS_FORCING, None):
             node = create_llm_node(
-                self._model(model_details),
-                self._tools(),
-                is_conversational=True,
-                auto_tool_choice_llm_node=True,
+                self._model(model_details), self._tools(), is_conversational=True
             )
             assert isinstance(node, ConversationalLLMNode), model_details
 

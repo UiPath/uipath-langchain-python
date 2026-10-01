@@ -209,7 +209,6 @@ def create_agent(
         tool_choice=config.tool_choice,
         parallel_tool_calls=config.parallel_tool_calls,
         strict_mode=config.strict_mode,
-        auto_tool_choice_llm_node=config.auto_tool_choice_llm_node,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema
