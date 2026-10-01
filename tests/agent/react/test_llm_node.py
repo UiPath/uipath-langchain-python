@@ -707,7 +707,7 @@ class _UntypedListOutput(BaseModel):
     sources: list[Any]
 
 
-_REJECTS_FORCING = {"supportsForcedToolChoice": False}
+_REJECTS_FORCING = {"shouldSkipForcedToolChoice": True}
 
 
 class _StubChatBedrockConverse(ChatBedrockConverse):
@@ -1084,7 +1084,7 @@ class TestFinishWithoutForcingCanRaiseError:
 
 
 class TestCreateLlmNode:
-    """The factory picks the LLM node by discovery's supportsForcedToolChoice."""
+    """The factory picks the LLM node by discovery's shouldSkipForcedToolChoice."""
 
     @staticmethod
     def _tools() -> list[BaseTool]:
@@ -1101,7 +1101,7 @@ class TestCreateLlmNode:
         assert isinstance(node, AutoToolChoiceLLMNode)
 
     def test_models_without_the_discovery_flag_get_the_forced_node(self) -> None:
-        for model_details in (None, {}, {"supportsForcedToolChoice": True}):
+        for model_details in (None, {}, {"shouldSkipForcedToolChoice": False}):
             node = create_llm_node(self._model(model_details), self._tools())
             assert isinstance(node, ForcedToolChoiceLLMNode), model_details
 

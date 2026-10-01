@@ -87,9 +87,9 @@ async def _ainvoke(
         raise
 
 
-def _supports_forced_tool_choice(model: BaseChatModel) -> bool:
+def _should_skip_forced_tool_choice(model: BaseChatModel) -> bool:
     model_details = getattr(model, "model_details", None) or {}
-    return bool(model_details.get("supportsForcedToolChoice", True))
+    return bool(model_details.get("shouldSkipForcedToolChoice", False))
 
 
 def _no_finishing_tool_call_error() -> AgentRuntimeError:
@@ -262,7 +262,7 @@ class ForcedToolChoiceLLMNode(LLMNode[StateT]):
 
 
 class AutoToolChoiceLLMNode(LLMNode[StateT]):
-    """For models whose discovery details say supportsForcedToolChoice: false.
+    """For models whose discovery details say shouldSkipForcedToolChoice: true.
 
     Runs on auto. A text answer gets one finish call; any other stall fails the run.
     The finish call doesn't count against llm_messages_limit: it belongs to the same
@@ -330,7 +330,7 @@ def create_llm_node(
     """Pick the LLM node for the agent and model.
 
     Conversational or no tools: ConversationalLLMNode. Discovery says
-    supportsForcedToolChoice: false: AutoToolChoiceLLMNode. Otherwise:
+    shouldSkipForcedToolChoice: true: AutoToolChoiceLLMNode. Otherwise:
     ForcedToolChoiceLLMNode.
 
     Args:
@@ -354,7 +354,7 @@ def create_llm_node(
             strict_mode=strict_mode,
             tool_choice=tool_choice,
         )
-    if not _supports_forced_tool_choice(model):
+    if _should_skip_forced_tool_choice(model):
         return AutoToolChoiceLLMNode(
             model,
             tools,
