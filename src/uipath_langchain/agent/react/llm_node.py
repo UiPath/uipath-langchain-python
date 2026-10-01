@@ -96,8 +96,7 @@ def _no_finishing_tool_call_error() -> AgentRuntimeError:
     return AgentRuntimeError(
         code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
         title="Agent responded without calling a tool.",
-        detail="The model answered without calling a tool, and when asked to finish "
-        "it didn't call "
+        detail="The model answered without calling "
         + END_EXECUTION_TOOL.name
         + " or "
         + RAISE_ERROR_TOOL.name
@@ -164,14 +163,33 @@ class LLMNode(ABC, Generic[StateT]):
             self.tools, state, self.input_schema or type(state)
         )
 
-        call = self.prepare_call(messages)
+        response = await self.get_response(messages, static_schema_tools)
+
+        # filter out flow control tools when multiple tool calls exist
+        if response.tool_calls:
+            filtered_tool_calls = _filter_control_flow_tool_calls(response.tool_calls)
+            if len(filtered_tool_calls) != len(response.tool_calls):
+                response = replace_tool_calls(response, filtered_tool_calls)
+
+        self.static_args_handler.apply_to_response(response.tool_calls)
+        return {"messages": [response]}
+
+    async def get_response(
+        self, messages: list[AnyMessage], tools: Sequence[BaseTool]
+    ) -> AIMessage:
+        """The model's response for this turn."""
+        return await self._invoke_model(self.prepare_call(messages), tools)
+
+    async def _invoke_model(
+        self, call: LLMCall, tools: Sequence[BaseTool]
+    ) -> AIMessage:
         binding_kwargs = call.handler.get_tool_binding_kwargs(
-            tools=static_schema_tools,
+            tools=tools,
             tool_choice=call.tool_choice,
             parallel_tool_calls=self.parallel_tool_calls,
             strict_mode=self.strict_mode,
         )
-        llm = call.model.bind_tools(static_schema_tools, **binding_kwargs)
+        llm = call.model.bind_tools(tools, **binding_kwargs)
 
         response = await _ainvoke(llm, call.messages)
         if not isinstance(response, AIMessage):
@@ -184,30 +202,11 @@ class LLMNode(ABC, Generic[StateT]):
             )
 
         self.payload_handler.check_stop_reason(response)
-
-        response = await self.finish(response, messages, static_schema_tools)
-
-        # filter out flow control tools when multiple tool calls exist
-        if response.tool_calls:
-            filtered_tool_calls = _filter_control_flow_tool_calls(response.tool_calls)
-            if len(filtered_tool_calls) != len(response.tool_calls):
-                response = replace_tool_calls(response, filtered_tool_calls)
-
-        self.static_args_handler.apply_to_response(response.tool_calls)
-        return {"messages": [response]}
+        return response
 
     @abstractmethod
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
         """Model, messages, handler and tool_choice for this turn."""
-
-    async def finish(
-        self,
-        response: AIMessage,
-        messages: list[AnyMessage],
-        tools: Sequence[BaseTool],
-    ) -> AIMessage:
-        """Post-process the response. Unchanged by default."""
-        return response
 
 
 class ConversationalLLMNode(LLMNode[StateT]):
@@ -293,28 +292,23 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
             raise _no_finishing_tool_call_error()
         return LLMCall(self.model, messages, self.payload_handler, tool_choice="auto")
 
-    async def finish(
-        self,
-        response: AIMessage,
-        messages: list[AnyMessage],
-        tools: Sequence[BaseTool],
+    async def get_response(
+        self, messages: list[AnyMessage], tools: Sequence[BaseTool]
     ) -> AIMessage:
+        response = await super().get_response(messages, tools)
         if self.output_fields is None or response.tool_calls or not response.text:
             return response
-        finish_llm, finish_input = finish_without_forcing(
-            self.model,
-            self.payload_handler,
-            tools,
-            messages,
-            response,
-            parallel_tool_calls=self.parallel_tool_calls,
-            strict_mode=self.strict_mode,
+        finishing_tools, finish_messages = finish_without_forcing(
+            tools, messages, response
         )
-        reply = await _ainvoke(finish_llm, finish_input)
-        if not isinstance(reply, AIMessage):
-            return response
-        self.payload_handler.check_stop_reason(reply)
-        return finishing_tool_call(reply, self.output_fields) or response
+        finish_call = LLMCall(
+            self.model, finish_messages, self.payload_handler, tool_choice="auto"
+        )
+        reply = await self._invoke_model(finish_call, finishing_tools)
+        final = finishing_tool_call(reply, self.output_fields)
+        if final is None:
+            raise _no_finishing_tool_call_error()
+        return final
 
 
 def create_llm_node(

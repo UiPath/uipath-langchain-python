@@ -9,7 +9,7 @@ import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.messages.content import create_text_block, create_tool_call
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import AzureChatOpenAI
@@ -766,7 +766,7 @@ class TestFinishWithoutForcing:
     """Opus 5.5 rejects forced tool choice, so its turns run with tool_choice auto and a
     text answer is turned into end_execution by one finish call."""
 
-    def _model(self, *responses: AIMessage) -> Any:
+    def _model(self, *responses: BaseMessage) -> Any:
         model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
         model.model_details = _REJECTS_FORCING
         model.bind_tools = Mock(return_value=model)
@@ -881,25 +881,26 @@ class TestFinishWithoutForcing:
         assert [(tc["name"], tc["args"]) for tc in response.tool_calls] == [
             (END_EXECUTION_TOOL.name, {"sources": ["https://example.com"]})
         ]
-        assert response.content == []
+        assert response.content == [
+            {"type": "thinking", "thinking": "", "signature": "s"}
+        ]
 
     @pytest.mark.asyncio
-    async def test_finish_call_without_end_execution_keeps_the_answer(
-        self,
-    ) -> None:
+    async def test_finish_call_without_end_execution_fails_the_run(self) -> None:
         model = self._model(self._prose(), self._prose())
 
-        result = await self._untyped_list_node(model)(
-            AgentGraphState(messages=[HumanMessage("q")])
-        )
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._untyped_list_node(model)(
+                AgentGraphState(messages=[HumanMessage("q")])
+            )
 
         assert model.ainvoke.await_count == 2
-        [response] = result["messages"]
-        assert not response.tool_calls
-        assert response.text == "Lisbon is warmer (27 °C)."
+        assert exc_info.value.error_info.code.endswith(
+            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value
+        )
 
     @pytest.mark.asyncio
-    async def test_empty_finish_call_keeps_the_answer(self) -> None:
+    async def test_empty_finish_call_fails_the_run(self) -> None:
         reply = AIMessage(
             content=[],
             tool_calls=[
@@ -910,11 +911,12 @@ class TestFinishWithoutForcing:
         )
         model = self._model(self._prose(), reply)
 
-        result = await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
 
-        [response] = result["messages"]
-        assert not response.tool_calls
-        assert response.text == "Lisbon is warmer (27 °C)."
+        assert exc_info.value.error_info.code.endswith(
+            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value
+        )
 
     @pytest.mark.asyncio
     async def test_tool_calls_need_no_finish_call(self) -> None:
@@ -986,18 +988,15 @@ class TestFinishWithoutForcing:
         assert finish_kwargs["strict"] is True
 
     @pytest.mark.asyncio
-    async def test_stall_error_explains_the_finish_call(self) -> None:
-        state = AgentGraphState(
-            messages=[HumanMessage("q"), AIMessage(content="still prose")]
-        )
+    async def test_finish_reply_that_is_not_an_ai_message_is_invalid(self) -> None:
+        model = self._model(self._prose(), HumanMessage("not an AI message"))
 
         with pytest.raises(AgentRuntimeError) as exc_info:
-            await self._node(self._model())(state)
+            await self._node(model)(AgentGraphState(messages=[HumanMessage("q")]))
 
-        detail = exc_info.value.error_info.detail
-        assert "forced extraction" not in detail
-        assert END_EXECUTION_TOOL.name in detail
-        assert RAISE_ERROR_TOOL.name in detail
+        assert exc_info.value.error_info.code.endswith(
+            AgentRuntimeErrorCode.LLM_INVALID_RESPONSE.value
+        )
 
     @pytest.mark.asyncio
     async def test_a_tool_less_turn_already_in_the_history_fails_visibly(self) -> None:
@@ -1014,9 +1013,12 @@ class TestFinishWithoutForcing:
         with pytest.raises(AgentRuntimeError) as exc_info:
             await self._node(model)(state)
 
-        assert exc_info.value.error_info.code.endswith(
-            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value
-        )
+        error = exc_info.value.error_info
+        assert error.code.endswith(AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED.value)
+        assert END_EXECUTION_TOOL.name in error.detail
+        assert RAISE_ERROR_TOOL.name in error.detail
+        assert "forced extraction" not in error.detail
+        assert "asked to finish" not in error.detail
         model.ainvoke.assert_not_awaited()
 
 
@@ -1081,6 +1083,42 @@ class TestFinishWithoutForcingCanRaiseError:
         assert [(tc["name"], tc["args"]) for tc in response.tool_calls] == [
             (RAISE_ERROR_TOOL.name, {"message": "No such city."})
         ]
+
+
+class TestConversationalLLMNode:
+    """Conversational agents bind the configured tool_choice and are never forced."""
+
+    @staticmethod
+    def _model() -> Any:
+        model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(content=[{"type": "text", "text": "Hello!"}])
+        )
+        return model
+
+    @staticmethod
+    def _tools() -> list[BaseTool]:
+        return [
+            StructuredTool(
+                name="search",
+                description="search",
+                args_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+                func=lambda **_: None,
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_binds_the_configured_tool_choice(self) -> None:
+        for tool_choice in ("auto", "any"):
+            model = self._model()
+            node = create_llm_node(
+                model, self._tools(), is_conversational=True, tool_choice=tool_choice
+            )
+
+            await node(AgentGraphState(messages=[HumanMessage("hi")]))
+
+            assert model.bind_tools.call_args.kwargs["tool_choice"] == tool_choice
 
 
 class TestCreateLlmNode:
