@@ -382,9 +382,7 @@ class TestCreateAgentPicksTheLlmNode:
     """The compiled graph runs the LLM node the factory picks for the model."""
 
     @staticmethod
-    async def _tool_choice(
-        model_details: dict[str, Any], auto_tool_choice_llm_node: bool = True
-    ) -> Any:
+    async def _tool_choice(model_details: dict[str, Any]) -> Any:
         model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
         model.model_details = model_details
         model.bind_tools = Mock(return_value=model)
@@ -403,9 +401,6 @@ class TestCreateAgentPicksTheLlmNode:
             [],
             [SystemMessage(content="system")],
             output_schema=_AnswerOutput,
-            config=AgentGraphConfig(
-                auto_tool_choice_llm_node=auto_tool_choice_llm_node
-            ),
         ).compile()
 
         assert await graph.ainvoke({}) == {"answer": "Lisbon"}
@@ -418,12 +413,3 @@ class TestCreateAgentPicksTheLlmNode:
     @pytest.mark.asyncio
     async def test_other_models_are_forced(self) -> None:
         assert await self._tool_choice({}) == "any"
-
-    @pytest.mark.asyncio
-    async def test_without_the_feature_flag_models_that_reject_forcing_are_forced(
-        self,
-    ) -> None:
-        tool_choice = await self._tool_choice(
-            {"supportsForcedToolChoice": False}, auto_tool_choice_llm_node=False
-        )
-        assert tool_choice == "any"

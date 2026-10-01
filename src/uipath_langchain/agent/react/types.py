@@ -132,11 +132,6 @@ class AgentGraphConfig(BaseModel):
         default=True,
         description="Allow the LLM to return multiple tool calls in a single response.",
     )
-    auto_tool_choice_llm_node: bool = Field(
-        default=False,
-        description="Use the auto tool choice LLM node for models whose discovery "
-        "details say supportsForcedToolChoice: false.",
-    )
     strict_mode: bool = Field(
         default=False,
         description="If set, the LLM will guarantee schema validation of the tool calls.",
