@@ -7,19 +7,11 @@ Then one more call binds only those two tools and asks the model to call one.
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import (
-    AIMessage,
-    AnyMessage,
-    BaseMessage,
-    HumanMessage,
-    ToolCall,
-)
-from langchain_core.runnables import Runnable
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolCall
 from langchain_core.tools import BaseTool
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
-from uipath_langchain.chat.handlers.base import ModelPayloadHandler
+from uipath_langchain.chat.thinking import is_reasoning_block
 
 FINISH_REQUEST = (
     "Return the final output of the task by calling "
@@ -39,36 +31,29 @@ def output_fields(tools: Sequence[BaseTool]) -> list[str] | None:
 
 
 def finish_without_forcing(
-    model: BaseChatModel,
-    handler: ModelPayloadHandler,
     tools: Sequence[BaseTool],
     messages: Sequence[AnyMessage],
     answer: AIMessage,
-    *,
-    parallel_tool_calls: bool,
-    strict_mode: bool,
-) -> tuple[Runnable[Sequence[AnyMessage], BaseMessage], list[AnyMessage]]:
-    """The finish call: end_execution and raise_error only, on auto."""
+) -> tuple[list[BaseTool], list[AnyMessage]]:
+    """The finish call's tools and messages: end_execution and raise_error only."""
     finishing_tools = [
         tool
         for tool in tools
         if tool.name in (END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name)
     ]
-    binding_kwargs = handler.get_tool_binding_kwargs(
-        finishing_tools,
-        "auto",
-        parallel_tool_calls=parallel_tool_calls,
-        strict_mode=strict_mode,
-    )
-    llm = model.bind_tools(finishing_tools, **binding_kwargs)
-    return llm, [*messages, answer, HumanMessage(content=FINISH_REQUEST)]
+    return finishing_tools, [*messages, answer, HumanMessage(content=FINISH_REQUEST)]
 
 
 def finishing_tool_call(reply: AIMessage, output_fields: list[str]) -> AIMessage | None:
-    """The reply's raise_error call, or its end_execution call if it has any output."""
+    """The reply's raise_error call, or its end_execution call if it has any output.
+
+    The reply keeps its reasoning blocks: the message can be sent back to the model
+    (an output file retry), and thinking models need them on a tool-use turn.
+    """
     for tool_call in reply.tool_calls:
         if tool_call["name"] == RAISE_ERROR_TOOL.name:
             return _only(reply, tool_call)
+    for tool_call in reply.tool_calls:
         if tool_call["name"] == END_EXECUTION_TOOL.name and _has_output(
             tool_call["args"], output_fields
         ):
@@ -83,4 +68,6 @@ def _has_output(arguments: dict[str, Any], fields: list[str]) -> bool:
 
 
 def _only(reply: AIMessage, tool_call: ToolCall) -> AIMessage:
-    return reply.model_copy(update={"content": [], "tool_calls": [tool_call]})
+    content = reply.content if isinstance(reply.content, list) else []
+    reasoning = [block for block in content if is_reasoning_block(block)]
+    return reply.model_copy(update={"content": reasoning, "tool_calls": [tool_call]})

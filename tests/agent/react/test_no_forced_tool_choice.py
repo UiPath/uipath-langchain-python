@@ -1,8 +1,5 @@
 """Tests for finishing a run whose model can't be forced and answered in text."""
 
-from unittest.mock import Mock
-
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
@@ -14,8 +11,6 @@ from uipath_langchain.agent.react.no_forced_tool_choice import (
     output_fields,
 )
 from uipath_langchain.agent.react.tools import create_flow_control_tools
-from uipath_langchain.chat.handlers.anthropic import AnthropicPayloadHandler
-from uipath_langchain.chat.handlers.base import DefaultModelPayloadHandler
 
 
 class _Output(BaseModel):
@@ -49,40 +44,22 @@ class TestOutputFields:
 
 
 class TestFinishWithoutForcing:
-    def test_binds_only_end_execution_and_raise_error_on_auto(self) -> None:
-        model = Mock(spec=BaseChatModel)
+    def test_keeps_only_end_execution_and_raise_error(self) -> None:
         tools = [_search_tool(), *create_flow_control_tools(_Output)]
 
-        finish_without_forcing(
-            model,
-            DefaultModelPayloadHandler(model),
-            tools,
-            [],
-            AIMessage("x"),
-            parallel_tool_calls=True,
-            strict_mode=False,
-        )
+        finishing_tools, _ = finish_without_forcing(tools, [], AIMessage("x"))
 
-        bound, kwargs = model.bind_tools.call_args
-        assert [tool.name for tool in bound[0]] == [
+        assert [tool.name for tool in finishing_tools] == [
             END_EXECUTION_TOOL.name,
             RAISE_ERROR_TOOL.name,
         ]
-        assert kwargs["tool_choice"] == "auto"
 
     def test_history_then_the_answer_then_the_request(self) -> None:
-        model = Mock(spec=BaseChatModel)
         history = [HumanMessage("Which city is warmer?")]
         answer = AIMessage(content="Lisbon is warmer at 27 °C.")
 
         _, messages = finish_without_forcing(
-            model,
-            DefaultModelPayloadHandler(model),
-            create_flow_control_tools(_Output),
-            history,
-            answer,
-            parallel_tool_calls=True,
-            strict_mode=False,
+            create_flow_control_tools(_Output), history, answer
         )
 
         assert messages[:-1] == [*history, answer]
@@ -91,26 +68,9 @@ class TestFinishWithoutForcing:
         assert RAISE_ERROR_TOOL.name in messages[-1].text
         assert history == [HumanMessage("Which city is warmer?")]
 
-    def test_passes_parallel_tool_calls_and_strict_mode_through(self) -> None:
-        model = Mock(spec=BaseChatModel)
-        model.model = "claude-opus-5-5"
-
-        finish_without_forcing(
-            model,
-            AnthropicPayloadHandler(model),
-            create_flow_control_tools(_Output),
-            [],
-            AIMessage("x"),
-            parallel_tool_calls=False,
-            strict_mode=True,
-        )
-
-        kwargs = model.bind_tools.call_args.kwargs
-        assert kwargs["parallel_tool_calls"] is False
-        assert kwargs["strict"] is True
-
 
 _FIELDS = ["answer", "confidence"]
+_THINKING = {"type": "thinking", "thinking": "", "signature": "sig"}
 
 
 def _end_execution(args: dict[str, object]) -> AIMessage:
@@ -121,15 +81,33 @@ def _end_execution(args: dict[str, object]) -> AIMessage:
 
 
 class TestFinishingToolCall:
-    def test_end_execution_call_is_kept_without_its_thinking(self) -> None:
-        final = finishing_tool_call(
-            _end_execution({"answer": "Lisbon", "confidence": 1.0}), _FIELDS
+    def test_end_execution_call_keeps_its_thinking_and_drops_the_text(self) -> None:
+        reply = AIMessage(
+            content=[
+                _THINKING,
+                {"type": "text", "text": "Here is the answer."},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": END_EXECUTION_TOOL.name,
+                    "input": {},
+                },
+            ],
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"answer": "Lisbon", "confidence": 1.0},
+                    "id": "toolu_1",
+                }
+            ],
         )
+
+        final = finishing_tool_call(reply, _FIELDS)
 
         assert final is not None
         assert final.tool_calls[0]["id"] == "toolu_1"
         assert final.tool_calls[0]["args"] == {"answer": "Lisbon", "confidence": 1.0}
-        assert final.content == []
+        assert final.content == [_THINKING]
 
     def test_empty_end_execution_call_gives_none(self) -> None:
         empties: list[dict[str, object]] = [
@@ -151,7 +129,7 @@ class TestFinishingToolCall:
 
     def test_raise_error_call_is_kept(self) -> None:
         reply = AIMessage(
-            content=[{"type": "thinking", "thinking": "", "signature": "sig"}],
+            content=[_THINKING],
             tool_calls=[
                 {"name": RAISE_ERROR_TOOL.name, "args": {"message": "x"}, "id": "t2"}
             ],
@@ -161,4 +139,22 @@ class TestFinishingToolCall:
 
         assert final is not None
         assert final.tool_calls[0]["name"] == RAISE_ERROR_TOOL.name
-        assert final.content == []
+        assert final.content == [_THINKING]
+
+    def test_raise_error_wins_over_an_earlier_end_execution(self) -> None:
+        reply = AIMessage(
+            content=[_THINKING],
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"answer": "Lisbon", "confidence": 0.9},
+                    "id": "t1",
+                },
+                {"name": RAISE_ERROR_TOOL.name, "args": {"message": "x"}, "id": "t2"},
+            ],
+        )
+
+        final = finishing_tool_call(reply, _FIELDS)
+
+        assert final is not None
+        assert [tool_call["id"] for tool_call in final.tool_calls] == ["t2"]
