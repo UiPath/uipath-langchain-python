@@ -2,7 +2,8 @@
 
 Sits between the agent loop and TERMINATE, inspecting the pending
 ``end_execution`` arguments and letting termination proceed only when every
-required file field carries a reference to an attachment linked to this job. A
+required file field carries a reference to an existing attachment. An accepted
+reference is rebuilt from that attachment before termination reads it. A
 failure answers the tool call with a corrective message and hands control back
 to the agent rather than faulting.
 
@@ -11,46 +12,57 @@ which rejects an id that is not in ``inner_state.job_attachments``. That wrapper
 cannot be reused here for two reasons. It is honored only by ``UiPathToolNode``,
 so it never runs on the advanced path, where LangChain executes the tools; and
 ``end_execution`` is never executed as a tool at all, since routing intercepts
-it and reads its arguments directly. Checking against the attachments the
-platform reports for the job works identically on both paths.
+it and reads its arguments directly. Looking each attachment up in Orchestrator
+works identically on both paths.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
-from langchain_core.messages import ToolMessage
-from langchain_core.messages.tool import ToolCall
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
-from ..attachments.output_files import OutputFileField, diagnose_output_files
+from ..attachments.output_files import OutputFileField, check_output_files
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import AgentGraphNode, AgentGraphState
 from .utils import extract_current_tool_call_index, find_latest_ai_message
 
 
-def _pending_end_execution(state: AgentGraphState) -> ToolCall | None:
-    """The ``end_execution`` tool call the agent is currently making, if any."""
+def _pending_end_execution(
+    state: AgentGraphState,
+) -> tuple[AIMessage, int] | None:
+    """The message making the current ``end_execution`` call, and the call's index."""
     last_message = find_latest_ai_message(state.messages)
     if last_message is None or not last_message.tool_calls:
         return None
     index = extract_current_tool_call_index(state.messages)
     if index is None:
         return None
-    tool_call = last_message.tool_calls[index]
-    if tool_call["name"] != END_EXECUTION_TOOL.name:
+    if last_message.tool_calls[index]["name"] != END_EXECUTION_TOOL.name:
         return None
-    return tool_call
+    return last_message, index
 
 
-def create_output_files_node(fields: list[OutputFileField], max_retries: int):
+def _with_args(message: AIMessage, index: int, args: dict[str, Any]) -> AIMessage:
+    """``message`` with the args of its tool call at ``index`` replaced."""
+    tool_calls = list(message.tool_calls)
+    tool_calls[index] = {**tool_calls[index], "args": args}
+    return message.model_copy(update={"tool_calls": tool_calls})
+
+
+def create_output_files_node(
+    fields: list[OutputFileField],
+    max_retries: int,
+    file_tool_name: str | None = None,
+):
     """Create the node that gates termination on the declared output files."""
 
     async def output_files_node(
         state: AgentGraphState,
     ) -> Command[Literal[AgentGraphNode.TERMINATE, AgentGraphNode.AGENT]]:
-        tool_call = _pending_end_execution(state)
-        if tool_call is None:
+        pending = _pending_end_execution(state)
+        if pending is None:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.ROUTING_ERROR,
                 title="Output file verification reached without an end_execution call.",
@@ -62,9 +74,16 @@ def create_output_files_node(fields: list[OutputFileField], max_retries: int):
                 category=UiPathErrorCategory.SYSTEM,
             )
 
-        problem = await diagnose_output_files(fields, tool_call["args"])
+        message, index = pending
+        tool_call = message.tool_calls[index]
+        problem, output = await check_output_files(
+            fields, tool_call["args"], file_tool_name
+        )
         if problem is None:
-            return Command(goto=AgentGraphNode.TERMINATE)
+            return Command(
+                goto=AgentGraphNode.TERMINATE,
+                update={"messages": [_with_args(message, index, output)]},
+            )
 
         retries = state.inner_state.output_file_retries
         if retries >= max_retries:

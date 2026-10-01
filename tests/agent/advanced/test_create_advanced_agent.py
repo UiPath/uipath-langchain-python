@@ -1,14 +1,22 @@
 """Tests for create_advanced_agent."""
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from deepagents.backends import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from uipath.agent.models.agent import AgentInternalToolResourceConfig
 
 from uipath_langchain.agent.advanced.agent import create_advanced_agent
+from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
+    CreateFileTool,
+    create_file_tool,
+)
 
 
 def _make_mock_model() -> MagicMock:
@@ -105,3 +113,56 @@ class TestCreateAdvancedAgent:
             create_advanced_agent(mock_model, system_prompt="test")
             _, kwargs = mock_upstream.call_args
             assert kwargs["skills"] is None
+
+
+def _create_file_tool() -> CreateFileTool:
+    return create_file_tool(
+        AgentInternalToolResourceConfig.model_validate(
+            {
+                "$resourceType": "tool",
+                "type": "Internal",
+                "name": "Create File",
+                "description": "Make a file.",
+                "properties": {"toolType": "create-file"},
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fileName": {"type": "string"},
+                        "content": {"type": "string"},
+                        "filePath": {"type": "string"},
+                    },
+                    "required": ["fileName"],
+                },
+            }
+        )
+    )
+
+
+class TestCreateFileBinding:
+    def _forwarded_tool(self, tool: BaseTool, backend: Any) -> BaseTool:
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent"
+        ) as mock_upstream:
+            mock_upstream.return_value = MagicMock(spec=CompiledStateGraph)
+            create_advanced_agent(_make_mock_model(), tools=[tool], backend=backend)
+        (forwarded,) = mock_upstream.call_args.kwargs["tools"]
+        return forwarded
+
+    def test_binds_the_tool_to_the_backend(self, tmp_path: Path) -> None:
+        backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+
+        forwarded = self._forwarded_tool(_create_file_tool(), backend)
+
+        assert isinstance(forwarded, CreateFileTool)
+        assert forwarded.workspace is backend
+
+    def test_keeps_an_already_bound_tool(self, tmp_path: Path) -> None:
+        backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+        bound = _create_file_tool().with_workspace(backend)
+
+        assert self._forwarded_tool(bound, backend) is bound
+
+    def test_leaves_the_tool_alone_without_a_backend(self) -> None:
+        tool = _create_file_tool()
+
+        assert self._forwarded_tool(tool, None) is tool
