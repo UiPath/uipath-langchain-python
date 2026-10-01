@@ -6,16 +6,19 @@ target a literal public IP (``8.8.8.8``) so the real SSRF guard runs and passes
 without any DNS lookup — no need to mock internal functions.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from langchain_core.messages import AIMessage, ToolMessage
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentInternalHttpRequestToolProperties,
     AgentInternalToolResourceConfig,
 )
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.http_request_tool import (
     create_http_request_tool,
 )
@@ -89,6 +92,21 @@ def resource_config():
 @pytest.fixture
 def tool(resource_config, mock_llm):
     return create_http_request_tool(resource_config, mock_llm)
+
+
+async def _call(tool: Any, args: dict[str, Any]) -> ToolMessage:
+    """Invoke the tool with a tool call, as the agent graph does."""
+    result = await tool.ainvoke(
+        {"name": tool.name, "args": args, "id": "call_1", "type": "tool_call"}
+    )
+    assert isinstance(result, ToolMessage)
+    return result
+
+
+def _assert_returned_to_model(message: ToolMessage, expected: str) -> None:
+    """The error came back as an error tool message rather than being raised."""
+    assert message.status == "error"
+    assert expected in message.content
 
 
 class TestCreateHttpRequestTool:
@@ -228,11 +246,41 @@ class TestCreateHttpRequestTool:
         assert result["statusCode"] == 200
         assert str(httpx_mock.get_requests()[0].url) == BASE_URL
 
-    async def test_missing_url_raises(self, mock_llm):
+    async def test_pair_keys_are_matched_case_insensitively(self, tool, httpx_mock):
+        """Models sometimes write ``Name``/``Value``; the pair keys are lowercased.
+
+        Only the keys are normalized: header and param values keep their case.
+        """
+        httpx_mock.add_response(method="GET", status_code=200, text="ok")
+
+        message = await _call(
+            tool,
+            {
+                "url": f"{BASE_URL}/x",
+                "headers": [{"Name": "Accept", "Value": "text/html"}],
+                "params": [{"NAME": "q", "value": "MixedCase"}],
+            },
+        )
+
+        assert message.status == "success"
+        request = httpx_mock.get_requests()[0]
+        assert request.headers["accept"] == "text/html"
+        assert dict(request.url.params) == {"q": "MixedCase"}
+
+    async def test_schema_mismatch_is_returned_to_model(self, tool):
+        """Arguments that still fail the input schema go back to the model."""
+        message = await _call(
+            tool, {"url": f"{BASE_URL}/x", "headers": [{"key": "Accept"}]}
+        )
+
+        _assert_returned_to_model(message, "Invalid input for tool 'http_request'")
+        assert "headers.0.name" in message.content
+
+    async def test_missing_url_is_returned_to_model(self, mock_llm):
         """The tool's own guard rejects a missing url.
 
         Uses a schema that does not mark ``url`` required, so args validation
-        passes and the tool's defensive check is what raises (a schema that
+        passes and the tool's defensive check is what reports it (a schema that
         requires ``url`` would be rejected earlier, by validation).
         """
         resource = AgentInternalToolResourceConfig(
@@ -243,11 +291,13 @@ class TestCreateHttpRequestTool:
             properties=AgentInternalHttpRequestToolProperties(),
         )
         tool = create_http_request_tool(resource, mock_llm)
-        with pytest.raises(AgentRuntimeError, match="Argument 'url' is required"):
-            await tool.ainvoke({})
 
-    async def test_non_string_url_raises(self, mock_llm):
-        """A non-string url is rejected with a clean error.
+        message = await _call(tool, {})
+
+        _assert_returned_to_model(message, "Argument 'url' is required")
+
+    async def test_non_string_url_is_returned_to_model(self, mock_llm):
+        """A non-string url is reported with a clean error.
 
         Uses a schema where ``url`` is untyped so validation passes a number
         through to the tool's own type guard.
@@ -260,17 +310,21 @@ class TestCreateHttpRequestTool:
             properties=AgentInternalHttpRequestToolProperties(),
         )
         tool = create_http_request_tool(resource, mock_llm)
-        with pytest.raises(AgentRuntimeError, match="'url' must be a string"):
-            await tool.ainvoke({"url": 123})
 
-    async def test_invalid_method_raises(self, tool):
-        with pytest.raises(AgentRuntimeError, match="Unsupported HTTP method"):
-            await tool.ainvoke({"url": f"{BASE_URL}/x", "method": "FETCH"})
+        message = await _call(tool, {"url": 123})
+
+        _assert_returned_to_model(message, "'url' must be a string")
+
+    async def test_invalid_method_is_returned_to_model(self, tool):
+        message = await _call(tool, {"url": f"{BASE_URL}/x", "method": "FETCH"})
+
+        _assert_returned_to_model(message, "Unsupported HTTP method")
 
     @pytest.mark.parametrize("bad_timeout", [-1, 0, -0.5])
-    async def test_non_positive_timeout_raises(self, tool, bad_timeout):
-        with pytest.raises(AgentRuntimeError, match="must be a positive number"):
-            await tool.ainvoke({"url": f"{BASE_URL}/x", "timeout": bad_timeout})
+    async def test_non_positive_timeout_is_returned_to_model(self, tool, bad_timeout):
+        message = await _call(tool, {"url": f"{BASE_URL}/x", "timeout": bad_timeout})
+
+        _assert_returned_to_model(message, "must be a positive number")
 
     @pytest.mark.parametrize(
         "url",
@@ -287,7 +341,60 @@ class TestCreateHttpRequestTool:
         """Internal/metadata/non-http targets are rejected before any request.
 
         No response is registered because the request never leaves the SSRF
-        guard.
+        guard. The refusal goes back to the model, which can pick another URL.
         """
-        with pytest.raises(AgentRuntimeError):
-            await tool.ainvoke({"url": url})
+        message = await _call(tool, {"url": url})
+
+        assert message.status == "error"
+        assert (
+            "Request was blocked" in message.content
+            or "Host could not be resolved" in message.content
+        )
+
+    @pytest.mark.parametrize(
+        ("exception", "expected"),
+        [
+            (httpx.ReadTimeout("read timed out"), "HTTP request timed out"),
+            (httpx.ConnectError("connection refused"), "HTTP request failed"),
+        ],
+    )
+    async def test_transport_errors_are_returned_to_model(
+        self, tool, httpx_mock, exception, expected
+    ):
+        httpx_mock.add_exception(exception)
+
+        message = await _call(tool, {"url": f"{BASE_URL}/slow"})
+
+        _assert_returned_to_model(message, expected)
+        assert f"{BASE_URL}/slow" in message.content
+
+    async def test_bad_call_does_not_fault_the_tool_node(self, tool):
+        """Through the graph's tool node, a bad call yields an error tool message.
+
+        This is the non-conversational path, which has no node-level error
+        handling: before, the exception faulted the whole run.
+        """
+        from uipath_langchain.agent.tools import create_tool_node
+
+        node = create_tool_node([tool])[tool.name]
+        state = AgentGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": tool.name,
+                            "args": {"url": f"{BASE_URL}/x", "headers": [{"k": "v"}]},
+                            "id": "call_1",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            ]
+        )
+
+        result = await node.ainvoke(state)
+
+        message = result.update["messages"][0]
+        _assert_returned_to_model(message, "Invalid input for tool 'http_request'")
+        assert message.tool_call_id == "call_1"

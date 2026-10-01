@@ -138,7 +138,7 @@ class BaseUiPathStructuredTool(StructuredTool):
                 parsed[alias] = getattr(result, python_name)
         return parsed
 
-    def _invalid_input_error(self, error: ValidationError) -> AgentRuntimeError:
+    def _invalid_input_error(self, error: ValidationError) -> Exception:
         return AgentRuntimeError(
             code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
             title=f"Invalid input for tool '{self.name}'",
