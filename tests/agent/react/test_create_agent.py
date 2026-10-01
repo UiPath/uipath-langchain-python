@@ -408,7 +408,7 @@ class TestCreateAgentPicksTheLlmNode:
 
     @pytest.mark.asyncio
     async def test_models_that_reject_forcing_run_on_auto(self) -> None:
-        assert await self._tool_choice({"supportsForcedToolChoice": False}) == "auto"
+        assert await self._tool_choice({"shouldSkipForcedToolChoice": True}) == "auto"
 
     @pytest.mark.asyncio
     async def test_other_models_are_forced(self) -> None:
