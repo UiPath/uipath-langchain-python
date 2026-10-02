@@ -151,6 +151,8 @@ tests/agent/tools/test_mcp/
     ├── TestCreateMcpToolsFromAgent (class)  ← New!
     │   ├── test_creates_tools_from_multiple_mcp_servers
     │   ├── test_returns_mcp_clients_for_each_server
+    │   ├── test_clients_default_to_legacy_protocol
+    │   ├── test_passes_protocol_mode_to_clients
     │   ├── test_skips_disabled_mcp_resources
     │   ├── test_returns_empty_for_empty_resources
     │   ├── test_raises_on_missing_mcp_url
@@ -550,6 +552,17 @@ assert len(tools) == 3  # 2 from server 1 + 1 from server 2
 with patch(..., return_value=mock_uipath_class):
     tools, clients = await create_mcp_tools_and_clients(agent)
 assert len(clients) == 2  # One per MCP server
+```
+
+#### test_clients_default_to_legacy_protocol / test_passes_protocol_mode_to_clients
+
+**Purpose:** Verify the factory builds every `McpClient` with `"legacy"` unless
+`protocol_mode` is passed, and forwards the mode it is given
+
+**Assertions:**
+```python
+_, clients = await create_mcp_tools_and_clients(mcp_resources, protocol_mode="auto")
+assert all(isinstance(client._strategy, AutoStrategy) for client in clients)
 ```
 
 #### test_skips_disabled_mcp_resources

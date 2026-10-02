@@ -217,7 +217,8 @@ as a dropped connection would keep a session the server has just declared dead
 and burn the retry resuming it, so a `-32000` whose message names a lost
 session counts as a verdict.
 
-Selected by `McpClient(protocol_mode=...)` via `build_protocol_strategy`:
+Selected by `McpClient(protocol_mode=...)` via `build_protocol_strategy`
+(`create_mcp_tools_and_clients` forwards the same kwarg to every client):
 
 - **`"legacy"` (default)** — `LegacyHandshakeStrategy`. Preserves the pre-2026
   wire behaviour exactly.
