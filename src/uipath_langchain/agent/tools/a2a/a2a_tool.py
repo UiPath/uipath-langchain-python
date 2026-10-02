@@ -340,15 +340,16 @@ def _create_a2a_tool(
     in LangGraph's graph state via tools_storage, ensuring reliable
     multi-turn conversations with the remote agent.
     """
-    raw_name = agent_card.name or config.name
-    tool_name = sanitize_tool_name(raw_name)
+    display_name = agent_card.name or config.name
+    tool_name = sanitize_tool_name(config.name)
     tool_description = _build_description(agent_card)
     agent_label = config.slug
 
     metadata = {
         "tool_type": "a2a",
-        "display_name": raw_name,
+        "display_name": display_name,
         "slug": config.slug,
+        "resource_name": config.name,
     }
 
     async def _invoke(
@@ -365,7 +366,7 @@ def _create_a2a_tool(
         """
         parent_ctx = UiPathSpanUtils.get_parent_context()
         tracer = otel_trace.get_tracer(__name__)
-        with tracer.start_as_current_span(raw_name, context=parent_ctx) as span:
+        with tracer.start_as_current_span(display_name, context=parent_ctx) as span:
             # "openinference.span.kind" drives the SpanType shown in the UI;
             # "toolCall" is the recognized type for a tool invocation.
             span.set_attribute("openinference.span.kind", "toolCall")

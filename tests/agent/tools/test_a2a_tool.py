@@ -41,6 +41,7 @@ from uipath_langchain.agent.tools.a2a.a2a_tool import (
     _send_a2a_message,
     create_a2a_tools_and_clients,
 )
+from uipath_langchain.agent.tools.tool_node import create_tool_node
 
 PROXY_URL = (
     "https://cloud.uipath.com/org/tenant/agenthub_/a2a/remote/folder/remote-agent-slug"
@@ -50,13 +51,14 @@ CACHED_URL = "https://internal.example.com/agents/remote-agent"
 
 def _make_resource(
     *,
+    name: str = "remote-agent",
     cached_agent_card: dict[str, Any] | None = None,
     is_enabled: bool = True,
 ) -> AgentA2aResourceConfig:
     """Build an A2A resource config for tests."""
     return AgentA2aResourceConfig(
         id="resource-id",
-        name="remote-agent",
+        name=name,
         description="A remote A2A agent",
         is_enabled=is_enabled,
         slug="remote-agent-slug",
@@ -98,6 +100,34 @@ def test_create_tools_builds_default_card_without_cached_card() -> None:
     assert len(tools) == 1
     assert clients[0]._resource_name == "remote-agent"
     assert clients[0]._agent_card.name == "remote-agent"
+
+
+def test_tool_is_named_after_the_resource_and_titled_by_the_card() -> None:
+    resource = _make_resource(
+        name="Research Briefing", cached_agent_card=_cached_card()
+    )
+
+    tools, _ = create_a2a_tools_and_clients([resource])
+
+    assert tools[0].name == "Research_Briefing"
+    assert tools[0].metadata == {
+        "tool_type": "a2a",
+        "display_name": "Remote Agent",
+        "slug": "remote-agent-slug",
+        "resource_name": "Research Briefing",
+    }
+
+
+def test_resources_sharing_a_card_get_distinct_tools() -> None:
+    resources = [
+        _make_resource(name="Briefing EU", cached_agent_card=_cached_card()),
+        _make_resource(name="Briefing US", cached_agent_card=_cached_card()),
+    ]
+
+    tools, _ = create_a2a_tools_and_clients(resources)
+
+    assert [t.name for t in tools] == ["Briefing_EU", "Briefing_US"]
+    assert set(create_tool_node(tools)) == {"Briefing_EU", "Briefing_US"}
 
 
 def test_create_tools_skips_disabled_resource() -> None:
