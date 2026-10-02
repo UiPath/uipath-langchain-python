@@ -26,7 +26,10 @@ from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_unique_model_field_name
-from uipath_langchain.agent.attachments.job_attachments import get_job_attachment_paths
+from uipath_langchain.agent.attachments.job_attachments import (
+    get_job_attachment_paths,
+    get_job_attachments,
+)
 from uipath_langchain.agent.attachments.output_files import (
     DEFAULT_MAX_OUTPUT_FILE_RETRIES,
     check_output_files,
@@ -50,6 +53,11 @@ from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
+from .job_attachments_middleware import (
+    JOB_ATTACHMENTS_STATE_KEY,
+    JobAttachmentsMiddleware,
+    dump_attachments,
+)
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -320,14 +328,14 @@ def _resolve_subagent_specs(
     """
     resolved: list[SubAgent | CompiledSubAgent] = []
     for spec in subagents:
-        # A CompiledSubAgent brings its own graph and tools; nothing to filter.
-        if "runnable" in spec or "tools" in spec:
+        # A CompiledSubAgent brings its own graph; nothing to add to it.
+        if "runnable" in spec:
             resolved.append(spec)
             continue
         resolved.append(
             {
                 **spec,
-                "tools": list(shared_tools),
+                "tools": list(spec["tools"] if "tools" in spec else shared_tools),
                 "middleware": [*spec.get("middleware", []), *middleware],
             }
         )
@@ -374,16 +382,19 @@ def create_advanced_agent(
         else tool
         for tool in tools
     ]
-    payload_handler = _PayloadHandlerMiddleware()
+    shared_middleware: list[AgentMiddleware[Any, Any]] = [
+        _PayloadHandlerMiddleware(),
+        JobAttachmentsMiddleware(),
+    ]
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=_resolve_subagent_specs(subagents, tools, skills, [payload_handler]),
+        subagents=_resolve_subagent_specs(subagents, tools, skills, shared_middleware),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*middleware, payload_handler],
+        middleware=[*middleware, *shared_middleware],
         skills=list(skills) if skills else None,
     )
 
@@ -449,6 +460,10 @@ def create_advanced_agent_graph(
     state_fields: dict[str, Any] = dict(runtime_prompt.state_fields)
     if output_file_fields:
         state_fields[output_file_retries_key] = (int, 0)
+    attachment_paths = (
+        get_job_attachment_paths(input_schema) if input_schema is not None else []
+    )
+    state_fields[JOB_ATTACHMENTS_STATE_KEY] = (dict[str, dict[str, Any]], {})
 
     wrapper_state = create_state_with_input(input_schema)
     if state_fields:
@@ -458,9 +473,6 @@ def create_advanced_agent_graph(
             **state_fields,
         )
     internal_fields = set(AdvancedAgentGraphState.model_fields) | set(state_fields)
-    attachment_paths = (
-        get_job_attachment_paths(input_schema) if input_schema is not None else []
-    )
 
     async def transform_input_async(state: BaseModel) -> dict[str, Any]:
         state_data = state.model_dump()
@@ -470,14 +482,20 @@ def create_advanced_agent_graph(
             if input_schema is not None
             else {}
         )
-        if attachment_paths:
+        update: dict[str, Any] = {}
+        if attachment_paths and input_schema is not None:
+            update[JOB_ATTACHMENTS_STATE_KEY] = dump_attachments(
+                {
+                    str(attachment.id): attachment
+                    for attachment in get_job_attachments(input_schema, input_args)
+                    if attachment.id is not None
+                }
+            )
             input_args = await resolve_input_attachments(
                 backend, attachment_paths, input_args
             )
         user_text = build_user_message(input_args)
-        update: dict[str, Any] = {
-            "messages": [HumanMessage(content=user_text, id="user-input")]
-        }
+        update["messages"] = [HumanMessage(content=user_text, id="user-input")]
         update.update(runtime_prompt.resolve(input_args))
         return update
 

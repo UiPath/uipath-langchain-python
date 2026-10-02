@@ -169,3 +169,19 @@ def test_a_subagent_declaring_its_own_tools_is_left_alone(tmp_path: Path) -> Non
     assert subagent, f"no subagent binding found: {bindings}"
     assert all("only_mine" in b for b in subagent), subagent
     assert not any("read_invoice" in b for b in subagent), subagent
+
+
+def test_a_subagent_declaring_its_own_tools_still_gets_our_middleware() -> None:
+    from uipath_langchain.agent.advanced.agent import _resolve_subagent_specs
+    from uipath_langchain.agent.advanced.job_attachments_middleware import (
+        JobAttachmentsMiddleware,
+    )
+
+    middleware = JobAttachmentsMiddleware()
+    (spec, _general_purpose) = _resolve_subagent_specs(
+        [{**_WORKER, "tools": [_tool("only_mine")]}], [], None, [middleware]
+    )
+
+    resolved: dict[str, Any] = dict(spec)
+    assert [getattr(t, "name", None) for t in resolved["tools"]] == ["only_mine"]
+    assert middleware in resolved["middleware"]

@@ -318,7 +318,7 @@ class TestUiPathToolNode:
             resolve_job_attachment_args,
         )
 
-        node = UiPathToolNode(mock_tool, wrapper=resolve_job_attachment_args)
+        node = UiPathToolNode(mock_tool, awrapper=resolve_job_attachment_args)
 
         filtered_state = node._filter_state(
             AgentGraphState(messages=[]), resolve_job_attachment_args
