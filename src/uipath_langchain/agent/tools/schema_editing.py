@@ -192,7 +192,7 @@ def _apply_const_schema_modification(
 
     - Primitives: enum: [value]
     - Objects: Recursively apply enum to primitive leaves
-    - Arrays: enum: [json.dumps(value)]
+    - Objects without declared properties, Arrays: enum: [json.dumps(value)]
     """
 
     def _apply_recursive(
@@ -209,6 +209,12 @@ def _apply_const_schema_modification(
             case "string" | "number" | "integer" | "boolean":
                 field_schema["enum"] = [value]
             case "array":
+                properties_object[field_name] = {
+                    "type": "string",
+                    "enum": [json.dumps(value)],
+                }
+            case "object" if not field_schema.get("properties"):
+                # No declared leaves to pin: pin the whole value, as for arrays.
                 properties_object[field_name] = {
                     "type": "string",
                     "enum": [json.dumps(value)],

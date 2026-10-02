@@ -9,6 +9,7 @@ from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
     AgentToolArrayBuilderArgumentProperties,
+    AgentToolObjectBuilderArgumentProperties,
     AgentToolStaticArgumentProperties,
     AgentToolTextBuilderArgumentProperties,
     TextToken,
@@ -1019,3 +1020,116 @@ class TestDeduplicationOfArgumentProperties:
         assert result == {"$['items']": ["a", "b"]}
         assert "$['items'][0]" not in result
         assert "$['items'][1]" not in result
+
+
+class TicketState(BaseModel):
+    """Object argument built property by property in objectBuilder tests."""
+
+    message: str
+    customer: str
+    greeting: str
+    tags: list[str]
+    note: str
+
+
+class ObjectInput(BaseModel):
+    """Input model with an object field for objectBuilder tests."""
+
+    state: TicketState
+
+
+def _object_builder_properties() -> dict[str, AgentToolArgumentProperties]:
+    return {
+        "$['state']": AgentToolObjectBuilderArgumentProperties(),
+        "$['state']['message']": AgentToolStaticArgumentProperties(
+            is_sensitive=False, value="Refund please"
+        ),
+        "$['state']['customer']": AgentToolArgumentArgumentProperties(
+            is_sensitive=False, argument_path="customerName"
+        ),
+        "$['state']['greeting']": AgentToolTextBuilderArgumentProperties(
+            is_sensitive=False,
+            tokens=[
+                TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string="Hi "),
+                TextToken(type=TextTokenType.VARIABLE, raw_string="input.customerName"),
+            ],
+        ),
+        "$['state']['tags']": AgentToolArrayBuilderArgumentProperties(),
+        "$['state']['tags'][0]": AgentToolStaticArgumentProperties(
+            is_sensitive=False, value="billing"
+        ),
+        "$['state']['tags'][1]": AgentToolArgumentArgumentProperties(
+            is_sensitive=False, argument_path="tier"
+        ),
+        # "$['state']['note']" is left dynamic: the LLM fills it.
+    }
+
+
+class TestObjectBuilder:
+    """Tests for AgentToolObjectBuilderArgumentProperties resolution."""
+
+    def test_object_builder_resolves_configured_children_individually(self):
+        """The objectBuilder marker yields nothing; its children resolve on their own."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = _object_builder_properties()
+
+        result = resolve_static_args(
+            ResourceWithProps(), {"customerName": "Ana", "tier": "gold"}
+        )
+
+        assert result == {
+            "$['state']['message']": "Refund please",
+            "$['state']['customer']": "Ana",
+            "$['state']['greeting']": "Hi Ana",
+            "$['state']['tags']": ["billing", "gold"],
+        }
+
+    def test_object_builder_without_children_resolves_nothing(self):
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['state']": AgentToolObjectBuilderArgumentProperties(),
+            }
+
+        assert resolve_static_args(ResourceWithProps(), {}) == {}
+
+    def test_object_builder_keeps_dynamic_child_in_schema_and_merges_llm_args(
+        self,
+    ):
+        """Static children are pinned in the schema and merged into the LLM call,
+        while the dynamic child stays for the LLM to fill."""
+
+        class InputSchema(BaseModel):
+            customerName: str
+            tier: str
+
+        tool = _create_tool(
+            "test_tool", _object_builder_properties(), args_schema=ObjectInput
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize(
+            [tool], InputSchema(customerName="Ana", tier="gold"), InputSchema
+        )
+
+        modified_tool = processed_tools[0]
+        assert isinstance(modified_tool.args_schema, type) and issubclass(
+            modified_tool.args_schema, BaseModel
+        )
+        schema = modified_tool.args_schema.model_json_schema()
+        state_ref = schema["properties"]["state"]["$ref"]
+        state_def = schema["$defs"][state_ref.rsplit("/", 1)[-1]]
+        assert "note" in state_def["properties"]
+        assert "enum" not in str(state_def["properties"]["note"])
+
+        call = _make_tool_call("test_tool", {"state": {"note": "from the LLM"}})
+        handler.apply_to_response([call])
+
+        assert call["args"] == {
+            "state": {
+                "note": "from the LLM",
+                "message": "Refund please",
+                "customer": "Ana",
+                "greeting": "Hi Ana",
+                "tags": ["billing", "gold"],
+            }
+        }
