@@ -1,5 +1,5 @@
 {
-  "description": "Expected traces for company-research-agent test with DuckDuckGo search tools",
+  "description": "Expected traces for company-research-agent test with a search tool",
   "required_spans": [
     {
       "name": "LangGraph",
