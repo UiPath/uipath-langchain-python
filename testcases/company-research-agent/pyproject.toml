@@ -1,15 +1,13 @@
 [project]
 name = "company-research-agent"
 version = "0.0.1"
-description = "Company research agent with Tavily web search"
+description = "Company research agent with a search tool"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 
 requires-python = ">=3.11"
 dependencies = [
     "uipath-langchain",
     "langgraph>=1.0.10",
-    "langchain-community>=0.4.1",
-    "ddgs>=9.6.1",
 ]
 
 [project.optional-dependencies]
