@@ -480,3 +480,13 @@ class TestOutputFileVerification:
             "MimeType": "text/markdown",
         }
         assert fake.links == [self.ATTACHMENT_ID]
+
+    def test_attachments_survive_a_verification_retry(self) -> None:
+        """The wrapper carries the inner graph's attachments into the next pass."""
+        from uipath_langchain.agent.advanced.job_attachments_middleware import (
+            JOB_ATTACHMENTS_STATE_KEY,
+        )
+
+        graph = _build(output_schema=self._output_model(), output_files_enabled=True)
+
+        assert JOB_ATTACHMENTS_STATE_KEY in graph.state_schema.model_fields

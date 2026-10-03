@@ -62,8 +62,9 @@ def patch_orchestrator(
         attachments = FakeAttachments()
         jobs = FakeJobs()
 
-    monkeypatch.setattr(
-        "uipath_langchain.agent.attachments.output_files.UiPath",
-        lambda *args, **kwargs: FakeUiPath(),
-    )
+    for module in ("output_files", "job_attachments"):
+        monkeypatch.setattr(
+            f"uipath_langchain.agent.attachments.{module}.UiPath",
+            lambda *args, **kwargs: FakeUiPath(),
+        )
     return fake
