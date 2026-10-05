@@ -12,26 +12,18 @@ from pydantic import BaseModel
 
 from uipath_langchain.agent.exceptions import AgentStartupError
 from uipath_langchain.agent.react._legacy_converter import (
-    _DYNAMIC_MODULE_PREFIX,
     _create_dynamic_module,
     create_model,
 )
 
+MODULE_NAME = "jsonschema_pydantic_converter._dynamic_test_legacy"
+
 
 class TestCreateDynamicModule:
-    def test_creates_unique_modules(self) -> None:
-        m1 = _create_dynamic_module()
-        m2 = _create_dynamic_module()
-        assert m1.__name__ != m2.__name__
-
-    def test_registered_in_sys_modules(self) -> None:
-        m = _create_dynamic_module()
-        assert m.__name__ in sys.modules
-        assert sys.modules[m.__name__] is m
-
-    def test_name_prefix(self) -> None:
-        m = _create_dynamic_module()
-        assert m.__name__.startswith(_DYNAMIC_MODULE_PREFIX)
+    def test_registered_in_sys_modules_under_the_given_name(self) -> None:
+        m = _create_dynamic_module(MODULE_NAME)
+        assert m.__name__ == MODULE_NAME
+        assert sys.modules[MODULE_NAME] is m
 
 
 class TestLegacyCreateModel:
@@ -40,7 +32,7 @@ class TestLegacyCreateModel:
             "type": "object",
             "properties": {"name": {"type": "string"}},
         }
-        model = create_model(schema)
+        model = create_model(schema, MODULE_NAME)
         assert issubclass(model, BaseModel)
         assert "name" in model.model_fields
 
@@ -50,15 +42,15 @@ class TestLegacyCreateModel:
             "properties": {"x": {"$ref": "#/$defs/Missing"}},
         }
         with pytest.raises(AgentStartupError, match="Missing.*could not be resolved"):
-            create_model(schema)
+            create_model(schema, MODULE_NAME)
 
     def test_model_module_is_dynamic(self) -> None:
         schema: dict[str, Any] = {
             "type": "object",
             "properties": {"val": {"type": "integer"}},
         }
-        model = create_model(schema)
-        assert model.__module__.startswith(_DYNAMIC_MODULE_PREFIX)
+        model = create_model(schema, MODULE_NAME)
+        assert model.__module__ == MODULE_NAME
 
     def test_marker_name_on_referenced_type(self) -> None:
         schema: dict[str, Any] = {
@@ -71,7 +63,7 @@ class TestLegacyCreateModel:
                 }
             },
         }
-        model = create_model(schema)
+        model = create_model(schema, MODULE_NAME)
         # The referenced type should carry __uipath_marker_name__
         module = sys.modules[model.__module__]
         classes = [
