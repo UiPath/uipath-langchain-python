@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from uipath_langchain.agent.attachments.job_attachments import (
     get_job_attachment_paths,
     get_job_attachments,
-    replace_job_attachment_ids,
+    resolve_attachment_references,
 )
 from uipath_langchain.agent.attachments.pydantic_json import coerce_json_strings
 from uipath_langchain.agent.react.types import AgentGraphState
@@ -28,7 +28,7 @@ def _parse(content: str) -> Any:
     return content
 
 
-def resolve_job_attachment_args(
+async def resolve_job_attachment_args(
     tool: BaseTool,
     call: ToolCall,
     state: AgentGraphState,
@@ -44,14 +44,16 @@ def resolve_job_attachment_args(
     schema = None
     if isinstance(tool.args_schema, type) and issubclass(tool.args_schema, BaseModel):
         schema = tool.args_schema
-        errors: list[str] = []
-        paths = get_job_attachment_paths(schema)
-        modified_input_args = replace_job_attachment_ids(
-            paths, input_args, state.inner_state.job_attachments, errors
+        resolution = await resolve_attachment_references(
+            get_job_attachment_paths(schema),
+            input_args,
+            state.inner_state.job_attachments,
+            lookup_unknown=False,
         )
+        modified_input_args = resolution.args
 
-        if errors:
-            return {"error": "\n".join(errors)}
+        if resolution.errors:
+            return {"error": "\n".join(resolution.errors)}
 
     call["args"] = coerce_json_strings(modified_input_args, schema)
     return None
@@ -100,7 +102,7 @@ def get_job_attachment_wrapper(
             Command object with tool result message and updated job attachments in inner_state,
             or error dict if attachment validation fails
         """
-        error = resolve_job_attachment_args(tool, call, state)
+        error = await resolve_job_attachment_args(tool, call, state)
         if error is not None:
             return error
 
