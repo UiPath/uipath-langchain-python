@@ -184,7 +184,7 @@ def _rewrite_openai_url(
         # Strip query string to get base URL
         base_url = original_url.split("?")[0]
 
-    new_url_str = f"{base_url}/completions"
+    new_url_str = f"{base_url.rstrip('/')}/completions"
     if params:
         return httpx.URL(new_url_str, params=params)
     return httpx.URL(new_url_str)
