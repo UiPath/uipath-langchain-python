@@ -1,29 +1,40 @@
-import asyncio
+import json
 
 from langchain.agents import create_agent
-from langchain_community.tools import DuckDuckGoSearchResults
+from langchain_core.tools import BaseTool, tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel
 
 from uipath_langchain.chat import UiPathChat
 
-# ddgs is not thread-safe — its lazy proxy + primp.Client deadlock when
-# LangGraph dispatches parallel tool calls via run_in_executor.
-# Adding _arun with a lock serializes execution in the async path instead.
-_ddg_lock = asyncio.Lock()
+SEARCH_RESULTS = [
+    {
+        "title": "UiPath - Company Overview",
+        "link": "https://www.uipath.com/company",
+        "snippet": "UiPath is an enterprise automation and AI software company founded in 2005 in Bucharest, Romania, and headquartered in New York City.",
+    },
+    {
+        "title": "UiPath Leadership",
+        "link": "https://www.uipath.com/company/leadership",
+        "snippet": "UiPath is led by co-founder and CEO Daniel Dines, with executive leadership spanning product, engineering, sales, finance and customer success.",
+    },
+    {
+        "title": "UiPath Platform",
+        "link": "https://www.uipath.com/product",
+        "snippet": "The UiPath Platform combines RPA, agentic automation, document understanding, process mining and orchestration for enterprises.",
+    },
+]
 
 
-class SafeDuckDuckGoSearch(DuckDuckGoSearchResults):
-    """DuckDuckGoSearchResults with async serialization to avoid ddgs deadlock."""
-
-    async def _arun(self, query: str, **kwargs):
-        async with _ddg_lock:
-            return await super()._arun(query, **kwargs)
+@tool("duckduckgo_results_json")
+def search(query: str) -> str:
+    """Search the web and return results as JSON with title, link and snippet."""
+    return json.dumps(SEARCH_RESULTS)
 
 
-def get_search_tool() -> DuckDuckGoSearchResults:
-    """Get the appropriate search tool based on available API keys."""
-    return SafeDuckDuckGoSearch()
+def get_search_tool() -> BaseTool:
+    """Get the search tool."""
+    return search
 
 
 # System prompt for the research agent
@@ -77,7 +88,7 @@ class GraphOutput(BaseModel):
 
 def create_user_message(company_name: str) -> str:
     """Create a formatted user message for company research."""
-    return f"""Please provide a comprehensive analysis and outreach strategy for the company: {company_name}. Use the DuckDuckGoSearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
+    return f"""Please provide a comprehensive analysis and outreach strategy for the company: {company_name}. Use the search tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
 
 1. Company Overview
 2. Organizational Structure

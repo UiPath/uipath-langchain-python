@@ -240,3 +240,74 @@ async def test_context_cleared_after_stream_on_error(
                 pass
 
     assert ReferenceContextAccessor.get() is None
+
+
+# ---------------------------------------------------------------------------
+# The hierarchy leaf must name the same entity as the span's ReferenceId
+# ---------------------------------------------------------------------------
+
+
+class TestHierarchyLeafMatchesReferenceId:
+    """The pushed entry carries the id `ReferenceId` resolves to.
+
+    `_SpanUtils.otel_span_to_uipath_span` derives `ReferenceId` as
+    ``agentId or referenceId`` and sets the `agentId` attribute from
+    ``resolve_project_id()`` — which prefers ``uipath.json#id`` over
+    ``UIPATH_AGENT_ID``. Pushing the raw env var left the hierarchy leaf naming
+    a different entity than `ReferenceId` whenever the two disagreed.
+    """
+
+    ENV_AGENT_ID = "550e8400-e29b-41d4-a716-446655440020"
+    PROJECT_ID = "550e8400-e29b-41d4-a716-4466554400ff"
+
+    def setup_method(self) -> None:
+        _clear_accessor()
+
+    def teardown_method(self) -> None:
+        _clear_accessor()
+
+    def _leaf_id(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+        from uipath.platform.common._span_utils import _read_config_id
+
+        _read_config_id.cache_clear()
+        runtime = UiPathLangGraphRuntime(graph=_build_graph().compile())
+        token = runtime._push_reference_context()
+        try:
+            ctx = ReferenceContextAccessor.get()
+            return ctx.entries[-1].reference_id if ctx and len(ctx) else None
+        finally:
+            ReferenceContextAccessor.reset(token)
+            _read_config_id.cache_clear()
+
+    def test_uipath_json_id_wins_over_env_agent_id(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """resolve_project_id() prefers uipath.json#id, so the entry must too."""
+        import json
+
+        monkeypatch.delenv("UIPATH_PROCESS_VERSION", raising=False)
+        monkeypatch.setenv("UIPATH_AGENT_ID", self.ENV_AGENT_ID)
+        (tmp_path / "uipath.json").write_text(json.dumps({"id": self.PROJECT_ID}))
+        monkeypatch.chdir(tmp_path)
+
+        assert self._leaf_id(tmp_path, monkeypatch) == self.PROJECT_ID
+
+    def test_falls_back_to_env_agent_id(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With no uipath.json, UIPATH_AGENT_ID is what ReferenceId resolves to."""
+        monkeypatch.delenv("UIPATH_PROCESS_VERSION", raising=False)
+        monkeypatch.setenv("UIPATH_AGENT_ID", self.ENV_AGENT_ID)
+        monkeypatch.chdir(tmp_path)
+
+        assert self._leaf_id(tmp_path, monkeypatch) == self.ENV_AGENT_ID
+
+    def test_non_uuid_id_is_skipped_not_raised(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Env-var sources are unvalidated; a bad id must not fail the run."""
+        monkeypatch.delenv("UIPATH_PROCESS_VERSION", raising=False)
+        monkeypatch.setenv("UIPATH_AGENT_ID", "not-a-uuid")
+        monkeypatch.chdir(tmp_path)
+
+        assert self._leaf_id(tmp_path, monkeypatch) is None

@@ -1,26 +1,30 @@
 """Discovery and verification of job-attachment fields in an agent's output schema.
 
 An output schema may declare fields that hold a file (a job attachment). The
-agent has no way to fill such a field on its own, so the runtime injects the
-``create_output_file`` tool and tells the agent, in the system prompt, which
-fields expect a file and what to write into them.
+agent fills one with a reference returned by the create-file tool, or by any
+other tool that produced a file.
 
 Verification closes the loop. Nothing stops a model from inventing an attachment
-id, so at termination every attachment reference in the output is checked against
-the attachments actually linked to this job. A reference that is not there did
-not come from the tool.
+id or editing a reference, so at termination every attachment reference in the
+output is looked up in Orchestrator and rebuilt from the attachment it names. An
+attachment a child job produced is linked to that job only, so each one is also
+linked to this job, which then lists every file it outputs.
 """
 
+import copy
 import uuid
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Sequence
 
+from jsonpath_ng import parse  # type: ignore[import-untyped]
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 from uipath.platform import UiPath
 from uipath.platform.attachments import Attachment
 from uipath.platform.common import UiPathConfig
+from uipath.platform.errors import EnrichedException
 
-from .constants import OUTPUT_FILE_TOOL_NAME
 from .job_attachments import get_job_attachment_paths
+from .mime_types import guess_mime_type
 from .pydantic_json import extract_values_by_paths
 
 
@@ -127,135 +131,185 @@ def output_attachment_ids(
     return ids
 
 
-async def unlinked_output_attachment_ids(
-    fields: list[OutputFileField], output: dict[str, Any]
-) -> list[str]:
-    """Referenced attachment ids that are not linked to the current job.
+async def _lookup_attachment(uipath: UiPath, attachment_id: str) -> str | None:
+    """The attachment's file name, or None when no such attachment exists."""
+    try:
+        key = uuid.UUID(attachment_id)
+    except ValueError:
+        return None
+    try:
+        info = await uipath.attachments.get_blob_file_access_uri_async(
+            key=key, folder_key=UiPathConfig.folder_key
+        )
+    except EnrichedException as e:
+        if e.status_code in (400, 403, 404):
+            return None
+        raise
+    return info.name
 
-    Returns an empty list when there is no job to check against — a local run
-    stores attachments outside Orchestrator, so there is nothing to verify.
+
+async def resolve_output_attachments(
+    fields: list[OutputFileField], output: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    """Rebuild every file reference from its attachment and link it to this job.
+
+    Returns the output with each reference replaced by the attachment's real
+    ``ID``, ``FullName`` and ``MimeType``, and the ids that name no attachment.
+    Without a job there is nothing to look up or link to, so the output passes
+    through unchanged.
     """
-    referenced = output_attachment_ids(fields, output)
+    referenced = list(dict.fromkeys(output_attachment_ids(fields, output)))
     if not referenced or not UiPathConfig.job_key:
-        return []
+        return output, []
 
     uipath = UiPath()
+    lookups = {id: await _lookup_attachment(uipath, id) for id in referenced}
+    unknown = [id for id, name in lookups.items() if name is None]
+    if unknown:
+        return output, unknown
+    names = {id: name for id, name in lookups.items() if name is not None}
+
+    job_key = uuid.UUID(str(UiPathConfig.job_key))
     linked = {
         str(key).lower()
         for key in await uipath.jobs.list_attachments_async(
-            job_key=uuid.UUID(str(UiPathConfig.job_key)),
-            folder_key=UiPathConfig.folder_key,
+            job_key=job_key, folder_key=UiPathConfig.folder_key
         )
     }
-    return [id for id in referenced if id.lower() not in linked]
+    for id in referenced:
+        if id.lower() not in linked:
+            await uipath.jobs.link_attachment_async(
+                attachment_key=uuid.UUID(id),
+                job_key=job_key,
+                folder_key=UiPathConfig.folder_key,
+            )
 
-
-_PROMPT_HEADER = """\
-**Output files**
-These output fields hold a file. Fill one with the reference the `{tool}` tool \
-returns, or with the reference a tool already gave you when it produced the \
-file itself. Put each reference in its matching field exactly as you received \
-it, and never write one yourself.
-"""
-
-_PROMPT_REQUIRED_RULE = """\
-Create every required file before you end execution."""
-
-_PROMPT_OPTIONAL_RULE = """\
-Create an optional file only when it serves the request; leaving one empty is a \
-valid answer."""
-
-_PROMPT_FORMAT_RULE = """\
-If a field's description names a file format, use that format. Otherwise choose \
-the format that best fits the content, and give the file an extension that \
-matches it."""
-
-_PROMPT_WORKSPACE_RULE = """\
-For anything you have already written to a file, or any non-text file, pass its \
-workspace path as `file_path` rather than re-emitting the body as `content`."""
-
-
-def build_output_files_prompt(
-    fields: list[OutputFileField],
-    *,
-    tool_name: str,
-    with_workspace: bool = False,
-) -> str:
-    """Describe the declared output file fields and how to fill them.
-
-    Returns an empty string when the output schema declares no file field, so
-    the caller can append the result unconditionally.
-    """
-    if not fields:
-        return ""
-
-    lines = [_PROMPT_HEADER.format(tool=tool_name)]
+    resolved = copy.deepcopy(output)
     for field in fields:
-        suffix = " (required)" if field.required else " (optional)"
-        description = f" — {field.description}" if field.description else ""
-        lines.append(f"- `{field.name}`{suffix}{description}")
-    lines.append("")
-    if any(field.required for field in fields):
-        lines.append(_PROMPT_REQUIRED_RULE)
-    if any(not field.required for field in fields):
-        lines.append(_PROMPT_OPTIONAL_RULE)
-    lines.append(_PROMPT_FORMAT_RULE)
-    if with_workspace:
-        lines.append(_PROMPT_WORKSPACE_RULE)
-    return "\n".join(lines)
+        for match in parse(field.path).find(resolved):
+            value = match.value
+            if isinstance(value, dict) and value.get("ID"):
+                name = names[str(value["ID"])]
+                match.full_path.update(
+                    resolved,
+                    {
+                        "ID": str(value["ID"]),
+                        "FullName": name,
+                        "MimeType": guess_mime_type(name),
+                    },
+                )
+    return resolved, []
+
+
+class OutputFilesCheck(NamedTuple):
+    """The verdict on an output's file fields."""
+
+    problem: str | None
+    """Why the output cannot be accepted yet, or None when it can."""
+
+    output: dict[str, Any]
+    """The output with every file reference rebuilt from its attachment."""
 
 
 DEFAULT_MAX_OUTPUT_FILE_RETRIES = 2
 
 
-def _missing_files_message(fields: list[OutputFileField]) -> str:
+def _file_creator(file_tool_name: str | None) -> str:
+    return f"`{file_tool_name}`" if file_tool_name else "a tool that creates files"
+
+
+def _missing_files_message(
+    fields: list[OutputFileField], file_tool_name: str | None
+) -> str:
     names = ", ".join(f"'{field.name}'" for field in fields)
+    creator = _file_creator(file_tool_name)
     return (
         f"Execution cannot end: the output field(s) {names} must hold a file and "
-        f"are empty. Call `{OUTPUT_FILE_TOOL_NAME}` once per field, put each returned "
-        f"reference in its field, then end execution again."
+        f"are empty. Put in each field a file reference returned by a tool. If no "
+        f"tool has produced the file yet, create it with {creator}. Then end "
+        f"execution again."
     )
 
 
-def _malformed_files_message(fields: list[OutputFileField]) -> str:
+def _malformed_files_message(
+    fields: list[OutputFileField], file_tool_name: str | None
+) -> str:
     names = ", ".join(f"'{field.name}'" for field in fields)
     return (
         f"Execution cannot end: the output field(s) {names} do not hold a usable "
-        f"file reference. Use the value `{OUTPUT_FILE_TOOL_NAME}` returned, "
-        f"unchanged and complete, rather than assembling one by hand."
+        f"file reference. Use a reference a tool returned, unchanged and "
+        f"complete, rather than assembling one by hand. If you don't have one, "
+        f"create it with {_file_creator(file_tool_name)}."
     )
 
 
-def _unlinked_ids_message(ids: list[str]) -> str:
+def _unknown_ids_message(ids: list[str], file_tool_name: str | None) -> str:
     listed = ", ".join(f"'{id}'" for id in ids)
     return (
         f"Execution cannot end: the attachment reference(s) {listed} in the "
-        f"output do not belong to this job. Only a reference returned by "
-        f"`{OUTPUT_FILE_TOOL_NAME}` (or by a tool that produced a file) is valid. Create "
-        f"the file with `{OUTPUT_FILE_TOOL_NAME}` and use the reference it returns."
+        f"output do not name an existing file. Use a reference a tool returned, "
+        f"unchanged and complete. If you don't have one, create the file with "
+        f"{_file_creator(file_tool_name)} and use the reference it returns."
     )
 
 
-async def diagnose_output_files(
-    fields: list[OutputFileField], output: dict[str, Any]
-) -> str | None:
-    """Why this output cannot be accepted yet, or None when it can.
+async def check_output_files(
+    fields: list[OutputFileField],
+    output: dict[str, Any],
+    file_tool_name: str | None = None,
+) -> OutputFilesCheck:
+    """Whether this output can be accepted, and the output to accept.
 
     Checked in order: a required file field left empty, a field holding
-    something that is not a usable reference, then a reference to an attachment
-    that is not linked to this job. Each message is written for the agent to act
-    on, so it names the field and the tool to call.
+    something that is not a usable reference, then a reference naming no
+    attachment. Each message is written for the agent to act on, so it names
+    the field or reference to fix.
     """
     missing = missing_output_files(fields, output)
     if missing:
-        return _missing_files_message(missing)
+        return OutputFilesCheck(_missing_files_message(missing, file_tool_name), output)
 
     malformed = malformed_output_files(fields, output)
     if malformed:
-        return _malformed_files_message(malformed)
+        return OutputFilesCheck(
+            _malformed_files_message(malformed, file_tool_name), output
+        )
 
-    unlinked = await unlinked_output_attachment_ids(fields, output)
-    if unlinked:
-        return _unlinked_ids_message(unlinked)
+    resolved, unknown = await resolve_output_attachments(fields, output)
+    if unknown:
+        return OutputFilesCheck(_unknown_ids_message(unknown, file_tool_name), output)
 
-    return None
+    return OutputFilesCheck(None, resolved)
+
+
+def has_attachment_fields(
+    tools: Sequence[BaseTool], output_model: type[BaseModel] | None
+) -> bool:
+    """Whether the output or any tool argument declares a job-attachment field."""
+    if output_model is not None and get_job_attachment_paths(output_model):
+        return True
+    return any(
+        isinstance(tool.args_schema, type)
+        and issubclass(tool.args_schema, BaseModel)
+        and bool(get_job_attachment_paths(tool.args_schema))
+        for tool in tools
+    )
+
+
+def build_files_prompt(*, file_tool_name: str | None, with_workspace: bool) -> str:
+    """Explain to the agent what fills a file field."""
+    sentences = [
+        "**Files.** Every file field, in your output or in a tool's arguments, "
+        "holds a UiPath attachment reference (`ID`, `FullName`, `MimeType`) "
+        "returned by a tool or given in your input."
+    ]
+    if with_workspace:
+        sentences.append(
+            "Files in your workspace are not attachments until a tool turns them "
+            "into one."
+        )
+    sentences.append("Use a reference you already have.")
+    if file_tool_name:
+        sentences.append(f"If you don't have one, create it with `{file_tool_name}`.")
+    sentences.append("Never write a reference yourself.")
+    return " ".join(sentences)

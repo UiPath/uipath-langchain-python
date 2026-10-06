@@ -1,17 +1,25 @@
 """Job attachment utilities shared by agent implementations."""
 
 import copy
+import json
 import uuid
-from typing import Any, Sequence
+from typing import Any, NamedTuple, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ValidationError
+from uipath.platform import UiPath
 from uipath.platform.attachments import Attachment
-from uipath.platform.errors import EnrichedException
+from uipath.platform.common import UiPathConfig
+from uipath.platform.errors import (
+    BaseUrlMissingError,
+    EnrichedException,
+    SecretMissingError,
+)
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode, raise_for_enriched
+from .mime_types import guess_mime_type
 from .pydantic_json import extract_values_by_paths, get_json_paths_by_type
 
 _JOB_ATTACHMENT_ERRORS: dict[
@@ -220,6 +228,89 @@ def replace_job_attachment_ids(
                     )
 
     return result
+
+
+def parse_tool_content(content: Any) -> Any:
+    """A tool result's content, decoded from JSON when it is a JSON string."""
+    if not content or not isinstance(content, str):
+        return content
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return content
+
+
+async def lookup_attachment(attachment_id: uuid.UUID) -> Attachment | None:
+    """The attachment Orchestrator holds under ``attachment_id``, or None.
+
+    None also when there is no Orchestrator to ask, as in a local run without
+    credentials.
+    """
+    try:
+        info = await UiPath().attachments.get_blob_file_access_uri_async(
+            key=attachment_id, folder_key=UiPathConfig.folder_key
+        )
+    except (BaseUrlMissingError, SecretMissingError):
+        return None
+    except EnrichedException as e:
+        if e.status_code in (400, 403, 404):
+            return None
+        raise
+    return Attachment(
+        id=attachment_id, full_name=info.name, mime_type=guess_mime_type(info.name)
+    )
+
+
+class AttachmentResolution(NamedTuple):
+    """Tool arguments with every attachment reference replaced by its attachment."""
+
+    args: dict[str, Any]
+    found: dict[str, Attachment]
+    """Attachments the run did not know yet, keyed by id, found in Orchestrator."""
+
+    errors: list[str]
+
+
+async def resolve_attachment_references(
+    json_paths: list[str],
+    tool_args: dict[str, Any],
+    known: dict[str, Attachment],
+    *,
+    lookup_unknown: bool,
+) -> AttachmentResolution:
+    """Replace each attachment reference in ``tool_args`` with the attachment it names.
+
+    A reference resolves against ``known``, the attachments this run has already
+    seen. With ``lookup_unknown``, any other id is looked up in Orchestrator, which
+    is how a file another job or project produced becomes usable. An id that is not
+    resolved, or is not a UUID, is an error.
+    """
+    result = copy.deepcopy(tool_args)
+    found: dict[str, Attachment] = {}
+    errors: list[str] = []
+    for json_path in json_paths:
+        for match in parse(json_path).find(result):
+            value = match.value
+            if not isinstance(value, dict) or "ID" not in value:
+                continue
+            raw_id = str(value["ID"])
+            try:
+                key = uuid.UUID(raw_id)
+            except (ValueError, AttributeError):
+                errors.append(_create_job_attachment_error_message(raw_id))
+                continue
+            attachment = known.get(raw_id) or found.get(raw_id)
+            if attachment is None and lookup_unknown:
+                attachment = await lookup_attachment(key)
+                if attachment is not None:
+                    found[raw_id] = attachment
+            if attachment is None:
+                errors.append(_create_job_attachment_error_message(raw_id))
+                continue
+            match.full_path.update(
+                result, attachment.model_dump(by_alias=True, mode="json")
+            )
+    return AttachmentResolution(result, found, errors)
 
 
 def _create_job_attachment_error_message(attachment_id_str: str) -> str:

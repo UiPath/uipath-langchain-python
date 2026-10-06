@@ -26,11 +26,13 @@ from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_unique_model_field_name
-from uipath_langchain.agent.attachments.constants import OUTPUT_FILE_TOOL_NAME
-from uipath_langchain.agent.attachments.job_attachments import get_job_attachment_paths
+from uipath_langchain.agent.attachments.job_attachments import (
+    get_job_attachment_paths,
+    get_job_attachments,
+)
 from uipath_langchain.agent.attachments.output_files import (
     DEFAULT_MAX_OUTPUT_FILE_RETRIES,
-    diagnose_output_files,
+    check_output_files,
     get_output_file_fields,
 )
 from uipath_langchain.agent.exceptions import (
@@ -44,9 +46,18 @@ from uipath_langchain.agent.react.conversational_output_node import (
 from uipath_langchain.agent.react.utils import (
     has_custom_conversational_output_fields,
 )
+from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
+    CreateFileTool,
+    create_file_tool_name,
+)
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
+from .job_attachments_middleware import (
+    JOB_ATTACHMENTS_STATE_KEY,
+    JobAttachmentsMiddleware,
+    dump_attachments,
+)
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -292,31 +303,16 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return response
 
 
-MAIN_AGENT_ONLY_TOOLS: frozenset[str] = frozenset({OUTPUT_FILE_TOOL_NAME})
-
-
-def _partition_main_agent_tools(
-    tools: Sequence[BaseTool],
-) -> tuple[list[BaseTool], list[BaseTool]]:
-    """Split ``tools`` into (shared with subagents, main agent only)."""
-    shared: list[BaseTool] = []
-    main_only: list[BaseTool] = []
-    for tool in tools:
-        (main_only if tool.name in MAIN_AGENT_ONLY_TOOLS else shared).append(tool)
-    return shared, main_only
-
-
-def _subagents_without_main_agent_tools(
+def _resolve_subagent_specs(
     subagents: Sequence[SubAgent | CompiledSubAgent],
     shared_tools: Sequence[BaseTool],
     skills: Sequence[str] | None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> list[SubAgent | CompiledSubAgent]:
-    """Give every subagent the shared tool list instead of the parent's.
+    """Pin the shared tool list and middleware on every subagent spec.
 
     deepagents hands a subagent the parent's ``tools`` unless its spec declares its
-    own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``), so
-    pinning ``tools`` on each spec is what actually withholds a main-agent-only tool.
+    own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``).
 
     The auto-added ``general-purpose`` subagent is replaced with an explicit spec,
     since it would otherwise inherit the parent list too. Supplying a spec under
@@ -332,14 +328,14 @@ def _subagents_without_main_agent_tools(
     """
     resolved: list[SubAgent | CompiledSubAgent] = []
     for spec in subagents:
-        # A CompiledSubAgent brings its own graph and tools; nothing to filter.
-        if "runnable" in spec or "tools" in spec:
+        # A CompiledSubAgent brings its own graph; nothing to add to it.
+        if "runnable" in spec:
             resolved.append(spec)
             continue
         resolved.append(
             {
                 **spec,
-                "tools": list(shared_tools),
+                "tools": list(spec["tools"] if "tools" in spec else shared_tools),
                 "middleware": [*spec.get("middleware", []), *middleware],
             }
         )
@@ -377,22 +373,28 @@ def create_advanced_agent(
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
-
-    Tools named in :data:`MAIN_AGENT_ONLY_TOOLS` are withheld from every subagent.
     """
-    shared_tools, _ = _partition_main_agent_tools(tools)
-    payload_handler = _PayloadHandlerMiddleware()
+    tools = [
+        tool.with_workspace(backend)
+        if isinstance(tool, CreateFileTool)
+        and tool.workspace is None
+        and backend is not None
+        else tool
+        for tool in tools
+    ]
+    shared_middleware: list[AgentMiddleware[Any, Any]] = [
+        _PayloadHandlerMiddleware(),
+        JobAttachmentsMiddleware(),
+    ]
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=_subagents_without_main_agent_tools(
-            subagents, shared_tools, skills, [payload_handler]
-        ),
+        subagents=_resolve_subagent_specs(subagents, tools, skills, shared_middleware),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*middleware, payload_handler],
+        middleware=[*middleware, *shared_middleware],
         skills=list(skills) if skills else None,
     )
 
@@ -458,6 +460,10 @@ def create_advanced_agent_graph(
     state_fields: dict[str, Any] = dict(runtime_prompt.state_fields)
     if output_file_fields:
         state_fields[output_file_retries_key] = (int, 0)
+    attachment_paths = (
+        get_job_attachment_paths(input_schema) if input_schema is not None else []
+    )
+    state_fields[JOB_ATTACHMENTS_STATE_KEY] = (dict[str, dict[str, Any]], {})
 
     wrapper_state = create_state_with_input(input_schema)
     if state_fields:
@@ -467,9 +473,6 @@ def create_advanced_agent_graph(
             **state_fields,
         )
     internal_fields = set(AdvancedAgentGraphState.model_fields) | set(state_fields)
-    attachment_paths = (
-        get_job_attachment_paths(input_schema) if input_schema is not None else []
-    )
 
     async def transform_input_async(state: BaseModel) -> dict[str, Any]:
         state_data = state.model_dump()
@@ -479,14 +482,20 @@ def create_advanced_agent_graph(
             if input_schema is not None
             else {}
         )
-        if attachment_paths:
+        update: dict[str, Any] = {}
+        if attachment_paths and input_schema is not None:
+            update[JOB_ATTACHMENTS_STATE_KEY] = dump_attachments(
+                {
+                    str(attachment.id): attachment
+                    for attachment in get_job_attachments(input_schema, input_args)
+                    if attachment.id is not None
+                }
+            )
             input_args = await resolve_input_attachments(
                 backend, attachment_paths, input_args
             )
         user_text = build_user_message(input_args)
-        update: dict[str, Any] = {
-            "messages": [HumanMessage(content=user_text, id="user-input")]
-        }
+        update["messages"] = [HumanMessage(content=user_text, id="user-input")]
         update.update(runtime_prompt.resolve(input_args))
         return update
 
@@ -498,9 +507,13 @@ def create_advanced_agent_graph(
         state: BaseModel,
     ) -> Command[Literal["advanced_agent", "transform_output"]]:
         structured = getattr(state, "structured_response", {}) or {}
-        problem = await diagnose_output_files(output_file_fields, structured)
+        problem, output = await check_output_files(
+            output_file_fields, structured, create_file_tool_name(tools)
+        )
         if problem is None:
-            return Command(goto="transform_output")
+            return Command(
+                goto="transform_output", update={"structured_response": output}
+            )
 
         retries = getattr(state, output_file_retries_key, 0) or 0
         if retries >= DEFAULT_MAX_OUTPUT_FILE_RETRIES:

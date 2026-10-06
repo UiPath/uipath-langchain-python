@@ -1,14 +1,9 @@
-"""Contract test: main-agent-only tools must never reach a subagent.
+"""Contract test: subagents receive the parent's tools, create-file included.
 
 Deliberately **not** mocked. Every other test in this directory patches
 ``_create_deep_agent``, so they assert what we pass in and never what deepagents
-does with it. Only a real graph catches an upstream change that starts sharing the
-parent tool list with subagents again.
-
-The bug this guards: a subagent that calls ``create_output_file`` uploads a real job
-attachment and returns prose. The reference never reaches the main agent, the only
-agent that fills the typed output, so the main agent uploads a second orphan
-attachment and the job faults.
+does with it. Only a real graph catches an upstream change to how subagent tool
+lists are resolved.
 
 Bindings are recorded per ``bind_tools`` call rather than per model, because a
 subagent with no ``model`` in its spec inherits the parent's instance -- so the
@@ -28,14 +23,39 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, StructuredTool
+from uipath.agent.models.agent import AgentInternalToolResourceConfig
 
-from uipath_langchain.agent.advanced.agent import (
-    MAIN_AGENT_ONLY_TOOLS,
-    create_advanced_agent,
+from uipath_langchain.agent.advanced.agent import create_advanced_agent
+from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
+    create_file_tool,
 )
-from uipath_langchain.agent.attachments.constants import OUTPUT_FILE_TOOL_NAME
+
+CREATE_FILE_TOOL_NAME = "Make_Report"
 
 _BINDINGS: list[list[str]] = []
+
+
+def _create_file_tool() -> BaseTool:
+    return create_file_tool(
+        AgentInternalToolResourceConfig.model_validate(
+            {
+                "$resourceType": "tool",
+                "type": "Internal",
+                "name": "Make Report",
+                "description": "Make a file.",
+                "properties": {"toolType": "create-file"},
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fileName": {"type": "string"},
+                        "content": {"type": "string"},
+                        "filePath": {"type": "string"},
+                    },
+                    "required": ["fileName"],
+                },
+            }
+        )
+    )
 
 
 def _tool(name: str) -> BaseTool:
@@ -86,7 +106,7 @@ def _dispatch(
     )
     graph = create_advanced_agent(
         model=model,
-        tools=[_tool(OUTPUT_FILE_TOOL_NAME), _tool("read_invoice")],
+        tools=[_create_file_tool(), _tool("read_invoice")],
         subagents=[SubAgent(**{**s, "model": model}) for s in subagents],
         backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
     )
@@ -109,22 +129,18 @@ _WORKER: SubAgent = {
     [("worker", (_WORKER,)), (GENERAL_PURPOSE_SUBAGENT["name"], ())],
     ids=["declared-subagent", "general-purpose"],
 )
-def test_only_the_main_agent_holds_the_output_file_tool(
+def test_every_agent_holds_the_create_file_tool(
     tmp_path: Path, subagent_type: str, subagents: Sequence[SubAgent]
 ) -> None:
-    """The main agent holds it, the dispatched subagent does not.
-
-    ``general-purpose`` is the load-bearing case: deepagents adds it implicitly and
-    would otherwise hand it the parent tool list.
-    """
+    """``general-purpose`` is covered too: we replace deepagents' implicit spec."""
     bindings = _dispatch(tmp_path, subagent_type, subagents)
     main = [b for b in bindings if "task" in b]
     subagent = [b for b in bindings if "task" not in b]
 
     assert main, f"no main-agent binding found: {bindings}"
     assert subagent, f"no subagent binding found: {bindings}"
-    assert all(OUTPUT_FILE_TOOL_NAME in b for b in main), main
-    assert not any(OUTPUT_FILE_TOOL_NAME in b for b in subagent), subagent
+    assert all(CREATE_FILE_TOOL_NAME in b for b in main), main
+    assert all(CREATE_FILE_TOOL_NAME in b for b in subagent), subagent
 
 
 @pytest.mark.parametrize(
@@ -132,10 +148,9 @@ def test_only_the_main_agent_holds_the_output_file_tool(
     [("worker", (_WORKER,)), (GENERAL_PURPOSE_SUBAGENT["name"], ())],
     ids=["declared-subagent", "general-purpose"],
 )
-def test_shared_tools_still_reach_every_agent(
+def test_other_tools_reach_every_agent(
     tmp_path: Path, subagent_type: str, subagents: Sequence[SubAgent]
 ) -> None:
-    """Withholding one tool must not withhold the rest."""
     bindings = _dispatch(tmp_path, subagent_type, subagents)
     assert all("read_invoice" in b for b in bindings), bindings
 
@@ -156,6 +171,17 @@ def test_a_subagent_declaring_its_own_tools_is_left_alone(tmp_path: Path) -> Non
     assert not any("read_invoice" in b for b in subagent), subagent
 
 
-def test_the_withheld_set_is_not_empty() -> None:
-    """Guard against the set being emptied and the tests above passing vacuously."""
-    assert OUTPUT_FILE_TOOL_NAME in MAIN_AGENT_ONLY_TOOLS
+def test_a_subagent_declaring_its_own_tools_still_gets_our_middleware() -> None:
+    from uipath_langchain.agent.advanced.agent import _resolve_subagent_specs
+    from uipath_langchain.agent.advanced.job_attachments_middleware import (
+        JobAttachmentsMiddleware,
+    )
+
+    middleware = JobAttachmentsMiddleware()
+    (spec, _general_purpose) = _resolve_subagent_specs(
+        [{**_WORKER, "tools": [_tool("only_mine")]}], [], None, [middleware]
+    )
+
+    resolved: dict[str, Any] = dict(spec)
+    assert [getattr(t, "name", None) for t in resolved["tools"]] == ["only_mine"]
+    assert middleware in resolved["middleware"]

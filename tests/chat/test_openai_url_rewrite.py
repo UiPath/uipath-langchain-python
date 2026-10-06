@@ -45,6 +45,19 @@ class TestRewriteOpenAIUrl:
             == "https://cloud.uipath.com/account/tenant/agenthub_/llm/raw/vendor/openai/model/gpt-5-mini-2025-08-07/completions?api-version=2024-12-01-preview"
         )
 
+    def test_rewrite_base_url_with_trailing_slash(self):
+        """Test rewriting a base URL with a trailing slash, as openai >= 3.20 sends it."""
+        original_url = "https://cloud.uipath.com/account/tenant/agenthub_/llm/raw/vendor/openai/model/gpt-5-mini-2025-08-07/?api-version=2024-12-01-preview"
+        params = httpx.QueryParams({"api-version": "2024-12-01-preview"})
+
+        result = _rewrite_openai_url(original_url, params)
+
+        assert result is not None
+        assert (
+            str(result)
+            == "https://cloud.uipath.com/account/tenant/agenthub_/llm/raw/vendor/openai/model/gpt-5-mini-2025-08-07/completions?api-version=2024-12-01-preview"
+        )
+
     def test_rewrite_without_query_params(self):
         """Test rewriting URL without query parameters."""
         original_url = "https://cloud.uipath.com/account/tenant/agenthub_/llm/raw/vendor/openai/model/gpt-5-mini-2025-08-07/openai/responses"

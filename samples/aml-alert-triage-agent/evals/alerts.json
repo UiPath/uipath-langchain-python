@@ -1,0 +1,122 @@
+[
+  {
+    "alert_id": "AML-2026-0142",
+    "customer": "Meridian Trading Ltd (registered Seychelles, incorporated 4 months ago)",
+    "narrative": "Nine inbound wires of USD 9,400-9,800 each from four unrelated remitters in Dubai over 11 days, aggregating USD 86,200. Funds fully withdrawn within 48 hours of each credit via outbound transfer to a single beneficiary in Cyprus. Stated business purpose: agricultural equipment import. No import documentation on file.",
+    "account_age_days": 118,
+    "prior_alerts": 0,
+    "expected_disposition": "escalate",
+    "difficulty": "clear",
+    "note": "Textbook structuring plus pass-through plus shell indicators."
+  },
+  {
+    "alert_id": "AML-2026-0143",
+    "customer": "Westbrook Dental Practice LLP (established 1998, 3 partners)",
+    "narrative": "Monthly deposit of GBP 41,200 flagged as above the customer's 12-month average of GBP 33,800. Deposits comprise card settlement batches from the practice's payment processor. Increase coincides with the practice taking on two NHS orthodontic contracts, documentation for which is on file.",
+    "account_age_days": 9855,
+    "prior_alerts": 0,
+    "expected_disposition": "close",
+    "difficulty": "clear",
+    "note": "Fully explained increase with documentation. Should not escalate."
+  },
+  {
+    "alert_id": "AML-2026-0144",
+    "customer": "Aurelia Holdings SA (Panama, nominee directors)",
+    "narrative": "Single inbound transfer of USD 2,400,000 from a Latvian bank, followed 6 hours later by six outbound transfers of USD 395,000-405,000 each to accounts in three different jurisdictions. No commercial rationale stated. Customer declined to provide source-of-funds documentation when contacted.",
+    "account_age_days": 47,
+    "prior_alerts": 2,
+    "expected_disposition": "escalate",
+    "difficulty": "clear",
+    "note": "Classic layering. Refusal to document is aggravating."
+  },
+  {
+    "alert_id": "AML-2026-0145",
+    "customer": "Tomas Riedel (personal account, salaried engineer)",
+    "narrative": "Inbound transfer of EUR 18,500 from the customer's own account at another institution, immediately used for a car purchase paid to a registered dealership. Invoice on file matches amount and date.",
+    "account_age_days": 3120,
+    "prior_alerts": 0,
+    "expected_disposition": "close",
+    "difficulty": "clear",
+    "note": "Own-account transfer with matching invoice."
+  },
+  {
+    "alert_id": "AML-2026-0146",
+    "customer": "Sunrise Textiles Pvt Ltd (Mumbai, established 2011)",
+    "narrative": "Twelve inbound payments totalling USD 340,000 from a single buyer in Nigeria over 5 weeks. Customer has traded with this buyer for 4 years. Two of the twelve payments were routed through a third-party payment agent in the UAE rather than direct, which is new. Invoices provided for all twelve; the two agent-routed payments have invoices that do not match the amounts received.",
+    "account_age_days": 4200,
+    "prior_alerts": 1,
+    "expected_disposition": "need_info",
+    "difficulty": "ambiguous",
+    "note": "Established relationship, but invoice mismatch on the new routing. Not enough to escalate, too much to close."
+  },
+  {
+    "alert_id": "AML-2026-0147",
+    "customer": "Kestrel Consulting Ltd (UK, sole director, incorporated 14 months ago)",
+    "narrative": "Regular monthly inbound payments of GBP 8,000-9,500 from four different corporate clients. Outbound spending is consistent with business operating costs and director salary. No single payment exceeds a reporting threshold, but the pattern of amounts sitting just below GBP 10,000 was flagged by the monitoring rule. Consultancy agreements on file for three of the four clients.",
+    "account_age_days": 426,
+    "prior_alerts": 0,
+    "expected_disposition": "need_info",
+    "difficulty": "ambiguous",
+    "note": "Amounts look like structuring but may be ordinary consultancy invoicing. One missing agreement is the gap."
+  },
+  {
+    "alert_id": "AML-2026-0148",
+    "customer": "Halcyon Freight Services (Cyprus, incorporated 2 months ago)",
+    "narrative": "Account opened with minimum deposit. Within 3 weeks received 23 inbound transfers from individuals across 9 countries, amounts between USD 2,000 and USD 4,500, totalling USD 71,300. All funds converted to cryptocurrency via an exchange within days. Stated purpose: freight forwarding. No freight contracts, no vehicles, no employees on record.",
+    "account_age_days": 61,
+    "prior_alerts": 0,
+    "expected_disposition": "escalate",
+    "difficulty": "clear",
+    "note": "Funnel account into crypto with no operating substance."
+  },
+  {
+    "alert_id": "AML-2026-0149",
+    "customer": "Greenfield Agricultural Co-operative (Kenya, established 2004)",
+    "narrative": "Seasonal spike in inbound payments totalling USD 210,000 across 45 transactions from member farmers, consistent with the same period in each of the previous four years. Outbound payments to seed and fertiliser suppliers with invoices on file. One supplier is newly registered this season.",
+    "account_age_days": 7300,
+    "prior_alerts": 0,
+    "expected_disposition": "close",
+    "difficulty": "clear",
+    "note": "Seasonal pattern matching four years of history."
+  },
+  {
+    "alert_id": "AML-2026-0150",
+    "customer": "Nordvik Marine AS (Norway, established 2016)",
+    "narrative": "Outbound payment of USD 680,000 to a shipyard in a jurisdiction subject to enhanced due diligence requirements. Customer provided a vessel repair contract and photographs of the vessel in dry dock. The shipyard entity is not on any sanctions list but shares a registered address with two entities that were delisted from sanctions in 2024.",
+    "account_age_days": 3600,
+    "prior_alerts": 0,
+    "expected_disposition": "need_info",
+    "difficulty": "ambiguous",
+    "note": "Documentation is strong; the shared-address link is a thread that needs pulling, not a conclusion."
+  },
+  {
+    "alert_id": "AML-2026-0151",
+    "customer": "Delacroix Fine Art Sarl (Luxembourg, established 2019)",
+    "narrative": "Sale of a single artwork for EUR 1,150,000 settled by three payments from three different entities, none of which is the named buyer on the sales contract. All three payers are companies registered in the same building in the British Virgin Islands. Customer states this is normal practice for collectors using investment vehicles.",
+    "account_age_days": 2400,
+    "prior_alerts": 1,
+    "expected_disposition": "escalate",
+    "difficulty": "clear",
+    "note": "Third-party payment plus BVI co-registration plus high-value art."
+  },
+  {
+    "alert_id": "AML-2026-0152",
+    "customer": "Priya Raghunathan (personal account, retired teacher)",
+    "narrative": "Received INR 4,200,000 from the sale of an inherited property. Sale deed, probate documentation and buyer identity are all on file and consistent. Funds subsequently moved to a fixed deposit at the same institution. The monitoring rule fired because the amount is 60x the customer's average balance.",
+    "account_age_days": 5400,
+    "prior_alerts": 0,
+    "expected_disposition": "close",
+    "difficulty": "clear",
+    "note": "Fully documented one-off life event. A model that escalates this is too trigger-happy."
+  },
+  {
+    "alert_id": "AML-2026-0153",
+    "customer": "Bluepeak Logistics Ltd (Malta, incorporated 3 years ago)",
+    "narrative": "Inbound payments of EUR 45,000-60,000 arriving roughly fortnightly from a related company under common ownership, described as intercompany funding. Outbound payments cover payroll and port fees consistent with a logistics operation with 14 employees. However, the related company's accounts are 2 years overdue at the registry, and the described intercompany loan has no written agreement.",
+    "account_age_days": 1095,
+    "prior_alerts": 0,
+    "expected_disposition": "need_info",
+    "difficulty": "ambiguous",
+    "note": "Real operating business, but undocumented intercompany flows and a delinquent counterparty."
+  }
+]

@@ -17,8 +17,11 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
     _PayloadHandlerMiddleware,
-    _subagents_without_main_agent_tools,
+    _resolve_subagent_specs,
     create_advanced_agent,
+)
+from uipath_langchain.agent.advanced.job_attachments_middleware import (
+    JobAttachmentsMiddleware,
 )
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -59,9 +62,7 @@ def _specs(subagents: Any, extra: Any, shared: Any = ()) -> list[dict[str, Any]]
     """Resolved subagent specs as plain dicts, for key assertions."""
     return [
         dict(spec)
-        for spec in _subagents_without_main_agent_tools(
-            subagents, list(shared), None, extra
-        )
+        for spec in _resolve_subagent_specs(subagents, list(shared), None, extra)
     ]
 
 
@@ -326,7 +327,7 @@ class TestSubagentWiring:
         subagent = kwargs["subagents"][0]["middleware"]
 
         assert len(main) == 1
-        assert main[0] is subagent[-1]
+        assert main[0] in subagent
 
 
 def test_bound_tools_are_filtered_to_basetools() -> None:
@@ -383,11 +384,12 @@ class TestGeneralPurposeSubagentParity:
     def test_middleware_matches_deepagents_plus_ours(self) -> None:
         baseline, ours = self._build()
 
+        added = {_PayloadHandlerMiddleware.__name__, JobAttachmentsMiddleware.__name__}
         names = [m.name for m in ours["middleware"]]
-        assert [n for n in names if n != _PayloadHandlerMiddleware.__name__] == [
+        assert [n for n in names if n not in added] == [
             m.name for m in baseline["middleware"]
         ]
-        assert _PayloadHandlerMiddleware.__name__ in names
+        assert added <= set(names)
 
     def test_skills_reach_the_subagent(self) -> None:
         """Restated on the spec: deepagents reads a supplied spec's skills from it."""

@@ -5,10 +5,13 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import StructuredTool
+from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalBatchTransformToolProperties,
     AgentInternalToolResourceConfig,
+    AgentToolArgumentArgumentProperties,
 )
+from uipath.core.feature_flags import FeatureFlags
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import (
@@ -40,6 +43,8 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+
+BATCH_TRANSFORM_FROM_ATTACHMENT_KILL_SWITCH = "DisableBatchTransformFromAttachment"
 
 
 class ReadyEphemeralIndex(SkipInterruptValue):
@@ -77,6 +82,13 @@ def create_batch_transform_tool(
 
     is_query_static = query_setting and query_setting.variant == "static"
     static_query = query_setting.value if is_query_static else None
+
+    argument_properties = dict(resource.argument_properties)
+    if query_setting and query_setting.variant == "argument":
+        argument_properties["query"] = AgentToolArgumentArgumentProperties(
+            is_sensitive=False,
+            argument_path=(query_setting.value or "").strip("{}"),
+        )
 
     static_folder_path_prefix = None
     if folder_path_prefix_setting:
@@ -131,41 +143,57 @@ def create_batch_transform_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_batch_transform(**_tool_kwargs: Any):
-            @durable_interrupt
-            async def create_ephemeral_index():
-                uipath = UiPath()
-                ephemeral_index = (
-                    await uipath.context_grounding.create_ephemeral_index_async(
-                        usage=EphemeralIndexUsage.BATCH_RAG,
-                        attachments=[attachment_id],
-                        folder_key=UiPathConfig.folder_key,
+            if not FeatureFlags.is_flag_enabled(
+                BATCH_TRANSFORM_FROM_ATTACHMENT_KILL_SWITCH, default=False
+            ):
+                interrupt(
+                    CreateBatchTransform(
+                        name=f"task-{uuid.uuid4()}",
+                        prompt=query,
+                        output_columns=batch_transform_output_columns,
+                        attachment=attachment_id,
+                        enable_web_search_grounding=static_web_search,
+                        destination_path=destination_path,
+                        index_folder_key=UiPathConfig.folder_key,
                     )
                 )
-                if ephemeral_index.in_progress_ingestion():
-                    return WaitEphemeralIndex(index=ephemeral_index)
-                return ReadyEphemeralIndex(index=ephemeral_index)
-
-            index_result = await create_ephemeral_index()
-            if isinstance(index_result, dict):
-                ephemeral_index = ContextGroundingIndex(**index_result)
             else:
-                ephemeral_index = index_result
 
-            @durable_interrupt
-            async def create_batch_transform():
-                return CreateBatchTransform(
-                    name=f"task-{uuid.uuid4()}",
-                    index_name=ephemeral_index.name,
-                    index_id=ephemeral_index.id,
-                    prompt=query,
-                    output_columns=batch_transform_output_columns,
-                    storage_bucket_folder_path_prefix=static_folder_path_prefix,
-                    enable_web_search_grounding=static_web_search,
-                    destination_path=destination_path,
-                    is_ephemeral_index=True,
-                )
+                @durable_interrupt
+                async def create_ephemeral_index():
+                    uipath = UiPath()
+                    ephemeral_index = (
+                        await uipath.context_grounding.create_ephemeral_index_async(
+                            usage=EphemeralIndexUsage.BATCH_RAG,
+                            attachments=[attachment_id],
+                            folder_key=UiPathConfig.folder_key,
+                        )
+                    )
+                    if ephemeral_index.in_progress_ingestion():
+                        return WaitEphemeralIndex(index=ephemeral_index)
+                    return ReadyEphemeralIndex(index=ephemeral_index)
 
-            await create_batch_transform()
+                index_result = await create_ephemeral_index()
+                if isinstance(index_result, dict):
+                    ephemeral_index = ContextGroundingIndex(**index_result)
+                else:
+                    ephemeral_index = index_result
+
+                @durable_interrupt
+                async def create_batch_transform():
+                    return CreateBatchTransform(
+                        name=f"task-{uuid.uuid4()}",
+                        index_name=ephemeral_index.name,
+                        index_id=ephemeral_index.id,
+                        prompt=query,
+                        output_columns=batch_transform_output_columns,
+                        storage_bucket_folder_path_prefix=static_folder_path_prefix,
+                        enable_web_search_grounding=static_web_search,
+                        destination_path=destination_path,
+                        is_ephemeral_index=True,
+                    )
+
+                await create_batch_transform()
 
             # create job attachment with output
             async def upload_result_attachment():
@@ -199,7 +227,7 @@ def create_batch_transform_tool(
         args_schema=input_model,
         coroutine=batch_transform_tool_fn,
         output_type=output_model,
-        argument_properties=resource.argument_properties,
+        argument_properties=argument_properties,
         metadata={
             "tool_type": "context_grounding",
             "display_name": tool_name,

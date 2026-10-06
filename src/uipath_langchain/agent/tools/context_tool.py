@@ -19,6 +19,7 @@ from uipath.agent.models.agent import (
     AgentToolArgumentProperties,
     LowCodeAgentDefinition,
 )
+from uipath.core.feature_flags import FeatureFlags
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import CreateBatchTransform, CreateDeepRag, UiPathConfig
@@ -61,6 +62,12 @@ from .structured_tool_with_argument_properties import (
 )
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name
+
+# Gates the agent.json ``searchDuringIngestion`` opt-in. An agent.json may carry
+# the setting from a designer build, or by hand, before the feature is enabled for
+# the tenant; that combination fails the agent at startup rather than quietly
+# downgrading to the old blocking behaviour, so the misconfiguration is visible.
+SEARCH_DURING_INGESTION_FF = "EnableContextGroundingSearchDuringIngestion"
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +230,20 @@ def handle_semantic_search(
     result_count = resource.settings.result_count
     threshold = resource.settings.threshold
     search_during_ingestion = resource.settings.search_during_ingestion
+    if search_during_ingestion and not FeatureFlags.is_flag_enabled(
+        SEARCH_DURING_INGESTION_FF, default=False
+    ):
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Search during ingestion is not enabled for this tenant",
+            detail=(
+                f"Context resource '{resource.name}' has 'search during ingestion' "
+                f"turned on, but the '{SEARCH_DURING_INGESTION_FF}' feature is not "
+                "enabled for this tenant. Turn the setting off on the context "
+                "resource, or ask your administrator to enable the feature."
+            ),
+            category=UiPathErrorCategory.USER,
+        )
 
     static = is_static_query(resource)
     prompt = resource.settings.query.value if static else None

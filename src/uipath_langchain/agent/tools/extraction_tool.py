@@ -131,7 +131,7 @@ def create_ixp_extraction_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        error = resolve_job_attachment_args(tool, call, state)
+        error = await resolve_job_attachment_args(tool, call, state)
         if error is not None:
             return error
 

@@ -18,6 +18,7 @@ from ..attachments.output_files import (
     get_output_file_fields,
 )
 from ..guardrails.actions import GuardrailAction
+from ..tools.internal_tools.create_file_tool import create_file_tool_name
 from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
 from .conversational_output_node import (
     create_conversational_output_node,
@@ -177,7 +178,9 @@ def create_agent(
         builder.add_node(
             AgentGraphNode.VERIFY_OUTPUT_FILES,
             create_output_files_node(
-                output_file_fields, DEFAULT_MAX_OUTPUT_FILE_RETRIES
+                output_file_fields,
+                DEFAULT_MAX_OUTPUT_FILE_RETRIES,
+                create_file_tool_name(tools),
             ),
         )
     if with_conversational_output_node and output_schema is not None:

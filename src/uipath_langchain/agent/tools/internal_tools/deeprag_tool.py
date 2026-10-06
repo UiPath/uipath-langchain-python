@@ -9,6 +9,7 @@ from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
+    AgentToolArgumentArgumentProperties,
 )
 from uipath.core.feature_flags import FeatureFlags
 from uipath.eval.mocks import mockable
@@ -83,6 +84,13 @@ def create_deeprag_tool(
 
     is_query_static = query_setting and query_setting.variant == "static"
     static_query = query_setting.value if is_query_static else None
+
+    argument_properties = dict(resource.argument_properties)
+    if query_setting and query_setting.variant == "argument":
+        argument_properties["query"] = AgentToolArgumentArgumentProperties(
+            is_sensitive=False,
+            argument_path=(query_setting.value or "").strip("{}"),
+        )
 
     input_schema = dict(resource.input_schema)
     if not is_query_static:
@@ -180,7 +188,7 @@ def create_deeprag_tool(
         args_schema=input_model,
         coroutine=deeprag_tool_fn,
         output_type=output_model,
-        argument_properties=resource.argument_properties,
+        argument_properties=argument_properties,
         metadata={
             "tool_type": resource.type.lower(),
             "display_name": tool_name,

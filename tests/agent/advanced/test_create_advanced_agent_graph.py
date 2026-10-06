@@ -458,3 +458,35 @@ class TestOutputFileVerification:
 
         assert "messages" in update
         assert "uipath__output_file_retries" not in update
+
+    async def test_an_accepted_reference_is_rebuilt_in_the_structured_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ..attachments.fake_orchestrator import patch_orchestrator
+
+        fake = patch_orchestrator(
+            monkeypatch, existing={self.ATTACHMENT_ID: "report.md"}, linked=[]
+        )
+        graph = _build(output_schema=self._output_model(), output_files_enabled=True)
+        edited = {"ID": self.ATTACHMENT_ID, "FullName": "/x", "MimeType": "x/y"}
+        state = graph.state_schema(structured_response={"report": edited})
+
+        command = await graph.nodes["verify_output_files"].runnable.ainvoke(state)
+
+        assert command.goto == "transform_output"
+        assert command.update["structured_response"]["report"] == {
+            "ID": self.ATTACHMENT_ID,
+            "FullName": "report.md",
+            "MimeType": "text/markdown",
+        }
+        assert fake.links == [self.ATTACHMENT_ID]
+
+    def test_attachments_survive_a_verification_retry(self) -> None:
+        """The wrapper carries the inner graph's attachments into the next pass."""
+        from uipath_langchain.agent.advanced.job_attachments_middleware import (
+            JOB_ATTACHMENTS_STATE_KEY,
+        )
+
+        graph = _build(output_schema=self._output_model(), output_files_enabled=True)
+
+        assert JOB_ATTACHMENTS_STATE_KEY in graph.state_schema.model_fields

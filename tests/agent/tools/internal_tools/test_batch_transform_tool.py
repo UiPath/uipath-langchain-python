@@ -5,7 +5,8 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from langchain_core.messages import ToolCall
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextOutputColumn,
     AgentContextQuerySetting,
@@ -18,6 +19,7 @@ from uipath.agent.models.agent import (
     BatchTransformWebSearchGrounding,
     BatchTransformWebSearchGroundingSetting,
 )
+from uipath.platform.common import CreateBatchTransform
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
@@ -25,6 +27,7 @@ from uipath.platform.context_grounding.context_grounding_index import (
 from uipath_langchain.agent.tools.internal_tools.batch_transform_tool import (
     create_batch_transform_tool,
 )
+from uipath_langchain.agent.tools.static_args import StaticArgsHandler
 
 
 class MockAttachment(BaseModel):
@@ -156,6 +159,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1"})
     async def test_create_batch_transform_tool_static_query_index_ready(
         self,
         mock_interrupt,
@@ -248,6 +252,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1"})
     async def test_create_batch_transform_tool_static_query_wait_for_ingestion(
         self,
         mock_interrupt,
@@ -329,6 +334,8 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1"})
+    @pytest.mark.parametrize("variant", ["dynamic", "argument"])
     async def test_create_batch_transform_tool_dynamic_query(
         self,
         mock_interrupt,
@@ -337,8 +344,9 @@ class TestCreateBatchTransformTool:
         mock_get_wrapper,
         resource_config_dynamic,
         mock_llm,
+        variant,
     ):
-        """Test Batch Transform tool with dynamic query."""
+        """Test model-supplied and argument-bound Batch Transform queries."""
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
@@ -367,8 +375,19 @@ class TestCreateBatchTransformTool:
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
 
-        # Create tool
+        if variant == "argument":
+            resource_config_dynamic.properties.settings.query = (
+                AgentContextQuerySetting(variant="argument", value="{{task}}")
+            )
         tool = create_batch_transform_tool(resource_config_dynamic, mock_llm)
+        expected = "Extract all names"
+        call = ToolCall(name=tool.name, args={"query": expected}, id="call-1")
+        if variant == "argument":
+            expected = "  exact {{literal}}\n task "
+            input_model = create_model("Input", task=(str, ...))
+            handler = StaticArgsHandler()
+            handler.initialize([tool], input_model(task=expected), input_model)
+            handler.apply_to_response([call])
 
         # Test tool execution with dynamic query
         mock_attachment = MockAttachment(
@@ -376,9 +395,8 @@ class TestCreateBatchTransformTool:
         )
 
         assert tool.coroutine is not None
-        result = await tool.coroutine(
-            attachment=mock_attachment, query="Extract all names"
-        )
+        result = await tool.coroutine(attachment=mock_attachment, **call["args"])
+        assert mock_interrupt.call_args.args[0].prompt == expected
 
         # Verify result contains attachment info
         assert result == {
@@ -401,6 +419,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1"})
     async def test_create_batch_transform_tool_default_destination_path(
         self,
         mock_interrupt,
@@ -481,6 +500,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
+    @patch.dict(os.environ, {"UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1"})
     async def test_create_batch_transform_tool_custom_destination_path(
         self,
         mock_interrupt,
@@ -557,7 +577,13 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
-    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "test-folder-key"})
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_FOLDER_KEY": "test-folder-key",
+            "UIPATH_FEATURE_DisableBatchTransformFromAttachment": "1",
+        },
+    )
     async def test_create_ephemeral_index_passes_folder_key(
         self,
         mock_interrupt,
@@ -658,3 +684,67 @@ class TestCreateBatchTransformTool:
         assert tool.coroutine is not None
         with pytest.raises(ValueError, match="Attachment ID is required"):
             await tool.coroutine(attachment=mock_attachment)
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
+    async def test_create_batch_transform_tool_from_attachment_default(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_uipath_config,
+        mock_get_wrapper,
+        resource_config_static,
+        mock_llm,
+    ):
+        """Default (kill switch off) emits a single CreateBatchTransform from-attachment interrupt."""
+        mock_uipath = AsyncMock()
+        mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
+        mock_uipath_config.folder_key = "test-folder-key"
+
+        mock_attachment_uuid = uuid.uuid4()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=mock_attachment_uuid
+        )
+
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_batch_transform_tool(resource_config_static, mock_llm)
+
+        attachment_id = str(uuid.uuid4())
+        mock_attachment = MockAttachment(
+            ID=attachment_id, FullName="data.csv", MimeType="text/csv"
+        )
+
+        assert tool.coroutine is not None
+        result = await tool.coroutine(attachment=mock_attachment)
+
+        assert result == {
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
+
+        # Only one interrupt fires — no ephemeral-index step.
+        assert mock_interrupt.call_count == 1
+        create_payload = mock_interrupt.call_args.args[0]
+        assert isinstance(create_payload, CreateBatchTransform)
+        assert create_payload.attachment == attachment_id
+        assert create_payload.prompt == "Extract customer data"
+        assert create_payload.destination_path == "output.csv"
+        assert create_payload.index_folder_key == "test-folder-key"
+
+        # The two-step ephemeral path is skipped entirely.
+        mock_uipath.context_grounding.create_ephemeral_index_async.assert_not_called()

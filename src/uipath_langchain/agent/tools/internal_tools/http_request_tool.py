@@ -10,6 +10,12 @@ mechanism shared by all structured tools.
 Requests that resolve to private, loopback, link-local, or cloud-metadata
 addresses are rejected to guard against SSRF; the check runs on every request,
 including redirect hops.
+
+Mistakes the model can correct (arguments that fail the input schema, a bad
+url/method/timeout, a blocked or unreachable host, a timeout) are raised as
+``ToolException`` and reported back to the model as an error tool message, so
+they cost a turn instead of faulting the run. Header and param pairs accept
+their ``name``/``value`` keys in any case.
 """
 
 import asyncio
@@ -23,17 +29,12 @@ from urllib.parse import urlparse
 
 import httpx
 from langchain_core.language_models import BaseChatModel
-from langchain_core.tools import StructuredTool
-from pydantic import BaseModel
+from langchain_core.tools import StructuredTool, ToolException
+from pydantic import BaseModel, ValidationError
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentInternalToolResourceConfig
 from uipath.eval.mocks import mockable
-from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import (
-    AgentRuntimeError,
-    AgentRuntimeErrorCode,
-)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,
@@ -73,6 +74,10 @@ _MAX_REDIRECTS = 5
 # whether the caller supplied a scheme at all.
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
 
+# Arguments modeled as lists of ``{name, value}`` pairs, and the keys of a pair.
+_PAIR_ARGUMENTS = ("headers", "params")
+_PAIR_KEYS = ("name", "value")
+
 
 def _normalize_url(url: str) -> str:
     """Default to ``https`` when the caller omits a scheme.
@@ -111,6 +116,32 @@ def _is_json_object_body(text: str) -> bool:
     return isinstance(parsed, (dict, list))
 
 
+def _normalize_pair_item(item: Any) -> Any:
+    """Lowercase the ``name``/``value`` keys of one pair, leaving its values as-is.
+
+    Models sometimes write ``{"Name": ..., "Value": ...}``; the schema keys are
+    lowercase and pydantic matches them case-sensitively.
+    """
+    if not isinstance(item, dict):
+        return item
+    normalized: dict[Any, Any] = {}
+    for key, value in item.items():
+        if isinstance(key, str) and key.lower() in _PAIR_KEYS:
+            key = key.lower()
+        normalized[key] = value
+    return normalized
+
+
+def _normalize_pair_keys(tool_input: dict[str, Any]) -> dict[str, Any]:
+    """Copy the tool input with the headers/params pair keys lowercased."""
+    normalized = dict(tool_input)
+    for argument in _PAIR_ARGUMENTS:
+        pairs = normalized.get(argument)
+        if isinstance(pairs, list):
+            normalized[argument] = [_normalize_pair_item(item) for item in pairs]
+    return normalized
+
+
 def _pairs_to_dict(pairs: list[Any]) -> dict[str, Any]:
     """Fold a list of ``{name, value}`` items into a dict.
 
@@ -124,6 +155,7 @@ def _pairs_to_dict(pairs: list[Any]) -> dict[str, Any]:
     for item in pairs:
         if isinstance(item, BaseModel):
             item = item.model_dump()
+        item = _normalize_pair_item(item)
         if isinstance(item, dict) and item.get("name") is not None:
             result[str(item["name"])] = item.get("value")
     return result
@@ -170,13 +202,8 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _blocked_host_error(detail: str) -> AgentRuntimeError:
-    return AgentRuntimeError(
-        code=AgentRuntimeErrorCode.HTTP_ERROR,
-        title="Request was blocked",
-        detail=detail,
-        category=UiPathErrorCategory.USER,
-    )
+def _blocked_host_error(detail: str) -> ToolException:
+    return ToolException(f"Request was blocked: {detail}")
 
 
 async def _assert_public_url(url: str) -> None:
@@ -208,11 +235,8 @@ async def _assert_public_url(url: str) -> None:
             host, parsed.port, type=socket.SOCK_STREAM
         )
     except socket.gaierror as e:
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.HTTP_ERROR,
-            title="Host could not be resolved",
-            detail=f"Could not resolve host {host!r}: {e}",
-            category=UiPathErrorCategory.USER,
+        raise ToolException(
+            f"Host could not be resolved: Could not resolve host {host!r}: {e}"
         ) from e
 
     for info in infos:
@@ -244,18 +268,10 @@ def _validate_url(kwargs: dict[str, Any]) -> str:
     """Return the required, https-normalized url; raise on missing/non-string."""
     url = kwargs.get("url")
     if not url:
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
-            title="Missing required argument",
-            detail="Argument 'url' is required.",
-            category=UiPathErrorCategory.USER,
-        )
+        raise ToolException("Missing required argument: Argument 'url' is required.")
     if not isinstance(url, str):
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
-            title="Invalid url",
-            detail=f"Argument 'url' must be a string; got {type(url).__name__}.",
-            category=UiPathErrorCategory.USER,
+        raise ToolException(
+            f"Invalid url: Argument 'url' must be a string; got {type(url).__name__}."
         )
     return _normalize_url(url)
 
@@ -264,14 +280,9 @@ def _validate_method(kwargs: dict[str, Any]) -> str:
     """Return the upper-cased method (default GET); raise on unsupported."""
     method = (kwargs.get("method") or "GET").upper()
     if method not in HTTP_REQUEST_METHODS:
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
-            title="Unsupported HTTP method",
-            detail=(
-                f"Unsupported HTTP method {method!r}; expected one of "
-                f"{', '.join(HTTP_REQUEST_METHODS)}."
-            ),
-            category=UiPathErrorCategory.USER,
+        raise ToolException(
+            f"Unsupported HTTP method {method!r}; expected one of "
+            f"{', '.join(HTTP_REQUEST_METHODS)}."
         )
     return method
 
@@ -286,14 +297,9 @@ def _validate_timeout(kwargs: dict[str, Any]) -> float:
         or not isinstance(timeout, (int, float))
         or timeout <= 0
     ):
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
-            title="Invalid timeout",
-            detail=(
-                "Argument 'timeout' must be a positive number of seconds; "
-                f"got {timeout!r}."
-            ),
-            category=UiPathErrorCategory.USER,
+        raise ToolException(
+            "Invalid timeout: Argument 'timeout' must be a positive number of "
+            f"seconds; got {timeout!r}."
         )
     return timeout
 
@@ -331,7 +337,7 @@ def _build_request_parameters(kwargs: dict[str, Any]) -> _HttpRequestParameters:
     """Validate and normalize the tool's input arguments into a request spec.
 
     Raises:
-        AgentRuntimeError: If any argument is missing or invalid (USER category).
+        ToolException: If any argument is missing or invalid.
     """
     url = _validate_url(kwargs)
     method = _validate_method(kwargs)
@@ -348,6 +354,28 @@ def _build_request_parameters(kwargs: dict[str, Any]) -> _HttpRequestParameters:
         timeout=timeout,
         request_kwargs=request_kwargs,
     )
+
+
+class _HttpRequestTool(StructuredToolWithArgumentProperties):
+    """HTTP request tool that tolerates pair-key casing and reports bad input.
+
+    Arguments that still fail the input schema after the pair keys are
+    normalized come back to the model as an error tool message rather than
+    faulting the run (requires ``handle_tool_error``).
+    """
+
+    def _parse_input(
+        self, tool_input: str | dict[str, Any], tool_call_id: str | None
+    ) -> str | dict[str, Any]:
+        if isinstance(tool_input, dict):
+            tool_input = _normalize_pair_keys(tool_input)
+        return super()._parse_input(tool_input, tool_call_id)
+
+    def _invalid_input_error(self, error: ValidationError) -> Exception:
+        return ToolException(
+            f"Invalid input for tool '{self.name}'. Fix the arguments so they "
+            f"match the tool input schema and call the tool again.\n\n{error}"
+        )
 
 
 def create_http_request_tool(
@@ -392,24 +420,17 @@ def create_http_request_tool(
                     timeout=request_parameters.timeout,
                     **request_parameters.request_kwargs,
                 )
-        except AgentRuntimeError:
+        except ToolException:
             raise
         except httpx.TimeoutException as e:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.HTTP_ERROR,
-                title="HTTP request timed out",
-                detail=(
-                    f"Request to {request_parameters.url!r} timed out after "
-                    f"{request_parameters.timeout}s: {e}"
-                ),
-                category=UiPathErrorCategory.USER,
+            raise ToolException(
+                f"HTTP request timed out: Request to {request_parameters.url!r} "
+                f"timed out after {request_parameters.timeout}s: {e}"
             ) from e
         except httpx.HTTPError as e:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.HTTP_ERROR,
-                title="HTTP request failed",
-                detail=f"Request to {request_parameters.url!r} failed: {e}",
-                category=UiPathErrorCategory.USER,
+            raise ToolException(
+                f"HTTP request failed: Request to {request_parameters.url!r} "
+                f"failed: {e}"
             ) from e
 
         # Non-2xx responses are returned to the agent rather than raised, so it
@@ -424,13 +445,14 @@ def create_http_request_tool(
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
-    tool = StructuredToolWithArgumentProperties(
+    tool = _HttpRequestTool(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=http_request_tool_fn,
         output_type=output_model,
         argument_properties=resource.argument_properties,
+        handle_tool_error=True,
         metadata={
             "tool_type": resource.type.lower(),
             "display_name": tool_name,

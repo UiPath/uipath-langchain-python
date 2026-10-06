@@ -1,0 +1,10 @@
+{
+  "alert_id": "AML-2026-0144",
+  "customer": "Aurelia Holdings SA (Panama, nominee directors)",
+  "narrative": "Single inbound transfer of USD 2,400,000 from a Latvian bank, followed 6 hours later by six outbound transfers of USD 395,000-405,000 each to accounts in three different jurisdictions. No commercial rationale stated. Customer declined to provide source-of-funds documentation when contacted.",
+  "account_age_days": 47,
+  "prior_alerts": 2,
+  "benchmark": true,
+  "decider": "jev",
+  "expected_disposition": "escalate"
+}

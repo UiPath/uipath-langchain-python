@@ -13,6 +13,7 @@ from uipath.agent.models.agent import (
     AgentContextSettings,
     AgentContextValueSetting,
 )
+from uipath.core.feature_flags import FeatureFlags
 from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
@@ -27,6 +28,7 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupErrorCode,
 )
 from uipath_langchain.agent.tools.context_tool import (
+    SEARCH_DURING_INGESTION_FF,
     _normalize_folder_prefix,
     build_glob_pattern,
     create_context_tool,
@@ -1286,11 +1288,20 @@ class TestSemanticSearchSystemIndexFallbackIntegration:
 
 
 class TestSearchDuringIngestionSetting:
-    """searchDuringIngestion on the context resource reaches the retriever."""
+    """searchDuringIngestion reaches the retriever only when its flag is on."""
 
     @staticmethod
-    async def _retriever_kwargs_for(resource):
+    async def _retriever_kwargs_for(resource, *, flag_enabled: bool = False):
         """Invoke the semantic tool and return the ContextGroundingRetriever kwargs."""
+        FeatureFlags.reset_flags()
+        FeatureFlags.configure_flags({SEARCH_DURING_INGESTION_FF: flag_enabled})
+        try:
+            return await TestSearchDuringIngestionSetting._invoke(resource)
+        finally:
+            FeatureFlags.reset_flags()
+
+    @staticmethod
+    async def _invoke(resource):
         with patch(
             "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
         ) as mock_retriever_class:
@@ -1342,6 +1353,67 @@ class TestSearchDuringIngestionSetting:
 
         assert kwargs["search_during_ingestion"] is False
 
+    def test_opt_in_without_the_flag_fails_fast(self):
+        """agent.json may carry the opt-in before the tenant has the flag.
+
+        That combination is a misconfiguration, not a silent downgrade: the
+        agent must fail at startup so it is visible rather than looking like
+        the feature is on while searches keep being rejected.
+        """
+        resource = _make_context_resource(
+            name="semantic_tool",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+            search_during_ingestion=True,
+        )
+
+        FeatureFlags.reset_flags()
+        FeatureFlags.configure_flags({SEARCH_DURING_INGESTION_FF: False})
+        try:
+            with pytest.raises(AgentStartupError) as exc_info:
+                handle_semantic_search("semantic_tool", resource)
+        finally:
+            FeatureFlags.reset_flags()
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+
+    def test_deep_rag_resource_is_unaffected_by_the_flag(self):
+        """The setting is inert for non-semantic modes, so it must not fail them."""
+        resource = _make_context_resource(
+            name="deep_rag_tool",
+            retrieval_mode=AgentContextRetrievalMode.DEEP_RAG,
+            query_variant="static",
+            query_value="a static query",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+            search_during_ingestion=True,
+        )
+
+        FeatureFlags.reset_flags()
+        FeatureFlags.configure_flags({SEARCH_DURING_INGESTION_FF: False})
+        try:
+            tool = handle_deep_rag("deep_rag_tool", resource)
+        finally:
+            FeatureFlags.reset_flags()
+
+        assert tool is not None
+
+    @pytest.mark.asyncio
+    async def test_flag_alone_does_not_opt_in(self):
+        """The flag enables the capability; agent.json still decides."""
+        resource = _make_context_resource(
+            name="semantic_tool",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+            search_during_ingestion=False,
+        )
+
+        kwargs = await self._retriever_kwargs_for(resource, flag_enabled=True)
+
+        assert kwargs["search_during_ingestion"] is False
+
     @pytest.mark.asyncio
     async def test_opt_in_is_forwarded_to_the_retriever(self):
         resource = _make_context_resource(
@@ -1351,6 +1423,6 @@ class TestSearchDuringIngestionSetting:
             search_during_ingestion=True,
         )
 
-        kwargs = await self._retriever_kwargs_for(resource)
+        kwargs = await self._retriever_kwargs_for(resource, flag_enabled=True)
 
         assert kwargs["search_during_ingestion"] is True

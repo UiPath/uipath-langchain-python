@@ -14,13 +14,13 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
+jsonschema-pydantic-converter = false
 uipath = false
+uipath-core = false
+uipath-langchain-client = false
+uipath-llm-client = false
 uipath-platform = false
 uipath-runtime = false
-uipath-llm-client = false
-jsonschema-pydantic-converter = false
-uipath-langchain-client = false
-uipath-core = false
 
 [[package]]
 name = "a2a-sdk"
@@ -173,9 +173,9 @@ name = "aiologic"
 version = "0.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "sniffio", marker = "python_full_version < '3.13'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
-    { name = "wrapt", marker = "python_full_version < '3.13'" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+    { name = "wrapt" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f1/7a/d51f2fde1e8ae8a83431f8e97b7a71e9358cdb1d4d2ce6be387fa44d68de/aiologic-0.17.1.tar.gz", hash = "sha256:2e1b93b9e88ced318c2a63ad7b382688f40cbfe40e3d42258d49dc9c5aea179d", size = 252354, upload-time = "2026-06-27T20:41:33.25Z" }
 wheels = [
@@ -456,12 +456,12 @@ name = "black"
 version = "26.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "mypy-extensions", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "packaging", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "pathspec", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "platformdirs", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "pytokens", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "click" },
+    { name = "mypy-extensions" },
+    { name = "packaging" },
+    { name = "pathspec" },
+    { name = "platformdirs" },
+    { name = "pytokens" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/37/5628dd55bf2b34257fc7603f0fe97c40e3aaf24265f416a9c85c95ca1436/black-26.5.1.tar.gz", hash = "sha256:dd321f668053961824bcc1be1cc1df748b2d7e4fa28086b08331e577b0100a73", size = 679439, upload-time = "2026-05-18T16:53:36.107Z" }
 wheels = [
@@ -1042,8 +1042,8 @@ name = "culsans"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiologic", marker = "python_full_version < '3.13'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "aiologic" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d9/e3/49afa1bc180e0d28008ec6bcdf82a4072d1c7a41032b5b759b60814ca4b0/culsans-0.11.0.tar.gz", hash = "sha256:0b43d0d05dce6106293d114c86e3fb4bfc63088cfe8ff08ed3fe36891447fe33", size = 107546, upload-time = "2025-12-31T23:15:38.196Z" }
 wheels = [
@@ -1698,8 +1698,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -4773,7 +4773,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.14.21"
+version = "2.14.30"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -4798,9 +4798,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/f3/7fa28f50bb2c8d53074daa33172e47ad6e52d593a5bafd69301259d0343d/uipath-2.14.21.tar.gz", hash = "sha256:19da203089a15f541ab3df9fcf9280725e523d84a27a27de872f8d8e80af2209", size = 4575500, upload-time = "2026-09-16T17:32:54.369Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/18/b693447157fd49ff7fe6b44d0b7daffb23baf8754ad7dadb95a1a51c5cf9/uipath-2.14.30.tar.gz", hash = "sha256:7fab929985d77894af2faa4cb032b65bc4603c84eab4997af922f660172034db", size = 4590542, upload-time = "2026-10-01T13:55:14.923Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/58/b3d6e0b4f66c07ba7dc7dc2c9a72b54728ddf48d55591f0addb883f1847c/uipath-2.14.21-py3-none-any.whl", hash = "sha256:543b54f9c6893b2bd0bc5db2bb7f6b794b96e03b11ac5260bf342da3570896f8", size = 450144, upload-time = "2026-09-16T17:32:52.528Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/7f/036f786f297627695673b5544f8f491c24062fc6d2c4eeef1505efd2881d/uipath-2.14.30-py3-none-any.whl", hash = "sha256:2b1e04902e4c48da81458e7fb010743bddbed86690f13f587ff98326f14b3262", size = 453395, upload-time = "2026-10-01T13:55:12.834Z" },
 ]
 
 [[package]]
@@ -4828,7 +4828,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.18.15"
+version = "0.18.24"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4922,7 +4922,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2.0.0" },
     { name = "rdflib", specifier = ">=7.0.0,<8.0.0" },
-    { name = "uipath", specifier = ">=2.14.21,<2.15.0" },
+    { name = "uipath", specifier = ">=2.14.30,<2.15.0" },
     { name = "uipath-core", specifier = ">=0.5.29,<0.6.0" },
     { name = "uipath-langchain", extras = ["code-interpreter"], marker = "extra == 'all'" },
     { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.20.0,<1.21.0" },
@@ -4933,7 +4933,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.20.0,<1.21.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.20.0,<1.21.0" },
     { name = "uipath-llm-client", specifier = ">=1.20.0,<1.21.0" },
-    { name = "uipath-platform", specifier = ">=0.2.31,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.33,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.13.0,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpreter", "all"]
@@ -5024,7 +5024,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.2.31"
+version = "0.2.33"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -5035,9 +5035,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/fa/087feadb32c9a8b82ee7398cfe4eb1b2d60335f4ca6e9f78b8629dc290a7/uipath_platform-0.2.31.tar.gz", hash = "sha256:2d9f7904006a0b68cca2535df5172d905ad8e19e453eeafbfc20def0d149947d", size = 454031, upload-time = "2026-09-17T07:34:58.067Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/f5/85ae81277cbb2f07cc99fcafadff7ac6c655db312086b529673274d3ef3b/uipath_platform-0.2.33.tar.gz", hash = "sha256:3164a36abb5548f70190a8f9ea115a4aea4e3274be9af347199711e525334c6a", size = 454622, upload-time = "2026-09-29T22:03:03.944Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/e4/45b8f27c012ddfd03076c3f07c4c248ccc59ce19ec7e9c5141c5aee3c3a0/uipath_platform-0.2.31-py3-none-any.whl", hash = "sha256:9e88470bcbb2c31dcdf23dc4e2152f73220ce29c7db7495828d10cb2c9b29814", size = 295171, upload-time = "2026-09-17T07:34:56.461Z" },
+    { url = "https://files.pythonhosted.org/packages/62/8b/c42ff0c94bb2c767862a567d8bb14e3be97affa185558b1f11b9b4ba77da/uipath_platform-0.2.33-py3-none-any.whl", hash = "sha256:3e2d4d1ec1ca05e10418073c1905e965e8b191cd671d5b9fbab9103a90e9fd6c", size = 294638, upload-time = "2026-09-29T22:03:02.273Z" },
 ]
 
 [[package]]
