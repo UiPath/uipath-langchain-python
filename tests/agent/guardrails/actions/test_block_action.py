@@ -12,7 +12,10 @@ from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
 from uipath_langchain.agent.guardrails.types import (
     ExecutionStage,
 )
-from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.types import (
+    AgentGuardrailsGraphState,
+    InnerAgentGuardrailsGraphState,
+)
 
 
 class TestBlockAction:
@@ -76,4 +79,47 @@ class TestBlockAction:
         assert (
             str(excinfo.value)
             == "Execution was blocked by guardrail [My Guardrail v1], with reason: Sensitive data detected"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("names", "expected_suffix"),
+        [
+            (None, ""),
+            ([], ""),
+            (["tickets.csv"], "\nFlagged files: tickets.csv"),
+            (["a.csv", "c.pdf"], "\nFlagged files: a.csv, c.pdf"),
+            (
+                ["evil.csv\r\nCode: OK", "\u202ecod.exe", "\n\t"],
+                "\nFlagged files: evil.csv  Code: OK, cod.exe",
+            ),
+        ],
+    )
+    async def test_exception_names_the_flagged_files(
+        self, names: list[str] | None, expected_suffix: str
+    ) -> None:
+        """The flagged files are named after the reason; control characters are dropped."""
+        action = BlockAction(reason="PII found in the uploaded file")
+        guardrail = MagicMock()
+        guardrail.name = "PII"
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.AGENT,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="guarded_node_name",
+        )
+
+        with pytest.raises(AgentRuntimeError) as excinfo:
+            await node(
+                AgentGuardrailsGraphState(
+                    messages=[],
+                    inner_state=InnerAgentGuardrailsGraphState(
+                        guardrail_flagged_file_names=names
+                    ),
+                )
+            )
+
+        assert str(excinfo.value) == (
+            "Execution was blocked by guardrail [PII], with reason: "
+            f"PII found in the uploaded file{expected_suffix}"
         )

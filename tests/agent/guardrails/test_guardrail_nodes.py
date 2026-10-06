@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,11 +38,14 @@ class FakeGuardrails:
         self.last_attachments = None
         self.call_count = 0
 
-    def evaluate_guardrail(self, text, guardrail, *, attachments=None):
+    def evaluate_guardrail(
+        self, text, guardrail, *, attachments=None, termination_mode=None
+    ):
         self.call_count += 1
         self.last_text = text
         self.last_guardrail = guardrail
         self.last_attachments = attachments
+        self.last_termination_mode = termination_mode
         return self._result
 
 
@@ -115,6 +119,7 @@ class TestLlmGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -154,6 +159,7 @@ class TestLlmGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -198,6 +204,7 @@ class TestAgentInitGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_flagged_file_names": None,
             }
         }
         assert fake.guardrails.last_text == "payload"
@@ -241,6 +248,7 @@ class TestAgentInitGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -289,6 +297,7 @@ class TestAgentTerminateGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_flagged_file_names": None,
             }
         }
         assert fake.guardrails.last_text == str(agent_result)
@@ -335,6 +344,7 @@ class TestAgentTerminateGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -388,6 +398,7 @@ class TestToolGuardrailNodes:
                 "inner_state": {
                     "guardrail_validation_result": True,
                     "guardrail_validation_details": "",
+                    "guardrail_flagged_file_names": None,
                 }
             }
             assert json.loads(fake.guardrails.last_text or "{}") == {"x": 1}
@@ -401,6 +412,7 @@ class TestToolGuardrailNodes:
                 "inner_state": {
                     "guardrail_validation_result": True,
                     "guardrail_validation_details": "",
+                    "guardrail_flagged_file_names": None,
                 }
             }
             assert fake.guardrails.last_text == "tool output"
@@ -460,6 +472,7 @@ class TestToolGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -610,6 +623,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -630,6 +644,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
             }
         }
 
@@ -651,6 +666,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_flagged_file_names": None,
                 "guardrail_span_id": "span-123",
             }
         }
@@ -673,6 +689,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
                 "guardrail_span_id": "span-456",
             }
         }
@@ -1385,7 +1402,9 @@ class TestGuardrailNodeAttachments:
         )
 
         class FlakyGuardrails:
-            def evaluate_guardrail(self, text, guardrail, *, attachments=None):
+            def evaluate_guardrail(
+                self, text, guardrail, *, attachments=None, termination_mode=None
+            ):
                 calls.append(attachments)
                 if attachments:
                     raise rejection
@@ -1432,7 +1451,9 @@ class TestGuardrailNodeAttachments:
         )
 
         class FailingGuardrails:
-            def evaluate_guardrail(self, text, guardrail, *, attachments=None):
+            def evaluate_guardrail(
+                self, text, guardrail, *, attachments=None, termination_mode=None
+            ):
                 raise rejection
 
         class FailingUiPath:
@@ -1498,3 +1519,350 @@ class TestGuardrailNodeAttachments:
 
         assert cmd.goto == "ok"
         assert fake.guardrails.last_attachments == []
+
+
+class TestGuardrailFlaggedFileNames:
+    """The evaluation node writes the names of the files the guardrail service flagged
+    to ``inner_state.guardrail_flagged_file_names`` on every outcome."""
+
+    _CSV = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
+    _PDF = "0b6f3a2d-5e4c-4b1a-8f9e-1d2c3b4a5f60"
+
+    @classmethod
+    def _references(cls):
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        return [
+            GuardrailAttachment(id=cls._CSV, file_name="a.csv", mime_type="text/csv"),
+            GuardrailAttachment(
+                id=cls._PDF, file_name="b.pdf", mime_type="application/pdf"
+            ),
+        ]
+
+    @staticmethod
+    def _result(result, flagged_ids):
+        validation = GuardrailValidationResult.model_validate(
+            {"result": result, "reason": "r", "flaggedAttachmentIds": flagged_ids}
+        )
+        assert validation.flagged_attachment_ids == flagged_ids, (
+            "uipath-core predates GuardrailValidationResult.flagged_attachment_ids"
+        )
+        return validation
+
+    @classmethod
+    def _patch(cls, monkeypatch, result, flagged_ids, references):
+        from unittest.mock import AsyncMock
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: FakeUiPath(cls._result(result, flagged_ids)),
+        )
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.resolve_guardrail_attachments",
+            AsyncMock(return_value=references),
+        )
+
+    @staticmethod
+    async def _run_node():
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "Example"
+        _, node = create_agent_init_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        return await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
+
+    @pytest.mark.asyncio
+    async def test_failure_writes_the_flagged_names_matching_ids_case_insensitively(
+        self, monkeypatch
+    ):
+        self._patch(
+            monkeypatch,
+            GuardrailValidationResultType.VALIDATION_FAILED,
+            [self._PDF.upper()],
+            self._references(),
+        )
+
+        cmd = await self._run_node()
+
+        assert cmd.goto == "nope"
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] == ["b.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_names_keep_the_order_sent(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            GuardrailValidationResultType.VALIDATION_FAILED,
+            [self._PDF, self._CSV],
+            self._references(),
+        )
+
+        cmd = await self._run_node()
+
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] == [
+            "a.csv",
+            "b.pdf",
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("result", "flagged_ids"),
+        [
+            (GuardrailValidationResultType.PASSED, None),
+            (GuardrailValidationResultType.VALIDATION_FAILED, None),
+            (GuardrailValidationResultType.VALIDATION_FAILED, []),
+        ],
+    )
+    async def test_no_flagged_ids_writes_none(self, monkeypatch, result, flagged_ids):
+        self._patch(monkeypatch, result, flagged_ids, self._references())
+
+        cmd = await self._run_node()
+
+        assert "guardrail_flagged_file_names" in cmd.update["inner_state"]
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] is None
+
+    @pytest.mark.asyncio
+    async def test_ids_that_match_no_sent_reference_are_dropped(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            GuardrailValidationResultType.VALIDATION_FAILED,
+            ["11111111-2222-3333-4444-555555555555", "not-a-uuid", "", self._CSV],
+            self._references(),
+        )
+
+        cmd = await self._run_node()
+
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] == ["a.csv"]
+
+    @pytest.mark.asyncio
+    async def test_flagged_ids_without_sent_references_write_none(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            GuardrailValidationResultType.VALIDATION_FAILED,
+            [self._CSV],
+            [],
+        )
+
+        cmd = await self._run_node()
+
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] is None
+
+    @pytest.mark.asyncio
+    async def test_deterministic_guardrail_writes_none(self, monkeypatch):
+        from uipath.core.guardrails import DeterministicGuardrail
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes._evaluate_deterministic_guardrail",
+            lambda *args, **kwargs: self._result(
+                GuardrailValidationResultType.VALIDATION_FAILED, [self._CSV]
+            ),
+        )
+        guardrail = MagicMock(spec=DeterministicGuardrail)
+        guardrail.name = "Deterministic"
+        _, node = create_tool_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "my_tool", "args": {"x": 1}, "id": "c1"}],
+                )
+            ]
+        )
+
+        cmd = await node(state)
+
+        assert cmd.goto == "nope"
+        assert "guardrail_flagged_file_names" in cmd.update["inner_state"]
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("result", "flagged_ids", "expected"),
+        [
+            (GuardrailValidationResultType.PASSED, None, None),
+            (GuardrailValidationResultType.VALIDATION_FAILED, [_PDF], ["b.pdf"]),
+        ],
+    )
+    async def test_a_value_from_an_earlier_guardrail_never_survives_the_merge(
+        self, monkeypatch, result, flagged_ids, expected
+    ):
+        from uipath_langchain.agent.react.reducers import merge_objects
+
+        stale = InnerAgentGuardrailsGraphState(guardrail_flagged_file_names=["a.csv"])
+        self._patch(monkeypatch, result, flagged_ids, self._references())
+
+        cmd = await self._run_node()
+        merged = merge_objects(stale, cmd.update["inner_state"])
+
+        assert merged.guardrail_flagged_file_names == expected
+
+    def test_state_without_the_key_loads(self):
+        state = InnerAgentGuardrailsGraphState.model_validate(
+            {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "r",
+                "guardrail_span_id": "span-1",
+            }
+        )
+
+        assert state.guardrail_flagged_file_names is None
+
+
+class TestGuardrailTerminationModeForwarding:
+    """Each action's termination mode reaches the validate call, so the service stops
+    scanning at the first violation for Block and Log and scans everything otherwise."""
+
+    def test_actions_declare_their_termination_mode(self):
+        from uipath.platform.guardrails import GuardrailTerminationMode
+
+        from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            EscalateAction,
+        )
+        from uipath_langchain.agent.guardrails.actions.filter_action import (
+            FilterAction,
+        )
+        from uipath_langchain.agent.guardrails.actions.log_action import LogAction
+
+        assert BlockAction("r").termination_mode == GuardrailTerminationMode.FAIL_FAST
+        assert LogAction(None).termination_mode == GuardrailTerminationMode.FAIL_FAST
+        assert FilterAction().termination_mode == GuardrailTerminationMode.EVALUATE_ALL
+        assert (
+            EscalateAction("app", None, 1, MagicMock()).termination_mode
+            == GuardrailTerminationMode.EVALUATE_ALL
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["FailFast", "EvaluateAll", None])
+    async def test_node_sends_the_termination_mode(self, monkeypatch, mode):
+        from uipath.platform.guardrails import GuardrailTerminationMode
+
+        termination_mode = GuardrailTerminationMode(mode) if mode else None
+        fake = _patch_uipath(monkeypatch)
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "Example"
+        _, node = create_agent_init_guardrail_node(
+            guardrail,
+            ExecutionStage.PRE_EXECUTION,
+            "ok",
+            "nope",
+            termination_mode=termination_mode,
+        )
+
+        await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
+
+        assert fake.guardrails.last_termination_mode == termination_mode
+
+    @pytest.mark.asyncio
+    async def test_text_only_retry_keeps_the_termination_mode(self, monkeypatch):
+        import httpx
+        from uipath.platform.errors import EnrichedException
+        from uipath.platform.guardrails import (
+            GuardrailAttachment,
+            GuardrailTerminationMode,
+        )
+
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _evaluate_builtin_guardrail,
+        )
+
+        response = httpx.Response(
+            400, request=httpx.Request("POST", "https://x/validate"), text="bad url"
+        )
+        rejection = EnrichedException(
+            httpx.HTTPStatusError("400", request=response.request, response=response)
+        )
+        calls: list[tuple[Any, Any]] = []
+
+        class FlakyGuardrails:
+            def evaluate_guardrail(
+                self, text, guardrail, *, attachments=None, termination_mode=None
+            ):
+                calls.append((attachments, termination_mode))
+                if attachments:
+                    raise rejection
+                return GuardrailValidationResult(
+                    result=GuardrailValidationResultType.PASSED, reason="ok"
+                )
+
+        class FlakyUiPath:
+            guardrails = FlakyGuardrails()
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: FlakyUiPath(),
+        )
+        attachment = GuardrailAttachment(
+            id="7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10",
+            file_name="a.csv",
+            mime_type="text/csv",
+        )
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "Example"
+
+        await _evaluate_builtin_guardrail(
+            guardrail, "payload", [attachment], GuardrailTerminationMode.FAIL_FAST
+        )
+
+        assert calls == [
+            ([attachment], GuardrailTerminationMode.FAIL_FAST),
+            (None, GuardrailTerminationMode.FAIL_FAST),
+        ]
+
+    def test_subgraph_passes_each_actions_termination_mode_to_its_node(self):
+        from uipath.platform.guardrails import GuardrailScope, GuardrailTerminationMode
+
+        from tests.agent.guardrails.test_guardrail_utils import FakeStateGraph
+        from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
+        from uipath_langchain.agent.guardrails.actions.filter_action import (
+            FilterAction,
+        )
+        from uipath_langchain.agent.guardrails.actions.log_action import LogAction
+        from uipath_langchain.agent.react.guardrails import guardrails_subgraph
+
+        seen: list[tuple[str, Any]] = []
+
+        def factory(
+            guardrail,
+            execution_stage,
+            success_node,
+            failure_node,
+            *,
+            termination_mode=None,
+        ):
+            seen.append((guardrail.name, termination_mode))
+            return f"eval_{guardrail.name}", (lambda s: s)
+
+        guardrails = []
+        for name, action in (
+            ("blocking", BlockAction("r")),
+            ("logging", LogAction(None)),
+            ("filtering", FilterAction()),
+        ):
+            guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+            guardrail.name = name
+            guardrails.append((guardrail, action))
+
+        guardrails_subgraph._build_guardrail_node_chain(
+            FakeStateGraph(None),  # type: ignore[arg-type]
+            guardrails,
+            GuardrailScope.LLM,
+            ExecutionStage.PRE_EXECUTION,
+            factory,
+            "next",
+            "inner",
+        )
+
+        assert sorted(seen) == [
+            ("blocking", GuardrailTerminationMode.FAIL_FAST),
+            ("filtering", GuardrailTerminationMode.EVALUATE_ALL),
+            ("logging", GuardrailTerminationMode.FAIL_FAST),
+        ]
