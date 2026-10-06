@@ -11,7 +11,7 @@ Two backends implement the conversion, chosen by the
   ``jsonschema-pydantic-converter``;
 * flag on -- :mod:`._datamodel_code_generator_converter`, backed by
   ``datamodel-code-generator``, which names generated types after the schema
-  instead of ``DynamicType_N``, homes every class in the conversion's own module,
+  instead of ``DynamicType_N``, homes every class in the schema's own module,
   and repairs property names that are not valid Python identifiers.
 
 Both resolve ``$ref``s completely, an inline object holding one included. The flag
@@ -21,9 +21,16 @@ Both produce a model with the same observable contract: the original JSON
 property names on the wire, ``__uipath_marker_name__`` on types reached through a
 ``$ref``, generated classes reachable through a module in ``sys.modules``, and an
 ``AgentStartupError`` naming the type when a ``$ref`` cannot be resolved.
+
+Classes are built once per backend and schema, in a module named after a hash
+of both. A suspended run's checkpoint stores values by ``module.Class``, so that
+name must resolve to the same class in whichever process resumes it.
 """
 
+import hashlib
+import json
 import logging
+import threading
 from typing import Any, Type
 
 from pydantic import BaseModel
@@ -37,6 +44,11 @@ logger = logging.getLogger(__name__)
 # Selects the datamodel-code-generator backend. Off by default: the legacy
 # converter stays in charge until the new path has been exercised in the wild.
 DATAMODEL_CODE_GENERATOR_CONVERTER_FF = "EnableDatamodelCodeGeneratorConverter"
+
+_DYNAMIC_MODULE_PREFIX = "jsonschema_pydantic_converter._dynamic"
+
+_models_by_module: dict[str, Type[BaseModel]] = {}
+_models_lock = threading.Lock()
 
 __all__ = [
     "create_model",
@@ -59,9 +71,21 @@ def create_model(
     Raises:
         AgentStartupError: If the schema contains a type that cannot be resolved.
     """
-    if _datamodel_code_generator_enabled():
-        return _datamodel_code_generator_converter.create_model(schema)
-    return _legacy_converter.create_model(schema)
+    backend = (
+        _datamodel_code_generator_converter
+        if _datamodel_code_generator_enabled()
+        else _legacy_converter
+    )
+    canonical = json.dumps(schema, sort_keys=True)
+    digest = hashlib.sha256(f"{backend.__name__}:{canonical}".encode()).hexdigest()
+    module_name = f"{_DYNAMIC_MODULE_PREFIX}_{digest}"
+
+    with _models_lock:
+        model = _models_by_module.get(module_name)
+        if model is None:
+            model = backend.create_model(schema, module_name)
+            _models_by_module[module_name] = model
+    return model
 
 
 def create_output_model(
