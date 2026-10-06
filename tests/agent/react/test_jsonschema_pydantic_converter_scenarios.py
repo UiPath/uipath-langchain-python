@@ -823,13 +823,16 @@ class TestBackendSelection:
         calls: list[dict[str, Any]] = []
         original = expected.create_model
 
-        def spy(schema: dict[str, Any]) -> Any:
+        def spy(schema: dict[str, Any], module_name: str) -> Any:
             calls.append(schema)
-            return original(schema)
+            return original(schema, module_name)
 
         expected.create_model = spy
         try:
-            create_model({"type": "object", "properties": {"a": {"type": "string"}}})
+            # a schema no other test converts, so it is not served from the cache
+            create_model(
+                {"type": "object", "properties": {"selected": {"type": "string"}}}
+            )
         finally:
             expected.create_model = original
         assert len(calls) == 1, "the selected backend should have been used"
