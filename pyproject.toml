@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.18.26"
+version = "0.18.27"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -49,7 +49,6 @@ anthropic = [
 ]
 vertex = [
     "uipath-langchain-client[google]>=1.21.0, <1.22.0",
-    "uipath-langchain-client[vertexai]>=1.21.0, <1.22.0",
 ]
 bedrock = [
     "uipath-langchain-client[bedrock]>=1.21.0, <1.22.0",
