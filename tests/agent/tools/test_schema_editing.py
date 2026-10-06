@@ -475,6 +475,26 @@ class TestObjectStaticValueValidation:
                 is_sensitive=False,
             )
 
+    def test_object_without_declared_properties_converted_to_json_string_enum(self):
+        """An object with no declared properties is pinned whole, like an array."""
+
+        class Model(BaseModel):
+            cfg: dict[str, Any]
+
+        schema = Model.model_json_schema()
+
+        apply_static_value_to_schema(
+            schema,
+            json_path="$['cfg']",
+            value={"a": 1, "b": [None, "x"]},
+            is_sensitive=False,
+        )
+
+        assert schema["properties"]["cfg"] == {
+            "type": "string",
+            "enum": ['{"a": 1, "b": [null, "x"]}'],
+        }
+
     def test_invalid_static_arg_error_is_not_a_schema_navigation_error(self):
         """The fatal error must not be swallowed by the SchemaNavigationError skip path."""
         assert not issubclass(InvalidStaticArgError, SchemaNavigationError)
