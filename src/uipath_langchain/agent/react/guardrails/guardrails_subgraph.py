@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, Mapping, Sequence, TypeVar
+from typing import Any, Mapping, Protocol, Sequence, TypeVar
 
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.constants import END, START
@@ -10,6 +10,7 @@ from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
     GuardrailScope,
+    GuardrailTerminationMode,
 )
 
 from uipath_langchain.agent.guardrails.actions.base_action import (
@@ -30,6 +31,21 @@ from uipath_langchain.agent.react.types import (
 )
 from uipath_langchain.agent.react.utils import create_guardrails_state_with_input
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+
+
+class GuardrailNodeFactory(Protocol):
+    """Builds a guardrail evaluation node routing to ``success_node`` or ``failure_node``."""
+
+    def __call__(
+        self,
+        guardrail: BaseGuardrail,
+        execution_stage: ExecutionStage,
+        success_node: str,
+        failure_node: str,
+        *,
+        termination_mode: GuardrailTerminationMode | None = None,
+    ) -> GuardrailActionNode: ...
+
 
 _VALIDATOR_ALLOWED_STAGES = {
     "prompt_injection": {ExecutionStage.PRE_EXECUTION},
@@ -64,15 +80,7 @@ def _create_guardrails_subgraph(
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     scope: GuardrailScope,
     execution_stages: Sequence[ExecutionStage],
-    node_factory: Callable[
-        [
-            BaseGuardrail,
-            ExecutionStage,
-            str,  # success node name
-            str,  # fail node name
-        ],
-        GuardrailActionNode,
-    ] = create_llm_guardrail_node,
+    node_factory: GuardrailNodeFactory = create_llm_guardrail_node,
     input_schema: type[BaseModel] | None = None,
 ):
     """Build a subgraph that enforces guardrails around an inner node.
@@ -140,15 +148,7 @@ def _build_guardrail_node_chain(
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
-    node_factory: Callable[
-        [
-            BaseGuardrail,
-            ExecutionStage,
-            str,  # success node name
-            str,  # fail node name
-        ],
-        GuardrailActionNode,
-    ],
+    node_factory: GuardrailNodeFactory,
     next_node: str,
     guarded_node_name: str,
 ) -> str:
@@ -195,7 +195,11 @@ def _build_guardrail_node_chain(
 
     # Create the guardrail evaluation node.
     guardrail_node_name, guardrail_node = node_factory(
-        guardrail, execution_stage, next_node, first_fail_node_name
+        guardrail,
+        execution_stage,
+        next_node,
+        first_fail_node_name,
+        termination_mode=action.termination_mode,
     )
 
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
