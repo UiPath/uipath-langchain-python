@@ -579,10 +579,10 @@ def test_build_protocol_strategy_maps_every_mode() -> None:
         build_protocol_strategy("2026-07-28")  # type: ignore[arg-type]
 
 
-def test_legacy_is_the_default_mode(
+def test_auto_is_the_default_mode(
     mcp_resource_config: AgentMcpResourceConfig,
 ) -> None:
-    """Existing callers must keep the pre-2026 wire behavior untouched."""
+    """A caller that names no mode probes for the modern era and falls back."""
     client = McpClient(config=mcp_resource_config)
 
-    assert isinstance(client._strategy, LegacyHandshakeStrategy)
+    assert isinstance(client._strategy, AutoStrategy)

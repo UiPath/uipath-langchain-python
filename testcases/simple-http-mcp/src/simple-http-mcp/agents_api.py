@@ -5,9 +5,12 @@ layer, and it pins ``uipath-langchain`` exactly, so a break there surfaces on
 its next bump rather than in this repository's own tests. This leg exercises
 the API it actually calls, over real sockets, against a real SDK ``MCPServer``:
 
-* ``create_mcp_tools_and_clients(resources, session_info_factory=..., terminate_on_close=...)``
-  -- both call shapes it uses: production (no factory, terminate on close) and
-  playground (debug-state factory, session kept alive).
+* ``create_mcp_tools_and_clients(resources, session_info_factory=...,
+  terminate_on_close=..., protocol_mode="auto")`` -- both call shapes it uses:
+  production (no factory, terminate on close) and playground (debug-state
+  factory, session kept alive). Against this discovery-capable server ``auto``
+  resolves to ``2026-07-28``, so the playground leg persists and resumes the
+  client-minted affinity ID.
 * ``SessionInfo`` subclassed with its own ``__init__`` and async
   ``get_session_id`` / ``set_session_id`` overrides, persisting through HTTP.
   This is the shape of ``SessionInfoDebugState``; MCP 2 added
@@ -19,11 +22,9 @@ the API it actually calls, over real sockets, against a real SDK ``MCPServer``:
   persisted, which is what playground mode relies on across runs.
 * Disposal through ``McpClient.dispose()``, the way the caller drains its
   ``UiPathDisposableProtocol`` list.
-* ``McpClient(protocol_mode="modern")`` against the same real server: the era
-  has no session identity, so no response may assign one, and every leg records
-  the version its live session actually negotiated. Note that
-  ``create_mcp_tools_and_clients`` exposes no ``protocol_mode``, so a downstream
-  caller reaching ``2026-07-28`` has to construct the client itself.
+* ``protocol_mode="modern"`` against the same real server: the era has no
+  session identity, so no response may assign one, and every leg records the
+  version its live session actually negotiated.
 * A modern affinity pair: two clients sharing one ``SessionInfo``, standing in
   for two playground runs that must land on the same warm instance.
 
@@ -60,11 +61,6 @@ from uipath_langchain.agent.tools.mcp import (
     SessionInfoFactory,
     create_mcp_tools_and_clients,
 )
-
-# Not part of the downstream import surface asserted below: the modern legs need
-# it because `create_mcp_tools_and_clients` has no `protocol_mode` parameter, so
-# reaching 2026-07-28 means constructing the `McpClient` directly.
-from uipath_langchain.agent.tools.mcp import create_mcp_tools
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +291,7 @@ class LegSummary(BaseModel):
     """Outcome of one ``create_mcp_tools_and_clients`` call."""
 
     label: str
-    protocol_mode: str = "legacy"
+    protocol_mode: str = "auto"
     tools: list[str] = Field(default_factory=list)
     tool_result: str | None = None
     session_id: str | None = None
@@ -361,7 +357,7 @@ async def _run_leg(
     session_info_factory: SessionInfoFactory | None,
     terminate_on_close: bool,
     operands: tuple[int, int],
-    protocol_mode: str = "legacy",
+    protocol_mode: str = "auto",
     recorder: Any = None,
 ) -> LegSummary:
     """Drive one downstream-shaped call from tool creation through disposal.
@@ -372,7 +368,8 @@ async def _run_leg(
         session_info_factory: Downstream's factory, or None for the default.
         terminate_on_close: Whether disposal should terminate the session.
         operands: Operands handed to the remote ``add`` tool.
-        protocol_mode: Negotiation era to drive -- ``legacy`` or ``modern``.
+        protocol_mode: Negotiation era to drive -- ``auto`` (what
+            uipath-agents-python passes) or ``modern``.
         recorder: Optional ``SessionHeaderRecorder`` wrapping the server, used
             to tell a server-assigned session ID from a client-minted one.
     """
@@ -380,25 +377,13 @@ async def _run_leg(
     seen_before = 0 if recorder is None else len(recorder.response_session_ids)
     clients: list[McpClient] = []
     try:
-        if protocol_mode == "legacy":
-            # Exactly the call shape uipath-agents-python uses.
-            tools, clients = await create_mcp_tools_and_clients(
-                [resource],
-                session_info_factory=session_info_factory,
-                terminate_on_close=terminate_on_close,
-            )
-        else:
-            # `create_mcp_tools_and_clients` exposes no `protocol_mode`, so a
-            # caller reaching the modern era builds the client itself. This is
-            # what the same code path looks like from downstream today.
-            client = McpClient(
-                config=resource,
-                session_info_factory=session_info_factory,
-                terminate_on_close=terminate_on_close,
-                protocol_mode=protocol_mode,  # type: ignore[arg-type]
-            )
-            clients = [client]
-            tools = await create_mcp_tools(resource, client)
+        # Exactly the call shape uipath-agents-python uses.
+        tools, clients = await create_mcp_tools_and_clients(
+            [resource],
+            session_info_factory=session_info_factory,
+            terminate_on_close=terminate_on_close,
+            protocol_mode=protocol_mode,  # type: ignore[arg-type]
+        )
         add_tool = next(tool for tool in tools if _mcp_name(tool) == "add")
         blocks = await add_tool.ainvoke({"a": a, "b": b})
         summary = LegSummary(

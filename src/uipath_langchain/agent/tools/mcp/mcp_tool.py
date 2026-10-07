@@ -24,6 +24,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from ..utils import sanitize_tool_name
 from .mcp_client import McpClient, SessionInfoFactory
+from .protocol_strategy import ProtocolMode
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -447,6 +448,7 @@ async def create_mcp_tools_and_clients(
     resources: list[AgentMcpResourceConfig],
     session_info_factory: SessionInfoFactory | None = None,
     terminate_on_close: bool = True,
+    protocol_mode: ProtocolMode = "auto",
 ) -> tuple[list[BaseTool], list[McpClient]]:
     """Create MCP tools from a list of MCP resource configurations.
 
@@ -462,6 +464,8 @@ async def create_mcp_tools_and_clients(
             Defaults to the base ``SessionInfoFactory``.  Pass
             ``SessionInfoDebugStateFactory()`` for playground mode.
         terminate_on_close: Whether to terminate the MCP session on close.
+        protocol_mode: Negotiation era passed to each ``McpClient``. See
+            ``McpClient`` for ``"legacy"``, ``"modern"`` and ``"auto"``.
 
     Returns:
         A tuple of (tools, mcp_clients) where:
@@ -486,6 +490,7 @@ async def create_mcp_tools_and_clients(
             config=resource,
             session_info_factory=session_info_factory,
             terminate_on_close=terminate_on_close,
+            protocol_mode=protocol_mode,
         )
         clients.append(mcpClient)
 

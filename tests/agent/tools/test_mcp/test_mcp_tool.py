@@ -32,6 +32,10 @@ from uipath_langchain.agent.tools.mcp.mcp_tool import (
     mcp_tool_identity,
     open_mcp_tools,
 )
+from uipath_langchain.agent.tools.mcp.protocol_strategy import (
+    AutoStrategy,
+    LegacyHandshakeStrategy,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -312,6 +316,22 @@ class TestCreateMcpToolsFromAgent:
 
         # Should have 2 clients (one per MCP server)
         assert len(clients) == 2
+
+    @pytest.mark.asyncio
+    async def test_clients_default_to_auto_protocol(self, mcp_resources):
+        _, clients = await create_mcp_tools_and_clients(mcp_resources)
+
+        assert all(isinstance(client._strategy, AutoStrategy) for client in clients)
+
+    @pytest.mark.asyncio
+    async def test_passes_protocol_mode_to_clients(self, mcp_resources):
+        _, clients = await create_mcp_tools_and_clients(
+            mcp_resources, protocol_mode="legacy"
+        )
+
+        assert all(
+            isinstance(client._strategy, LegacyHandshakeStrategy) for client in clients
+        )
 
     @pytest.mark.asyncio
     async def test_skips_disabled_mcp_resources(self, mcp_resources_with_disabled):

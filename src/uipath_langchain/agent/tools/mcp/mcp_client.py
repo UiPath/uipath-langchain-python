@@ -102,7 +102,7 @@ class McpClient(UiPathDisposableProtocol):
         session_info_factory: SessionInfoFactory | None = None,
         terminate_on_close: bool = True,
         *,
-        protocol_mode: ProtocolMode = "legacy",
+        protocol_mode: ProtocolMode = "auto",
     ) -> None:
         """Initialize the MCP tool session.
 
@@ -118,11 +118,10 @@ class McpClient(UiPathDisposableProtocol):
                 Defaults to ``SessionInfoFactory`` which returns a plain SessionInfo.
             terminate_on_close: Whether to terminate the server session on
                 disposal. Already a no-op in the modern era, which has no session.
-            protocol_mode: Which negotiation era to use. ``"legacy"`` (the
-                default) sends only the ``initialize`` handshake, preserving
-                pre-existing behavior. ``"modern"`` uses ``server/discover``
-                only. ``"auto"`` probes for the modern era and falls back to the
-                handshake.
+            protocol_mode: Which negotiation era to use. ``"auto"`` (the
+                default) probes for the modern era and falls back to the
+                handshake. ``"legacy"`` sends only the ``initialize`` handshake.
+                ``"modern"`` uses ``server/discover`` only.
         """
         self._config = config
         self._timeout = _normalize_timeout(timeout)
