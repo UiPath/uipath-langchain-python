@@ -212,14 +212,31 @@ def check_leg(
     return leg
 
 
+# uipath-agents-python passes protocol_mode="auto"; this server answers
+# server/discover, so every downstream-shaped leg resolves to the modern era and
+# no response may assign a server session.
+
 # Production shape: no session_info_factory, terminate_on_close=True, dynamic
 # discovery -- which reads the SDK's snake_case Tool.input_schema/output_schema.
-check_leg("production", ["add", "multiply"], expected_version="2025-11-25")
+check_leg(
+    "production",
+    ["add", "multiply"],
+    expected_version=MODERN_VERSION,
+    server_session=False,
+)
 
 # Playground shape: SessionInfoFactory subclass, terminate_on_close=False,
-# cached discovery with refresh_schema_before_call left at its default.
-playground = check_leg("playground", ["add"], expected_version="2025-11-25")
-resumed = check_leg("playground_resumed", ["add"], expected_version="2025-11-25")
+# cached discovery with refresh_schema_before_call left at its default. The ID it
+# persists and resumes is the client-minted affinity ID.
+playground = check_leg(
+    "playground", ["add"], expected_version=MODERN_VERSION, server_session=False
+)
+resumed = check_leg(
+    "playground_resumed",
+    ["add"],
+    expected_version=MODERN_VERSION,
+    server_session=False,
+)
 
 # The resumed session must speak the version it was originally negotiated at.
 # The session ID surviving is only half the contract: probing candidate versions
