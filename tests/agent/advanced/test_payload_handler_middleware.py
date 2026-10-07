@@ -7,7 +7,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from deepagents import create_deep_agent
 from deepagents.middleware import SubAgentMiddleware
-from langchain.agents.middleware import ModelRequest, ModelResponse
+from langchain.agents.middleware import (
+    ModelRequest,
+    ModelResponse,
+    ToolErrorMiddleware,
+)
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
@@ -384,7 +388,11 @@ class TestGeneralPurposeSubagentParity:
     def test_middleware_matches_deepagents_plus_ours(self) -> None:
         baseline, ours = self._build()
 
-        added = {_PayloadHandlerMiddleware.__name__, JobAttachmentsMiddleware.__name__}
+        added = {
+            ToolErrorMiddleware.__name__,
+            _PayloadHandlerMiddleware.__name__,
+            JobAttachmentsMiddleware.__name__,
+        }
         names = [m.name for m in ours["middleware"]]
         assert [n for n in names if n not in added] == [
             m.name for m in baseline["middleware"]
