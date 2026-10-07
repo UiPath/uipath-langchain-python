@@ -32,6 +32,7 @@ from uipath_langchain.agent.tools.schema_editing import (
     InvalidStaticArgError,
     SchemaNavigationError,
     apply_static_value_to_schema,
+    parse_jsonpath_segments,
 )
 
 from .utils import sanitize_dict_for_serialization
@@ -54,6 +55,13 @@ class ToolStaticArgument(BaseModel):
 _INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
 
 _SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
+
+_ARGUMENT_SOURCE_NAMES: dict[type, str] = {
+    AgentToolStaticArgumentProperties: "static",
+    AgentToolArgumentArgumentProperties: "argument",
+    AgentToolTextBuilderArgumentProperties: "textBuilder",
+    AgentToolArrayBuilderArgumentProperties: "arrayBuilder",
+}
 
 
 def _resolve_argument_properties(
@@ -191,6 +199,59 @@ def _resolve_argument_properties(
     return static_args
 
 
+def _group_paths_by_source(
+    tool: BaseTool,
+    bound_properties: Mapping[str, AgentToolArgumentProperties],
+) -> dict[str, list[str]]:
+    """Group the tool's argument paths by where their value comes from."""
+    sources: dict[str, list[str]] = {}
+    fully_bound_fields: set[str] = set()
+    for json_path, props in bound_properties.items():
+        source_name = _ARGUMENT_SOURCE_NAMES[type(props)]
+        sources.setdefault(source_name, []).append(json_path)
+        segments = parse_jsonpath_segments(json_path)
+        binds_whole_field = len(segments) == 1 or segments[1:] == ["*"]
+        if binds_whole_field:
+            fully_bound_fields.add(segments[0])
+    sources["prompt"] = [
+        name for name in _top_level_fields(tool) if name not in fully_bound_fields
+    ]
+    return sources
+
+
+def _top_level_fields(tool: BaseTool) -> list[str]:
+    schema = getattr(tool, "args_schema", None)
+    if isinstance(schema, dict):
+        json_schema = schema
+    elif isinstance(schema, type) and issubclass(schema, BaseModel):
+        json_schema = schema.model_json_schema()
+    else:
+        return []
+    return list(json_schema.get("properties", {}))
+
+
+def _log_argument_sources(
+    tool_name: str,
+    model_args: dict[str, Any],
+    sources: dict[str, list[str]],
+    static_values: Mapping[str, Any],
+) -> None:
+    overridden = [
+        json_path for json_path in static_values if _has_value(json_path, model_args)
+    ]
+    logger.info(
+        "Tool call '%s' argument sources: %s, model values overridden: %s",
+        tool_name,
+        sources,
+        overridden,
+    )
+
+
+def _has_value(json_path: str, args: dict[str, Any]) -> bool:
+    field_path = json_path.removesuffix("[*]")
+    return bool(parse(field_path).find(args))
+
+
 ToolT = TypeVar("ToolT", bound=StructuredTool)
 
 
@@ -312,10 +373,12 @@ class StaticArgsHandler:
     """Resolves and applies static args to tool schemas and tool calls."""
 
     _sanitized_static_values: dict[str, dict[str, Any]] | None
+    _argument_sources: dict[str, dict[str, list[str]]] | None
     _processed_tools: list[BaseTool] | None
 
     def __init__(self) -> None:
         self._sanitized_static_values = None
+        self._argument_sources = None
         self._processed_tools = None
 
     def initialize(
@@ -332,6 +395,7 @@ class StaticArgsHandler:
 
         self._processed_tools = []
         self._sanitized_static_values = {}
+        self._argument_sources = {}
         for tool in tools:
             if (
                 isinstance(tool, ArgumentPropertiesMixin)
@@ -355,17 +419,37 @@ class StaticArgsHandler:
                 self._sanitized_static_values[tool.name] = (
                     sanitize_dict_for_serialization(applied_static_values)
                 )
+                applied_properties = {
+                    path: tool.argument_properties[path] for path in applied_paths
+                }
+                self._argument_sources[tool.name] = _group_paths_by_source(
+                    modified_tool, applied_properties
+                )
             else:
                 self._processed_tools.append(tool)
+                self._argument_sources[tool.name] = _group_paths_by_source(tool, {})
 
         return self._processed_tools
 
     def apply_to_response(self, tool_calls: list[ToolCall]) -> None:
-        """Applies cached static args to tool calls in-place."""
-        if not tool_calls or not self._sanitized_static_values:
+        """Applies cached static args to tool calls in-place and logs argument sources.
+
+        Only argument paths are logged, never their values.
+        """
+        if (
+            not tool_calls
+            or self._argument_sources is None
+            or self._sanitized_static_values is None
+        ):
             return
 
         for tool_call in tool_calls:
-            static_values = self._sanitized_static_values.get(tool_call["name"])
+            sources = self._argument_sources.get(tool_call["name"])
+            if sources is None:
+                continue
+            static_values = self._sanitized_static_values.get(tool_call["name"], {})
+            _log_argument_sources(
+                tool_call["name"], tool_call["args"], sources, static_values
+            )
             if static_values:
                 tool_call["args"] = apply_static_args(static_values, tool_call["args"])

@@ -1,5 +1,6 @@
 """Tests for static_args.py module."""
 
+import logging
 from typing import Any
 
 import pytest
@@ -290,6 +291,141 @@ class TestStaticArgsHandler:
         call = _make_tool_call("other_tool", {"query": "hello"})
         handler.apply_to_response([call])
         assert call["args"] == {"query": "hello"}
+
+    def test_apply_to_response_logs_argument_sources_and_overrides(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Test that each tool call logs its argument paths by source, without values."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        call = _make_tool_call("test_tool", {"host": "evil.example.com", "port": 1})
+        with caplog.at_level(logging.INFO):
+            handler.apply_to_response([call])
+
+        assert call["args"]["host"] == "api.example.com"
+        assert caplog.messages == [
+            "Tool call 'test_tool' argument sources: "
+            "{'static': [\"$['host']\"], 'prompt': ['port', 'api_key']}, "
+            "model values overridden: [\"$['host']\"]"
+        ]
+        assert "example.com" not in caplog.text
+
+    def test_apply_to_response_logs_no_override_when_model_omits_static_arg(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Test that a static arg the model did not send is not reported as overridden."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        with caplog.at_level(logging.INFO):
+            handler.apply_to_response([_make_tool_call("test_tool", {"port": 1})])
+
+        assert caplog.messages[-1].endswith("model values overridden: []")
+
+    def test_apply_to_response_logs_prompt_only_tool(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Test that a tool without bound arguments logs every field as prompt."""
+        tool = _create_tool("plain_tool", {})
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        with caplog.at_level(logging.INFO):
+            handler.apply_to_response([_make_tool_call("plain_tool", {"host": "h"})])
+
+        assert caplog.messages == [
+            "Tool call 'plain_tool' argument sources: "
+            "{'prompt': ['host', 'port', 'api_key']}, model values overridden: []"
+        ]
+
+    def test_apply_to_response_keeps_partially_bound_field_in_prompt(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Test that a nested binding does not hide its parent field from prompt."""
+
+        class Config(BaseModel):
+            host: str
+            port: int
+
+        class NestedInput(BaseModel):
+            config: Config
+
+        tool = _create_tool(
+            "nested_tool",
+            {
+                "$['config']['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+            args_schema=NestedInput,
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        with caplog.at_level(logging.INFO):
+            handler.apply_to_response(
+                [_make_tool_call("nested_tool", {"config": {"port": 1}})]
+            )
+
+        assert caplog.messages == [
+            "Tool call 'nested_tool' argument sources: "
+            "{'static': [\"$['config']['host']\"], 'prompt': ['config']}, "
+            "model values overridden: []"
+        ]
+
+    def test_apply_to_response_logs_override_of_empty_array(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Test that replacing an empty model array via a wildcard path counts as an override."""
+        tool = _create_tool(
+            "list_tool",
+            {
+                "$['items'][*]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="a"
+                ),
+            },
+            args_schema=ListInput,
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        call = _make_tool_call("list_tool", {"items": []})
+        with caplog.at_level(logging.INFO):
+            handler.apply_to_response([call])
+
+        assert call["args"]["items"] == ["a"]
+        assert caplog.messages[-1].endswith(
+            "model values overridden: [\"$['items'][*]\"]"
+        )
+
+    def test_apply_to_response_does_not_log_unknown_tools(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        """Test that tool calls for tools not passed to initialize are not logged."""
+        handler = StaticArgsHandler()
+        handler.initialize([_create_tool("plain_tool", {})], EmptyInput(), EmptyInput)
+
+        with caplog.at_level(logging.INFO):
+            handler.apply_to_response([_make_tool_call("other_tool", {})])
+
+        assert caplog.messages == []
 
     def test_initialize_caches_results(self):
         """Test that initialize returns cached tools on subsequent calls."""
