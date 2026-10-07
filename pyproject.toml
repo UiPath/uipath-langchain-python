@@ -49,7 +49,6 @@ anthropic = [
 ]
 vertex = [
     "uipath-langchain-client[google]>=1.21.0, <1.22.0",
-    "uipath-langchain-client[vertexai]>=1.21.0, <1.22.0",
 ]
 bedrock = [
     "uipath-langchain-client[bedrock]>=1.21.0, <1.22.0",
