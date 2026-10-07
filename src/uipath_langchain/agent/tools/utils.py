@@ -8,6 +8,9 @@ from langgraph.constants import TAG_NOSTREAM
 from uipath.agent.models.agent import TaskTitle, TextBuilderTaskTitle
 from uipath.agent.utils.text_tokens import build_string_from_tokens
 
+# Folder values the designer stores for solution-local resources
+SOLUTION_LOCAL_FOLDER_PLACEHOLDERS = frozenset({"solution_folder", ".", ""})
+
 
 def sanitize_tool_name(name: str) -> str:
     """Sanitize tool name for LLM compatibility (alphanumeric, underscore, hyphen only, max 64 chars)."""

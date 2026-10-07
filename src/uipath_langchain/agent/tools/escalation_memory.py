@@ -26,6 +26,8 @@ from uipath_langchain._utils import (
     set_span_attribute,
 )
 
+from .utils import SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
+
 logger = logging.getLogger(__name__)
 
 MEMORY_CACHE_HIT_METRIC = "MemoryCacheHit"
@@ -407,7 +409,7 @@ def _resolve_memory_folder_path(
         folder_path = (
             _get_memory_space_folder_override(memory_space_name) or folder_path
         )
-    if folder_path in (None, "", ".", "solution_folder"):
+    if folder_path is None or folder_path in SOLUTION_LOCAL_FOLDER_PLACEHOLDERS:
         return get_execution_folder_path()
     return str(folder_path)
 

@@ -852,6 +852,37 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         assert create_call_kwargs["app_folder_path"] == "/Apps/Approvals"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("placeholder", ["solution_folder", ".", ""])
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_solution_local_folder_placeholder_sends_no_folder(
+        self, mock_interrupt, mock_uipath_class, escalation_resource, placeholder
+    ):
+        """Test that a solution-local folder placeholder is sent as None."""
+        escalation_resource.channels[0].properties.folder_name = placeholder
+        task = _make_mock_task(id=555)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.id = 555
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.assigned_to_user = None
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        create_call_kwargs = mock_client.tasks.create_async.call_args[1]
+        assert create_call_kwargs["app_folder_path"] is None
+        assert mock_interrupt.call_args[0][0].app_folder_path is None
+
+    @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
     async def test_task_creation_failure_propagates(
         self, mock_uipath_class, escalation_resource
