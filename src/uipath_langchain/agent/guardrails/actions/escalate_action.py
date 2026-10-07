@@ -35,11 +35,10 @@ from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
 from ...tools.escalation_recipient import resolve_recipient_value
+from ...tools.utils import SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
-
-_SOLUTION_LOCAL_FOLDER_PLACEHOLDERS = frozenset({"solution_folder", ".", ""})
 
 
 class EscalateAction(GuardrailAction):
@@ -70,7 +69,7 @@ class EscalateAction(GuardrailAction):
         self.app_name = app_name
         self.app_folder_path = (
             None
-            if app_folder_path in _SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
+            if app_folder_path in SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
             else app_folder_path
         )
         self.version = version

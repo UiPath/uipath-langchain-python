@@ -62,6 +62,7 @@ from .escalation_recipient import (
 )
 from .tool_node import ToolWrapperReturnType
 from .utils import (
+    SOLUTION_LOCAL_FOLDER_PLACEHOLDERS,
     resolve_task_title,
     sanitize_dict_for_serialization,
     sanitize_tool_name,
@@ -209,7 +210,10 @@ def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
 def _resolve_channel_folder_path(channel: EscalationChannel) -> str | None:
     """Return the folder the channel's task must be created in"""
     if isinstance(channel, AgentEscalationChannel):
-        return channel.properties.folder_name
+        folder_name = channel.properties.folder_name
+        if folder_name in SOLUTION_LOCAL_FOLDER_PLACEHOLDERS:
+            return None
+        return folder_name
     return get_execution_folder_path()
 
 
