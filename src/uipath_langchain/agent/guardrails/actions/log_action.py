@@ -2,7 +2,11 @@ import logging
 import re
 from typing import Any, Optional
 
-from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BaseGuardrail,
+    GuardrailScope,
+    GuardrailTerminationMode,
+)
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
@@ -28,6 +32,11 @@ class LogAction(GuardrailAction):
     @property
     def action_type(self) -> str:
         return "Log"
+
+    @property
+    def termination_mode(self) -> GuardrailTerminationMode:
+        """One logged violation is enough, so scanning stops at the first."""
+        return GuardrailTerminationMode.FAIL_FAST
 
     def action_node(
         self,

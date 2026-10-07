@@ -19,6 +19,7 @@ in the appropriate component modules instead.
 import json
 import os
 import tempfile
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,6 +29,7 @@ from uipath.core.guardrails import (
     GuardrailValidationResultType,
 )
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+from uipath.platform.guardrails import GuardrailTerminationMode
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -282,8 +284,13 @@ graph = create_agent(
                         )
 
                 # Mock the guardrails service to detect PII and trigger blocking
-                def mock_evaluate_guardrail(text, guardrail, *, attachments=None):
+                sent_modes: dict[str, Any] = {}
+
+                def mock_evaluate_guardrail(
+                    text, guardrail, *, attachments=None, termination_mode=None
+                ):
                     """Mock guardrail evaluation that detects PII."""
+                    sent_modes[guardrail.name] = termination_mode
                     # Only the Agent-level "PII detection guardrail" should fail
                     # Other PII guardrails (like LLM PII escalation) should pass in this test
                     if (
@@ -363,6 +370,10 @@ graph = create_agent(
                     assert guardrail_blocked, (
                         "PII guardrail should have blocked execution"
                     )
+                    assert (
+                        sent_modes["PII detection guardrail"]
+                        == GuardrailTerminationMode.FAIL_FAST
+                    )
 
                     # Cleanup
                     await runtime.dispose()
@@ -424,7 +435,9 @@ graph = create_agent(
                     f.write(joke_agent_langgraph_json)
 
                 # Mock the guardrails service - prompt injection guardrail should fail
-                def mock_evaluate_guardrail(text, guardrail, *, attachments=None):
+                def mock_evaluate_guardrail(
+                    text, guardrail, *, attachments=None, termination_mode=None
+                ):
                     """Mock guardrail evaluation - prompt injection fails, others pass."""
                     # Prompt injection guardrail should detect and block
                     if guardrail.name == "Prompt injection guardrail":
@@ -868,7 +881,9 @@ graph = create_agent(
                     f.write(joke_agent_langgraph_json)
 
                 # Mock the guardrails service - PII guardrail at tool level should detect email
-                def mock_evaluate_guardrail(text, guardrail, *, attachments=None):
+                def mock_evaluate_guardrail(
+                    text, guardrail, *, attachments=None, termination_mode=None
+                ):
                     """Mock guardrail evaluation that detects PII in tool input."""
                     # Tool-level PII guardrail should detect email addresses
                     if (
@@ -1029,7 +1044,9 @@ graph = create_agent(
                     f.write(joke_agent_langgraph_json)
 
                 # Mock the guardrails service - PII guardrail at LLM level should detect PII
-                def mock_evaluate_guardrail(text, guardrail, *, attachments=None):
+                def mock_evaluate_guardrail(
+                    text, guardrail, *, attachments=None, termination_mode=None
+                ):
                     """Mock guardrail evaluation that detects PII in LLM output."""
                     # LLM-level PII escalation guardrail should detect email addresses
                     if (
@@ -1266,7 +1283,9 @@ graph = create_agent(
                     f.write(joke_agent_langgraph_json)
 
                 # Mock the guardrails service - PII guardrail at LLM level should detect PII
-                def mock_evaluate_guardrail(text, guardrail, *, attachments=None):
+                def mock_evaluate_guardrail(
+                    text, guardrail, *, attachments=None, termination_mode=None
+                ):
                     """Mock guardrail evaluation that detects PII in LLM output."""
                     # LLM-level PII escalation guardrail should detect email addresses
                     if (

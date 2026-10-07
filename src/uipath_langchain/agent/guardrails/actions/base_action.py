@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Any, Sequence, Union
 
-from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BaseGuardrail,
+    GuardrailScope,
+    GuardrailTerminationMode,
+)
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
@@ -22,6 +26,11 @@ class GuardrailAction(ABC):
     def action_type(self) -> str:
         """Return the action type identifier (e.g., 'Block', 'Log', 'Filter', 'Escalate')."""
         ...
+
+    @property
+    def termination_mode(self) -> GuardrailTerminationMode:
+        """When the guardrail service may stop scanning; everything unless the action says so."""
+        return GuardrailTerminationMode.EVALUATE_ALL
 
     @abstractmethod
     def action_node(
