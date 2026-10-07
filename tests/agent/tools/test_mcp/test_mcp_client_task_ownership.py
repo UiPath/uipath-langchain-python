@@ -48,7 +48,7 @@ async def test_session_opened_on_a_tool_task_disposes_from_the_teardown_task(
     gateway = RecordingGateway(build_sdk_app())
     async with serve(gateway) as url:
         with patched_sdk(url):
-            client = make_client()
+            client = make_client(protocol_mode="legacy")
 
             # asyncio.gather wraps the coroutine in its own Task, the way
             # langgraph's ToolNode dispatches tool calls.

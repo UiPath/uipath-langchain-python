@@ -220,19 +220,22 @@ session counts as a verdict.
 Selected by `McpClient(protocol_mode=...)` via `build_protocol_strategy`
 (`create_mcp_tools_and_clients` forwards the same kwarg to every client):
 
-- **`"legacy"` (default)** — `LegacyHandshakeStrategy`. Preserves the pre-2026
+- **`"legacy"`** — `LegacyHandshakeStrategy`. Preserves the pre-2026
   wire behaviour exactly.
 - **`"modern"`** — `ModernDiscoveryStrategy`. `server/discover` only.
-- **`"auto"`** — `AutoStrategy`. Mints the affinity ID first so the probe is
+- **`"auto"` (default)** — `AutoStrategy`. Mints the affinity ID first so the probe is
   pinned, runs its own `server/discover` probe (`probe_modern_era`, built on the
   public `ClientSession.send_discover` / `adopt` seam), then delegates to
   whichever era won. Re-resolved on every `connect`, so a server upgraded
   mid-run is handled.
 
-The default stays `"legacy"` on purpose. Defaulting to `"auto"` would silently
-move any discovery-capable UiPath MCP server to stateless `2026-07-28` and stop
-issuing session IDs, breaking the playground persistence `SessionInfoDebugState`
-exists for.
+The default is `"auto"`. On AgentHub, UiPath, Swagger and Platform servers
+resolve to `2026-07-28`; Coded, Command and Remote servers fall back to the
+handshake. Playground persistence survives the modern era: the client-minted
+affinity ID is stored through `SessionInfo`, so `SessionInfoDebugState` persists
+and restores it like a session ID. A server whose instances hold state no peer
+can rebuild should pass `protocol_mode="legacy"` (see Modern-era instance
+affinity below).
 
 #### Resuming a legacy session: adopt the version, do not renegotiate
 

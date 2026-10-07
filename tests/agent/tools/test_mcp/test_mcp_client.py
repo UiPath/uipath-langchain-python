@@ -539,6 +539,7 @@ async def test_only_an_initialize_response_assigns_a_session_id(
         mock_uipath_sdk,
         endpoint,
         session_info_factory=RecordingFactory(),
+        protocol_mode="legacy",
     ) as client:
         await client.call_tool("test_tool", {"query": "test"})
 
@@ -574,6 +575,7 @@ async def test_repeated_session_headers_do_not_repeat_external_persistence(
         mock_uipath_sdk,
         endpoint,
         session_info_factory=CountingFactory(),
+        protocol_mode="legacy",
     ) as client:
         await client.list_tools()
         await client.call_tool("test_tool", {"query": "first"})

@@ -448,7 +448,7 @@ async def create_mcp_tools_and_clients(
     resources: list[AgentMcpResourceConfig],
     session_info_factory: SessionInfoFactory | None = None,
     terminate_on_close: bool = True,
-    protocol_mode: ProtocolMode = "legacy",
+    protocol_mode: ProtocolMode = "auto",
 ) -> tuple[list[BaseTool], list[McpClient]]:
     """Create MCP tools from a list of MCP resource configurations.
 

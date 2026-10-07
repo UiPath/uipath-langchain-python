@@ -123,7 +123,7 @@ tests/agent/tools/test_mcp/
 │   ├── test_legacy_keeps_a_persisted_session_when_the_connection_drops
 │   ├── test_auto_does_not_carry_a_stale_era_through_a_failed_probe
 │   ├── test_build_protocol_strategy_maps_every_mode
-│   └── test_legacy_is_the_default_mode
+│   └── test_auto_is_the_default_mode
 │
 ├── test_session_info.py       # SessionInfo + SessionInfoFactory contract
 │
@@ -151,7 +151,7 @@ tests/agent/tools/test_mcp/
     ├── TestCreateMcpToolsFromAgent (class)  ← New!
     │   ├── test_creates_tools_from_multiple_mcp_servers
     │   ├── test_returns_mcp_clients_for_each_server
-    │   ├── test_clients_default_to_legacy_protocol
+    │   ├── test_clients_default_to_auto_protocol
     │   ├── test_passes_protocol_mode_to_clients
     │   ├── test_skips_disabled_mcp_resources
     │   ├── test_returns_empty_for_empty_resources
@@ -554,16 +554,20 @@ with patch(..., return_value=mock_uipath_class):
 assert len(clients) == 2  # One per MCP server
 ```
 
-#### test_clients_default_to_legacy_protocol / test_passes_protocol_mode_to_clients
+#### test_clients_default_to_auto_protocol / test_passes_protocol_mode_to_clients
 
-**Purpose:** Verify the factory builds every `McpClient` with `"legacy"` unless
+**Purpose:** Verify the factory builds every `McpClient` with `"auto"` unless
 `protocol_mode` is passed, and forwards the mode it is given
 
 **Assertions:**
 ```python
-_, clients = await create_mcp_tools_and_clients(mcp_resources, protocol_mode="auto")
-assert all(isinstance(client._strategy, AutoStrategy) for client in clients)
+_, clients = await create_mcp_tools_and_clients(mcp_resources, protocol_mode="legacy")
+assert all(isinstance(client._strategy, LegacyHandshakeStrategy) for client in clients)
 ```
+
+Tests that exercise legacy-only behaviour (resume, `DELETE` on disposal, handshake
+counts) pass `protocol_mode="legacy"` explicitly; they must not depend on the
+default.
 
 #### test_skips_disabled_mcp_resources
 

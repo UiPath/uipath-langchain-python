@@ -171,14 +171,22 @@ async def test_legacy_resume_keeps_the_originally_negotiated_version() -> None:
 
     async with serve(gateway) as url:
         with patched_sdk(url):
-            first = make_client(session_info_factory=factory, terminate_on_close=False)
+            first = make_client(
+                session_info_factory=factory,
+                terminate_on_close=False,
+                protocol_mode="legacy",
+            )
             await first.call_tool("add", {"a": 1, "b": 1})
             original_session_id = await first.get_session_id()
             await first.dispose()
 
             resume_boundary = len(gateway.records)
 
-            second = make_client(session_info_factory=factory, terminate_on_close=False)
+            second = make_client(
+                session_info_factory=factory,
+                terminate_on_close=False,
+                protocol_mode="legacy",
+            )
             result = await second.call_tool("add", {"a": 2, "b": 2})
             resumed_session_id = await second.get_session_id()
             await second.dispose()
@@ -240,14 +248,22 @@ async def test_legacy_resume_survives_a_server_that_refuses_reinitialization() -
 
     async with serve(gateway) as url:
         with patched_sdk(url):
-            first = make_client(session_info_factory=factory, terminate_on_close=False)
+            first = make_client(
+                session_info_factory=factory,
+                terminate_on_close=False,
+                protocol_mode="legacy",
+            )
             await first.call_tool("add", {"a": 1, "b": 1})
             original_session_id = await first.get_session_id()
             await first.dispose()
 
             resume_boundary = len(gateway.records)
 
-            second = make_client(session_info_factory=factory, terminate_on_close=False)
+            second = make_client(
+                session_info_factory=factory,
+                terminate_on_close=False,
+                protocol_mode="legacy",
+            )
             result = await second.call_tool("add", {"a": 2, "b": 2})
             resumed_session_id = await second.get_session_id()
             await second.dispose()
@@ -274,7 +290,9 @@ async def test_unknown_persisted_session_falls_back_to_a_fresh_session() -> None
 
     async with serve(gateway) as url:
         async with connected_client(
-            url, session_info_factory=pinned_session_factory(stored)
+            url,
+            session_info_factory=pinned_session_factory(stored),
+            protocol_mode="legacy",
         ) as client:
             result = await client.call_tool("add", {"a": 6, "b": 1})
             session_id = await client.get_session_id()
@@ -397,7 +415,11 @@ async def test_legacy_disposal_deletes_a_restored_session() -> None:
 
     async with serve(gateway) as url:
         with patched_sdk(url):
-            first = make_client(session_info_factory=factory, terminate_on_close=False)
+            first = make_client(
+                session_info_factory=factory,
+                terminate_on_close=False,
+                protocol_mode="legacy",
+            )
             await first.call_tool("add", {"a": 1, "b": 1})
             session_id = await first.get_session_id()
             await first.dispose()
@@ -405,7 +427,11 @@ async def test_legacy_disposal_deletes_a_restored_session() -> None:
             assert gateway.http_count("DELETE") == 0
             resume_boundary = len(gateway.records)
 
-            second = make_client(session_info_factory=factory, terminate_on_close=True)
+            second = make_client(
+                session_info_factory=factory,
+                terminate_on_close=True,
+                protocol_mode="legacy",
+            )
             await second.call_tool("add", {"a": 2, "b": 2})
             await second.dispose()
 
@@ -511,7 +537,7 @@ async def test_dispose_then_reuse_reinitializes_the_client() -> None:
     """Disposal releases everything, and the next call rebuilds a working client."""
     gateway = RecordingGateway(build_sdk_app())
     async with serve(gateway) as url:
-        async with connected_client(url) as client:
+        async with connected_client(url, protocol_mode="legacy") as client:
             await client.call_tool("add", {"a": 1, "b": 1})
             await client.dispose()
 

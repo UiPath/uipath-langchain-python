@@ -318,20 +318,20 @@ class TestCreateMcpToolsFromAgent:
         assert len(clients) == 2
 
     @pytest.mark.asyncio
-    async def test_clients_default_to_legacy_protocol(self, mcp_resources):
+    async def test_clients_default_to_auto_protocol(self, mcp_resources):
         _, clients = await create_mcp_tools_and_clients(mcp_resources)
 
-        assert all(
-            isinstance(client._strategy, LegacyHandshakeStrategy) for client in clients
-        )
+        assert all(isinstance(client._strategy, AutoStrategy) for client in clients)
 
     @pytest.mark.asyncio
     async def test_passes_protocol_mode_to_clients(self, mcp_resources):
         _, clients = await create_mcp_tools_and_clients(
-            mcp_resources, protocol_mode="auto"
+            mcp_resources, protocol_mode="legacy"
         )
 
-        assert all(isinstance(client._strategy, AutoStrategy) for client in clients)
+        assert all(
+            isinstance(client._strategy, LegacyHandshakeStrategy) for client in clients
+        )
 
     @pytest.mark.asyncio
     async def test_skips_disabled_mcp_resources(self, mcp_resources_with_disabled):
