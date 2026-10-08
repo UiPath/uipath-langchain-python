@@ -4975,7 +4975,7 @@ provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpre
 [package.metadata.requires-dev]
 dev = [
     { name = "filelock", specifier = ">=3.20.3" },
-    { name = "hatchling", specifier = ">=1.32,<2" },
+    { name = "hatchling" },
     { name = "mypy", specifier = ">=1.14.1" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "packaging", specifier = ">=24.0" },
