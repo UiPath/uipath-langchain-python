@@ -1,0 +1,11 @@
+{
+  "employee_id": "EMP010",
+  "employee_name": "Jennifer Lee",
+  "department": "hr",
+  "expense_amount": 75.00,
+  "expense_category": "supplies",
+  "expense_description": "Training materials for new hire onboarding",
+  "receipt_attached": true,
+  "expense_date": "2025-09-18",
+  "manager_email": "hr.manager@company.com"
+}

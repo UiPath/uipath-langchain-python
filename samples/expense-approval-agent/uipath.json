@@ -1,0 +1,102 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "26255b06-0d73-4bb1-ad23-5408003bf7a4",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "employee_id": {
+                        "title": "Employee Id",
+                        "type": "string"
+                    },
+                    "employee_name": {
+                        "title": "Employee Name",
+                        "type": "string"
+                    },
+                    "department": {
+                        "title": "Department",
+                        "type": "string"
+                    },
+                    "expense_amount": {
+                        "title": "Expense Amount",
+                        "type": "number"
+                    },
+                    "expense_category": {
+                        "enum": [
+                            "travel",
+                            "meals",
+                            "supplies",
+                            "training",
+                            "equipment",
+                            "other"
+                        ],
+                        "title": "Expense Category",
+                        "type": "string"
+                    },
+                    "expense_description": {
+                        "title": "Expense Description",
+                        "type": "string"
+                    },
+                    "receipt_attached": {
+                        "default": true,
+                        "title": "Receipt Attached",
+                        "type": "boolean"
+                    },
+                    "expense_date": {
+                        "title": "Expense Date",
+                        "type": "string"
+                    },
+                    "manager_email": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "employee_id",
+                    "employee_name",
+                    "department",
+                    "expense_amount",
+                    "expense_category",
+                    "expense_description",
+                    "expense_date"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "expense_id": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "approval_level": {
+                        "type": "string"
+                    },
+                    "final_amount": {
+                        "default": null,
+                        "title": "Final Amount",
+                        "type": "number"
+                    },
+                    "processing_notes": {
+                        "default": null,
+                        "items": {
+                            "type": "string"
+                        },
+                        "title": "Processing Notes",
+                        "type": "array"
+                    },
+                    "reimbursement_eta": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}

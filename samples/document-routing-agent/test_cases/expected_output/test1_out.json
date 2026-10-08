@@ -1,0 +1,18 @@
+{
+  "document_id": "DOC-2025-001",
+  "routing_id": "RTG-FA124F32",
+  "assigned_department": "finance",
+  "routing_confidence": "medium",
+  "priority_score": 75,
+  "routing_reasons": [
+    "Document received at 2025-01-02T10:00:00Z",
+    "Analyzed 278 characters of content",
+    "Top departments: finance:0.50, legal:0.10, it:0.10",
+    "Matched keywords: invoice, payment",
+    "Document type 'invoice' matches department",
+    "Priority score: 75 (4-8 hours)"
+  ],
+  "secondary_departments": [],
+  "processing_timestamp": "2025-01-02T10:00:00Z",
+  "estimated_processing_time": "4-8 hours"
+}

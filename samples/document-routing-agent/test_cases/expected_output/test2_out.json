@@ -1,0 +1,18 @@
+{
+  "document_id": "DOC-2025-002",
+  "routing_id": "RTG-72D4CF13",
+  "assigned_department": "hr",
+  "routing_confidence": "high",
+  "priority_score": 45,
+  "routing_reasons": [
+    "Document received at 2025-01-02T10:00:00Z",
+    "Analyzed 256 characters of content",
+    "Top departments: hr:0.85, finance:0.00, legal:0.00",
+    "Matched keywords: employee, vacation, leave",
+    "Document type 'leave_request' matches department",
+    "Priority score: 45 (1-2 business days)"
+  ],
+  "secondary_departments": [],
+  "processing_timestamp": "2025-01-02T10:00:00Z",
+  "estimated_processing_time": "1-2 business days"
+}
