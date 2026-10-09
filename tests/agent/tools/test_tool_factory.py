@@ -9,6 +9,8 @@ from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
     AgentContextSettings,
+    AgentConversationalAgentToolProperties,
+    AgentConversationalAgentToolResourceConfig,
     AgentEscalationChannel,
     AgentEscalationChannelProperties,
     AgentEscalationResourceConfig,
@@ -416,6 +418,27 @@ class TestCreateToolsFromResources:
         mock_llm = AsyncMock(spec=BaseChatModel)
         tool = await _build_tool_for_resource(resource, mock_llm)
         assert_tool_is_base_uipath(tool)
+
+    async def test_conversational_agent_resource_is_not_built_here(
+        self, mock_uipath_sdk
+    ):
+        """Conversational agents are built by the A2A tool factory, never as jobs."""
+        resource = AgentConversationalAgentToolResourceConfig(
+            id="conv-1",
+            name="Conversational Agent",
+            description="A conversational agent",
+            type=AgentToolType.CONVERSATIONAL_AGENT,
+            input_schema=EMPTY_SCHEMA,
+            properties=AgentConversationalAgentToolProperties(process_name="p"),
+        )
+        mock_llm = AsyncMock(spec=BaseChatModel)
+        with patch(
+            "uipath_langchain.agent.tools.tool_factory.create_process_tool"
+        ) as mock_create_process_tool:
+            tool = await _build_tool_for_resource(resource, mock_llm)
+
+        assert tool is None
+        mock_create_process_tool.assert_not_called()
 
     async def test_flow_resource_routes_through_process_tool_path(
         self, flow_resource, mock_uipath_sdk
