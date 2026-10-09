@@ -7,8 +7,9 @@ import os
 # surface as noisy, unparented nodes in the Execution Trace and are not a
 # meaningful representation of the call. Disable that instrumentation before the
 # SDK is imported (it reads this variable at import time), so the single A2A
-# span emitted by ``a2a_tool`` is the only node for the call. ``setdefault``
-# preserves an explicit opt-in when the variable is already set.
+# span emitted by ``a2a_tool`` (or ``conversational_agent_tool``) is the only
+# node for the call. ``setdefault`` preserves an explicit opt-in when the
+# variable is already set.
 os.environ.setdefault("OTEL_INSTRUMENTATION_A2A_SDK_ENABLED", "false")
 
 from .a2a_tool import (  # noqa: E402
@@ -16,9 +17,17 @@ from .a2a_tool import (  # noqa: E402
     create_a2a_tools_and_clients,
     open_a2a_tools,
 )
+from .conversational_agent_tool import (  # noqa: E402
+    ConversationalAgentA2aClient,
+    create_conversational_agent_tools_and_clients,
+    open_conversational_agent_tools,
+)
 
 __all__ = [
     "A2aClient",
+    "ConversationalAgentA2aClient",
     "create_a2a_tools_and_clients",
+    "create_conversational_agent_tools_and_clients",
     "open_a2a_tools",
+    "open_conversational_agent_tools",
 ]
