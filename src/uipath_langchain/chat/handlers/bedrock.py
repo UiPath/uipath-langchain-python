@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
+from uipath.core.feature_flags import FeatureFlags
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
@@ -13,6 +14,8 @@ from ..thinking import thinking_rejects_forced_tool_choice
 from .base import ModelPayloadHandler
 
 logger = logging.getLogger(__name__)
+
+BEDROCK_PROMPT_CACHING_FF = "EnableBedrockPromptCaching"
 
 
 # --- Converse API constants ---
@@ -148,6 +151,16 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         if strict_mode is True:
             kwargs["strict"] = True
         return kwargs
+
+    def get_prompt_caching_kwargs(self) -> dict[str, Any]:
+        """``cache_control`` for ``ChatBedrockConverse`` when the flag is on.
+
+        langchain-aws turns it into ``cachePoint`` blocks after the tools, the
+        system prompt and the last message.
+        """
+        if not FeatureFlags.is_flag_enabled(BEDROCK_PROMPT_CACHING_FF, default=False):
+            return {}
+        return {"cache_control": {"type": "ephemeral"}}
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check ``stopReason`` (camelCase) and raise for faulty terminations.

@@ -26,6 +26,14 @@ class ModelPayloadHandler(ABC):
         strict_mode: bool | None = None,
     ) -> dict[str, Any]: ...
 
+    def get_prompt_caching_kwargs(self) -> dict[str, Any]:
+        """Binding kwargs that mark the request's prompt prefix for caching.
+
+        Empty unless the provider needs explicit cache markers and caching is
+        enabled for it.
+        """
+        return {}
+
     @abstractmethod
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check response stop reason and raise exception for faulty terminations.

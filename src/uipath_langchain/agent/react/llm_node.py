@@ -111,6 +111,7 @@ def create_llm_node(
         call_model: BaseChatModel = model
         call_messages: list[AnyMessage] = messages
         handler = payload_handler
+        prompt_caching_kwargs = payload_handler.get_prompt_caching_kwargs()
         if not is_conversational and bindable_tools:
             # only one tool_choice=auto call that doesnt return tool is allowed
             if consecutive_tool_less > 1:
@@ -126,13 +127,17 @@ def create_llm_node(
             if thinking_rejects_forcing and consecutive_tool_less > 0:
                 call_model, call_messages = build_extraction_call(model, messages)
                 handler = get_payload_handler(call_model)
+                prompt_caching_kwargs = {}
 
-        binding_kwargs = handler.get_tool_binding_kwargs(
-            tools=static_schema_tools,
-            tool_choice=current_tool_choice,
-            parallel_tool_calls=parallel_tool_calls,
-            strict_mode=strict_mode,
-        )
+        binding_kwargs = {
+            **handler.get_tool_binding_kwargs(
+                tools=static_schema_tools,
+                tool_choice=current_tool_choice,
+                parallel_tool_calls=parallel_tool_calls,
+                strict_mode=strict_mode,
+            ),
+            **prompt_caching_kwargs,
+        }
         llm = call_model.bind_tools(static_schema_tools, **binding_kwargs)
 
         try:
