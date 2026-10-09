@@ -13,6 +13,8 @@ from langchain.agents.middleware import (
     AgentState,
     ModelRequest,
     ModelResponse,
+    ToolCallRequest,
+    ToolErrorMiddleware,
 )
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
@@ -38,6 +40,7 @@ from uipath_langchain.agent.attachments.output_files import (
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    AgentStartupError,
     max_iterations_error,
 )
 from uipath_langchain.agent.react.conversational_output_node import (
@@ -218,6 +221,17 @@ def _max_iterations_middleware(
     return [_MaxIterationsMiddleware(max_iterations, initial_message_count_key)]
 
 
+def _tool_error_content(exc: Exception, request: ToolCallRequest) -> str | None:
+    """Hand a failed tool call back to the model, except errors meant to end the run."""
+    if isinstance(exc, AgentStartupError):
+        return None
+    if isinstance(exc, AgentRuntimeError) and exc.error_info.code.startswith(
+        "AGENT_RUNTIME.TERMINATION_"
+    ):
+        return None
+    return str(exc)
+
+
 # A subagent returns only a text report, so a reference it produces never reaches
 # the main agent -- the only agent that fills the typed output.
 class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
@@ -383,6 +397,7 @@ def create_advanced_agent(
         for tool in tools
     ]
     shared_middleware: list[AgentMiddleware[Any, Any]] = [
+        ToolErrorMiddleware(_tool_error_content),
         _PayloadHandlerMiddleware(),
         JobAttachmentsMiddleware(),
     ]
