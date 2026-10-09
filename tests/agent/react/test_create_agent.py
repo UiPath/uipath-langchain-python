@@ -1,11 +1,13 @@
 """Tests for create_agent function in agent.py module."""
 
 from typing import Any
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages.content import create_tool_call
 from langchain_core.runnables.graph import Edge
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph
@@ -365,3 +367,49 @@ class TestCreateAgentGenerateConversationalOutput:
         )
         graph = result.compile().get_graph()
         assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes
+
+
+class _AnswerOutput(BaseModel):
+    answer: str
+
+
+class _StubChatAnthropic(ChatAnthropic):
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+
+
+class TestCreateAgentPicksTheLlmNode:
+    """The compiled graph runs the LLM node the factory picks for the model."""
+
+    @staticmethod
+    async def _tool_choice(model_details: dict[str, Any]) -> Any:
+        model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5-5")
+        model.model_details = model_details
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(
+                        name="end_execution", args={"answer": "Lisbon"}, id="c1"
+                    )
+                ],
+            )
+        )
+        graph: Any = create_agent(
+            model,
+            [],
+            [SystemMessage(content="system")],
+            output_schema=_AnswerOutput,
+        ).compile()
+
+        assert await graph.ainvoke({}) == {"answer": "Lisbon"}
+        return model.bind_tools.call_args.kwargs["tool_choice"]
+
+    @pytest.mark.asyncio
+    async def test_models_that_reject_forcing_run_on_auto(self) -> None:
+        assert await self._tool_choice({"shouldSkipForcedToolChoice": True}) == "auto"
+
+    @pytest.mark.asyncio
+    async def test_other_models_are_forced(self) -> None:
+        assert await self._tool_choice({}) == "any"
