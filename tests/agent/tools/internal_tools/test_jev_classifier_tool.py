@@ -1298,6 +1298,17 @@ def _jev_error(status: int, body: Any) -> UiPathAPIError:
             id="typesafe-400",
         ),
         pytest.param(
+            400,
+            {
+                "detail": {
+                    "error_type": None,
+                    "message": "Unsupported model used. The list of supported "
+                    "models is : gpt-4o,jev-1.13.0",
+                }
+            },
+            id="llm-gateway-400",
+        ),
+        pytest.param(
             422,
             {"detail": [{"loc": ["body", "model"], "msg": "Unknown model"}]},
             id="fastapi-422",
