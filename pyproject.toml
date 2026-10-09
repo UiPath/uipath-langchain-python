@@ -9,7 +9,7 @@ dependencies = [
     "uipath-core>=0.5.33, <0.6.0",
     "uipath-platform>=0.2.34, <0.3.0",
     "uipath-runtime>=0.13.0, <0.14.0",
-    "uipath-llm-client>=1.21.0, <1.22.0",
+    "uipath-llm-client>=1.22.0, <1.23.0",
     "langgraph>=1.2.11, <2.0.0",
     "langchain-core>=1.6.1, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.1.1, <4.0.0",
@@ -28,7 +28,7 @@ dependencies = [
     "pillow>=12.3.0, <13.0.0",
     "rdflib>=7.0.0, <8.0.0",
     "a2a-sdk>=1.1.2,<2.0.0",
-    "uipath-langchain-client[openai]>=1.21.0, <1.22.0",
+    "uipath-langchain-client[openai]>=1.22.0, <1.23.0",
 ]
 
 classifiers = [
@@ -45,23 +45,23 @@ maintainers = [
 
 [project.optional-dependencies]
 anthropic = [
-    "uipath-langchain-client[anthropic]>=1.21.0, <1.22.0",
+    "uipath-langchain-client[anthropic]>=1.22.0, <1.23.0",
 ]
 vertex = [
-    "uipath-langchain-client[google]>=1.21.0, <1.22.0",
+    "uipath-langchain-client[google]>=1.22.0, <1.23.0",
 ]
 bedrock = [
-    "uipath-langchain-client[bedrock]>=1.21.0, <1.22.0",
+    "uipath-langchain-client[bedrock]>=1.22.0, <1.23.0",
     "boto3-stubs>=1.41.4",
 ]
 fireworks = [
-    "uipath-langchain-client[fireworks]>=1.21.0, <1.22.0",
+    "uipath-langchain-client[fireworks]>=1.22.0, <1.23.0",
 ]
 code-interpreter = [
     "langchain-quickjs>=0.3.5, <0.4.0",
 ]
 all = [
-    "uipath-langchain-client[all]>=1.21.0, <1.22.0",
+    "uipath-langchain-client[all]>=1.22.0, <1.23.0",
     "uipath-langchain[code-interpreter]",
 ]
 
@@ -185,3 +185,4 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+

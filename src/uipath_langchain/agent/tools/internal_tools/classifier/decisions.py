@@ -21,13 +21,7 @@ from uipath.agent.models.agent import (
     DecisionsScoreQuestion,
 )
 from uipath.llm_client import UiPathAPIError
-from uipath.llm_client.httpx_client import UiPathHttpxAsyncClient
-from uipath.llm_client.settings import (
-    UiPathAPIConfig,
-    UiPathBaseSettings,
-    get_default_client_settings,
-)
-from uipath.llm_client.settings.constants import ApiType, RoutingMode, VendorType
+from uipath.llm_client.clients.decisions import UiPathDecisionsClient
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
@@ -41,9 +35,6 @@ from .provider import (
     is_finite_number,
 )
 
-# Raw vendor passthrough: .../raw/vendor/openai/model/{model}/completions, with the
-# "decisions" API flavor (as the TypeSafe client uses "systemone").
-DECISIONS_API_FLAVOR = "decisions"
 # Decisions answers in well under a second; images make the request larger.
 DECISIONS_TIMEOUT_SECONDS = 60.0
 
@@ -165,62 +156,6 @@ def build_decisions_input(input_value: Any, images: list[str]) -> str | list[Any
     )
     content.extend({"type": "input_image", "image_url": image} for image in images)
     return [{"role": "user", "content": content}]
-
-
-def _build_api_config() -> UiPathAPIConfig:
-    return UiPathAPIConfig(
-        api_type=ApiType.COMPLETIONS,
-        routing_mode=RoutingMode.PASSTHROUGH,
-        vendor_type=VendorType.OPENAI,
-        api_flavor=DECISIONS_API_FLAVOR,
-        freeze_base_url=True,
-    )
-
-
-class UiPathDecisionsClient:
-    """Client for OpenAI's ``POST /v1/decisions`` through the UiPath LLM Gateway.
-
-    Uses the UiPath httpx client, so retries, logging and UiPath exception mapping
-    behave like the other vendor clients.
-
-    Args:
-        model_name: The Decisions model, e.g. ``gpt-6-luna``.
-        client_settings: UiPath client settings. Defaults to the default settings.
-        timeout: Client-side request timeout in seconds.
-    """
-
-    def __init__(
-        self,
-        *,
-        model_name: str,
-        client_settings: UiPathBaseSettings | None = None,
-        timeout: float | None = None,
-    ):
-        self.model_name = model_name
-        # The frozen base URL already is the full passthrough endpoint, so
-        # requests post to "".
-        self._client = UiPathHttpxAsyncClient(
-            model_name=model_name,
-            timeout=timeout,
-            client_settings=client_settings or get_default_client_settings(),
-            api_config=_build_api_config(),
-        )
-
-    async def acreate(
-        self, input_value: str | list[Any], questions: list[dict[str, Any]]
-    ) -> Any:
-        """Ask the questions about ``input_value`` and return the decoded response.
-
-        Raises:
-            UiPathAPIError: If the request fails.
-        """
-        body = {"model": self.model_name, "input": input_value, "questions": questions}
-        response = await self._client.post("", json=body)
-        response.raise_for_status()
-        return response.json()
-
-    async def aclose(self) -> None:
-        await self._client.aclose()
 
 
 class DecisionsProvider(ClassifierProviderAdapter):

@@ -20,9 +20,6 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.tools.internal_tools.classifier.decisions import (
-    DECISIONS_API_FLAVOR,
-    UiPathDecisionsClient,
-    _build_api_config,
     build_decisions_input,
 )
 from uipath_langchain.agent.tools.internal_tools.internal_tool_factory import (
@@ -641,38 +638,3 @@ def test_jev_shapes_fail_at_startup(
 ) -> None:
     with pytest.raises(AgentStartupError):
         create_internal_tool(_resource(argument_properties, input_schema), AsyncMock())
-
-
-# --- Client --------------------------------------------------------------------
-
-
-def test_api_config_routes_to_the_openai_decisions_passthrough() -> None:
-    config = _build_api_config()
-
-    assert config.vendor_type == "openai"
-    assert config.api_flavor == DECISIONS_API_FLAVOR
-    assert config.routing_mode == "passthrough"
-    assert config.freeze_base_url
-
-
-async def test_client_posts_the_decisions_body() -> None:
-    response = MagicMock()
-    response.json.return_value = DECISIONS_RESPONSE
-    http_client = MagicMock()
-    http_client.post = AsyncMock(return_value=response)
-
-    with patch(
-        f"{PACKAGE}.decisions.UiPathHttpxAsyncClient", return_value=http_client
-    ) as client_cls:
-        client = UiPathDecisionsClient(
-            model_name="gpt-6-luna", client_settings=MagicMock(), timeout=5.0
-        )
-        result = await client.acreate("text", [IS_URGENT])
-
-    assert client_cls.call_args.kwargs["model_name"] == "gpt-6-luna"
-    assert client_cls.call_args.kwargs["timeout"] == 5.0
-    http_client.post.assert_awaited_once_with(
-        "", json={"model": "gpt-6-luna", "input": "text", "questions": [IS_URGENT]}
-    )
-    response.raise_for_status.assert_called_once()
-    assert result == DECISIONS_RESPONSE
