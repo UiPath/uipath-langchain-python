@@ -2,15 +2,23 @@
 
 Two sources feed the same reference shape:
 
-* Agent- and LLM-scope guardrails judge the conversation so far, so they read the whole
-  job-attachment registry (:func:`resolve_guardrail_attachments`).
-* Tool-scope guardrails judge one tool call, so they read only the attachments that call
-  mentions: the ``{"ID": ...}`` objects in its arguments before the tool runs, or in its
-  result afterwards (:func:`resolve_referenced_attachments`). A tool call that names no
-  file forwards nothing, even when the run holds files elsewhere; otherwise every tool
-  call would ship every file to the backend.
+* Pre-execution guardrails at Agent and LLM scope judge the conversation so far, so they
+  read the whole job-attachment registry (:func:`resolve_guardrail_attachments`).
+* Every other guardrail judges one payload, so it reads only the attachments that payload
+  mentions (:func:`resolve_referenced_attachments`): the ``{"ID": ...}`` objects in a tool
+  call's arguments or result, in the tool-call arguments an LLM produced, or in the
+  agent's result. A payload that names no file forwards none, even when the run holds
+  files elsewhere; otherwise every check would ship every file to the backend, and an
+  input file would be judged again as if the agent had produced it.
 
-Any built-in guardrail forwards references unless its ``appliesTo`` scope is text only.
+Both return one of three answers, which the validate API reads differently:
+
+* ``None``: say nothing about files. The guardrail is scoped to text only, or the
+  payload could not be scanned; the backend evaluates the text as before.
+* ``[]``: files apply and there are none to inspect. A files-only guardrail passes
+  without judging the text.
+* a list: the files to inspect.
+
 The runtime forwards id, file name and mime type only; the backend's feature flag
 decides whether they are used at all, the backend decides which validators and file
 types it can inspect, and it resolves the id through Orchestrator.
@@ -38,7 +46,7 @@ _APPLIES_TO_PARAMETER = "appliesto"
 _FILE_SCOPES: frozenset[str] = frozenset({"files", "both"})
 #: Wire key of a job attachment reference as the model and the tools exchange it.
 _ID_KEY = "ID"
-#: Bounds for scanning a tool payload, which can be arbitrarily large or deep.
+#: Bounds for scanning a payload, which can be arbitrarily large or deep.
 _MAX_SCAN_DEPTH = 32
 _MAX_SCAN_NODES = 10_000
 
@@ -60,23 +68,29 @@ def _scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> bool:
     return True
 
 
+def _is_text_only(guardrail: BuiltInValidatorGuardrail) -> bool:
+    if _scope_includes_files(guardrail):
+        return False
+    logger.debug(
+        "Guardrail '%s' is scoped to text only; skipping attachment resolution.",
+        guardrail.name,
+    )
+    return True
+
+
 async def resolve_guardrail_attachments(
     job_attachments: dict[str, Attachment],
     guardrail: BuiltInValidatorGuardrail,
-) -> list[GuardrailAttachment]:
+) -> list[GuardrailAttachment] | None:
     """Return up to five references for every attachment the run knows about.
 
-    For Agent- and LLM-scope guardrails, which evaluate the conversation as a whole.
-    Empty when the guardrail is scoped to text only or the run has no attachments. Never
-    raises.
+    For pre-execution guardrails at Agent and LLM scope, which evaluate the conversation
+    as a whole. ``None`` when the guardrail is scoped to text only, empty when the run
+    has no attachments. Never raises.
     """
+    if _is_text_only(guardrail):
+        return None
     if not job_attachments:
-        return []
-    if not _scope_includes_files(guardrail):
-        logger.debug(
-            "Guardrail '%s' is scoped to text only; skipping attachment resolution.",
-            guardrail.name,
-        )
         return []
     return _collect(job_attachments.values())
 
@@ -85,43 +99,44 @@ def resolve_referenced_attachments(
     data: Any,
     job_attachments: dict[str, Attachment] | None,
     guardrail: BuiltInValidatorGuardrail,
-) -> list[GuardrailAttachment]:
-    """Return up to five references for the attachments ``data`` mentions.
+) -> list[GuardrailAttachment] | None:
+    """Return up to five references for the attachments ``data`` mentions, in order.
 
-    For Tool-scope guardrails: ``data`` is the tool call's arguments (before the tool
-    runs) or its parsed result (after). A mention is a mapping with an ``ID`` that parses
-    as a UUID, the shape the model emits and the tool wrapper expands. Only ids the run's
-    registry holds are forwarded, with the registry's name and type: the registry is the
-    set of files this run legitimately has (agent input plus files its tools returned),
-    so a mention the run never held, or a non-attachment resource id, is skipped rather
-    than sent to the backend for lookup. Empty when nothing is mentioned or the guardrail
-    is scoped to text only. Never raises.
+    ``data`` is the payload one guardrail judges: a tool call's arguments or parsed
+    result, an LLM's tool-call arguments, or the agent's result. A mention is a mapping
+    with an ``ID`` that parses as a UUID, the shape the model emits and the tool wrapper
+    expands. Only ids the run's registry holds are forwarded, with the registry's name
+    and type: the registry is the set of files this run legitimately has (agent input
+    plus files its tools returned or its output verified), so a mention the run never
+    held, or a non-attachment resource id, is skipped rather than sent to the backend
+    for lookup. ``None`` when the guardrail is scoped to text only or ``data`` cannot be
+    scanned; empty when nothing is mentioned. Never raises.
     """
+    if _is_text_only(guardrail):
+        return None
     if data is None:
-        return []
-    if not _scope_includes_files(guardrail):
-        logger.debug(
-            "Guardrail '%s' is scoped to text only; skipping attachment resolution.",
-            guardrail.name,
-        )
         return []
     try:
         mentions = list(_iter_attachment_mentions(data))
     except Exception:
         logger.warning(
-            "Could not scan the tool payload for attachments; guardrail '%s' evaluates "
+            "Could not scan the payload for attachments; guardrail '%s' evaluates "
             "without files.",
             guardrail.name,
             exc_info=True,
         )
-        return []
+        return None
     registry = job_attachments or {}
     resolved = (_resolve_mention(mention, registry) for mention in mentions)
     return _collect(attachment for attachment in resolved if attachment is not None)
 
 
 def _iter_attachment_mentions(data: Any) -> Iterator[Any]:
-    """Yield every attachment-shaped value in ``data``, depth first, within bounds."""
+    """Yield every attachment-shaped value in ``data`` in document order, within bounds.
+
+    Children are pushed reversed so the stack pops them first to last: when more files
+    are mentioned than the API accepts, the ones written first are the ones sent.
+    """
     stack: list[tuple[Any, int]] = [(data, 0)]
     visited = 0
     while stack:
@@ -129,7 +144,7 @@ def _iter_attachment_mentions(data: Any) -> Iterator[Any]:
         visited += 1
         if visited > _MAX_SCAN_NODES:
             logger.debug(
-                "Stopped scanning the tool payload for attachments after %d values.",
+                "Stopped scanning the payload for attachments after %d values.",
                 _MAX_SCAN_NODES,
             )
             return
@@ -143,9 +158,11 @@ def _iter_attachment_mentions(data: Any) -> Iterator[Any]:
             if _is_mention(value):
                 yield value
             else:
-                stack.extend((item, depth + 1) for item in value.values())
+                stack.extend(
+                    (item, depth + 1) for item in reversed(list(value.values()))
+                )
         elif isinstance(value, (list, tuple, set, frozenset)):
-            stack.extend((item, depth + 1) for item in value)
+            stack.extend((item, depth + 1) for item in reversed(list(value)))
 
 
 def _is_mention(value: Mapping[Any, Any]) -> bool:
@@ -173,7 +190,7 @@ def _resolve_mention(mention: Any, registry: dict[str, Attachment]) -> Any | Non
         )
     except Exception:
         logger.debug(
-            "Skipping a malformed attachment reference in the tool payload.",
+            "Skipping a malformed attachment reference in the payload.",
             exc_info=True,
         )
     return None

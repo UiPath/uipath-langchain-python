@@ -1,9 +1,11 @@
 """Tests for output-schema file field discovery and verification."""
 
+import uuid
 from typing import Any
 
 import pytest
 from langchain_core.tools import StructuredTool
+from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.attachments.output_files import (
     build_files_prompt,
@@ -14,6 +16,7 @@ from uipath_langchain.agent.attachments.output_files import (
     missing_output_files,
     output_attachment_ids,
     resolve_output_attachments,
+    verified_output_attachments,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
@@ -273,6 +276,60 @@ class TestResolveOutputAttachments:
 
         assert await resolve_output_attachments(fields, {}) == ({}, [])
         assert fake.lookups == []
+
+
+class TestVerifiedOutputAttachments:
+    @pytest.fixture
+    def fields(self):
+        model = build_output_model(
+            {
+                "report": {"$ref": "#/definitions/job-attachment"},
+                "exports": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                },
+            }
+        )
+        return get_output_file_fields(model)
+
+    async def test_a_verified_reference_is_registered_by_id(self, fields, monkeypatch):
+        patch_orchestrator(
+            monkeypatch,
+            existing={ATTACHMENT_ID: "report.md", OTHER_ATTACHMENT_ID: "code.py"},
+        )
+        check = await check_output_files(
+            fields, {"report": ticket(), "exports": [ticket(OTHER_ATTACHMENT_ID)]}
+        )
+
+        registered = verified_output_attachments(fields, check.output)
+
+        assert registered == {
+            ATTACHMENT_ID: Attachment(
+                id=uuid.UUID(ATTACHMENT_ID),
+                full_name="report.md",
+                mime_type="text/markdown",
+            ),
+            OTHER_ATTACHMENT_ID: Attachment(
+                id=uuid.UUID(OTHER_ATTACHMENT_ID),
+                full_name="code.py",
+                mime_type="text/x-python",
+            ),
+        }
+
+    def test_nothing_is_registered_without_a_job_key(self, fields, monkeypatch):
+        """Without a job nothing was looked up, so the reference is not verified."""
+        monkeypatch.delenv("UIPATH_JOB_KEY", raising=False)
+
+        assert verified_output_attachments(fields, {"report": ticket()}) == {}
+
+    def test_empty_and_malformed_values_are_skipped(self, fields, monkeypatch):
+        patch_orchestrator(monkeypatch, existing={})
+
+        registered = verified_output_attachments(
+            fields, {"report": None, "exports": [{"FullName": "x.md"}, ticket()]}
+        )
+
+        assert list(registered) == [ATTACHMENT_ID]
 
 
 class TestMalformedOutputFiles:

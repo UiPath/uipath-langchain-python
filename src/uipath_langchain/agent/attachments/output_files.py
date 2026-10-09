@@ -201,6 +201,31 @@ async def resolve_output_attachments(
     return resolved, []
 
 
+def verified_output_attachments(
+    fields: list[OutputFileField], output: dict[str, Any]
+) -> dict[str, Attachment]:
+    """The output's file references as registry entries, keyed by attachment id.
+
+    For an output :func:`check_output_files` accepted, whose references were rebuilt
+    from the attachments Orchestrator holds. Registering them lets the agent-output
+    guardrails resolve a file whatever tool produced it, including tools that do not
+    register their attachments. Without a job nothing was looked up, so nothing is
+    returned.
+    """
+    if not UiPathConfig.job_key:
+        return {}
+    verified: dict[str, Attachment] = {}
+    for field in fields:
+        for value in _filled_values(output, field.path):
+            try:
+                attachment = Attachment.model_validate(value, from_attributes=True)
+            except ValidationError:
+                continue
+            if attachment.id is not None:
+                verified[str(attachment.id)] = attachment
+    return verified
+
+
 class OutputFilesCheck(NamedTuple):
     """The verdict on an output's file fields."""
 

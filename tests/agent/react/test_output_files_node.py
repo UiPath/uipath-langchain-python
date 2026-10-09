@@ -101,6 +101,26 @@ class TestOutputFilesNode:
         (message,) = command.update["messages"]
         assert message.tool_calls[0]["args"]["report"]["ID"] == ATTACHMENT_ID
 
+    async def test_a_verified_reference_lands_in_the_registry(self, fields, linked_job):
+        """Agent-output guardrails resolve files through the registry, so a file a
+        tool never registered is still inspected once Orchestrator vouched for it."""
+        node = create_output_files_node(fields, max_retries=2)
+
+        command = await node(state_ending_with({"summary": "s", "report": ticket()}))
+
+        registered = command.update["inner_state"]["job_attachments"]
+        assert list(registered) == [ATTACHMENT_ID]
+        assert registered[ATTACHMENT_ID].full_name == "report.md"
+
+    async def test_nothing_is_registered_without_a_job_key(self, fields, monkeypatch):
+        monkeypatch.delenv("UIPATH_JOB_KEY", raising=False)
+        node = create_output_files_node(fields, max_retries=2)
+
+        command = await node(state_ending_with({"summary": "s", "report": ticket()}))
+
+        assert command.goto == AgentGraphNode.TERMINATE
+        assert command.update["inner_state"]["job_attachments"] == {}
+
     async def test_an_edited_reference_reaches_termination_rebuilt(
         self, fields, linked_job
     ):

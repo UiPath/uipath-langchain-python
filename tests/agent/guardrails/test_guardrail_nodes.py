@@ -2,12 +2,15 @@
 
 import json
 import uuid
+from functools import partial
+from importlib.metadata import version as package_version
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from packaging.version import Version
 from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
@@ -1307,25 +1310,54 @@ class TestGuardrailNodeAttachments:
         assert fake.guardrails.last_attachments == []
 
     @pytest.mark.asyncio
-    async def test_tool_node_without_extractors_forwards_nothing(self, monkeypatch):
-        """A tool-scope built-in node built without the argument/result extractors has
-        no source to scan and must not fall back to the whole registry."""
+    async def test_node_without_an_attachment_source_reads_the_whole_registry(
+        self, monkeypatch
+    ):
+        """No source means the guardrail judges the conversation so far."""
         from uipath.platform.guardrails import GuardrailScope
 
         fake = _patch_uipath(monkeypatch, reason="ok")
 
         _, node = _create_guardrail_node(
             self._judge_guardrail(),
-            GuardrailScope.TOOL,
+            GuardrailScope.AGENT,
             ExecutionStage.PRE_EXECUTION,
             lambda state: "payload",
             "ok",
             "nope",
         )
-        cmd = await node(self._tool_pre_state({"attachment": {"ID": self._UUID}}))
+        cmd = await node(self._state_with_attachment())
 
         assert cmd.goto == "ok"
-        assert fake.guardrails.last_attachments == []
+        assert [a.id for a in fake.guardrails.last_attachments] == [self._UUID]
+
+    @pytest.mark.asyncio
+    async def test_a_raising_attachment_source_says_nothing_about_files(
+        self, monkeypatch
+    ):
+        """A source that blows up degrades to the text check: ``None``, not ``[]``,
+        which would let a files-only guardrail pass unread."""
+        from uipath.platform.guardrails import GuardrailScope
+
+        fake = _patch_uipath(monkeypatch, reason="ok")
+
+        def broken(_state):
+            raise RuntimeError("boom")
+
+        _, node = _create_guardrail_node(
+            self._judge_guardrail(),
+            GuardrailScope.AGENT,
+            ExecutionStage.POST_EXECUTION,
+            lambda state: "payload",
+            "ok",
+            "nope",
+            attachment_source=broken,
+        )
+        cmd = await node(self._state_with_attachment())
+
+        assert cmd.goto == "ok"
+        assert fake.guardrails.last_text == "payload"
+        assert fake.guardrails.last_attachments is None
 
     @pytest.mark.asyncio
     async def test_tool_post_node_evaluates_without_files_when_the_result_cannot_be_read(
@@ -1354,7 +1386,7 @@ class TestGuardrailNodeAttachments:
 
         assert cmd.goto == "ok"
         assert fake.guardrails.last_text == '{"ID": "not-json-but-mentions-ID"'
-        assert fake.guardrails.last_attachments == []
+        assert fake.guardrails.last_attachments is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1384,6 +1416,310 @@ class TestGuardrailNodeAttachments:
         await node(self._state_with_attachment())
 
         assert [a.id for a in fake.guardrails.last_attachments] == [self._UUID]
+
+    _IN = "0b6f3a2d-5e4c-4b1a-8f9e-1d2c3b4a5f60"
+    _OUT = "5d1e2f3a-4b5c-4d6e-8f70-819a2b3c4d5e"
+
+    @staticmethod
+    def _scoped_guardrail(applies_to: str) -> MagicMock:
+        from uipath.platform.guardrails.guardrails import EnumParameterValue
+
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "Protected code"
+        guardrail.validator_type = "intellectual_property"
+        guardrail.validator_parameters = [
+            EnumParameterValue.model_validate(
+                {"$parameterType": "enum", "id": "appliesTo", "value": applies_to}
+            )
+        ]
+        return guardrail
+
+    def _registry_with_input_and_output(self):
+        from uipath.platform.attachments import Attachment
+
+        return {
+            self._IN: Attachment(
+                id=uuid.UUID(self._IN), full_name="in.pdf", mime_type="application/pdf"
+            ),
+            self._OUT: Attachment(
+                id=uuid.UUID(self._OUT), full_name="out.py", mime_type="text/x-python"
+            ),
+        }
+
+    def _reference(self, attachment_id: str, name: str) -> dict[str, str]:
+        return {"ID": attachment_id, "FullName": name, "MimeType": "text/x-python"}
+
+    def _terminate_state(self, agent_result):
+        return AgentGuardrailsGraphState(
+            messages=[HumanMessage("payload")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._registry_with_input_and_output(),
+                agent_result=agent_result,
+            ),
+        )
+
+    def _llm_post_state(self, tool_calls):
+        return AgentGuardrailsGraphState(
+            messages=[HumanMessage("go"), AIMessage(content="", tool_calls=tool_calls)],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._registry_with_input_and_output()
+            ),
+        )
+
+    @staticmethod
+    def _terminate_node(guardrail):
+        _, node = create_agent_terminate_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        return node
+
+    @pytest.mark.asyncio
+    async def test_terminate_node_sends_only_the_files_the_output_references(
+        self, monkeypatch
+    ):
+        """The input file is in the registry but not in the output, so it is not
+        judged again as if the agent had produced it."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        result = {"summary": "done", "code": self._reference(self._OUT, "out.py")}
+
+        node = self._terminate_node(self._scoped_guardrail("Both"))
+        cmd = await node(self._terminate_state(result))
+
+        assert cmd.goto == "ok"
+        assert fake.guardrails.last_text == str(result)
+        assert [
+            a.model_dump(by_alias=True) for a in fake.guardrails.last_attachments
+        ] == [{"id": self._OUT, "fileName": "out.py", "mimeType": "text/x-python"}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "agent_result",
+        [{"summary": "no file here"}, None],
+        ids=["no-reference", "no-result"],
+    )
+    async def test_terminate_node_with_no_referenced_file_sends_an_empty_list(
+        self, monkeypatch, agent_result
+    ):
+        fake = _patch_uipath(monkeypatch, reason="ok")
+
+        node = self._terminate_node(self._scoped_guardrail("Files"))
+        await node(self._terminate_state(agent_result))
+
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        Version(package_version("uipath-platform")) < Version("0.2.36"),
+        reason="uipath-platform drops an empty attachments list before 0.2.36",
+    )
+    async def test_terminate_node_puts_an_empty_attachments_list_on_the_wire(
+        self, httpx_mock, monkeypatch
+    ):
+        base = "https://cloud.uipath.com/org/tenant"
+        monkeypatch.setenv("UIPATH_URL", base)
+        monkeypatch.setenv("UIPATH_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("UIPATH_TRACING_ENABLED", "False")
+        httpx_mock.add_response(
+            url=f"{base}/agentsruntime_/api/execution/guardrails/validate",
+            method="POST",
+            json={"result": "PASSED", "details": "no files were supplied"},
+        )
+        guardrail = BuiltInValidatorGuardrail.model_validate(
+            {
+                "$guardrailType": "builtInValidator",
+                "id": "ip-code-files",
+                "name": "Protected code in files",
+                "description": "",
+                "enabledForEvals": True,
+                "selector": {"scopes": ["Agent"]},
+                "validatorType": "intellectual_property",
+                "validatorParameters": [
+                    {"$parameterType": "enum", "id": "appliesTo", "value": "Files"}
+                ],
+            }
+        )
+
+        cmd = await self._terminate_node(guardrail)(
+            self._terminate_state({"summary": "no file here"})
+        )
+
+        assert cmd.goto == "ok"
+        [request] = httpx_mock.get_requests()
+        assert json.loads(request.content)["attachments"] == []
+
+    @pytest.mark.asyncio
+    async def test_terminate_node_skips_an_id_the_run_never_held(self, monkeypatch):
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        unknown = str(uuid.uuid4())
+
+        node = self._terminate_node(self._scoped_guardrail("Files"))
+        await node(self._terminate_state({"code": self._reference(unknown, "x.py")}))
+
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    async def test_terminate_node_flags_the_referenced_file_by_name(self, monkeypatch):
+        validation = GuardrailValidationResult.model_validate(
+            {
+                "result": GuardrailValidationResultType.VALIDATION_FAILED,
+                "reason": "protected code",
+                "flaggedAttachmentIds": [self._OUT.upper()],
+            }
+        )
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: FakeUiPath(validation),
+        )
+
+        node = self._terminate_node(self._scoped_guardrail("Files"))
+        cmd = await node(
+            self._terminate_state({"code": self._reference(self._OUT, "out.py")})
+        )
+
+        assert cmd.goto == "nope"
+        assert cmd.update["inner_state"]["guardrail_flagged_file_names"] == ["out.py"]
+
+    @pytest.mark.asyncio
+    async def test_llm_post_node_sends_the_file_the_tool_call_references(
+        self, monkeypatch
+    ):
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        args = {"summary": "done", "code": self._reference(self._OUT, "out.py")}
+
+        _, node = create_llm_guardrail_node(
+            guardrail=self._scoped_guardrail("Files"),
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        await node(
+            self._llm_post_state([{"name": "end_execution", "args": args, "id": "c1"}])
+        )
+
+        assert json.loads(fake.guardrails.last_text) == [args]
+        assert [a.file_name for a in fake.guardrails.last_attachments] == ["out.py"]
+
+    @pytest.mark.asyncio
+    async def test_llm_post_node_with_inline_file_content_sends_an_empty_list(
+        self, monkeypatch
+    ):
+        """Create-file content is text the LLM wrote; it is judged as the payload, and
+        no registered file is attached to it."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        args = {"fileName": "out.py", "content": "import pygame"}
+
+        _, node = create_llm_guardrail_node(
+            guardrail=self._scoped_guardrail("Files"),
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+        await node(
+            self._llm_post_state([{"name": "create_file", "args": args, "id": "c1"}])
+        )
+
+        assert fake.guardrails.last_attachments == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "factory,stage",
+        [
+            (create_agent_init_guardrail_node, ExecutionStage.PRE_EXECUTION),
+            (create_agent_terminate_guardrail_node, ExecutionStage.POST_EXECUTION),
+            (create_llm_guardrail_node, ExecutionStage.PRE_EXECUTION),
+            (create_llm_guardrail_node, ExecutionStage.POST_EXECUTION),
+            (
+                partial(create_tool_guardrail_node, tool_name="my_tool"),
+                ExecutionStage.PRE_EXECUTION,
+            ),
+            (
+                partial(create_tool_guardrail_node, tool_name="my_tool"),
+                ExecutionStage.POST_EXECUTION,
+            ),
+        ],
+        ids=["agent-pre", "agent-post", "llm-pre", "llm-post", "tool-pre", "tool-post"],
+    )
+    async def test_text_scope_says_nothing_about_files(
+        self, monkeypatch, factory, stage
+    ):
+        """Every source mentions the output file here, yet a text-only guardrail sends
+        no ``attachments`` at all."""
+        fake = _patch_uipath(monkeypatch, reason="ok")
+        reference = self._reference(self._OUT, "out.py")
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "my_tool", "args": {"f": reference}, "id": "c1"}
+                    ],
+                ),
+                ToolMessage(content=json.dumps({"f": reference}), tool_call_id="c1"),
+            ]
+            if stage == ExecutionStage.POST_EXECUTION
+            else [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "my_tool", "args": {"f": reference}, "id": "c1"}
+                    ],
+                )
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                job_attachments=self._registry_with_input_and_output(),
+                agent_result={"f": reference},
+            ),
+        )
+
+        _, node = factory(
+            guardrail=self._scoped_guardrail("Text"),
+            execution_stage=stage,
+            success_node="ok",
+            failure_node="nope",
+        )
+        await node(state)
+
+        assert fake.guardrails.call_count == 1
+        assert fake.guardrails.last_attachments is None
+
+    @pytest.mark.asyncio
+    async def test_a_400_on_an_empty_list_propagates(self, monkeypatch):
+        """Only rejected references are retried without them; with none sent, the 400
+        is about something else and must surface."""
+        import httpx
+        from uipath.platform.errors import EnrichedException
+
+        calls: list[Any] = []
+        response = httpx.Response(
+            400, request=httpx.Request("POST", "https://x/validate"), text="bad"
+        )
+        rejection = EnrichedException(
+            httpx.HTTPStatusError("400", request=response.request, response=response)
+        )
+
+        class FailingGuardrails:
+            def evaluate_guardrail(
+                self, text, guardrail, *, attachments=None, termination_mode=None
+            ):
+                calls.append(attachments)
+                raise rejection
+
+        class FailingUiPath:
+            guardrails = FailingGuardrails()
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: FailingUiPath(),
+        )
+
+        node = self._terminate_node(self._scoped_guardrail("Files"))
+        with pytest.raises(EnrichedException):
+            await node(self._terminate_state({"summary": "no file"}))
+
+        assert calls == [[]]
 
     @pytest.mark.asyncio
     async def test_attachment_rejection_falls_back_to_text_only(self, monkeypatch):
