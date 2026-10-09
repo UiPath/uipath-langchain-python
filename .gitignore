@@ -203,3 +203,6 @@ testcases/**/CLAUDE.md
 testcases/**/.agent/
 testcases/**/agent.mermaid
 testcases/**/project.uiproj
+
+# Generated at build time by hatch_build.py
+/src/uipath_langchain/_version.py
