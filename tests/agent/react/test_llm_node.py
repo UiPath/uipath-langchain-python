@@ -6,12 +6,14 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import openai
 import pytest
+from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.content import create_text_block, create_tool_call
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, tool
 from langchain_openai import AzureChatOpenAI
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.core.feature_flags import FeatureFlags
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -682,3 +684,136 @@ class TestForcedExtractionEscalation:
         node = create_llm_node(model, [tool])
         await node(AgentGraphState(messages=[HumanMessage(content="q")]))
         assert model.bind_tools.call_args.kwargs["tool_choice"] == "any"
+
+
+class TestBedrockPromptCaching:
+    """Bedrock Converse turns carry cachePoint markers when EnableBedrockPromptCaching
+    is on, so the repeated prompt prefix of an agent run is read from the cache."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_flags(self) -> Any:
+        FeatureFlags.reset_flags()
+        yield
+        FeatureFlags.reset_flags()
+
+    @staticmethod
+    def _converse_model(**kwargs: Any) -> tuple[ChatBedrockConverse, Mock]:
+        client = Mock()
+        client.converse.return_value = {
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "toolUse": {
+                                "toolUseId": "c1",
+                                "name": END_EXECUTION_TOOL.name,
+                                "input": {},
+                            }
+                        }
+                    ],
+                }
+            },
+            "stopReason": "tool_use",
+            "usage": {"inputTokens": 10, "outputTokens": 2, "totalTokens": 12},
+            "metrics": {"latencyMs": 1},
+        }
+        model = ChatBedrockConverse(
+            model_id="anthropic.claude-sonnet-4-5-20250929-v1:0",
+            region_name="us-east-1",
+            client=client,
+            **kwargs,
+        )
+        return model, client
+
+    @staticmethod
+    def _lookup_tool() -> BaseTool:
+        @tool
+        def lookup(query: str) -> str:
+            """Look something up."""
+            return query
+
+        return lookup
+
+    @staticmethod
+    def _state(*messages: Any) -> AgentGraphState:
+        return AgentGraphState(
+            messages=[SystemMessage(content="You are an agent."), *messages]
+        )
+
+    @staticmethod
+    def _cache_points(request: dict[str, Any]) -> dict[str, bool]:
+        def has_cache_point(blocks: list[Any]) -> bool:
+            return any(isinstance(b, dict) and "cachePoint" in b for b in blocks)
+
+        return {
+            "tools": has_cache_point(request["toolConfig"]["tools"]),
+            "system": has_cache_point(request["system"]),
+            "last_message": has_cache_point(request["messages"][-1]["content"]),
+        }
+
+    @pytest.mark.asyncio
+    async def test_flag_on_marks_tools_system_and_last_message(self) -> None:
+        FeatureFlags.configure_flags({"EnableBedrockPromptCaching": True})
+        model, client = self._converse_model()
+
+        node = create_llm_node(model, [self._lookup_tool()])
+        await node(self._state(HumanMessage(content="q")))
+
+        request = client.converse.call_args.kwargs
+        assert self._cache_points(request) == {
+            "tools": True,
+            "system": True,
+            "last_message": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_flag_off_sends_no_cache_points(self) -> None:
+        model, client = self._converse_model()
+
+        node = create_llm_node(model, [self._lookup_tool()])
+        await node(self._state(HumanMessage(content="q")))
+
+        request = client.converse.call_args.kwargs
+        assert self._cache_points(request) == {
+            "tools": False,
+            "system": False,
+            "last_message": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_forced_extraction_call_sends_no_cache_points(self) -> None:
+        """The extraction retry drops thinking, so its prefix can't match the run's
+        cache entries; marking it would only pay for a write nobody reads."""
+        FeatureFlags.configure_flags({"EnableBedrockPromptCaching": True})
+        model, client = self._converse_model(
+            additional_model_request_fields={
+                "thinking": {"type": "enabled", "budget_tokens": 1024}
+            },
+            supports_tool_choice_values=("auto", "any", "tool"),
+        )
+
+        node = create_llm_node(model, [self._lookup_tool()])
+        await node(
+            self._state(HumanMessage(content="q"), AIMessage(content="an answer"))
+        )
+
+        request = client.converse.call_args.kwargs
+        assert "thinking" not in request.get("additionalModelRequestFields", {})
+        assert self._cache_points(request) == {
+            "tools": False,
+            "system": False,
+            "last_message": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_non_bedrock_model_gets_no_cache_control(self) -> None:
+        FeatureFlags.configure_flags({"EnableBedrockPromptCaching": True})
+        model: Any = _StubAzureChatOpenAI.model_construct()
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="done"))
+
+        node = create_llm_node(model, [self._lookup_tool()])
+        await node(self._state(HumanMessage(content="q")))
+
+        assert "cache_control" not in model.bind_tools.call_args.kwargs
