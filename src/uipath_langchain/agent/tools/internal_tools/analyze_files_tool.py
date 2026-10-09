@@ -284,7 +284,7 @@ def create_analyze_file_tool(
 
         files = await _resolve_job_attachment_arguments(attachments)
         if not files:
-            return {"analysisResult": "No attachments provided to analyze."}
+            return {"analysis": "No attachments provided to analyze."}
 
         client: UiPath | None = None
         policy: dict[str, Any] | None = None
@@ -372,7 +372,7 @@ def create_analyze_file_tool(
                     category=UiPathErrorCategory.SYSTEM,
                 ) from exc
 
-        return {"analysisResult": analysis_result}
+        return {"analysis": analysis_result}
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
