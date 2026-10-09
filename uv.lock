@@ -4828,7 +4828,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.18.31"
+version = "0.18.32"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
