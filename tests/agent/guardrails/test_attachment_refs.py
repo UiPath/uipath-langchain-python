@@ -74,6 +74,7 @@ class TestResolveGuardrailAttachments:
     async def test_resolves_text_attachment(self, monkeypatch):
         result = await resolve_guardrail_attachments(_registry(), _judge())
 
+        assert result is not None
         assert [r.model_dump(by_alias=True) for r in result] == [
             {
                 "id": _UUID,
@@ -83,7 +84,13 @@ class TestResolveGuardrailAttachments:
         ]
 
     @pytest.mark.parametrize(
-        "validator_type", ["pii_detection", "user_prompt_attacks", "harmful_content"]
+        "validator_type",
+        [
+            "pii_detection",
+            "user_prompt_attacks",
+            "harmful_content",
+            "intellectual_property",
+        ],
     )
     async def test_resolves_for_any_validator(self, monkeypatch, validator_type):
         """The runtime forwards for every guardrail; the backend decides who can use it."""
@@ -92,6 +99,7 @@ class TestResolveGuardrailAttachments:
 
         result = await resolve_guardrail_attachments(_registry(), guardrail)
 
+        assert result is not None
         assert [r.file_name for r in result] == ["a.csv"]
 
     @pytest.mark.parametrize(
@@ -101,6 +109,7 @@ class TestResolveGuardrailAttachments:
         """No type filter here: the backend skips (and logs) what it cannot inspect."""
         result = await resolve_guardrail_attachments(_registry(mime=mime), _judge())
 
+        assert result is not None
         assert [r.mime_type for r in result] == [mime]
 
     @pytest.mark.parametrize("mime,name", [("", "a.csv"), ("text/csv", "")])
@@ -135,6 +144,7 @@ class TestResolveGuardrailAttachments:
 
         result = await resolve_guardrail_attachments(registry, _judge())
 
+        assert result is not None
         assert len(result) == 5
 
     async def test_malformed_entry_neither_raises_nor_consumes_a_slot(
@@ -152,12 +162,25 @@ class TestResolveGuardrailAttachments:
 
         result = await resolve_guardrail_attachments(registry, _judge())
 
+        assert result is not None
         assert [a.file_name for a in result] == [
             f"{i}.csv" for i in range(_MAX_ATTACHMENTS)
         ]
 
     async def test_returns_empty_for_empty_registry(self, monkeypatch):
         assert await resolve_guardrail_attachments({}, _judge()) == []
+
+    @pytest.mark.parametrize("applies_to", ["Files", "Both"])
+    async def test_files_scope_with_no_files_says_none_apply(self, applies_to):
+        """``[]`` tells the backend a files-only check has nothing to inspect."""
+        result = await resolve_guardrail_attachments({}, _scoped_judge(applies_to))
+
+        assert result == []
+
+    async def test_text_scope_says_nothing_about_files_even_without_any(self):
+        """The scope is read before the empty-registry shortcut: a text-only guardrail
+        sends no ``attachments`` at all, not an empty list."""
+        assert await resolve_guardrail_attachments({}, _scoped_judge("Text")) is None
 
     async def test_truncates_over_long_file_names_to_the_api_ceiling(self, monkeypatch):
         """The validate API rejects names over 260 chars; a 400 there would kill the run."""
@@ -167,6 +190,7 @@ class TestResolveGuardrailAttachments:
             _registry(name=long_name), _judge()
         )
 
+        assert result is not None
         assert len(result[0].file_name) == 260
 
     @pytest.mark.parametrize("applies_to,includes_files", _SCOPE_CASES)
@@ -178,7 +202,11 @@ class TestResolveGuardrailAttachments:
             _registry(), _scoped_judge(applies_to)
         )
 
-        assert [r.file_name for r in result] == (["a.csv"] if includes_files else [])
+        if includes_files:
+            assert result is not None
+            assert [r.file_name for r in result] == ["a.csv"]
+        else:
+            assert result is None
 
     async def test_matches_the_scope_parameter_id_case_insensitively(self, monkeypatch):
         """The backend matches parameter ids ignoring case; a mismatch here would resolve
@@ -187,7 +215,7 @@ class TestResolveGuardrailAttachments:
             _registry(), _scoped_judge("Text", parameter_id="AppliesTo")
         )
 
-        assert result == []
+        assert result is None
 
     async def test_resolves_when_the_scope_parameter_is_malformed(self, monkeypatch):
         """Never raises: the caller re-raises, which would end the run over a bad parameter."""
@@ -196,6 +224,7 @@ class TestResolveGuardrailAttachments:
 
         result = await resolve_guardrail_attachments(_registry(), guardrail)
 
+        assert result is not None
         assert [r.file_name for r in result] == ["a.csv"]
 
 
@@ -217,6 +246,7 @@ class TestResolveReferencedAttachments:
             _judge(),
         )
 
+        assert result is not None
         assert [r.model_dump(by_alias=True) for r in result] == [
             {"id": _UUID, "fileName": "a.csv", "mimeType": "text/csv"}
         ]
@@ -240,6 +270,7 @@ class TestResolveReferencedAttachments:
 
         result = resolve_referenced_attachments(data, registry, _judge())
 
+        assert result is not None
         assert sorted(r.id for r in result) == sorted([_UUID, other_id])
 
     async def test_skips_an_id_the_run_never_held_even_with_inline_name_and_type(
@@ -258,6 +289,7 @@ class TestResolveReferencedAttachments:
 
         result = resolve_referenced_attachments(data, _registry(), _judge())
 
+        assert result is not None
         assert [(r.file_name, r.mime_type) for r in result] == [("a.csv", "text/csv")]
 
     async def test_skips_a_uuid_that_is_not_one_of_the_run_attachments(self):
@@ -278,6 +310,7 @@ class TestResolveReferencedAttachments:
 
         result = resolve_referenced_attachments(data, _registry(), _judge())
 
+        assert result is not None
         assert [r.id for r in result] == [_UUID]
 
     async def test_caps_at_the_api_limit(self):
@@ -286,6 +319,7 @@ class TestResolveReferencedAttachments:
 
         result = resolve_referenced_attachments(data, registry, _judge())
 
+        assert result is not None
         assert len(result) == _MAX_ATTACHMENTS
 
     @pytest.mark.parametrize("applies_to,includes_files", _SCOPE_CASES)
@@ -294,7 +328,39 @@ class TestResolveReferencedAttachments:
             {"attachment": {"ID": _UUID}}, _registry(), _scoped_judge(applies_to)
         )
 
-        assert [r.file_name for r in result] == (["a.csv"] if includes_files else [])
+        if includes_files:
+            assert result is not None
+            assert [r.file_name for r in result] == ["a.csv"]
+        else:
+            assert result is None
+
+    async def test_text_scope_says_nothing_about_files_even_for_a_missing_payload(
+        self,
+    ):
+        assert (
+            resolve_referenced_attachments(None, _registry(), _scoped_judge("Text"))
+            is None
+        )
+
+    async def test_a_missing_payload_has_no_files_to_inspect(self):
+        assert resolve_referenced_attachments(None, _registry(), _judge()) == []
+
+    async def test_keeps_document_order_under_the_api_limit(self):
+        """When more files are mentioned than the API accepts, the first ones written
+        are sent, so a file named early in the output is never dropped for a later one."""
+        entries = [_other_attachment(f"{index}.txt") for index in range(7)]
+        registry = dict(entries)
+        ids = [attachment_id for attachment_id, _ in entries]
+        data = {
+            "first": {"ID": ids[0]},
+            "nested": {"a": [{"ID": ids[1]}, {"ID": ids[2]}], "b": {"ID": ids[3]}},
+            "rest": [{"ID": attachment_id} for attachment_id in ids[4:]],
+        }
+
+        result = resolve_referenced_attachments(data, registry, _judge())
+
+        assert result is not None
+        assert [r.file_name for r in result] == [f"{i}.txt" for i in range(5)]
 
     async def test_accepts_attachment_instances_and_models(self):
         """Arguments may already carry expanded objects, not only wire dicts; they are
@@ -311,6 +377,7 @@ class TestResolveReferencedAttachments:
 
         result = resolve_referenced_attachments(data, registry, _judge())
 
+        assert result is not None
         assert [r.id for r in result] == [_UUID]
 
     async def test_bounds_the_scan_on_deep_and_large_payloads(self):
@@ -359,15 +426,17 @@ class _MentionWithUnreadableId(dict[str, Any]):
 
 
 class TestResolveReferencedAttachmentsErrorPaths:
-    async def test_returns_empty_when_the_payload_cannot_be_scanned(self):
-        """The guardrail node re-raises, so a broken payload must degrade to no files."""
+    async def test_says_nothing_about_files_when_the_payload_cannot_be_scanned(self):
+        """The guardrail node re-raises, so a broken payload must degrade to the text
+        check rather than to "no files", which would pass a files-only guardrail."""
         data = {"result": _UnscannablePayload(ID=_UUID)}
 
-        assert resolve_referenced_attachments(data, _registry(), _judge()) == []
+        assert resolve_referenced_attachments(data, _registry(), _judge()) is None
 
     async def test_skips_a_mention_whose_id_cannot_be_read(self):
         data = {"file": _MentionWithUnreadableId(), "other": {"ID": _UUID}}
 
         result = resolve_referenced_attachments(data, _registry(), _judge())
 
+        assert result is not None
         assert [r.id for r in result] == [_UUID]
