@@ -205,45 +205,35 @@ def _create_validation_command(
     )
 
 
+AttachmentSource = Callable[[AgentGuardrailsGraphState], Any]
+"""Reads, from the state, the payload whose file mentions a guardrail inspects."""
+
+
 async def _resolve_attachments(
     state: AgentGuardrailsGraphState,
     guardrail: BuiltInValidatorGuardrail,
-    scope: GuardrailScope,
-    execution_stage: ExecutionStage,
-    input_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
-    output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
-) -> list[GuardrailAttachment]:
+    attachment_source: AttachmentSource | None,
+) -> list[GuardrailAttachment] | None:
     """Attachment references for one built-in guardrail evaluation.
 
-    Agent and LLM scope judge the conversation, so they read the run's whole attachment
-    registry. Tool scope judges one call, so it reads only the files that call's
-    arguments (pre-execution) or result (post-execution) mention: a tool call without a
-    file forwards nothing even when the run has files elsewhere. Never raises.
+    Without a source the guardrail judges the conversation so far, so it reads the run's
+    whole attachment registry. With one it judges a single payload, so it reads only the
+    files that payload mentions. ``None`` lets the backend fall back to the text; a
+    source that raises gets that too. Never raises.
     """
     registry = state.inner_state.job_attachments
-    if scope != GuardrailScope.TOOL:
+    if attachment_source is None:
         return await resolve_guardrail_attachments(registry, guardrail)
-
-    if execution_stage == ExecutionStage.PRE_EXECUTION:
-        extractor, source_name = input_data_extractor, "arguments"
-    else:
-        extractor, source_name = output_data_extractor, "result"
-        # A mention always carries the literal ``ID`` key; skip parsing plain-text
-        # results, which the output extractor would otherwise warn about.
-        if not state.messages or "ID" not in get_message_content(state.messages[-1]):
-            return []
-    if extractor is None:
-        return []
     try:
-        source = extractor(state)
+        source = attachment_source(state)
     except Exception:
         logger.warning(
-            "Could not read the tool %s for guardrail '%s'; evaluating without files.",
-            source_name,
+            "Could not read the payload of guardrail '%s' for files; evaluating "
+            "without them.",
             guardrail.name,
             exc_info=True,
         )
-        return []
+        return None
     return resolve_referenced_attachments(source, registry, guardrail)
 
 
@@ -261,12 +251,16 @@ def _create_guardrail_node(
     tool_name: str | None = None,
     tool_type: str | None = None,
     termination_mode: GuardrailTerminationMode | None = None,
+    attachment_source: AttachmentSource | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
     Returns a node with observability metadata attached as __metadata__ attribute:
     - goto success_node on validation pass
     - goto failure_node on validation fail
+
+    ``attachment_source`` picks the files a built-in guardrail inspects; see
+    :func:`_resolve_attachments`.
     """
     raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}"
     node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
@@ -317,12 +311,7 @@ def _create_guardrail_node(
                     metadata["payload"]["output"] = payload
 
                 attachments = await _resolve_attachments(
-                    state,
-                    guardrail,
-                    scope,
-                    execution_stage,
-                    input_data_extractor,
-                    output_data_extractor,
+                    state, guardrail, attachment_source
                 )
 
                 result = await _evaluate_builtin_guardrail(
@@ -382,6 +371,11 @@ def create_llm_guardrail_node(
             case ExecutionStage.POST_EXECUTION:
                 return json.dumps(_extract_tools_args_from_message(state.messages[-1]))
 
+    def _tool_call_args(state: AgentGuardrailsGraphState) -> Any:
+        if not state.messages:
+            return None
+        return _extract_tools_args_from_message(state.messages[-1])
+
     return _create_guardrail_node(
         guardrail,
         GuardrailScope.LLM,
@@ -390,6 +384,11 @@ def create_llm_guardrail_node(
         success_node,
         failure_node,
         termination_mode=termination_mode,
+        attachment_source=(
+            _tool_call_args
+            if execution_stage == ExecutionStage.POST_EXECUTION
+            else None
+        ),
     )
 
 
@@ -428,6 +427,9 @@ def create_agent_terminate_guardrail_node(
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         return str(state.inner_state.agent_result)
 
+    def _agent_result(state: AgentGuardrailsGraphState) -> Any:
+        return state.inner_state.agent_result
+
     return _create_guardrail_node(
         guardrail,
         GuardrailScope.AGENT,
@@ -436,6 +438,7 @@ def create_agent_terminate_guardrail_node(
         success_node,
         failure_node,
         termination_mode=termination_mode,
+        attachment_source=_agent_result,
     )
 
 
@@ -539,6 +542,13 @@ def create_tool_guardrail_node(
     def _output_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
         return _extract_tool_output_data(state)
 
+    def _tool_result(state: AgentGuardrailsGraphState) -> Any:
+        # A mention always carries the literal ``ID`` key; skip parsing plain-text
+        # results, which the output extractor would otherwise warn about.
+        if not state.messages or "ID" not in get_message_content(state.messages[-1]):
+            return None
+        return _extract_tool_output_data(state)
+
     return _create_guardrail_node(
         guardrail,
         GuardrailScope.TOOL,
@@ -551,4 +561,9 @@ def create_tool_guardrail_node(
         tool_name,
         tool_type,
         termination_mode=termination_mode,
+        attachment_source=(
+            _current_call_args
+            if execution_stage == ExecutionStage.PRE_EXECUTION
+            else _tool_result
+        ),
     )
