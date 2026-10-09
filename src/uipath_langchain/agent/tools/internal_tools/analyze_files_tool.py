@@ -250,6 +250,16 @@ def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) 
             logger.exception("Failed to set PII Masking input/output attributes")
 
 
+def _tool_result(analysis: str) -> dict[str, str]:
+    """Build the tool result, carrying the answer under both of its keys.
+
+    ``analysis`` is the field the tool's output schema declares, so it is the one tool
+    guardrail rules select. ``analysisResult`` is the key the tool returned before, kept
+    so anything that reads it keeps working.
+    """
+    return {"analysis": analysis, "analysisResult": analysis}
+
+
 def create_analyze_file_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
@@ -284,7 +294,7 @@ def create_analyze_file_tool(
 
         files = await _resolve_job_attachment_arguments(attachments)
         if not files:
-            return {"analysis": "No attachments provided to analyze."}
+            return _tool_result("No attachments provided to analyze.")
 
         client: UiPath | None = None
         policy: dict[str, Any] | None = None
@@ -372,7 +382,7 @@ def create_analyze_file_tool(
                     category=UiPathErrorCategory.SYSTEM,
                 ) from exc
 
-        return {"analysis": analysis_result}
+        return _tool_result(analysis_result)
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
