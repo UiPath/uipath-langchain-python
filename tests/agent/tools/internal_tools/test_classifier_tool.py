@@ -1,4 +1,4 @@
-"""Tests for jev_classifier_tool.py module."""
+"""Tests for the classifier tool: shared behavior, with the Jev (TypeSafe) provider."""
 
 import json
 from typing import Any
@@ -20,7 +20,10 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import BaseModel
-from uipath.agent.models.agent import AgentInternalToolResourceConfig
+from uipath.agent.models.agent import (
+    AgentInternalToolResourceConfig,
+    ClassifierProvider,
+)
 from uipath.llm_client import UiPathAPIError
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -32,17 +35,22 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.agent.react.agent import create_agent
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.internal_tools.classifier.tool import (
+    PROVIDERS,
+    parse_classifier_questions,
+)
+from uipath_langchain.agent.tools.internal_tools.classifier.typesafe import (
+    build_jev_questions,
+)
 from uipath_langchain.agent.tools.internal_tools.internal_tool_factory import (
     create_internal_tool,
-)
-from uipath_langchain.agent.tools.internal_tools.jev_classifier_tool import (
-    build_jev_questions,
-    parse_jev_questions,
 )
 from uipath_langchain.agent.tools.static_args import StaticArgsHandler
 from uipath_langchain.agent.tools.tool_node import create_tool_node
 
-MODULE = "uipath_langchain.agent.tools.internal_tools.jev_classifier_tool"
+PACKAGE = "uipath_langchain.agent.tools.internal_tools.classifier"
+MODULE = f"{PACKAGE}.tool"
+TYPESAFE = PROVIDERS[ClassifierProvider.TYPESAFE]
 
 pytestmark = pytest.mark.usefixtures("_passthrough_mockable")
 
@@ -462,8 +470,8 @@ def _resource(
             "inputSchema": input_schema or _input_schema(state, questions),
             "outputSchema": output_schema or {"type": "object", "properties": {}},
             "properties": {
-                "toolType": "jev-classifier",
-                "settings": {"model": "jev-latest"},
+                "toolType": "classifier",
+                "settings": {"provider": "typesafe", "model": "jev-latest"},
             },
             "argumentProperties": (
                 STATIC_QUESTIONS if argument_properties is None else argument_properties
@@ -486,7 +494,9 @@ def _passthrough_mockable():
 def jev_client() -> Any:
     client = MagicMock()
     client.asystem_one = AsyncMock(return_value=JEV_RESPONSE)
-    with patch(f"{MODULE}.UiPathJevClient", return_value=client) as client_cls:
+    with patch(
+        f"{PACKAGE}.typesafe.UiPathJevClient", return_value=client
+    ) as client_cls:
         client.cls = client_cls
         yield client
 
@@ -605,10 +615,12 @@ def test_noul_criteria_payload(
 ) -> None:
     question = {**IS_URGENT, "criteria": criteria}
 
-    [entry] = build_jev_questions(parse_jev_questions([question])).values()
+    [entry] = build_jev_questions(
+        parse_classifier_questions([question], TYPESAFE)
+    ).values()
 
     assert entry.get("criteria") == expected
-    assert build_jev_questions(parse_jev_questions([IS_URGENT])) == {
+    assert build_jev_questions(parse_classifier_questions([IS_URGENT], TYPESAFE)) == {
         "is_urgent": {"type": "noul", "instructions": "Is this urgent?"}
     }
 
@@ -1435,7 +1447,9 @@ async def test_answers_are_passed_through_with_fields_jev_adds(
 
 
 async def test_client_configuration_failure_is_runtime_error() -> None:
-    with patch(f"{MODULE}.UiPathJevClient", side_effect=ValueError("no settings")):
+    with patch(
+        f"{PACKAGE}.typesafe.UiPathJevClient", side_effect=ValueError("no settings")
+    ):
         tool = create_internal_tool(_resource(), AsyncMock())
 
         with pytest.raises(AgentRuntimeError, match="configure access to Jev"):
