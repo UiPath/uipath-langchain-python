@@ -123,3 +123,54 @@ async def test_conversational_budget_is_per_exchange() -> None:
         await graph.ainvoke({"messages": history}, {"recursion_limit": 100})
 
     assert len(calls) == 2
+
+
+def _delegates_then_never_stops(calls: list[int]) -> _ToolCallingFakeModel:
+    """A model whose first call delegates to a subagent that then loops forever."""
+
+    def messages() -> Iterator[AIMessage]:
+        calls.append(1)
+        yield AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "task",
+                    "args": {
+                        "description": "loop",
+                        "subagent_type": "general-purpose",
+                    },
+                    "id": "delegate",
+                }
+            ],
+        )
+        yield from _never_stops(calls).messages
+
+    return _ToolCallingFakeModel(messages=messages())
+
+
+@pytest.mark.asyncio
+async def test_subagent_calls_spend_the_turn_budget() -> None:
+    calls: list[int] = []
+    graph = _autonomous_graph(_delegates_then_never_stops(calls), max_iterations=3)
+
+    with pytest.raises(AgentRuntimeError) as error:
+        await graph.ainvoke({"task": "delegate"}, {"recursion_limit": 100})
+
+    assert error.value.error_info.code == "AGENT_RUNTIME.TERMINATION_MAX_ITERATIONS"
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_budget_is_kept_per_thread() -> None:
+    """Runs sharing a compiled graph do not spend each other's budget."""
+    calls: list[int] = []
+    graph = _autonomous_graph(_never_stops(calls), max_iterations=2)
+
+    for thread_id in ("a", "b"):
+        with pytest.raises(AgentRuntimeError):
+            await graph.ainvoke(
+                {"task": "loop"},
+                {"recursion_limit": 100, "configurable": {"thread_id": thread_id}},
+            )
+
+    assert len(calls) == 4

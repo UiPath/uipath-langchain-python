@@ -72,6 +72,29 @@ class TestBuildNodeName:
 
 
 # ---------------------------------------------------------------------------
+# _is_inside_tool_call
+# ---------------------------------------------------------------------------
+
+
+class TestIsInsideToolCall:
+    def setup_method(self) -> None:
+        self.rt = _make_runtime()
+
+    def test_agent_loop_is_not_inside_a_tool_call(self) -> None:
+        assert not self.rt._is_inside_tool_call(())
+        assert not self.rt._is_inside_tool_call(("advanced_agent:a",))
+
+    def test_graph_run_by_a_tool_is_inside_a_tool_call(self) -> None:
+        assert self.rt._is_inside_tool_call(("advanced_agent:a", "tools:b"))
+
+    def test_node_merely_prefixed_with_tools_is_not_a_tool_call(self) -> None:
+        assert not self.rt._is_inside_tool_call(("tools_router:a",))
+
+    def test_non_tuple_namespace_is_not_inside_a_tool_call(self) -> None:
+        assert not self.rt._is_inside_tool_call(None)
+
+
+# ---------------------------------------------------------------------------
 # _extract_graph_result
 # ---------------------------------------------------------------------------
 
