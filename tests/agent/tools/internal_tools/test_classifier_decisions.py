@@ -450,6 +450,49 @@ async def test_images_reach_decisions_as_data_urls(decisions_client: Any) -> Non
     ]
 
 
+async def test_each_tiff_page_reaches_decisions_as_a_png(
+    decisions_client: Any,
+) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(
+        url="https://blob/scan.tiff", name="scan.tiff", mime_type="image/tiff"
+    )
+    pages = [
+        {"type": "image", "base64": "UDE=", "mime_type": "image/png"},
+        {"type": "image", "base64": "UDI=", "mime_type": "image/png"},
+    ]
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(
+            f"{PACKAGE}.tool.stream_tiff_to_content_blocks",
+            AsyncMock(return_value=pages),
+        ) as convert,
+    ):
+        await tool.ainvoke(
+            _args(
+                tool,
+                {"input": "", "images": [{**ATTACHMENT, "FullName": "scan.tiff"}]},
+            )
+        )
+
+    assert convert.await_args is not None
+    assert convert.await_args.args == ("https://blob/scan.tiff",)
+    sent_input, _ = decisions_client.acreate.await_args.args
+    assert sent_input == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_image", "image_url": "data:image/png;base64,UDE="},
+                {"type": "input_image", "image_url": "data:image/png;base64,UDI="},
+            ],
+        }
+    ]
+
+
 async def test_a_file_that_is_not_an_image_is_a_tool_error(
     decisions_client: Any,
 ) -> None:
@@ -548,11 +591,35 @@ async def test_malformed_response_is_an_invalid_response_error(
     assert detail in error.detail
 
 
-async def test_unknown_model_is_a_user_runtime_error(decisions_client: Any) -> None:
-    decisions_client.acreate.side_effect = _decisions_error(
-        404,
-        {"error": {"code": "model_not_found", "message": "The model does not exist"}},
-    )
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        pytest.param(
+            404,
+            {
+                "error": {
+                    "code": "model_not_found",
+                    "message": "The model does not exist",
+                }
+            },
+            id="openai-404",
+        ),
+        pytest.param(
+            400,
+            {
+                "error": {
+                    "message": "Unsupported model used. The list of supported "
+                    "models is : jev-1.13.0,gpt-6-luna"
+                }
+            },
+            id="llm-gateway-400",
+        ),
+    ],
+)
+async def test_unknown_model_is_a_user_runtime_error(
+    decisions_client: Any, status: int, body: Any
+) -> None:
+    decisions_client.acreate.side_effect = _decisions_error(status, body)
     tool = create_internal_tool(_resource(), AsyncMock())
 
     with pytest.raises(AgentRuntimeError) as exc_info:

@@ -31,6 +31,16 @@ CONFIDENCE_SCHEMA: dict[str, Any] = {
 }
 
 
+def is_gateway_unknown_model_error(status_code: int, message: str) -> bool:
+    """Whether the LLM Gateway rejected the call because it does not serve the model.
+
+    The gateway answers before the vendor sees the request, for every provider,
+    with 400 and the message "Unsupported model used. The list of supported models
+    is : ..." (``message`` is the provider's message in the error response).
+    """
+    return status_code == 400 and message.lower().startswith("unsupported model used")
+
+
 def is_finite_number(value: Any) -> bool:
     return (
         isinstance(value, (int, float))

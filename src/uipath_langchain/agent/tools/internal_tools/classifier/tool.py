@@ -46,9 +46,11 @@ from uipath_langchain.agent.exceptions.llm import raise_for_provider_http_error
 from uipath_langchain.agent.multimodal import (
     download_file_base64,
     is_image,
+    is_tiff,
     normalize_mime_type,
 )
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES
+from uipath_langchain.agent.multimodal.utils import stream_tiff_to_content_blocks
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,
@@ -62,7 +64,11 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 from .decisions import DecisionsProvider
-from .provider import INPUT_ERROR_STATUSES, ClassifierProviderAdapter
+from .provider import (
+    INPUT_ERROR_STATUSES,
+    ClassifierProviderAdapter,
+    is_gateway_unknown_model_error,
+)
 from .typesafe import TypeSafeProvider
 
 QUESTIONS_ARGUMENT = "questions"
@@ -497,12 +503,30 @@ def _input_error(llm_wrote_it: bool, title: str, detail: str) -> Exception:
 async def _read_images(
     provider: ClassifierProviderAdapter, config: _ClassifierConfig, value: Any
 ) -> list[str]:
-    """The images argument (job attachments) as data URLs."""
+    """The images argument (job attachments) as data URLs.
+
+    A TIFF becomes one PNG per page, as for the other file tools.
+    """
     if not value:
         return []
     images: list[str] = []
     for file in await resolve_attachments_to_file_infos(list(value)):
         mime_type = normalize_mime_type(file.mime_type, file.name)
+        if is_tiff(mime_type):
+            try:
+                pages = await stream_tiff_to_content_blocks(
+                    file.url, max_size=MAX_FILE_SIZE_BYTES
+                )
+            except ValueError as exc:
+                raise _input_error(
+                    config.llm_writes_images,
+                    "Image too large",
+                    f"File '{file.name}': {exc}",
+                ) from exc
+            images.extend(
+                f"data:{page['mime_type']};base64,{page['base64']}" for page in pages
+            )
+            continue
         if not is_image(mime_type):
             raise _input_error(
                 config.llm_writes_images,
@@ -568,7 +592,9 @@ def _raise_for_api_error(
 ) -> None:
     """Raise the tool error for a call the provider rejected."""
     name = provider.display_name
-    if provider.is_unknown_model_error(error):
+    if provider.is_unknown_model_error(error) or is_gateway_unknown_model_error(
+        error.status_code, provider.provider_message(error)
+    ):
         # The model comes from the tool settings, so the LLM cannot fix it.
         raise AgentRuntimeError(
             code=AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST,
@@ -581,11 +607,18 @@ def _raise_for_api_error(
             status=error.status_code,
         ) from error
     if llm_writes_input and error.status_code in INPUT_ERROR_STATUSES:
+        # A request over the size limit is answered 413 with an unrelated message.
+        too_large = (
+            "The request is too large: send fewer or smaller images, or a "
+            "shorter input. "
+            if error.status_code == 413
+            else ""
+        )
         raise ToolException(
             f"{name} rejected the input (HTTP {error.status_code}): "
-            f"{provider.provider_message(error)}\nFix the arguments (the input "
-            f"and questions together must also fit {name}'s context length) and "
-            "call the tool again."
+            f"{provider.provider_message(error)}\n{too_large}Fix the arguments "
+            f"(the input and questions together must also fit {name}'s context "
+            "length) and call the tool again."
         ) from error
     raise_for_provider_http_error(error)
 

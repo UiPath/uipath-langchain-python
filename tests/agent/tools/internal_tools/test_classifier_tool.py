@@ -1153,6 +1153,7 @@ async def test_jev_input_error_for_llm_content_is_a_tool_error(
     assert message.status == "error"
     assert "Context length exceeded" in message.content
     assert f"HTTP {status}" in message.content
+    assert ("The request is too large" in message.content) == (status == 413)
 
 
 # --- Configuration errors (not the LLM's to fix) --------------------------------
