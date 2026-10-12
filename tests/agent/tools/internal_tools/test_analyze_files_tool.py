@@ -218,7 +218,10 @@ class TestCreateAnalyzeFileTool:
         )
 
         # Verify calls
-        assert result == {"analysisResult": "Analyzed result"}
+        assert result == {
+            "analysis": "Analyzed result",
+            "analysisResult": "Analyzed result",
+        }
         mock_resolve_attachments.assert_called_once()
         mock_add_files.assert_called_once()
         mock_llm.ainvoke.assert_called_once()
@@ -439,13 +442,98 @@ class TestCreateAnalyzeFileTool:
             analysisTask="Compare these documents", attachments=mock_attachments
         )
 
-        assert result == {"analysisResult": "Multiple files analyzed"}
+        assert result == {
+            "analysis": "Multiple files analyzed",
+            "analysisResult": "Multiple files analyzed",
+        }
         mock_resolve_attachments.assert_called_once()
 
         # Verify add_files_to_message received both files
         call_args = mock_add_files.call_args
         files = call_args[0][1]
         assert len(files) == 2
+
+    @pytest.mark.parametrize(
+        ("resolved_files", "expected_analysis"),
+        [
+            (
+                [
+                    FileInfo(
+                        url="https://example.com/file.txt",
+                        name="file.txt",
+                        mime_type="text/plain",
+                    )
+                ],
+                "Name: John Smith",
+            ),
+            ([], "No attachments provided to analyze."),
+        ],
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_result_has_the_output_schema_field_and_the_legacy_key(
+        self,
+        mock_resolve_attachments: AsyncMock,
+        mock_add_files: AsyncMock,
+        mock_llm: AsyncMock,
+        resolved_files: list[FileInfo],
+        expected_analysis: str,
+    ) -> None:
+        """The answer is under every field of the output schema Agent Builder sends, so
+        a tool guardrail rule on the output field `analysis` finds it, and still under
+        the legacy `analysisResult` key."""
+        resource_config = AgentInternalToolResourceConfig(
+            name="Analyze Files",
+            description="Analyze files with AI",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "attachments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ID": {"type": "string"},
+                                "FullName": {"type": "string"},
+                                "MimeType": {"type": "string"},
+                            },
+                        },
+                    },
+                    "analysisTask": {"type": "string"},
+                },
+                "required": ["attachments", "analysisTask"],
+            },
+            output_schema={
+                "type": "object",
+                "properties": {"analysis": {"type": "string"}},
+                "required": ["analysis"],
+            },
+            properties=AgentInternalAnalyzeFilesToolProperties(
+                tool_type=AgentInternalToolType.ANALYZE_FILES
+            ),
+        )
+        mock_resolve_attachments.return_value = resolved_files
+        mock_add_files.return_value = HumanMessage(content="List the details")
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Name: John Smith"))
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        assert tool.coroutine is not None
+        result = await tool.coroutine(
+            analysisTask="List the details",
+            attachments=[
+                MockAttachment(
+                    ID=str(uuid.uuid4()), FullName="file.txt", MimeType="text/plain"
+                )
+            ],
+        )
+
+        for field in resource_config.output_schema["properties"]:
+            assert result[field] == expected_analysis
+        assert result["analysisResult"] == expected_analysis
 
 
 class TestResolveJobAttachmentArguments:
@@ -947,7 +1035,10 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
         assert message_arg.content == "contact [EMAIL]"
         assert files_arg[0].name == "pii_masked_doc.pdf"
 
-        assert result == {"analysisResult": "Sent to john@example.com"}
+        assert result == {
+            "analysis": "Sent to john@example.com",
+            "analysisResult": "Sent to john@example.com",
+        }
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
