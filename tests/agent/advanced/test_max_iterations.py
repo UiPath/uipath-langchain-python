@@ -41,24 +41,24 @@ class _ToolCallingFakeModel(GenericFakeChatModel):
         return self
 
 
+def _ping_forever(calls: list[int]) -> Iterator[AIMessage]:
+    while True:
+        calls.append(len(calls) + 1)
+        yield AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "ping",
+                    "args": {"value": str(len(calls))},
+                    "id": f"call-{len(calls)}",
+                }
+            ],
+        )
+
+
 def _never_stops(calls: list[int]) -> _ToolCallingFakeModel:
     """A model that always asks for another tool call, so only the budget stops it."""
-
-    def messages() -> Iterator[AIMessage]:
-        while True:
-            calls.append(len(calls) + 1)
-            yield AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "ping",
-                        "args": {"value": str(len(calls))},
-                        "id": f"call-{len(calls)}",
-                    }
-                ],
-            )
-
-    return _ToolCallingFakeModel(messages=messages())
+    return _ToolCallingFakeModel(messages=_ping_forever(calls))
 
 
 def _autonomous_graph(model: BaseChatModel, max_iterations: int | None) -> Any:
@@ -143,7 +143,7 @@ def _delegates_then_never_stops(calls: list[int]) -> _ToolCallingFakeModel:
                 }
             ],
         )
-        yield from _never_stops(calls).messages
+        yield from _ping_forever(calls)
 
     return _ToolCallingFakeModel(messages=messages())
 
