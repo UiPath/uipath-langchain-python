@@ -8,13 +8,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
+    _IterationBudget,
     _MaxIterationsMiddleware,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
@@ -163,26 +165,32 @@ async def test_subagent_calls_spend_the_turn_budget() -> None:
 
 
 class _DelegatingModel(_ToolCallingFakeModel):
-    """Delegates on the user's request, then asks for another tool call forever."""
+    """Delegates on the user's request, then asks for another tool call forever.
+
+    ``subagent_answers`` makes the subagent reply on its first call, and
+    ``main_answers`` makes the main agent reply once the subagent reported back.
+    """
 
     calls: list[int] = []
+    subagent_answers: bool = False
+    main_answers: bool = False
 
     def _generate(
         self, messages: list[BaseMessage], *args: Any, **kwargs: Any
     ) -> ChatResult:
         self.calls.append(1)
-        delegate = (
-            isinstance(messages[-1], HumanMessage)
-            and messages[-1].content == "delegate"
-        )
-        call = (
-            {
+        last = messages[-1]
+        if isinstance(last, HumanMessage) and last.content == "delegate":
+            call: dict[str, Any] = {
                 "name": "task",
                 "args": {"description": "loop", "subagent_type": "general-purpose"},
             }
-            if delegate
-            else {"name": "ping", "args": {"value": "x"}}
-        )
+        elif (isinstance(last, HumanMessage) and self.subagent_answers) or (
+            isinstance(last, ToolMessage) and last.name == "task" and self.main_answers
+        ):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage("done"))])
+        else:
+            call = {"name": "ping", "args": {"value": "x"}}
         message = AIMessage(
             content="", tool_calls=[{**call, "id": f"call-{len(self.calls)}"}]
         )
@@ -205,3 +213,53 @@ async def test_budget_is_kept_per_thread() -> None:
     await asyncio.gather(run("a"), run("b"))
 
     assert len(model.calls) == 6
+
+
+@pytest.mark.asyncio
+async def test_finished_subagent_calls_still_count() -> None:
+    """A subagent's calls keep counting after its task call returns."""
+    model = _DelegatingModel(messages=iter([]), calls=[], subagent_answers=True)
+    graph = _autonomous_graph(model, max_iterations=4)
+
+    with pytest.raises(AgentRuntimeError):
+        await graph.ainvoke({"task": "delegate"}, {"recursion_limit": 100})
+
+    assert len(model.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_each_exchange_gets_a_fresh_subagent_budget() -> None:
+    model = _DelegatingModel(
+        messages=iter([]), calls=[], subagent_answers=True, main_answers=True
+    )
+    graph = create_conversational_advanced_agent_graph(
+        model=model,
+        tools=[ping],
+        system_prompt="sys",
+        backend=None,
+        max_iterations=3,
+    ).compile(checkpointer=InMemorySaver())
+    config: Any = {"recursion_limit": 100, "configurable": {"thread_id": "chat"}}
+
+    await graph.ainvoke({"messages": [HumanMessage("delegate")]}, config)
+    state = await graph.aget_state(config)
+    history = [*state.values["messages"], HumanMessage("delegate")]
+    await graph.ainvoke({"messages": history}, config)
+
+    assert len(model.calls) == 6
+
+
+def test_running_subagents_are_forgotten_once_their_task_ends() -> None:
+    budget = _IterationBudget(max_iterations=5)
+    with patch(
+        "uipath_langchain.agent.advanced.agent.get_config",
+        return_value={"configurable": {"thread_id": "t"}},
+    ):
+        budget.start_task(spent=1)
+        budget.start_task(spent=1)
+        budget.spend_subagent()
+        assert budget.finish_task() == 1
+        budget.spend_subagent()
+        assert budget.finish_task() == 1
+
+    assert budget._running == {}
