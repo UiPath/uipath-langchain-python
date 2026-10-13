@@ -1,10 +1,13 @@
 """Tests for pii_masker.py module."""
 
+import json
 import uuid
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from uipath.core.feature_flags import FeatureFlags
+from uipath.platform.errors import EnrichedException
 from uipath.platform.pii_detection import (
     PiiDetectionResponse,
     PiiDocumentResult,
@@ -12,12 +15,21 @@ from uipath.platform.pii_detection import (
     PiiEntityThreshold,
     PiiFileResult,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.tools.internal_tools.pii_masker import (
     _FEATURE_FLAG,
     PiiMasker,
+    _pii_file_type,
 )
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 @pytest.fixture
@@ -48,6 +60,33 @@ def _make_pii_response(
     )
 
 
+def _make_pii_http_error(status: int, body: dict[str, str]) -> EnrichedException:
+    req = httpx.Request(
+        "POST", "https://cloud.uipath.com/org/tenant/llmopstenant_/api/pii-detection"
+    )
+    resp = httpx.Response(
+        status,
+        request=req,
+        content=json.dumps(body).encode(),
+        headers={"content-type": "application/json"},
+    )
+    err = httpx.HTTPStatusError(str(status), request=req, response=resp)
+    enriched = EnrichedException(err)
+    enriched.__cause__ = err
+    return enriched
+
+
+def _file_type_rejected_body(index: int) -> dict[str, str]:
+    return {
+        "code": "OPS0006",
+        "errorMessage": (
+            "The pIIDetectionRequest field is required.; The JSON value could not "
+            "be converted to UiPath.LLMOps.PiiDetection.Models.PIIDetection.FileType. "
+            f"Path: $.files[{index}].fileType | LineNumber: 0 | BytePositionInLine: 245."
+        ),
+    }
+
+
 def _make_client(
     response: PiiDetectionResponse,
     upload_result: uuid.UUID | None = None,
@@ -60,6 +99,45 @@ def _make_client(
         return_value=upload_result or uuid.uuid4()
     )
     return client
+
+
+class TestPiiFileType:
+    """Test cases for _pii_file_type."""
+
+    @pytest.mark.parametrize(
+        ("name", "mime_type", "expected"),
+        [
+            ("passport.jpg", "image/jpeg", "jpeg"),
+            ("passport.jpg", "image/jpg", "jpeg"),
+            ("scan.JPEG", "image/jpeg", "jpeg"),
+            ("photo.jpg", "application/octet-stream", "jpeg"),
+            ("report.PDF", "application/pdf", "pdf"),
+            ("scan", "image/png", "png"),
+            ("chart.gif", "image/gif", "gif"),
+            ("image.webp", "", "webp"),
+        ],
+    )
+    def test_returns_canonical_file_type_for_known_mime_types(
+        self, name, mime_type, expected
+    ):
+        file = FileInfo(url="https://orig/x", name=name, mime_type=mime_type)
+
+        assert _pii_file_type(file) == expected
+
+    @pytest.mark.parametrize(
+        ("name", "mime_type", "expected"),
+        [
+            ("report.xlsx", _XLSX_MIME, "xlsx"),
+            ("Legacy.XLS", "application/vnd.ms-excel", "xls"),
+            ("notes.docx", _DOCX_MIME, "docx"),
+            ("scan.tiff", "image/tiff", "tiff"),
+            ("readme", "", ""),
+        ],
+    )
+    def test_returns_extension_for_other_files(self, name, mime_type, expected):
+        file = FileInfo(url="https://orig/x", name=name, mime_type=mime_type)
+
+        assert _pii_file_type(file) == expected
 
 
 class TestIsPolicyEnabled:
@@ -330,6 +408,116 @@ class TestApply:
         assert masked_files[0].url == "https://orig/doc.pdf"
         assert masked_files[0].name == "doc.pdf"
         assert masked_files[0].masked_attachment_url == "https://orig/doc.pdf"
+
+    async def test_sends_jpeg_file_type_for_jpg_attachment(self):
+        client = _make_client(_make_pii_response())
+        files = [
+            FileInfo(
+                url="https://orig/passport.jpg",
+                name="passport.jpg",
+                mime_type="image/jpeg",
+            )
+        ]
+
+        await PiiMasker(client, None).apply("original", files)
+
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
+        assert request.files[0].file_name == "passport.jpg"
+        assert request.files[0].file_type == "jpeg"
+
+    async def test_sends_extension_for_file_without_canonical_type(self):
+        client = _make_client(_make_pii_response())
+        files = [
+            FileInfo(
+                url="https://orig/report.xlsx",
+                name="report.xlsx",
+                mime_type=_XLSX_MIME,
+            )
+        ]
+
+        await PiiMasker(client, None).apply("original", files)
+
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
+        assert request.files[0].file_type == "xlsx"
+
+    async def test_raises_file_error_naming_file_whose_type_was_rejected(self):
+        rejection = _make_pii_http_error(400, _file_type_rejected_body(index=1))
+        client = _make_client(_make_pii_response())
+        client.pii_detection.detect_pii_async = AsyncMock(side_effect=rejection)
+        files = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            ),
+            FileInfo(
+                url="https://orig/report.xlsx",
+                name="report.xlsx",
+                mime_type=_XLSX_MIME,
+            ),
+        ]
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await PiiMasker(client, None).apply("original", files)
+
+        error = exc_info.value.error_info
+        assert error.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.FILE_ERROR
+        )
+        assert error.category == UiPathErrorCategory.DEPLOYMENT
+        assert error.title == "File type not supported by PII masking"
+        assert "'report.xlsx'" in error.detail
+        assert "doc.pdf" not in error.detail
+        assert exc_info.value.__cause__ is rejection
+
+    async def test_raises_file_error_without_name_when_index_out_of_range(self):
+        rejection = _make_pii_http_error(400, _file_type_rejected_body(index=3))
+        client = _make_client(_make_pii_response())
+        client.pii_detection.detect_pii_async = AsyncMock(side_effect=rejection)
+        files = [
+            FileInfo(
+                url="https://orig/report.xlsx",
+                name="report.xlsx",
+                mime_type=_XLSX_MIME,
+            )
+        ]
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await PiiMasker(client, None).apply("original", files)
+
+        assert "an attached file" in exc_info.value.error_info.detail
+
+    @pytest.mark.parametrize(
+        ("status", "body"),
+        [
+            (
+                400,
+                {
+                    "code": "OPS0006",
+                    "errorMessage": "The pIIDetectionRequest field is required.; "
+                    "fileUrl is required",
+                },
+            ),
+            (400, {"code": "Pii.AzureRequestFailed", "errorMessage": "Failed"}),
+            (500, {"code": "InternalServerError", "errorMessage": "Failed"}),
+        ],
+    )
+    async def test_reraises_other_service_errors_unchanged(self, status, body):
+        failure = _make_pii_http_error(status, body)
+        client = _make_client(_make_pii_response())
+        client.pii_detection.detect_pii_async = AsyncMock(side_effect=failure)
+        files = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+
+        with pytest.raises(EnrichedException) as exc_info:
+            await PiiMasker(client, None).apply("original", files)
+
+        assert exc_info.value is failure
 
     async def test_passes_entity_thresholds_from_policy(self):
         response = _make_pii_response()

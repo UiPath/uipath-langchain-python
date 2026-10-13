@@ -1163,6 +1163,74 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
     @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
+    async def test_propagates_agent_runtime_error_from_masker_unchanged(
+        self,
+        mock_uipath_cls,
+        mock_masker_cls,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        mock_client = Mock()
+        mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
+            return_value={
+                "data": {
+                    "container": {"pii-in-flight-agents": True},
+                    "pii-detection-scope": "Files",
+                }
+            }
+        )
+        mock_uipath_cls.return_value = mock_client
+
+        mock_masker_cls.is_policy_enabled = Mock(return_value=True)
+        unsupported = AgentRuntimeError(
+            code=AgentRuntimeErrorCode.FILE_ERROR,
+            title="File type not supported by PII masking",
+            detail="PII masking cannot scan 'report.xlsx'.",
+            category=UiPathErrorCategory.DEPLOYMENT,
+        )
+        masker_instance = Mock()
+        masker_instance.apply = AsyncMock(side_effect=unsupported)
+        mock_masker_cls.return_value = masker_instance
+
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/report.xlsx",
+                name="report.xlsx",
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        ]
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()),
+            FullName="report.xlsx",
+            MimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        assert tool.coroutine is not None
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.coroutine(analysisTask="task", attachments=[attachment])
+
+        assert exc_info.value is unsupported
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+        mock_llm.ainvoke.assert_not_called()
+        mock_add_files.assert_not_called()
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
     async def test_skips_masker_when_scope_excludes_files(
         self,
         mock_uipath_cls,
