@@ -2,12 +2,16 @@
 
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
 
+from tests.settings import agent_hub_dummy_settings
+from uipath_langchain.chat.chat_model_factory import get_chat_model
 from uipath_langchain.chat.exceptions import ChatModelError
 from uipath_langchain.chat.handlers.bedrock import (
     BedrockConversePayloadHandler,
@@ -50,6 +54,45 @@ def make_thinking_invoke_model() -> object:
 
 def make_thinking_converse_model() -> object:
     return make_converse_model(thinking={"type": "enabled"})
+
+
+_CLAUDE = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+_CONNECTION_ID = "6f1d2c3b-0000-0000-0000-000000000001"
+
+
+def discovery_entry(
+    subscription: str = "UiPathOwned",
+    byom_details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """An LLM Gateway discovery entry for a Bedrock Claude model."""
+    return {
+        "modelName": _CLAUDE,
+        "vendor": "AwsBedrock",
+        "apiFlavor": "AwsBedrockConverse" if byom_details else None,
+        "modelFamily": "AnthropicClaude",
+        "modelSubscriptionType": subscription,
+        "byomDetails": byom_details,
+        "modelDetails": {},
+    }
+
+
+@contextmanager
+def discovered(*entries: dict[str, Any]) -> Iterator[None]:
+    """Serve discovery from ``entries``; the env skips endpoint capability probes."""
+    with (
+        patch.dict(os.environ, {"UIPATH_LLM_SERVICE": "agenthub"}),
+        patch.object(
+            type(agent_hub_dummy_settings),
+            "get_available_models",
+            return_value=list(entries),
+        ),
+    ):
+        yield
+
+
+def build_chat_model(**kwargs: Any) -> Any:
+    """The chat model production builds, via the uipath-langchain factory."""
+    return get_chat_model(_CLAUDE, client_settings=agent_hub_dummy_settings, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -391,28 +434,6 @@ class TestThinkingRejectsForcedToolChoice:
 # ---------------------------------------------------------------------------
 
 
-def make_uipath_converse_model(model: str, **kwargs: Any) -> Any:
-    """A real UiPathChatBedrockConverse, built without discovery or AWS."""
-    from uipath.llm_client.settings.platform import PlatformSettings
-    from uipath_langchain_client.clients.bedrock.chat_models import (
-        UiPathChatBedrockConverse,
-    )
-
-    settings = PlatformSettings(
-        UIPATH_ACCESS_TOKEN="token",
-        UIPATH_URL="https://cloud.uipath.com/org/tenant",
-        UIPATH_TENANT_ID="tenant",
-        UIPATH_ORGANIZATION_ID="org",
-    )
-    with (
-        patch.dict(os.environ, {"UIPATH_LLM_SERVICE": "agenthub"}),
-        patch.object(
-            PlatformSettings, "get_model_info", return_value={"modelDetails": {}}
-        ),
-    ):
-        return UiPathChatBedrockConverse(model=model, settings=settings, **kwargs)
-
-
 class TestBedrockConverseGetPromptCachingKwargs:
     _CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
 
@@ -441,36 +462,69 @@ class TestBedrockConverseGetPromptCachingKwargs:
         assert handler.get_prompt_caching_kwargs() == {}
 
     def test_uipath_owned_claude_gets_cache_control(self) -> None:
-        model = make_uipath_converse_model("anthropic.claude-sonnet-4-5-20250929-v1:0")
-        handler = BedrockConversePayloadHandler(model)
-        assert handler.get_prompt_caching_kwargs() == self._CACHE_CONTROL
+        with discovered(discovery_entry()):
+            handler = BedrockConversePayloadHandler(build_chat_model())
+            assert handler.get_prompt_caching_kwargs() == self._CACHE_CONTROL
 
-    def test_byo_connection_gets_nothing(self) -> None:
-        model = make_uipath_converse_model(
-            "anthropic.claude-sonnet-4-5-20250929-v1:0",
-            byo_connection_id="6f1d2c3b-0000-0000-0000-000000000001",
-        )
-        handler = BedrockConversePayloadHandler(model)
-        assert handler.get_prompt_caching_kwargs() == {}
-
-    def test_byo_model_resolved_by_name_gets_nothing(self) -> None:
-        """Discovery can resolve a BYO-only model name without a connection id;
-        the client then sets base_model_id from the BYO deployment's model."""
-        from uipath_langchain_client.clients.bedrock.model_resolution import (
-            apply_backing_model_detection_hints,
-        )
-
-        kwargs: dict[str, Any] = {}
-        apply_backing_model_detection_hints(
-            kwargs,
-            {
-                "byomDetails": {
-                    "customerModel": "anthropic.claude-3-haiku-20240307-v1:0"
-                }
+    @pytest.mark.parametrize(
+        "subscription", ["BYOMReplacedLikeForLike", "BYOMReplacedAlternative"]
+    )
+    def test_byo_replacement_selected_by_name_gets_nothing(
+        self, subscription: str
+    ) -> None:
+        """A tenant's BYO replacement is listed under the UiPath model name with no
+        customerModel, so the model itself carries no BYO field."""
+        entry = discovery_entry(
+            subscription=subscription,
+            byom_details={
+                "integrationServiceConnectionId": _CONNECTION_ID,
+                "availableOperationCodes": [],
+                "customerModel": None,
             },
         )
-        model = make_uipath_converse_model(
-            "anthropic.claude-3-haiku-20240307-v1:0", **kwargs
+        with discovered(entry):
+            handler = BedrockConversePayloadHandler(build_chat_model())
+            assert handler.get_prompt_caching_kwargs() == {}
+
+    @pytest.mark.parametrize(
+        "customer_model",
+        [
+            "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123",
+            "anthropic.claude-3-haiku-20240307-v1:0",
+        ],
+    )
+    def test_byo_addition_gets_nothing(self, customer_model: str) -> None:
+        entry = discovery_entry(
+            subscription="BYOMAdded",
+            byom_details={
+                "integrationServiceConnectionId": _CONNECTION_ID,
+                "availableOperationCodes": [],
+                "customerModel": customer_model,
+            },
         )
-        handler = BedrockConversePayloadHandler(model)
-        assert handler.get_prompt_caching_kwargs() == {}
+        with discovered(entry):
+            handler = BedrockConversePayloadHandler(build_chat_model())
+            assert handler.get_prompt_caching_kwargs() == {}
+
+    def test_byo_connection_gets_nothing(self) -> None:
+        entry = discovery_entry(
+            subscription="BYOMAdded",
+            byom_details={
+                "integrationServiceConnectionId": _CONNECTION_ID,
+                "availableOperationCodes": [],
+            },
+        )
+        with discovered(entry):
+            model = build_chat_model(byo_connection_id=_CONNECTION_ID)
+            handler = BedrockConversePayloadHandler(model)
+            assert handler.get_prompt_caching_kwargs() == {}
+
+    def test_failed_discovery_lookup_gets_nothing(self) -> None:
+        with discovered(discovery_entry()):
+            handler = BedrockConversePayloadHandler(build_chat_model())
+        with patch.object(
+            type(agent_hub_dummy_settings),
+            "get_available_models",
+            side_effect=RuntimeError("discovery unavailable"),
+        ):
+            assert handler.get_prompt_caching_kwargs() == {}

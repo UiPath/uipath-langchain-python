@@ -73,6 +73,30 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 
+def _is_byo(model: Any) -> bool:
+    """Whether the LLM Gateway's discovery entry for the model is a BYO deployment.
+
+    A BYO replacement is listed under the UiPath model name, so the model's own
+    fields can't tell it apart; the entry's ``byomDetails`` and
+    ``modelSubscriptionType`` can, the same test uipath-llm-client uses to prefer
+    UiPath-owned entries. ``get_model_info`` reads the settings' cached discovery
+    list. A failed lookup counts as BYO, which keeps caching off.
+    """
+    if getattr(model, "byo_connection_id", None):
+        return True
+    settings = getattr(model, "client_settings", None)
+    if settings is None:
+        return False
+    try:
+        info = settings.get_model_info(model.model_name)
+    except Exception:
+        return True
+    subscription = info.get("modelSubscriptionType")
+    return info.get("byomDetails") is not None or (
+        bool(subscription) and subscription != "UiPathOwned"
+    )
+
+
 class BedrockInvokePayloadHandler(ModelPayloadHandler):
     """Payload handler for ``ChatBedrock`` (AWS Bedrock Invoke API).
 
@@ -157,16 +181,12 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         Marks Claude and Nova ids only, the families langchain-aws's
         ``BedrockPromptCachingMiddleware`` treats as cache-capable. BYO deployments
         are skipped: custom BYO gateways can rewrite the Converse body, and the
-        rollout targets UiPath-billed traffic. uipath-langchain-client marks them
-        with ``byo_connection_id``, or with ``base_model_id`` when discovery
-        resolves a BYO model by name; UiPath-owned models set neither.
+        rollout targets UiPath-billed traffic.
         """
-        if getattr(self.model, "byo_connection_id", None) or getattr(
-            self.model, "base_model_id", None
-        ):
-            return {}
         model_id = (getattr(self.model, "model_id", None) or "").lower()
         if "anthropic" not in model_id and "amazon.nova" not in model_id:
+            return {}
+        if _is_byo(self.model):
             return {}
         return {"cache_control": {"type": "ephemeral"}}
 
