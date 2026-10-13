@@ -128,6 +128,7 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
     """Payload handler for ``ChatBedrockConverse`` (AWS Bedrock Converse API).
 
     - Supports ``strict``; ``parallel_tool_calls`` is not supported.
+    - Supports prompt caching via ``cache_control`` for Claude and Nova.
     - Stop reason field: ``stopReason`` (camelCase).
     """
 
@@ -148,6 +149,26 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         if strict_mode is True:
             kwargs["strict"] = True
         return kwargs
+
+    def get_prompt_caching_kwargs(self) -> dict[str, Any]:
+        """``cache_control``, which langchain-aws turns into ``cachePoint`` blocks
+        after the tools, the system prompt and the last message.
+
+        Only Claude and Nova accept cache checkpoints on Converse; the model check
+        matches langchain-aws's own ``BedrockPromptCachingMiddleware``. BYO
+        deployments are left out: they are billed to the customer and can sit
+        behind custom gateways that rewrite the request body.
+        """
+        if getattr(self.model, "byo_connection_id", None):
+            return {}
+        model_id = (
+            getattr(self.model, "base_model_id", None)
+            or getattr(self.model, "model_id", None)
+            or ""
+        ).lower()
+        if "anthropic" not in model_id and "amazon.nova" not in model_id:
+            return {}
+        return {"cache_control": {"type": "ephemeral"}}
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check ``stopReason`` (camelCase) and raise for faulty terminations.
