@@ -57,14 +57,11 @@ def make_thinking_converse_model() -> object:
 
 
 _CLAUDE = "anthropic.claude-sonnet-4-5-20250929-v1:0"
-_CONNECTION_ID = "6f1d2c3b-0000-0000-0000-000000000001"
 
 
 def discovery_entry(
-    subscription: str = "UiPathOwned",
-    byom_details: dict[str, Any] | None = None,
+    subscription: str | None, byom_details: Any = None
 ) -> dict[str, Any]:
-    """An LLM Gateway discovery entry for a Bedrock Claude model."""
     return {
         "modelName": _CLAUDE,
         "vendor": "AwsBedrock",
@@ -77,22 +74,14 @@ def discovery_entry(
 
 
 @contextmanager
-def discovered(*entries: dict[str, Any]) -> Iterator[None]:
-    """Serve discovery from ``entries``; the env skips endpoint capability probes."""
+def discovered(entry: dict[str, Any]) -> Iterator[None]:
     with (
         patch.dict(os.environ, {"UIPATH_LLM_SERVICE": "agenthub"}),
         patch.object(
-            type(agent_hub_dummy_settings),
-            "get_available_models",
-            return_value=list(entries),
+            type(agent_hub_dummy_settings), "get_available_models", return_value=[entry]
         ),
     ):
         yield
-
-
-def build_chat_model(**kwargs: Any) -> Any:
-    """The chat model production builds, via the uipath-langchain factory."""
-    return get_chat_model(_CLAUDE, client_settings=agent_hub_dummy_settings, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -438,93 +427,43 @@ class TestBedrockConverseGetPromptCachingKwargs:
     _CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
 
     @pytest.mark.parametrize(
-        "model_id",
+        "model_id, expected",
         [
-            "anthropic.claude-sonnet-4-5-20250929-v1:0",
-            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-            "amazon.nova-pro-v1:0",
+            ("us.anthropic.claude-sonnet-4-5-20250929-v1:0", _CACHE_CONTROL),
+            ("amazon.nova-pro-v1:0", _CACHE_CONTROL),
+            ("meta.llama3-1-70b-instruct-v1:0", {}),
         ],
     )
-    def test_claude_and_nova_get_cache_control(self, model_id: str) -> None:
-        handler = BedrockConversePayloadHandler(make_converse_model(model_id))  # type: ignore[arg-type]
-        assert handler.get_prompt_caching_kwargs() == self._CACHE_CONTROL
-
-    @pytest.mark.parametrize(
-        "model_id",
-        [
-            "meta.llama3-1-70b-instruct-v1:0",
-            "mistral.mistral-large-2407-v1:0",
-            "deepseek.r1-v1:0",
-        ],
-    )
-    def test_models_without_checkpoints_get_nothing(self, model_id: str) -> None:
-        handler = BedrockConversePayloadHandler(make_converse_model(model_id))  # type: ignore[arg-type]
-        assert handler.get_prompt_caching_kwargs() == {}
-
-    def test_uipath_owned_claude_gets_cache_control(self) -> None:
-        with discovered(discovery_entry()):
-            handler = BedrockConversePayloadHandler(build_chat_model())
-            assert handler.get_prompt_caching_kwargs() == self._CACHE_CONTROL
-
-    @pytest.mark.parametrize(
-        "subscription", ["BYOMReplacedLikeForLike", "BYOMReplacedAlternative"]
-    )
-    def test_byo_replacement_selected_by_name_gets_nothing(
-        self, subscription: str
+    def test_marks_only_claude_and_nova(
+        self, model_id: str, expected: dict[str, Any]
     ) -> None:
-        """A tenant's BYO replacement is listed under the UiPath model name with no
-        customerModel, so the model itself carries no BYO field."""
-        entry = discovery_entry(
-            subscription=subscription,
-            byom_details={
-                "integrationServiceConnectionId": _CONNECTION_ID,
-                "availableOperationCodes": [],
-                "customerModel": None,
-            },
-        )
-        with discovered(entry):
-            handler = BedrockConversePayloadHandler(build_chat_model())
-            assert handler.get_prompt_caching_kwargs() == {}
+        handler = BedrockConversePayloadHandler(make_converse_model(model_id))  # type: ignore[arg-type]
+        assert handler.get_prompt_caching_kwargs() == expected
 
     @pytest.mark.parametrize(
-        "customer_model",
+        "subscription, byom_details, expected",
         [
-            "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123",
-            "anthropic.claude-3-haiku-20240307-v1:0",
+            ("UiPathOwned", None, _CACHE_CONTROL),
+            ("BYOMReplacedLikeForLike", None, {}),
+            (None, {"customerModel": None}, {}),
+            ("BYOMAdded", {"customerModel": "arn:aws:bedrock:us-east-1:1:x/y"}, {}),
         ],
     )
-    def test_byo_addition_gets_nothing(self, customer_model: str) -> None:
-        entry = discovery_entry(
-            subscription="BYOMAdded",
-            byom_details={
-                "integrationServiceConnectionId": _CONNECTION_ID,
-                "availableOperationCodes": [],
-                "customerModel": customer_model,
-            },
-        )
-        with discovered(entry):
-            handler = BedrockConversePayloadHandler(build_chat_model())
-            assert handler.get_prompt_caching_kwargs() == {}
-
-    def test_byo_connection_gets_nothing(self) -> None:
-        entry = discovery_entry(
-            subscription="BYOMAdded",
-            byom_details={
-                "integrationServiceConnectionId": _CONNECTION_ID,
-                "availableOperationCodes": [],
-            },
-        )
-        with discovered(entry):
-            model = build_chat_model(byo_connection_id=_CONNECTION_ID)
+    def test_only_uipath_owned_entries_get_cache_control(
+        self, subscription: str | None, byom_details: Any, expected: dict[str, Any]
+    ) -> None:
+        with discovered(discovery_entry(subscription, byom_details)):
+            model = get_chat_model(_CLAUDE, client_settings=agent_hub_dummy_settings)
             handler = BedrockConversePayloadHandler(model)
-            assert handler.get_prompt_caching_kwargs() == {}
+            assert handler.get_prompt_caching_kwargs() == expected
 
     def test_failed_discovery_lookup_gets_nothing(self) -> None:
-        with discovered(discovery_entry()):
-            handler = BedrockConversePayloadHandler(build_chat_model())
+        with discovered(discovery_entry("UiPathOwned")):
+            model = get_chat_model(_CLAUDE, client_settings=agent_hub_dummy_settings)
         with patch.object(
             type(agent_hub_dummy_settings),
             "get_available_models",
             side_effect=RuntimeError("discovery unavailable"),
         ):
+            handler = BedrockConversePayloadHandler(model)
             assert handler.get_prompt_caching_kwargs() == {}

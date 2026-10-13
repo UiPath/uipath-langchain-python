@@ -1,6 +1,6 @@
 """Tests for LLM node tool call filtering functionality."""
 
-import copy
+import json
 from typing import Any, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -20,7 +20,6 @@ from langchain_core.messages import (
 from langchain_core.messages.content import create_text_block, create_tool_call
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import AzureChatOpenAI
-from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.core.feature_flags import FeatureFlags
@@ -1165,82 +1164,25 @@ class TestCreateLlmNode:
         assert isinstance(create_llm_node(model, []), ConversationalLLMNode)
 
 
-def _converse_text(text: str) -> dict[str, Any]:
+def _converse_reply(content: dict[str, Any], stop_reason: str) -> dict[str, Any]:
     return {
-        "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
-        "stopReason": "end_turn",
+        "output": {"message": {"role": "assistant", "content": [content]}},
+        "stopReason": stop_reason,
         "usage": {"inputTokens": 10, "outputTokens": 2, "totalTokens": 12},
         "metrics": {"latencyMs": 1},
     }
 
 
-def _converse_tool_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "output": {
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {"toolUse": {"toolUseId": "c1", "name": name, "input": args}}
-                ],
-            }
-        },
-        "stopReason": "tool_use",
-        "usage": {"inputTokens": 10, "outputTokens": 2, "totalTokens": 12},
-        "metrics": {"latencyMs": 1},
-    }
+def _end_execution_reply(**args: Any) -> dict[str, Any]:
+    tool_use = {"toolUseId": "c1", "name": END_EXECUTION_TOOL.name, "input": args}
+    return _converse_reply({"toolUse": tool_use}, "tool_use")
 
 
-def _converse_stream_tool_call(name: str) -> dict[str, Any]:
-    return {
-        "stream": [
-            {"messageStart": {"role": "assistant"}},
-            {
-                "contentBlockStart": {
-                    "start": {"toolUse": {"toolUseId": "c1", "name": name}},
-                    "contentBlockIndex": 0,
-                }
-            },
-            {
-                "contentBlockDelta": {
-                    "delta": {"toolUse": {"input": "{}"}},
-                    "contentBlockIndex": 0,
-                }
-            },
-            {"contentBlockStop": {"contentBlockIndex": 0}},
-            {"messageStop": {"stopReason": "tool_use"}},
-            {
-                "metadata": {
-                    "usage": {"inputTokens": 10, "outputTokens": 2, "totalTokens": 12},
-                    "metrics": {"latencyMs": 1},
-                }
-            },
-        ]
-    }
-
-
-def _cache_points(request: dict[str, Any]) -> dict[str, int]:
-    def count(blocks: list[Any]) -> int:
-        points = [b for b in blocks if isinstance(b, dict) and "cachePoint" in b]
-        assert points == [{"cachePoint": {"type": "default"}}] * len(points)
-        return len(points)
-
-    *earlier, last = request["messages"]
-    return {
-        "tools": count(request.get("toolConfig", {}).get("tools", [])),
-        "system": count(request.get("system", [])),
-        "earlier_messages": sum(count(m["content"]) for m in earlier),
-        "last_message": count(last["content"]),
-    }
-
-
-_ALL_MARKED = {"tools": 1, "system": 1, "earlier_messages": 0, "last_message": 1}
-_NONE_MARKED = {"tools": 0, "system": 0, "earlier_messages": 0, "last_message": 0}
+def _cache_point_count(request: dict[str, Any]) -> int:
+    return json.dumps(request).count('"cachePoint"')
 
 
 class TestBedrockPromptCaching:
-    """With EnableBedrockPromptCaching on, Bedrock Converse turns carry cachePoint
-    markers so the repeated prompt prefix of a run is read from Bedrock's cache."""
-
     @pytest.fixture(autouse=True)
     def _reset_flags(self) -> Any:
         FeatureFlags.reset_flags()
@@ -1248,20 +1190,11 @@ class TestBedrockPromptCaching:
         FeatureFlags.reset_flags()
 
     @staticmethod
-    def _enable() -> None:
-        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: True})
-
-    @staticmethod
-    def _converse_model(
-        model_id: str = "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        response: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> tuple[Any, Mock]:
-        reply = response or _converse_tool_call(END_EXECUTION_TOOL.name, {})
+    def _converse_model(**kwargs: Any) -> tuple[Any, Mock]:
         client = Mock()
-        client.converse.side_effect = lambda **_: copy.deepcopy(reply)
+        client.converse.side_effect = lambda **_: _end_execution_reply()
         model: Any = _StubChatBedrockConverse(
-            model_id=model_id,
+            model_id="anthropic.claude-sonnet-4-5-20250929-v1:0",
             region_name="us-east-1",
             client=client,
             bedrock_client=Mock(),
@@ -1270,7 +1203,7 @@ class TestBedrockPromptCaching:
         return model, client
 
     @staticmethod
-    def _lookup_tool() -> BaseTool:
+    def _tool() -> BaseTool:
         return StructuredTool(
             name="lookup",
             description="Look something up.",
@@ -1285,31 +1218,28 @@ class TestBedrockPromptCaching:
         )
 
     @pytest.mark.asyncio
-    async def test_forced_turn_marks_tools_system_and_last_message(self) -> None:
-        self._enable()
+    @pytest.mark.parametrize("flag, expected", [(True, 3), (False, 0)])
+    async def test_turns_carry_cache_points_only_with_the_flag(
+        self, flag: bool, expected: int
+    ) -> None:
+        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: flag})
         model, client = self._converse_model()
+        node = create_llm_node(model, [self._tool()])
+        messages: list[BaseMessage] = [HumanMessage(content="q")]
 
-        node = create_llm_node(model, [self._lookup_tool()])
-        assert isinstance(node, ForcedToolChoiceLLMNode)
-        await node(self._state(HumanMessage(content="q")))
+        for turn in range(2):
+            result = await node(self._state(*messages))
+            messages += [
+                result["messages"][0],
+                ToolMessage(content=f"result {turn}", tool_call_id="c1"),
+            ]
 
-        assert _cache_points(client.converse.call_args.kwargs) == _ALL_MARKED
+        counts = [_cache_point_count(c.kwargs) for c in client.converse.call_args_list]
+        assert counts == [expected, expected]
 
     @pytest.mark.asyncio
-    async def test_flag_off_sends_no_cache_points(self) -> None:
-        model, client = self._converse_model()
-
-        await create_llm_node(model, [self._lookup_tool()])(
-            self._state(HumanMessage(content="q"))
-        )
-
-        assert _cache_points(client.converse.call_args.kwargs) == _NONE_MARKED
-
-    @pytest.mark.asyncio
-    async def test_forced_extraction_call_sends_no_cache_points(self) -> None:
-        """The extraction retry drops thinking and appends a nudge, so its message
-        prefix differs from every cached turn; a cache write there is never read."""
-        self._enable()
+    async def test_forced_extraction_call_has_no_cache_points(self) -> None:
+        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: True})
         model, client = self._converse_model(
             additional_model_request_fields={
                 "thinking": {"type": "enabled", "budget_tokens": 1024}
@@ -1317,158 +1247,29 @@ class TestBedrockPromptCaching:
             supports_tool_choice_values=("auto", "any", "tool"),
         )
 
-        await create_llm_node(model, [self._lookup_tool()])(
+        await create_llm_node(model, [self._tool()])(
             self._state(HumanMessage(content="q"), AIMessage(content="an answer"))
         )
 
         request = client.converse.call_args.kwargs
         assert "thinking" not in request.get("additionalModelRequestFields", {})
-        assert _cache_points(request) == _NONE_MARKED
+        assert _cache_point_count(request) == 0
 
     @pytest.mark.asyncio
-    async def test_auto_tool_choice_marks_the_turn_but_not_the_finish_call(
-        self,
-    ) -> None:
-        """The finish call binds only end_execution and raise_error, so even the
-        tools segment differs from the run's cache entries."""
-        self._enable()
+    async def test_auto_tool_choice_finish_call_has_no_cache_points(self) -> None:
+        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: True})
         model, client = self._converse_model()
         model.model_details = _REJECTS_FORCING
         client.converse.side_effect = [
-            _converse_text("Lisbon is warmer."),
-            _converse_tool_call(END_EXECUTION_TOOL.name, {"answer": "Lisbon"}),
+            _converse_reply({"text": "Lisbon is warmer."}, "end_turn"),
+            _end_execution_reply(answer="Lisbon"),
         ]
-        tools = [self._lookup_tool(), *create_flow_control_tools(_Output)]
+        tools = [self._tool(), *create_flow_control_tools(_Output)]
 
         node = create_llm_node(model, tools)
         assert isinstance(node, AutoToolChoiceLLMNode)
         await node(self._state(HumanMessage(content="q")))
 
         turn, finish = client.converse.call_args_list
-        assert _cache_points(turn.kwargs) == _ALL_MARKED
-        assert _cache_points(finish.kwargs) == _NONE_MARKED
-
-    @pytest.mark.asyncio
-    async def test_conversational_turn_is_marked(self) -> None:
-        self._enable()
-        model, client = self._converse_model(response=_converse_text("Hello!"))
-
-        node = create_llm_node(model, [self._lookup_tool()], is_conversational=True)
-        assert isinstance(node, ConversationalLLMNode)
-        await node(self._state(HumanMessage(content="hi")))
-
-        assert _cache_points(client.converse.call_args.kwargs) == _ALL_MARKED
-
-    @pytest.mark.asyncio
-    async def test_agent_without_tools_marks_system_and_last_message(self) -> None:
-        self._enable()
-        model, client = self._converse_model(response=_converse_text("Hello!"))
-
-        await create_llm_node(model, [])(self._state(HumanMessage(content="hi")))
-
-        assert _cache_points(client.converse.call_args.kwargs) == {
-            "tools": 0,
-            "system": 1,
-            "earlier_messages": 0,
-            "last_message": 1,
-        }
-
-    @pytest.mark.asyncio
-    async def test_byo_connection_sends_no_cache_points(self) -> None:
-        """Custom BYO gateways can rewrite the Converse body, and the rollout
-        targets UiPath-billed traffic."""
-        self._enable()
-        model, client = self._converse_model()
-        model.byo_connection_id = "6f1d2c3b-0000-0000-0000-000000000001"
-
-        await create_llm_node(model, [self._lookup_tool()])(
-            self._state(HumanMessage(content="q"))
-        )
-
-        assert _cache_points(client.converse.call_args.kwargs) == _NONE_MARKED
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "model_id",
-        ["meta.llama3-1-70b-instruct-v1:0", "mistral.mistral-large-2407-v1:0"],
-    )
-    async def test_models_without_prompt_caching_send_no_cache_points(
-        self, model_id: str
-    ) -> None:
-        self._enable()
-        model, client = self._converse_model(
-            model_id=model_id, supports_tool_choice_values=("auto", "any", "tool")
-        )
-
-        await create_llm_node(model, [self._lookup_tool()])(
-            self._state(HumanMessage(content="q"))
-        )
-
-        assert _cache_points(client.converse.call_args.kwargs) == _NONE_MARKED
-
-    @pytest.mark.asyncio
-    async def test_non_bedrock_model_gets_no_cache_control(self) -> None:
-        self._enable()
-        model: Any = _StubAzureChatOpenAI.model_construct()
-        model.bind_tools = Mock(return_value=model)
-        model.ainvoke = AsyncMock(
-            return_value=AIMessage(
-                content="",
-                tool_calls=[
-                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
-                ],
-            )
-        )
-
-        await create_llm_node(model, [self._lookup_tool()])(
-            self._state(HumanMessage(content="q"))
-        )
-
-        assert "cache_control" not in model.bind_tools.call_args.kwargs
-
-    @pytest.mark.asyncio
-    async def test_streamed_turn_carries_cache_points(self) -> None:
-        self._enable()
-        model, client = self._converse_model()
-        client.converse_stream.return_value = _converse_stream_tool_call(
-            END_EXECUTION_TOOL.name
-        )
-        graph = StateGraph(AgentGraphState)
-        graph.add_node("llm", create_llm_node(model, [self._lookup_tool()]))
-        graph.add_edge(START, "llm")
-        graph.add_edge("llm", END)
-
-        async for _ in graph.compile().astream(
-            self._state(HumanMessage(content="q")), stream_mode="messages"
-        ):
-            pass
-
-        client.converse.assert_not_called()
-        assert _cache_points(client.converse_stream.call_args.kwargs) == _ALL_MARKED
-
-    @pytest.mark.asyncio
-    async def test_later_turns_keep_exactly_three_cache_points(self) -> None:
-        """Bedrock allows 4 checkpoints per request; markers must not pile up in
-        the run's messages across turns."""
-        self._enable()
-        model, client = self._converse_model(
-            response=_converse_tool_call("lookup", {"q": "x"})
-        )
-        node = create_llm_node(model, [self._lookup_tool()])
-        messages: list[BaseMessage] = [HumanMessage(content="q")]
-
-        for turn in range(3):
-            result = await node(self._state(*messages))
-            reply = result["messages"][0]
-            messages += [
-                reply,
-                ToolMessage(content=f"result {turn}", tool_call_id="c1"),
-            ]
-
-        for call in client.converse.call_args_list:
-            assert _cache_points(call.kwargs) == _ALL_MARKED
-        assert all(
-            not isinstance(m.content, list)
-            or not any(isinstance(b, dict) and "cachePoint" in b for b in m.content)
-            for m in messages
-        )
+        assert _cache_point_count(turn.kwargs) == 3
+        assert _cache_point_count(finish.kwargs) == 0

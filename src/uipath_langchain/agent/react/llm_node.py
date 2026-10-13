@@ -124,12 +124,7 @@ InputT = TypeVar("InputT", bound=BaseModel)
 
 
 class LLMCall(NamedTuple):
-    """How a turn calls the model.
-
-    cache_prompt marks the prompt prefix for provider caching. It's off for one-off
-    calls whose prefix differs from the run's turns (the forced-extraction retry, the
-    finish call), since a cache write there is never read.
-    """
+    """How a turn calls the model."""
 
     model: BaseChatModel
     messages: list[AnyMessage]
@@ -219,7 +214,7 @@ class LLMNode(ABC, Generic[StateT]):
 
     @abstractmethod
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
-        """The LLMCall for this turn."""
+        """Model, messages, handler, tool_choice and cache_prompt for this turn."""
 
 
 class ConversationalLLMNode(LLMNode[StateT]):

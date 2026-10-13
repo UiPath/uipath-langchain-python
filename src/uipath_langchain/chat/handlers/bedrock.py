@@ -74,14 +74,6 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 
 
 def _is_byo(model: Any) -> bool:
-    """Whether the LLM Gateway's discovery entry for the model is a BYO deployment.
-
-    A BYO replacement is listed under the UiPath model name, so the model's own
-    fields can't tell it apart; the entry's ``byomDetails`` and
-    ``modelSubscriptionType`` can, the same test uipath-llm-client uses to prefer
-    UiPath-owned entries. ``get_model_info`` reads the settings' cached discovery
-    list. A failed lookup counts as BYO, which keeps caching off.
-    """
     if getattr(model, "byo_connection_id", None):
         return True
     settings = getattr(model, "client_settings", None)
@@ -152,7 +144,6 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
     """Payload handler for ``ChatBedrockConverse`` (AWS Bedrock Converse API).
 
     - Supports ``strict``; ``parallel_tool_calls`` is not supported.
-    - Supports prompt caching via ``cache_control`` for Claude and Nova.
     - Stop reason field: ``stopReason`` (camelCase).
     """
 
@@ -175,14 +166,6 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         return kwargs
 
     def get_prompt_caching_kwargs(self) -> dict[str, Any]:
-        """``cache_control``, which langchain-aws turns into ``cachePoint`` blocks
-        after the tools, the system prompt and the last message.
-
-        Marks Claude and Nova ids only, the families langchain-aws's
-        ``BedrockPromptCachingMiddleware`` treats as cache-capable. BYO deployments
-        are skipped: custom BYO gateways can rewrite the Converse body, and the
-        rollout targets UiPath-billed traffic.
-        """
         model_id = (getattr(self.model, "model_id", None) or "").lower()
         if "anthropic" not in model_id and "amazon.nova" not in model_id:
             return {}
