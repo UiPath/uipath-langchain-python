@@ -1221,7 +1221,7 @@ def _converse_stream_tool_call(name: str) -> dict[str, Any]:
 def _cache_points(request: dict[str, Any]) -> dict[str, int]:
     def count(blocks: list[Any]) -> int:
         points = [b for b in blocks if isinstance(b, dict) and "cachePoint" in b]
-        assert all(p == {"cachePoint": {"type": "default"}} for p in points)
+        assert points == [{"cachePoint": {"type": "default"}}] * len(points)
         return len(points)
 
     *earlier, last = request["messages"]
