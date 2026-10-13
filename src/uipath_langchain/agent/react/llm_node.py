@@ -14,6 +14,7 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.core.feature_flags import FeatureFlags
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
@@ -116,17 +117,25 @@ def _tool_less_turns_error() -> AgentRuntimeError:
     )
 
 
+BEDROCK_PROMPT_CACHING_FF = "EnableBedrockPromptCaching"
+
 StateT = TypeVar("StateT", bound=AgentGraphState)
 InputT = TypeVar("InputT", bound=BaseModel)
 
 
 class LLMCall(NamedTuple):
-    """How a turn calls the model."""
+    """How a turn calls the model.
+
+    cache_prompt marks the prompt prefix for provider caching. It's off for one-off
+    calls whose prefix differs from the run's turns (the forced-extraction retry, the
+    finish call), since a cache write there is never read.
+    """
 
     model: BaseChatModel
     messages: list[AnyMessage]
     handler: ModelPayloadHandler
     tool_choice: Literal["auto", "any"]
+    cache_prompt: bool
 
 
 class LLMNode(ABC, Generic[StateT]):
@@ -189,6 +198,10 @@ class LLMNode(ABC, Generic[StateT]):
             parallel_tool_calls=self.parallel_tool_calls,
             strict_mode=self.strict_mode,
         )
+        if call.cache_prompt and FeatureFlags.is_flag_enabled(
+            BEDROCK_PROMPT_CACHING_FF, default=False
+        ):
+            binding_kwargs.update(call.handler.get_prompt_caching_kwargs())
         llm = call.model.bind_tools(tools, **binding_kwargs)
 
         response = await _ainvoke(llm, call.messages)
@@ -235,7 +248,11 @@ class ConversationalLLMNode(LLMNode[StateT]):
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
         # conversational need to be able to answer in text so we dont ForceToolChoice
         return LLMCall(
-            self.model, messages, self.payload_handler, tool_choice=self.tool_choice
+            self.model,
+            messages,
+            self.payload_handler,
+            tool_choice=self.tool_choice,
+            cache_prompt=True,
         )
 
 
@@ -256,8 +273,15 @@ class ForcedToolChoiceLLMNode(LLMNode[StateT]):
                 call_messages,
                 get_payload_handler(call_model),
                 tool_choice="any",
+                cache_prompt=False,
             )
-        return LLMCall(self.model, messages, self.payload_handler, tool_choice="any")
+        return LLMCall(
+            self.model,
+            messages,
+            self.payload_handler,
+            tool_choice="any",
+            cache_prompt=True,
+        )
 
 
 class AutoToolChoiceLLMNode(LLMNode[StateT]):
@@ -290,7 +314,13 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
         if count_consecutive_tool_less_turns(messages) > 0:
             raise _no_finishing_tool_call_error()
-        return LLMCall(self.model, messages, self.payload_handler, tool_choice="auto")
+        return LLMCall(
+            self.model,
+            messages,
+            self.payload_handler,
+            tool_choice="auto",
+            cache_prompt=True,
+        )
 
     async def get_response(
         self, messages: list[AnyMessage], tools: Sequence[BaseTool]
@@ -302,7 +332,11 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
             tools, messages, response
         )
         finish_call = LLMCall(
-            self.model, finish_messages, self.payload_handler, tool_choice="auto"
+            self.model,
+            finish_messages,
+            self.payload_handler,
+            tool_choice="auto",
+            cache_prompt=False,
         )
         reply = await self._invoke_model(finish_call, finishing_tools)
         final = finishing_tool_call(reply, self.output_fields)
