@@ -345,6 +345,24 @@ class TestResolveReferencedAttachments:
     async def test_a_missing_payload_has_no_files_to_inspect(self):
         assert resolve_referenced_attachments(None, _registry(), _judge()) == []
 
+    async def test_finds_a_file_nested_under_a_record_with_its_own_uuid_id(self):
+        """A UUID ``ID`` on a queue item or record is not a file; the file under it
+        must still be found."""
+        data = {"record": {"ID": str(uuid.uuid4()), "file": {"ID": _UUID}}}
+
+        result = resolve_referenced_attachments(data, _registry(), _judge())
+
+        assert result is not None
+        assert [r.id for r in result] == [_UUID]
+
+    async def test_a_file_mentioned_inside_its_own_mention_is_sent_once(self):
+        data = {"ID": _UUID, "nested": {"ID": _UUID}}
+
+        result = resolve_referenced_attachments(data, _registry(), _judge())
+
+        assert result is not None
+        assert [r.id for r in result] == [_UUID]
+
     async def test_keeps_document_order_under_the_api_limit(self):
         """When more files are mentioned than the API accepts, the first ones written
         are sent, so a file named early in the output is never dropped for a later one."""

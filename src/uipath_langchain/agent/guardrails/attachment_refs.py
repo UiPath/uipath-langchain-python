@@ -155,12 +155,11 @@ def _iter_attachment_mentions(data: Any) -> Iterator[Any]:
         elif isinstance(value, BaseModel):
             stack.append((value.model_dump(by_alias=True), depth + 1))
         elif isinstance(value, Mapping):
+            # A UUID ``ID`` may name a record other than a file, so its children are
+            # still scanned; a mention that is not in the registry is dropped later.
             if _is_mention(value):
                 yield value
-            else:
-                stack.extend(
-                    (item, depth + 1) for item in reversed(list(value.values()))
-                )
+            stack.extend((item, depth + 1) for item in reversed(list(value.values())))
         elif isinstance(value, (list, tuple, set, frozenset)):
             stack.extend((item, depth + 1) for item in reversed(list(value)))
 
