@@ -27,11 +27,6 @@ class ModelPayloadHandler(ABC):
     ) -> dict[str, Any]: ...
 
     def get_prompt_caching_kwargs(self) -> dict[str, Any]:
-        """Binding kwargs that mark the request's prompt prefix for caching.
-
-        Empty unless the provider needs explicit cache markers and the model
-        supports them.
-        """
         return {}
 
     @abstractmethod
