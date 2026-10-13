@@ -3,9 +3,10 @@
 Sits between the agent loop and TERMINATE, inspecting the pending
 ``end_execution`` arguments and letting termination proceed only when every
 required file field carries a reference to an existing attachment. An accepted
-reference is rebuilt from that attachment before termination reads it. A
-failure answers the tool call with a corrective message and hands control back
-to the agent rather than faulting.
+reference is rebuilt from that attachment before termination reads it, and
+registered as one of the run's attachments so the agent-output guardrails can
+inspect it. A failure answers the tool call with a corrective message and hands
+control back to the agent rather than faulting.
 
 Tool *inputs* solve the same problem through ``get_job_attachment_wrapper``,
 which rejects an id that is not in ``inner_state.job_attachments``. That wrapper
@@ -23,7 +24,11 @@ from langgraph.types import Command
 from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
-from ..attachments.output_files import OutputFileField, check_output_files
+from ..attachments.output_files import (
+    OutputFileField,
+    check_output_files,
+    verified_output_attachments,
+)
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import AgentGraphNode, AgentGraphState
 from .utils import extract_current_tool_call_index, find_latest_ai_message
@@ -82,7 +87,12 @@ def create_output_files_node(
         if problem is None:
             return Command(
                 goto=AgentGraphNode.TERMINATE,
-                update={"messages": [_with_args(message, index, output)]},
+                update={
+                    "messages": [_with_args(message, index, output)],
+                    "inner_state": {
+                        "job_attachments": verified_output_attachments(fields, output)
+                    },
+                },
             )
 
         retries = state.inner_state.output_file_retries
