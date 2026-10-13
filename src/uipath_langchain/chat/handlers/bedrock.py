@@ -154,18 +154,18 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         """``cache_control``, which langchain-aws turns into ``cachePoint`` blocks
         after the tools, the system prompt and the last message.
 
-        Only Claude and Nova accept cache checkpoints on Converse; the model check
-        matches langchain-aws's own ``BedrockPromptCachingMiddleware``. BYO
-        deployments are left out: they are billed to the customer and can sit
-        behind custom gateways that rewrite the request body.
+        Marks Claude and Nova ids only, the families langchain-aws's
+        ``BedrockPromptCachingMiddleware`` treats as cache-capable. BYO deployments
+        are skipped: custom BYO gateways can rewrite the Converse body, and the
+        rollout targets UiPath-billed traffic. uipath-langchain-client marks them
+        with ``byo_connection_id``, or with ``base_model_id`` when discovery
+        resolves a BYO model by name; UiPath-owned models set neither.
         """
-        if getattr(self.model, "byo_connection_id", None):
+        if getattr(self.model, "byo_connection_id", None) or getattr(
+            self.model, "base_model_id", None
+        ):
             return {}
-        model_id = (
-            getattr(self.model, "base_model_id", None)
-            or getattr(self.model, "model_id", None)
-            or ""
-        ).lower()
+        model_id = (getattr(self.model, "model_id", None) or "").lower()
         if "anthropic" not in model_id and "amazon.nova" not in model_id:
             return {}
         return {"cache_control": {"type": "ephemeral"}}

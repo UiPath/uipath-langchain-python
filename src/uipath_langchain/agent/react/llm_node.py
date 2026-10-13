@@ -219,7 +219,7 @@ class LLMNode(ABC, Generic[StateT]):
 
     @abstractmethod
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
-        """Model, messages, handler and tool_choice for this turn."""
+        """The LLMCall for this turn."""
 
 
 class ConversationalLLMNode(LLMNode[StateT]):

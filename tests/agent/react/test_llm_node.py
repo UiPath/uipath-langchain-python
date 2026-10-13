@@ -1220,17 +1220,21 @@ def _converse_stream_tool_call(name: str) -> dict[str, Any]:
 
 def _cache_points(request: dict[str, Any]) -> dict[str, int]:
     def count(blocks: list[Any]) -> int:
-        return sum(1 for b in blocks if isinstance(b, dict) and "cachePoint" in b)
+        points = [b for b in blocks if isinstance(b, dict) and "cachePoint" in b]
+        assert all(p == {"cachePoint": {"type": "default"}} for p in points)
+        return len(points)
 
+    *earlier, last = request["messages"]
     return {
         "tools": count(request.get("toolConfig", {}).get("tools", [])),
         "system": count(request.get("system", [])),
-        "last_message": count(request["messages"][-1]["content"]),
+        "earlier_messages": sum(count(m["content"]) for m in earlier),
+        "last_message": count(last["content"]),
     }
 
 
-_ALL_MARKED = {"tools": 1, "system": 1, "last_message": 1}
-_NONE_MARKED = {"tools": 0, "system": 0, "last_message": 0}
+_ALL_MARKED = {"tools": 1, "system": 1, "earlier_messages": 0, "last_message": 1}
+_NONE_MARKED = {"tools": 0, "system": 0, "earlier_messages": 0, "last_message": 0}
 
 
 class TestBedrockPromptCaching:
@@ -1257,7 +1261,11 @@ class TestBedrockPromptCaching:
         client = Mock()
         client.converse.side_effect = lambda **_: copy.deepcopy(reply)
         model: Any = _StubChatBedrockConverse(
-            model_id=model_id, region_name="us-east-1", client=client, **kwargs
+            model_id=model_id,
+            region_name="us-east-1",
+            client=client,
+            bedrock_client=Mock(),
+            **kwargs,
         )
         return model, client
 
@@ -1361,13 +1369,14 @@ class TestBedrockPromptCaching:
         assert _cache_points(client.converse.call_args.kwargs) == {
             "tools": 0,
             "system": 1,
+            "earlier_messages": 0,
             "last_message": 1,
         }
 
     @pytest.mark.asyncio
     async def test_byo_connection_sends_no_cache_points(self) -> None:
-        """BYO deployments are billed to the customer and can sit behind custom
-        gateways that rewrite the Converse body."""
+        """Custom BYO gateways can rewrite the Converse body, and the rollout
+        targets UiPath-billed traffic."""
         self._enable()
         model, client = self._converse_model()
         model.byo_connection_id = "6f1d2c3b-0000-0000-0000-000000000001"

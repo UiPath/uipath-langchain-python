@@ -1,6 +1,9 @@
 """Tests for BedrockInvokePayloadHandler and BedrockConversePayloadHandler."""
 
 import logging
+import os
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -381,3 +384,93 @@ class TestThinkingRejectsForcedToolChoice:
     def test_false_when_thinking_not_dict(self) -> None:
         model = make_invoke_model(thinking="enabled")
         assert thinking_rejects_forced_tool_choice(model) is False
+
+
+# ---------------------------------------------------------------------------
+# BedrockConversePayloadHandler — get_prompt_caching_kwargs
+# ---------------------------------------------------------------------------
+
+
+def make_uipath_converse_model(model: str, **kwargs: Any) -> Any:
+    """A real UiPathChatBedrockConverse, built without discovery or AWS."""
+    from uipath.llm_client.settings.platform import PlatformSettings
+    from uipath_langchain_client.clients.bedrock.chat_models import (
+        UiPathChatBedrockConverse,
+    )
+
+    settings = PlatformSettings(
+        UIPATH_ACCESS_TOKEN="token",
+        UIPATH_URL="https://cloud.uipath.com/org/tenant",
+        UIPATH_TENANT_ID="tenant",
+        UIPATH_ORGANIZATION_ID="org",
+    )
+    with (
+        patch.dict(os.environ, {"UIPATH_LLM_SERVICE": "agenthub"}),
+        patch.object(
+            PlatformSettings, "get_model_info", return_value={"modelDetails": {}}
+        ),
+    ):
+        return UiPathChatBedrockConverse(model=model, settings=settings, **kwargs)
+
+
+class TestBedrockConverseGetPromptCachingKwargs:
+    _CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "amazon.nova-pro-v1:0",
+        ],
+    )
+    def test_claude_and_nova_get_cache_control(self, model_id: str) -> None:
+        handler = BedrockConversePayloadHandler(make_converse_model(model_id))  # type: ignore[arg-type]
+        assert handler.get_prompt_caching_kwargs() == self._CACHE_CONTROL
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "meta.llama3-1-70b-instruct-v1:0",
+            "mistral.mistral-large-2407-v1:0",
+            "deepseek.r1-v1:0",
+        ],
+    )
+    def test_models_without_checkpoints_get_nothing(self, model_id: str) -> None:
+        handler = BedrockConversePayloadHandler(make_converse_model(model_id))  # type: ignore[arg-type]
+        assert handler.get_prompt_caching_kwargs() == {}
+
+    def test_uipath_owned_claude_gets_cache_control(self) -> None:
+        model = make_uipath_converse_model("anthropic.claude-sonnet-4-5-20250929-v1:0")
+        handler = BedrockConversePayloadHandler(model)
+        assert handler.get_prompt_caching_kwargs() == self._CACHE_CONTROL
+
+    def test_byo_connection_gets_nothing(self) -> None:
+        model = make_uipath_converse_model(
+            "anthropic.claude-sonnet-4-5-20250929-v1:0",
+            byo_connection_id="6f1d2c3b-0000-0000-0000-000000000001",
+        )
+        handler = BedrockConversePayloadHandler(model)
+        assert handler.get_prompt_caching_kwargs() == {}
+
+    def test_byo_model_resolved_by_name_gets_nothing(self) -> None:
+        """Discovery can resolve a BYO-only model name without a connection id;
+        the client then sets base_model_id from the BYO deployment's model."""
+        from uipath_langchain_client.clients.bedrock.model_resolution import (
+            apply_backing_model_detection_hints,
+        )
+
+        kwargs: dict[str, Any] = {}
+        apply_backing_model_detection_hints(
+            kwargs,
+            {
+                "byomDetails": {
+                    "customerModel": "anthropic.claude-3-haiku-20240307-v1:0"
+                }
+            },
+        )
+        model = make_uipath_converse_model(
+            "anthropic.claude-3-haiku-20240307-v1:0", **kwargs
+        )
+        handler = BedrockConversePayloadHandler(model)
+        assert handler.get_prompt_caching_kwargs() == {}
