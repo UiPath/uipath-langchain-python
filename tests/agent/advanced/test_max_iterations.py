@@ -12,12 +12,16 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
+    _SUBAGENT_ITERATIONS_KEY,
     _IterationBudget,
     _MaxIterationsMiddleware,
+    _SubagentIterationsMiddleware,
+    _with_subagent_spend,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
 )
@@ -263,3 +267,57 @@ def test_running_subagents_are_forgotten_once_their_task_ends() -> None:
         assert budget.finish_task() == 1
 
     assert budget._running == {}
+
+
+def test_sync_hooks_share_the_budget() -> None:
+    """The sync hooks charge the same budget as the async ones."""
+    budget = _IterationBudget(max_iterations=3)
+    main = _MaxIterationsMiddleware(budget)
+    subagent = _SubagentIterationsMiddleware(budget)
+    state = {"messages": [HumanMessage("delegate"), AIMessage("", id="a1")]}
+    answer = ToolMessage(content="done", tool_call_id="t1")
+
+    def run_subagent(request: Any) -> ToolMessage:
+        subagent.wrap_model_call(MagicMock(), lambda _: MagicMock())
+        subagent.wrap_model_call(MagicMock(), lambda _: MagicMock())
+        with pytest.raises(AgentRuntimeError):
+            subagent.wrap_model_call(MagicMock(), lambda _: MagicMock())
+        return answer
+
+    with patch(
+        "uipath_langchain.agent.advanced.agent.get_config",
+        return_value={"configurable": {"thread_id": "t"}},
+    ):
+        response = MagicMock()
+        assert (
+            main.wrap_model_call(MagicMock(state=state), lambda _: response) is response
+        )
+        ping_request = MagicMock(tool_call={"name": "ping"}, state=state)
+        assert main.wrap_tool_call(ping_request, lambda _: answer) is answer
+        task_request = MagicMock(tool_call={"name": "task"}, state=state)
+        result = main.wrap_tool_call(task_request, run_subagent)
+
+    assert result == Command(update={"messages": [answer], _SUBAGENT_ITERATIONS_KEY: 2})
+    assert budget._running == {}
+
+
+def test_a_subagent_outside_a_task_call_is_not_charged() -> None:
+    budget = _IterationBudget(max_iterations=1)
+    with patch(
+        "uipath_langchain.agent.advanced.agent.get_config",
+        return_value={"configurable": {"thread_id": "t"}},
+    ):
+        budget.spend_subagent()
+
+    assert budget._running == {}
+
+
+def test_subagent_spend_rides_on_any_task_result() -> None:
+    message = ToolMessage(content="no such subagent", tool_call_id="t1")
+
+    assert _with_subagent_spend(message, 0) is message
+    assert _with_subagent_spend(message, 2) == Command(
+        update={"messages": [message], _SUBAGENT_ITERATIONS_KEY: 2}
+    )
+    with_list_update: Command[Any] = Command(update=[("messages", [message])])
+    assert _with_subagent_spend(with_list_update, 2) is with_list_update
