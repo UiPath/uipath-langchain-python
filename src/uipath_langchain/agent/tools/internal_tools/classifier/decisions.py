@@ -40,31 +40,6 @@ DECISIONS_TIMEOUT_SECONDS = 60.0
 
 _QUESTION_TYPES = [question_type.value for question_type in DecisionsQuestionType]
 
-_CHOICE_PROBABILITIES_SCHEMA: dict[str, Any] = {
-    "type": "array",
-    "description": "Probability of each choice.",
-    "items": {
-        "type": "object",
-        "properties": {
-            "value": {"type": "string"},
-            "probability": {"type": "number"},
-        },
-    },
-}
-
-_SCORE_PROBABILITIES_SCHEMA: dict[str, Any] = {
-    "type": "array",
-    "description": "Probability of each level, from lowest (0) to highest.",
-    "items": {
-        "type": "object",
-        "properties": {
-            "value": {"type": "integer", "description": "The level index."},
-            "label": {"type": "string"},
-            "probability": {"type": "number"},
-        },
-    },
-}
-
 # One answer of the generic output (Prompt, Argument): the fields the Decisions API
 # returns for every type, without the name (the key of the answer).
 _GENERIC_ANSWER_SCHEMA: dict[str, Any] = {
