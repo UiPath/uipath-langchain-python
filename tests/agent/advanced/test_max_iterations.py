@@ -1,5 +1,6 @@
 """The advanced agent loop honors the configured iteration budget."""
 
+import asyncio
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -7,7 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory
@@ -160,17 +162,46 @@ async def test_subagent_calls_spend_the_turn_budget() -> None:
     assert len(calls) == 3
 
 
+class _DelegatingModel(_ToolCallingFakeModel):
+    """Delegates on the user's request, then asks for another tool call forever."""
+
+    calls: list[int] = []
+
+    def _generate(
+        self, messages: list[BaseMessage], *args: Any, **kwargs: Any
+    ) -> ChatResult:
+        self.calls.append(1)
+        delegate = (
+            isinstance(messages[-1], HumanMessage)
+            and messages[-1].content == "delegate"
+        )
+        call = (
+            {
+                "name": "task",
+                "args": {"description": "loop", "subagent_type": "general-purpose"},
+            }
+            if delegate
+            else {"name": "ping", "args": {"value": "x"}}
+        )
+        message = AIMessage(
+            content="", tool_calls=[{**call, "id": f"call-{len(self.calls)}"}]
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+
 @pytest.mark.asyncio
 async def test_budget_is_kept_per_thread() -> None:
-    """Runs sharing a compiled graph do not spend each other's budget."""
-    calls: list[int] = []
-    graph = _autonomous_graph(_never_stops(calls), max_iterations=2)
+    """Concurrent runs sharing a compiled graph each get the whole budget."""
+    model = _DelegatingModel(messages=iter([]), calls=[])
+    graph = _autonomous_graph(model, max_iterations=3)
 
-    for thread_id in ("a", "b"):
+    async def run(thread_id: str) -> None:
         with pytest.raises(AgentRuntimeError):
             await graph.ainvoke(
-                {"task": "loop"},
+                {"task": "delegate"},
                 {"recursion_limit": 100, "configurable": {"thread_id": thread_id}},
             )
 
-    assert len(calls) == 4
+    await asyncio.gather(run("a"), run("b"))
+
+    assert len(model.calls) == 6
