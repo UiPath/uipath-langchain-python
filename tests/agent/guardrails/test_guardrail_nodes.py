@@ -1393,7 +1393,7 @@ class TestGuardrailNodeAttachments:
     async def test_agent_and_llm_pre_nodes_forward_files_scoped_attachments(
         self, monkeypatch, factory
     ):
-        """Pre-execution at Agent and LLM scope with ``appliesTo = Files`` still hands
+        """Pre-execution at Agent and LLM scope with ``detectionScope = Files`` still hands
         the run's files to the judge (real resolver, nothing patched)."""
         from uipath.platform.guardrails.guardrails import EnumParameterValue
 
@@ -1401,7 +1401,7 @@ class TestGuardrailNodeAttachments:
         guardrail = self._judge_guardrail()
         guardrail.validator_parameters = [
             EnumParameterValue.model_validate(
-                {"$parameterType": "enum", "id": "appliesTo", "value": "Files"}
+                {"$parameterType": "enum", "id": "detectionScope", "value": "Files"}
             )
         ]
 
@@ -1419,7 +1419,7 @@ class TestGuardrailNodeAttachments:
     _OUT = "5d1e2f3a-4b5c-4d6e-8f70-819a2b3c4d5e"
 
     @staticmethod
-    def _scoped_guardrail(applies_to: str) -> MagicMock:
+    def _scoped_guardrail(detection_scope: str) -> MagicMock:
         from uipath.platform.guardrails.guardrails import EnumParameterValue
 
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
@@ -1427,7 +1427,11 @@ class TestGuardrailNodeAttachments:
         guardrail.validator_type = "intellectual_property"
         guardrail.validator_parameters = [
             EnumParameterValue.model_validate(
-                {"$parameterType": "enum", "id": "appliesTo", "value": applies_to}
+                {
+                    "$parameterType": "enum",
+                    "id": "detectionScope",
+                    "value": detection_scope,
+                }
             )
         ]
         return guardrail
@@ -1531,7 +1535,7 @@ class TestGuardrailNodeAttachments:
                 "selector": {"scopes": ["Agent"]},
                 "validatorType": "intellectual_property",
                 "validatorParameters": [
-                    {"$parameterType": "enum", "id": "appliesTo", "value": "Files"}
+                    {"$parameterType": "enum", "id": "detectionScope", "value": "Files"}
                 ],
             }
         )

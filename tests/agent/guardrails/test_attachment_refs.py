@@ -26,25 +26,27 @@ def _judge() -> MagicMock:
     return guardrail
 
 
-def _scoped_judge(applies_to: str | None, parameter_id: str = "appliesTo") -> MagicMock:
-    """A judge guardrail carrying the ``appliesTo`` parameter the designer writes.
+def _scoped_judge(
+    detection_scope: str | None, parameter_id: str = "detectionScope"
+) -> MagicMock:
+    """A judge guardrail carrying the ``detectionScope`` parameter the designer writes.
 
-    ``applies_to=None`` carries no ``appliesTo`` parameter at all.
+    ``detection_scope=None`` carries no ``detectionScope`` parameter at all.
     """
     guardrail = _judge()
     guardrail.validator_parameters = (
         []
-        if applies_to is None
+        if detection_scope is None
         else [
             EnumParameterValue.model_validate(
-                {"$parameterType": "enum", "id": parameter_id, "value": applies_to}
+                {"$parameterType": "enum", "id": parameter_id, "value": detection_scope}
             )
         ]
     )
     return guardrail
 
 
-#: ``appliesTo`` values and whether files stay in scope. ``None`` is a guardrail with no such
+#: ``detectionScope`` values and whether files stay in scope. ``None`` is a guardrail with no such
 #: parameter, which leaves the decision to the backend's default.
 _SCOPE_CASES = [
     ("Text", False),
@@ -170,10 +172,10 @@ class TestResolveGuardrailAttachments:
     async def test_returns_empty_for_empty_registry(self, monkeypatch):
         assert await resolve_guardrail_attachments({}, _judge()) == []
 
-    @pytest.mark.parametrize("applies_to", ["Files", "Both"])
-    async def test_files_scope_with_no_files_says_none_apply(self, applies_to):
+    @pytest.mark.parametrize("detection_scope", ["Files", "Both"])
+    async def test_files_scope_with_no_files_says_none_apply(self, detection_scope):
         """``[]`` tells the backend a files-only check has nothing to inspect."""
-        result = await resolve_guardrail_attachments({}, _scoped_judge(applies_to))
+        result = await resolve_guardrail_attachments({}, _scoped_judge(detection_scope))
 
         assert result == []
 
@@ -193,13 +195,13 @@ class TestResolveGuardrailAttachments:
         assert result is not None
         assert len(result[0].file_name) == 260
 
-    @pytest.mark.parametrize("applies_to,includes_files", _SCOPE_CASES)
-    async def test_honors_the_applies_to_scope(
-        self, monkeypatch, applies_to, includes_files
+    @pytest.mark.parametrize("detection_scope,includes_files", _SCOPE_CASES)
+    async def test_honors_the_detection_scope(
+        self, monkeypatch, detection_scope, includes_files
     ):
         """Only Files and Both forward references; anything else present is text only."""
         result = await resolve_guardrail_attachments(
-            _registry(), _scoped_judge(applies_to)
+            _registry(), _scoped_judge(detection_scope)
         )
 
         if includes_files:
@@ -212,7 +214,7 @@ class TestResolveGuardrailAttachments:
         """The backend matches parameter ids ignoring case; a mismatch here would resolve
         files the author scoped out."""
         result = await resolve_guardrail_attachments(
-            _registry(), _scoped_judge("Text", parameter_id="AppliesTo")
+            _registry(), _scoped_judge("Text", parameter_id="DetectionScope")
         )
 
         assert result is None
@@ -322,10 +324,10 @@ class TestResolveReferencedAttachments:
         assert result is not None
         assert len(result) == _MAX_ATTACHMENTS
 
-    @pytest.mark.parametrize("applies_to,includes_files", _SCOPE_CASES)
-    async def test_honors_the_applies_to_scope(self, applies_to, includes_files):
+    @pytest.mark.parametrize("detection_scope,includes_files", _SCOPE_CASES)
+    async def test_honors_the_detection_scope(self, detection_scope, includes_files):
         result = resolve_referenced_attachments(
-            {"attachment": {"ID": _UUID}}, _registry(), _scoped_judge(applies_to)
+            {"attachment": {"ID": _UUID}}, _registry(), _scoped_judge(detection_scope)
         )
 
         if includes_files:
