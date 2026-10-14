@@ -12,6 +12,11 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.content import create_file_block, create_image_block
 
+from uipath_langchain._utils._attachments import (
+    ATTACHMENT_ID_EXTRA,
+    ATTACHMENT_NAME_EXTRA,
+)
+
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import (
     download_file_base64,
@@ -39,7 +44,9 @@ async def build_file_content_blocks_for(
     Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
-    compatibility for non-image formats is delegated to the LLM.
+    compatibility for non-image formats is delegated to the LLM. An image or
+    file block built from a job attachment carries the attachment's id and name
+    in ``extras``, so a guardrail can forward a reference to it.
 
     Args:
         file_info: File URL, name, and MIME type.
@@ -73,14 +80,24 @@ async def build_file_content_blocks_for(
     except ValueError as exc:
         raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
+    tags = (
+        {
+            ATTACHMENT_ID_EXTRA: str(file_info.attachment_id),
+            ATTACHMENT_NAME_EXTRA: file_info.name,
+        }
+        if file_info.attachment_id
+        else {}
+    )
+
     if is_image(mime_type):
-        return [create_image_block(base64=base64_file, mime_type=mime_type)]
+        return [create_image_block(base64=base64_file, mime_type=mime_type, **tags)]
 
     return [
         create_file_block(
             base64=base64_file,
             mime_type=mime_type or "application/octet-stream",
             filename=sanitize_filename(file_info.name),
+            **tags,
         )
     ]
 

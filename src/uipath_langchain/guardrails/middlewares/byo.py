@@ -9,7 +9,9 @@ from langchain_core.tools import BaseTool
 from uipath.core.guardrails import GuardrailSelector
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
+    DetectionScope,
     GuardrailScope,
+    with_detection_scope,
 )
 from uipath.platform.guardrails.guardrails import (
     BYO_VALIDATOR_TYPE,
@@ -104,6 +106,10 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
         description: Optional description for the guardrail.
         enabled_for_evals: Whether this guardrail is enabled for evaluation
             scenarios. Defaults to True.
+        detection_scope: Which content the guardrail evaluates: ``Text`` the text only,
+            ``Files`` the attached files only, ``Both`` both. ``None`` sends no
+            parameter and leaves the decision to the backend, which for a BYO
+            connector means the connector's own default.
     """
 
     def __init__(
@@ -118,6 +124,7 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
         name: str | None = None,
         description: str | None = None,
         enabled_for_evals: bool = True,
+        detection_scope: DetectionScope | str | None = None,
     ):
         """Initialize Bring Your Own Guardrail middleware."""
         if not validator_name or not validator_name.strip():
@@ -144,7 +151,10 @@ class UiPathByoGuardrailMiddleware(BuiltInGuardrailMiddlewareMixin):
             description or f"Bring Your Own Guardrail validation '{validator_name}'"
         )
 
-        self._guardrail = self._create_guardrail()
+        self.detection_scope = self._resolve_detection_scope(detection_scope)
+        self._guardrail = with_detection_scope(
+            self._create_guardrail(), self.detection_scope
+        )
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:

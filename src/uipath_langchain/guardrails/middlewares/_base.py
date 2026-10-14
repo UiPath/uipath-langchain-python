@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any, Literal, Sequence
 
 from langchain.agents.middleware import (
@@ -27,7 +28,15 @@ from uipath.core.guardrails import (
     GuardrailValidationResultType,
 )
 from uipath.platform import UiPath
-from uipath.platform.guardrails import BuiltInValidatorGuardrail
+from uipath.platform.errors import EnrichedException
+from uipath.platform.guardrails import (
+    DETECTION_SCOPE_PARAMETER_ID,
+    BuiltInValidatorGuardrail,
+    DetectionScope,
+    GuardrailAttachment,
+    detection_scope_includes_files,
+    referenced_attachments,
+)
 from uipath.platform.guardrails.decorators import GuardrailExecutionStage
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
@@ -39,6 +48,13 @@ from .._action_context import (
     component_label,
 )
 from ..models import GuardrailAction
+from ._attachments import (
+    NO_TEXT_PLACEHOLDER,
+    build_registry,
+    output_references,
+    registry_references,
+    tool_result_references,
+)
 from ._utils import (
     convert_block_exception,
     create_modified_tool_request,
@@ -52,6 +68,20 @@ logger = logging.getLogger(__name__)
 #: ``$guardrailType`` discriminator for built-in validator guardrails. Typed as
 #: a ``Literal`` so it satisfies ``BuiltInValidatorGuardrail.guardrail_type``.
 BUILT_IN_VALIDATOR_GUARDRAIL_TYPE: Literal["builtInValidator"] = "builtInValidator"
+
+_DETECTION_SCOPE_VALUES = frozenset(member.value for member in DetectionScope)
+
+
+def _declares_detection_scope(guardrail: BuiltInValidatorGuardrail) -> bool:
+    try:
+        return any(
+            parameter.id.lower() == DETECTION_SCOPE_PARAMETER_ID.lower()
+            and isinstance(parameter.value, str)
+            and bool(parameter.value.strip())
+            for parameter in guardrail.validator_parameters
+        )
+    except Exception:
+        return False
 
 
 def _get_tool_message_content(result: ToolMessage | Command[Any]) -> Any:
@@ -110,6 +140,11 @@ class BuiltInGuardrailMiddlewareMixin:
         action (GuardrailAction): The action to take on violation.
         _tool_names (list[str] | None): Tool names to intercept; None skips all tools.
         _tool_stage (GuardrailExecutionStage): PRE, POST, or PRE_AND_POST evaluation.
+
+    Subclasses may set:
+        detection_scope (DetectionScope | None): Which content the guardrail
+            evaluates, set through ``_resolve_detection_scope``; None sends no
+            ``detectionScope`` parameter.
     """
 
     _guardrail: BuiltInValidatorGuardrail
@@ -119,6 +154,25 @@ class BuiltInGuardrailMiddlewareMixin:
     _tool_names: list[str] | None = None
     _tool_stage: GuardrailExecutionStage = GuardrailExecutionStage.PRE_AND_POST
     _uipath: UiPath | None = None
+    detection_scope: DetectionScope | None = None
+
+    @staticmethod
+    def _resolve_detection_scope(
+        value: DetectionScope | str | None,
+    ) -> DetectionScope | None:
+        """Validate a ``detection_scope`` constructor argument.
+
+        Raises:
+            ValueError: When ``value`` is neither None, a ``DetectionScope`` member nor
+                one of its exact wire values.
+        """
+        if value is None or isinstance(value, DetectionScope):
+            return value
+        if isinstance(value, str) and value in _DETECTION_SCOPE_VALUES:
+            return DetectionScope(value)
+        raise ValueError(
+            "detection_scope must be a DetectionScope member or one of 'Text', 'Files', 'Both'"
+        )
 
     def _resolve_tool_names(
         self, tools: Sequence[str | BaseTool] | None
@@ -180,11 +234,103 @@ class BuiltInGuardrailMiddlewareMixin:
         return self._uipath
 
     def _evaluate_guardrail(
-        self, input_data: str | dict[str, Any]
+        self,
+        input_data: str | dict[str, Any],
+        attachments: list[GuardrailAttachment] | None = None,
     ) -> GuardrailValidationResult:
-        """Evaluate the guardrail against input data via the UiPath API."""
+        """Evaluate the guardrail against input data via the UiPath API.
+
+        ``attachments`` is sent when there is at least one and the scope includes
+        files. An empty list, meaning files apply and there are none, is sent only
+        when the guardrail asks for files (``Files`` or ``Both``); ``None`` says
+        nothing about files, so a text-only evaluation sends the same request as
+        before files were supported. When the service
+        rejects the attachment references (HTTP 400), the input is evaluated again
+        without them, so a file never disables the guardrail.
+        """
         uipath = self._get_uipath()
-        return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+        files_apply = detection_scope_includes_files(self._guardrail)
+        files_requested = files_apply and (
+            self.detection_scope in (DetectionScope.FILES, DetectionScope.BOTH)
+            or _declares_detection_scope(self._guardrail)
+        )
+        if not files_apply or attachments is None:
+            return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+        if not attachments:
+            if files_requested:
+                return uipath.guardrails.evaluate_guardrail(
+                    input_data, self._guardrail, attachments=[]
+                )
+            return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+        try:
+            return uipath.guardrails.evaluate_guardrail(
+                input_data, self._guardrail, attachments=attachments
+            )
+        except EnrichedException as exc:
+            if exc.status_code != 400:
+                raise
+            logger.warning(
+                "Guardrail '%s' rejected the attachment references (HTTP 400); "
+                "re-evaluating without attachments.",
+                self._name,
+            )
+            return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+
+    def _attachments_for(
+        self,
+        *,
+        scope: GuardrailScope,
+        stage: GuardrailExecutionStage,
+        state: Mapping[str, Any] | None,
+        tool_args: Any = None,
+        tool_result: Any = None,
+    ) -> list[GuardrailAttachment] | None:
+        """Return the attachment references one evaluation forwards.
+
+        An agent or LLM input check forwards every file the run holds; an output
+        check only the held files the output names. A tool call forwards the held
+        files its arguments name, and its result also the files the tool returned.
+        ``None`` says nothing about files: the guardrail is scoped to text, by
+        ``detection_scope`` or by a ``detectionScope`` validator parameter, or the
+        state cannot be read, so the text is evaluated as before instead of failing.
+        """
+        if (
+            self.detection_scope is DetectionScope.TEXT
+            or not detection_scope_includes_files(self._guardrail)
+        ):
+            return None
+        try:
+            registry = build_registry(state)
+            if scope == GuardrailScope.TOOL:
+                if stage == GuardrailExecutionStage.PRE:
+                    return referenced_attachments(tool_args, registry)
+                return tool_result_references(tool_result, registry)
+            if stage == GuardrailExecutionStage.PRE:
+                return registry_references(registry)
+            state = state or {}
+            output = next(
+                (
+                    message
+                    for message in reversed(state.get("messages") or [])
+                    if isinstance(message, AIMessage)
+                ),
+                None,
+            )
+            if scope == GuardrailScope.AGENT:
+                return output_references(
+                    output,
+                    registry,
+                    structured_response=state.get("structured_response"),
+                )
+            return output_references(output, registry)
+        except Exception:
+            logger.debug(
+                "Could not collect attachments for guardrail '%s'; evaluating "
+                "without files.",
+                self._name,
+                exc_info=True,
+            )
+            return None
 
     def _handle_validation_result(
         self,
@@ -259,8 +405,16 @@ class BuiltInGuardrailMiddlewareMixin:
             GuardrailExecutionStage.PRE_AND_POST,
         ):
             input_data = self._extract_tool_input_data(request)
+            attachments = self._attachments_for(
+                scope=GuardrailScope.TOOL,
+                stage=GuardrailExecutionStage.PRE,
+                state=getattr(request, "state", None),
+                tool_args=input_data,
+            )
             try:
-                result = await asyncio.to_thread(self._evaluate_guardrail, input_data)
+                result = await asyncio.to_thread(
+                    self._evaluate_guardrail, input_data, attachments
+                )
                 modified_input = self._handle_validation_result(
                     result,
                     input_data,
@@ -292,9 +446,15 @@ class BuiltInGuardrailMiddlewareMixin:
         ):
             output_data = self._extract_tool_output_data(tool_result)
             if output_data:
+                attachments = self._attachments_for(
+                    scope=GuardrailScope.TOOL,
+                    stage=GuardrailExecutionStage.POST,
+                    state=getattr(request, "state", None),
+                    tool_result=output_data,
+                )
                 try:
                     result = await asyncio.to_thread(
-                        self._evaluate_guardrail, output_data
+                        self._evaluate_guardrail, output_data, attachments
                     )
                     modified_output = self._handle_validation_result(
                         result,
@@ -375,6 +535,11 @@ class BuiltInGuardrailMiddlewareMixin:
                         list(messages),
                         scope=GuardrailScope.AGENT,
                         stage=GuardrailExecutionStage.PRE,
+                        attachments=mw._attachments_for(
+                            scope=GuardrailScope.AGENT,
+                            stage=GuardrailExecutionStage.PRE,
+                            state=state,
+                        ),
                     )
 
                 _before_agent_func.__name__ = f"{guardrail_name}_before_agent"
@@ -398,6 +563,11 @@ class BuiltInGuardrailMiddlewareMixin:
                             scope=GuardrailScope.AGENT,
                             stage=GuardrailExecutionStage.POST,
                             input_text=mw._last_input_text(messages),
+                            attachments=mw._attachments_for(
+                                scope=GuardrailScope.AGENT,
+                                stage=GuardrailExecutionStage.POST,
+                                state=state,
+                            ),
                         )
 
                 _after_agent_func.__name__ = f"{guardrail_name}_after_agent"
@@ -414,6 +584,11 @@ class BuiltInGuardrailMiddlewareMixin:
                         list(messages),
                         scope=GuardrailScope.LLM,
                         stage=GuardrailExecutionStage.PRE,
+                        attachments=mw._attachments_for(
+                            scope=GuardrailScope.LLM,
+                            stage=GuardrailExecutionStage.PRE,
+                            state=state,
+                        ),
                     )
 
                 _before_model_func.__name__ = f"{guardrail_name}_before_model"
@@ -432,6 +607,11 @@ class BuiltInGuardrailMiddlewareMixin:
                             scope=GuardrailScope.LLM,
                             stage=GuardrailExecutionStage.POST,
                             input_text=mw._last_input_text(messages),
+                            attachments=mw._attachments_for(
+                                scope=GuardrailScope.LLM,
+                                stage=GuardrailExecutionStage.POST,
+                                state=state,
+                            ),
                         )
 
                 _after_model_func.__name__ = f"{guardrail_name}_after_model"
@@ -456,31 +636,33 @@ class BuiltInGuardrailMiddlewareMixin:
         scope: GuardrailScope | None = None,
         stage: GuardrailExecutionStage | None = None,
         input_text: str | None = None,
+        attachments: list[GuardrailAttachment] | None = None,
     ) -> None:
         """Evaluate guardrail against message text; apply action on violation.
 
         ``input_text`` is the original input for a POST (output) check — the
         message that produced the flagged output — so an escalation can show it
-        as ``Inputs`` alongside the flagged ``Outputs``.
+        as ``Inputs`` alongside the flagged ``Outputs``. ``attachments`` are the
+        file references sent with the text; with files but no text, the
+        placeholder ``NO_TEXT_PLACEHOLDER`` is evaluated instead.
         """
-        if not messages:
-            return
-
         text = extract_text_from_messages(messages)
-        if not text:
+        if not text and not attachments:
             return
+        payload = text or NO_TEXT_PLACEHOLDER
 
         try:
-            result = self._evaluate_guardrail(text)
+            result = self._evaluate_guardrail(payload, attachments)
             modified_text = self._handle_validation_result(
                 result,
-                text,
+                payload,
                 scope=scope,
                 stage=stage,
                 component=component_label(scope),
                 input_payload=json.dumps(input_text) if input_text else None,
             )
-            _apply_text_modification(messages, text, modified_text)
+            if text:
+                _apply_text_modification(messages, text, modified_text)
         except GuardrailBlockException as exc:
             raise convert_block_exception(exc) from exc
         except AgentRuntimeError:

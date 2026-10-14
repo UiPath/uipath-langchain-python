@@ -21,56 +21,35 @@ Both return one of three answers, which the validate API reads differently:
 
 The runtime forwards id, file name and mime type only; the backend's feature flag
 decides whether they are used at all, the backend decides which validators and file
-types it can inspect, and it resolves the id through Orchestrator.
+types it can inspect, and it resolves the id through Orchestrator. The scan and the
+reference rules live in ``uipath.platform.guardrails.attachments``, shared with the
+coded-agent guardrails.
 
 Nothing in this module raises: the guardrail node re-raises any exception, which would
 end the run over a single malformed attachment.
 """
 
 import logging
-import uuid
-from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
-from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailAttachment
+from uipath.platform.guardrails import (
+    BuiltInValidatorGuardrail,
+    GuardrailAttachment,
+    detection_scope_includes_files,
+    referenced_attachments,
+    to_references,
+)
+from uipath.platform.guardrails.attachments import MAX_ATTACHMENTS
 
 logger = logging.getLogger(__name__)
 
-#: Limits enforced by the validate API.
-_MAX_ATTACHMENTS = 5
-_MAX_FILE_NAME_LENGTH = 260
-#: ``detectionScope``: an allow-list, so an unknown value narrows to text only. Absent takes the backend default.
-_DETECTION_SCOPE_PARAMETER = "detectionscope"
-_FILE_DETECTION_SCOPES: frozenset[str] = frozenset({"files", "both"})
-#: Wire key of a job attachment reference as the model and the tools exchange it.
-_ID_KEY = "ID"
-#: Bounds for scanning a payload, which can be arbitrarily large or deep.
-_MAX_SCAN_DEPTH = 32
-_MAX_SCAN_NODES = 10_000
-
-
-def _detection_scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> bool:
-    try:
-        for parameter in guardrail.validator_parameters:
-            if parameter.id.lower() != _DETECTION_SCOPE_PARAMETER:
-                continue
-            if isinstance(parameter.value, str):
-                # Empty means absent, as the backend reads it.
-                scope = parameter.value.strip().lower()
-                if scope:
-                    return scope in _FILE_DETECTION_SCOPES
-    except Exception:
-        logger.debug(
-            "Could not read the guardrail detection scope; assuming files apply.",
-            exc_info=True,
-        )
-    return True
+#: Limit enforced by the validate API.
+_MAX_ATTACHMENTS = MAX_ATTACHMENTS
 
 
 def _is_text_only(guardrail: BuiltInValidatorGuardrail) -> bool:
-    if _detection_scope_includes_files(guardrail):
+    if detection_scope_includes_files(guardrail):
         return False
     logger.debug(
         "Guardrail '%s' is scoped to text only; skipping attachment resolution.",
@@ -93,7 +72,7 @@ async def resolve_guardrail_attachments(
         return None
     if not job_attachments:
         return []
-    return _collect(job_attachments.values())
+    return to_references(job_attachments.values())
 
 
 def resolve_referenced_attachments(
@@ -117,122 +96,4 @@ def resolve_referenced_attachments(
         return None
     if data is None:
         return []
-    try:
-        mentions = list(_iter_attachment_mentions(data))
-    except Exception:
-        logger.warning(
-            "Could not scan the payload for attachments; guardrail '%s' evaluates "
-            "without files.",
-            guardrail.name,
-            exc_info=True,
-        )
-        return None
-    registry = job_attachments or {}
-    resolved = (_resolve_mention(mention, registry) for mention in mentions)
-    return _collect(attachment for attachment in resolved if attachment is not None)
-
-
-def _iter_attachment_mentions(data: Any) -> Iterator[Any]:
-    """Yield every attachment-shaped value in ``data`` in document order, within bounds.
-
-    Children are pushed reversed so the stack pops them first to last: when more files
-    are mentioned than the API accepts, the ones written first are the ones sent.
-    """
-    stack: list[tuple[Any, int]] = [(data, 0)]
-    visited = 0
-    while stack:
-        value, depth = stack.pop()
-        visited += 1
-        if visited > _MAX_SCAN_NODES:
-            logger.debug(
-                "Stopped scanning the payload for attachments after %d values.",
-                _MAX_SCAN_NODES,
-            )
-            return
-        if depth > _MAX_SCAN_DEPTH:
-            continue
-        if isinstance(value, Attachment):
-            yield value
-        elif isinstance(value, BaseModel):
-            stack.append((value.model_dump(by_alias=True), depth + 1))
-        elif isinstance(value, Mapping):
-            # A UUID ``ID`` may name a record other than a file, so its children are
-            # still scanned; a mention that is not in the registry is dropped later.
-            if _is_mention(value):
-                yield value
-            stack.extend((item, depth + 1) for item in reversed(list(value.values())))
-        elif isinstance(value, (list, tuple, set, frozenset)):
-            stack.extend((item, depth + 1) for item in reversed(list(value)))
-
-
-def _is_mention(value: Mapping[Any, Any]) -> bool:
-    raw_id = value.get(_ID_KEY)
-    if raw_id is None or isinstance(raw_id, bool):
-        return False
-    try:
-        uuid.UUID(str(raw_id))
-    except ValueError:
-        return False
-    return True
-
-
-def _resolve_mention(mention: Any, registry: dict[str, Attachment]) -> Any | None:
-    """Look one mention up in the run's registry; None when the run never held it."""
-    try:
-        raw_id = mention.id if isinstance(mention, Attachment) else mention[_ID_KEY]
-        attachment_id = str(uuid.UUID(str(raw_id)))
-        known = registry.get(attachment_id)
-        if known is not None:
-            return known
-        logger.debug(
-            "Skipping attachment reference '%s': this run does not hold it.",
-            attachment_id,
-        )
-    except Exception:
-        logger.debug(
-            "Skipping a malformed attachment reference in the payload.",
-            exc_info=True,
-        )
-    return None
-
-
-def _collect(attachments: Iterable[Any]) -> list[GuardrailAttachment]:
-    """Build references, dropping unusable and duplicate ones, capped to the API limit."""
-    references: list[GuardrailAttachment] = []
-    seen: set[str] = set()
-    for attachment in attachments:
-        reference = _to_reference(attachment)
-        if reference is None or reference.id in seen:
-            continue
-        seen.add(reference.id)
-        references.append(reference)
-        if len(references) == _MAX_ATTACHMENTS:
-            break
-    return references
-
-
-def _to_reference(attachment: Any) -> GuardrailAttachment | None:
-    """Build one reference, or None when the attachment cannot be forwarded."""
-    try:
-        attachment_id = str(uuid.UUID(str(getattr(attachment, "id", None))))
-        file_name = str(getattr(attachment, "full_name", "") or "")
-        mime_type = str(getattr(attachment, "mime_type", "") or "")
-        if not file_name or not mime_type:
-            # The validate API rejects the whole request over an empty name or type.
-            logger.debug(
-                "Skipping attachment '%s' for guardrail inspection: missing name or type.",
-                file_name or attachment_id,
-            )
-            return None
-        return GuardrailAttachment(
-            id=attachment_id,
-            file_name=file_name[:_MAX_FILE_NAME_LENGTH],
-            mime_type=mime_type,
-        )
-    except Exception:
-        logger.warning(
-            "Skipping attachment '%s' for guardrail inspection: invalid reference.",
-            getattr(attachment, "full_name", "?"),
-            exc_info=True,
-        )
-        return None
+    return referenced_attachments(data, job_attachments or {})

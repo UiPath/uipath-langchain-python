@@ -6,7 +6,12 @@ from uuid import uuid4
 
 from langchain.agents.middleware import AgentMiddleware
 from uipath.core.guardrails import GuardrailSelector
-from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BuiltInValidatorGuardrail,
+    DetectionScope,
+    GuardrailScope,
+    with_detection_scope,
+)
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
@@ -31,6 +36,9 @@ class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
         name: Optional name for the guardrail.
         description: Optional description for the guardrail.
         enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
+        detection_scope: Which content the guardrail evaluates: ``Text`` the text only,
+            ``Files`` the attached files only, ``Both`` both. ``None`` sends no
+            parameter, so the backend default applies (``Text``).
     """
 
     def __init__(
@@ -41,6 +49,7 @@ class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
         name: str = "User Prompt Attacks Detection",
         description: str | None = None,
         enabled_for_evals: bool = True,
+        detection_scope: DetectionScope | str | None = None,
     ):
         """Initialize user prompt attacks detection guardrail middleware."""
         if not isinstance(action, GuardrailAction):
@@ -61,7 +70,10 @@ class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
         self.enabled_for_evals = enabled_for_evals
         self._description = description or "Detects user prompt attacks"
 
-        self._guardrail = self._create_guardrail()
+        self.detection_scope = self._resolve_detection_scope(detection_scope)
+        self._guardrail = with_detection_scope(
+            self._create_guardrail(), self.detection_scope
+        )
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
