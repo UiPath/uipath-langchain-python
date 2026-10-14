@@ -1,6 +1,7 @@
 """Tool node factory wiring directly to LangGraph's ToolNode."""
 
 from collections.abc import Sequence
+from contextlib import AbstractContextManager, nullcontext
 from inspect import signature
 from typing import Any, Awaitable, Callable, Literal, Mapping
 
@@ -24,6 +25,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
+from uipath_langchain.agent.tools.client_side_tool import client_side_tool_filter
 from uipath_langchain.chat.hitl import (
     IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     REQUIRE_CONVERSATIONAL_CONFIRMATION,
@@ -94,11 +96,14 @@ class UiPathToolNode(RunnableCallable):
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
 
-        if self.wrapper:
-            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
-            result = self.wrapper(*inputs)
-        else:
-            result = self.tool.invoke(call)
+        with self._tool_call_scope(state):
+            if self.wrapper:
+                inputs = self._prepare_wrapper_inputs(
+                    self.wrapper, self.tool, call, state
+                )
+                result = self.wrapper(*inputs)
+            else:
+                result = self.tool.invoke(call)
         output = self._process_result(call, result)
         if conversational_confirmation:
             # HITL approved - apply confirmation metadata to tool result message
@@ -119,16 +124,26 @@ class UiPathToolNode(RunnableCallable):
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
 
-        if self.awrapper:
-            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
-            result = await self.awrapper(*inputs)
-        else:
-            result = await self.tool.ainvoke(call)
+        with self._tool_call_scope(state):
+            if self.awrapper:
+                inputs = self._prepare_wrapper_inputs(
+                    self.awrapper, self.tool, call, state
+                )
+                result = await self.awrapper(*inputs)
+            else:
+                result = await self.tool.ainvoke(call)
         output = self._process_result(call, result)
         if conversational_confirmation:
             # HITL approved - apply confirmation metadata to tool result message
             conversational_confirmation.annotate_result(output)
         return output
+
+    def _tool_call_scope(self, state: AgentGraphState) -> AbstractContextManager[None]:
+        """Context the tool runs in: a client-side tool sees the exchange's declarations."""
+        metadata = getattr(self.tool, "metadata", None) or {}
+        if metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
+            return client_side_tool_filter(state)
+        return nullcontext()
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
         """Extract the tool call from the state messages."""

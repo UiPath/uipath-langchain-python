@@ -1,6 +1,8 @@
 """Factory for creating client-side tools that execute on the client SDK."""
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Annotated, Any
 
@@ -25,11 +27,42 @@ from .utils import sanitize_tool_name
 
 # When set, only tools in this set are available for the current exchange.
 # None means all client-side tools are available (default for CAS/web UI).
+# Set per tool call by `client_side_tool_filter`, from the graph state: LangGraph
+# runs each node in a copy of the context, so a value set in another node (such
+# as the init node) is not visible when the tool runs.
 available_client_side_tools: ContextVar[set[str] | None] = ContextVar(
     "available_client_side_tools", default=None
 )
 
 UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY = "uipath__client_side_tools"
+
+
+def declared_tool_names(declared_tools: list[str | dict[str, Any]]) -> set[str]:
+    """Tool names from the client's declarations: strings, or dicts with a 'name' field."""
+    names: set[str] = set()
+    for t in declared_tools:
+        if isinstance(t, str):
+            names.add(t)
+        elif isinstance(t, dict) and "name" in t:
+            names.add(t["name"])
+    return names
+
+
+@contextmanager
+def client_side_tool_filter(state: Any) -> Iterator[None]:
+    """Apply the exchange's client-side tool declarations for the duration of one tool call.
+
+    Reads `uipath__client_side_tools` from the graph state. Absent (None) keeps
+    every client-side tool available; a list makes only the declared names
+    available, so an empty list makes none available.
+    """
+    declared = getattr(state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None)
+    allowed = declared_tool_names(declared) if isinstance(declared, list) else None
+    token = available_client_side_tools.set(allowed)
+    try:
+        yield
+    finally:
+        available_client_side_tools.reset(token)
 
 
 def apply_tool_filter(
@@ -47,13 +80,7 @@ def apply_tool_filter(
             from uipath__client_side_tools input.
         agent_tools: The agent's client-side tools keyed by name.
     """
-    declared_names: set[str] = set()
-    for t in declared_tools:
-        if isinstance(t, str):
-            declared_names.add(t)
-        elif isinstance(t, dict) and "name" in t:
-            declared_names.add(t["name"])
-
+    declared_names = declared_tool_names(declared_tools)
     available_client_side_tools.set(declared_names & set(agent_tools.keys()))
 
 
