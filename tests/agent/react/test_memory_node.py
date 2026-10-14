@@ -3,13 +3,16 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import httpx
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables.graph import Edge
 from langgraph.graph import StateGraph
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
-from uipath.platform.memory import FieldMatching
+from uipath.platform.errors import EnrichedException
+from uipath.platform.memory import FieldMatching, SearchMode
 
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.react.agent import create_agent
@@ -22,6 +25,7 @@ from uipath_langchain.agent.react.memory_node import (
     _enabled_file_prompts,
     _fetch_space_settings,
     _normalize_attachment_items,
+    _query_too_long_message,
     _render_analysis_prompt,
     _top_level_attachment_field,
     _top_level_attachment_fields,
@@ -96,6 +100,51 @@ class _TopicLevelInput(BaseModel):
 
     topic: str = Field(default="")
     level: str = Field(default="")
+
+
+class _FakeSpan:
+    def __init__(self, name: str, attributes: dict[str, object]) -> None:
+        self.name = name
+        self.attributes = dict(attributes)
+        self.statuses: list[tuple[object, ...]] = []
+
+    def set_attribute(self, name: str, value: object) -> None:
+        self.attributes[name] = value
+
+    def set_status(self, *status: object) -> None:
+        self.statuses.append(status)
+
+
+class _FakeSpanContext:
+    def __init__(self, span: _FakeSpan) -> None:
+        self.span = span
+
+    def __enter__(self) -> _FakeSpan:
+        return self.span
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _FakeTracer:
+    def __init__(self) -> None:
+        self.spans: list[_FakeSpan] = []
+
+    def start_as_current_span(
+        self, name: str, attributes: dict[str, object] | None = None
+    ) -> _FakeSpanContext:
+        span = _FakeSpan(name, attributes or {})
+        self.spans.append(span)
+        return _FakeSpanContext(span)
+
+
+def _enriched_error(status_code: int, body: str) -> EnrichedException:
+    request = httpx.Request("POST", "https://cloud.test/api/Memory/space-123/search")
+    response = httpx.Response(status_code, request=request, text=body)
+    http_error = httpx.HTTPStatusError("error", request=request, response=response)
+    error = EnrichedException(http_error)
+    error.__cause__ = http_error
+    return error
 
 
 def _make_state(**user_fields: Any) -> dict[str, Any]:
@@ -188,6 +237,87 @@ class TestMemoryRecallNode:
 
         result = await node(_make_state(topic="python"))
         assert result == {}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("search_mode", [SearchMode.Hybrid, SearchMode.Semantic])
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_sends_configured_search_mode(
+        self, mock_uipath_cls: MagicMock, search_mode: SearchMode
+    ) -> None:
+        search = _mock_search(mock_uipath_cls)
+        config = MemoryConfig(
+            memory_space_id="space-123",
+            field_weights={"topic": 1.0},
+            search_mode=search_mode,
+        )
+        node = create_memory_recall_node(config, input_schema=_TopicInput)
+
+        await node(_make_state(topic="python"))
+
+        assert _search_request(search).settings.search_mode == search_mode
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node._get_tracer")
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_query_too_long_sets_actionable_span_error(
+        self, mock_uipath_cls: MagicMock, get_tracer: MagicMock
+    ) -> None:
+        tracer = _FakeTracer()
+        get_tracer.return_value = (tracer, otel_trace)
+        # Padding pushes the message past EnrichedException's 200-char truncation.
+        body = (
+            '{"message":"Upstream ECS failed","details":"'
+            + "x" * 300
+            + " Query text exceeds the maximum length of 4000 characters for "
+            'Keyword search."}'
+        )
+        mock_uipath_cls.return_value.memory.search_async = AsyncMock(
+            side_effect=_enriched_error(400, body)
+        )
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
+        node = create_memory_recall_node(config, input_schema=_TopicInput)
+
+        result = await node(_make_state(topic="python"))
+
+        assert result == {}
+        assert [s.name for s in tracer.spans] == [
+            "Find previous memories",
+            "Apply dynamic few shot",
+        ]
+        for span in tracer.spans:
+            error = span.attributes["error"]
+            assert isinstance(error, str)
+            assert error.startswith("Memory lookup skipped")
+            assert (
+                "Query text exceeds the maximum length of 4000 characters for "
+                "Keyword search." in error
+            )
+            assert "Summarize key" in error
+            assert "Semantic (meaning only)" in error
+            assert "https://docs.uipath.com/agents/" in error
+            assert span.statuses == [(otel_trace.StatusCode.ERROR, error)]
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node._get_tracer")
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_other_failures_record_raw_error(
+        self, mock_uipath_cls: MagicMock, get_tracer: MagicMock
+    ) -> None:
+        tracer = _FakeTracer()
+        get_tracer.return_value = (tracer, otel_trace)
+        mock_uipath_cls.return_value.memory.search_async = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
+        node = create_memory_recall_node(config, input_schema=_TopicInput)
+
+        await node(_make_state(topic="python"))
+
+        for span in tracer.spans:
+            assert span.attributes["error"] == "RuntimeError('boom')"
+            assert span.statuses == [
+                (otel_trace.StatusCode.ERROR, "RuntimeError('boom')")
+            ]
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_user_inputs(self) -> None:
@@ -878,3 +1008,25 @@ class TestFetchSpaceSettings:
         uipath_cls.return_value = sdk
 
         assert await _fetch_space_settings("space-123") is None
+
+
+class TestQueryTooLongMessage:
+    _BODY = (
+        '{"message":"Query text exceeds the maximum length of 4000 characters '
+        'for Keyword search."}'
+    )
+
+    def test_matches_too_long_bad_request(self) -> None:
+        message = _query_too_long_message(_enriched_error(400, self._BODY))
+        assert message is not None
+        assert "Summarize key" in message
+
+    def test_ignores_other_status_codes(self) -> None:
+        assert _query_too_long_message(_enriched_error(500, self._BODY)) is None
+
+    def test_ignores_other_bad_requests(self) -> None:
+        error = _enriched_error(400, '{"message":"Memory space not found"}')
+        assert _query_too_long_message(error) is None
+
+    def test_ignores_non_http_errors(self) -> None:
+        assert _query_too_long_message(RuntimeError(self._BODY)) is None
