@@ -3,7 +3,11 @@
 import copy
 import importlib
 import logging
+import os
+import subprocess
 import sys
+import textwrap
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -617,3 +621,86 @@ class TestDynamicModuleRegistration:
 
         instance = model.model_validate({"details": {"site": "syd"}})
         assert model.model_validate(instance) is not None
+
+    def test_same_schema_returns_the_same_class(
+        self, schema_with_defs: dict[str, Any]
+    ) -> None:
+        first = create_model(schema_with_defs)
+        second = create_model(copy.deepcopy(schema_with_defs))
+
+        assert second is first
+
+    def test_backends_do_not_share_classes(
+        self, schema_with_defs: dict[str, Any]
+    ) -> None:
+        enabled = FeatureFlags.is_flag_enabled(DATAMODEL_CODE_GENERATOR_CONVERTER_FF)
+        model = create_model(schema_with_defs)
+        FeatureFlags.configure_flags(
+            {DATAMODEL_CODE_GENERATOR_CONVERTER_FF: not enabled}
+        )
+        other = create_model(schema_with_defs)
+
+        assert other is not model
+        assert other.__module__ != model.__module__
+
+    def test_checkpoint_resumes_in_a_process_that_converted_the_schema_before(
+        self, tmp_path: Path
+    ) -> None:
+        enabled = FeatureFlags.is_flag_enabled(DATAMODEL_CODE_GENERATOR_CONVERTER_FF)
+        script = tmp_path / "resume.py"
+        script.write_text(textwrap.dedent(_RESUME_SCRIPT), encoding="utf-8")
+        checkpoint = tmp_path / "checkpoint.bin"
+
+        def run(step: str) -> None:
+            proc = subprocess.run(
+                [sys.executable, str(script), step, str(enabled), str(checkpoint)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "PYTHONWARNINGS": "ignore"},
+            )
+            assert proc.returncode == 0, f"{step} failed:\n{proc.stderr[-2000:]}"
+
+        run("suspend")
+        run("resume")
+
+
+_RESUME_SCRIPT = """
+    import sys
+    from pathlib import Path
+
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+    from uipath.core.feature_flags import FeatureFlags
+
+    from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+        DATAMODEL_CODE_GENERATOR_CONVERTER_FF,
+        create_model,
+    )
+
+    SCHEMA = {
+        "type": "object",
+        "properties": {"invoice_file": {"$ref": "#/definitions/job-attachment"}},
+        "required": ["invoice_file"],
+        "definitions": {
+            "job-attachment": {
+                "type": "object",
+                "properties": {"ID": {"type": "string"}},
+                "required": ["ID"],
+            }
+        },
+    }
+
+    step, enabled, checkpoint = sys.argv[1], sys.argv[2] == "True", Path(sys.argv[3])
+    FeatureFlags.configure_flags({DATAMODEL_CODE_GENERATOR_CONVERTER_FF: enabled})
+    serde = JsonPlusSerializer()
+
+    if step == "suspend":
+        model = create_model(SCHEMA)
+        value = model.model_validate({"invoice_file": {"ID": "a"}})
+        checkpoint.write_bytes(serde.dumps_typed(value)[1])
+    else:
+        create_model(SCHEMA)  # another job of the same agent ran here first
+        model = create_model(SCHEMA)
+        restored = serde.loads_typed(("msgpack", checkpoint.read_bytes()))
+        model.model_validate(restored)
+"""

@@ -17,7 +17,6 @@ a model rather than a dict.
 """
 
 import inspect
-import itertools
 import sys
 from types import ModuleType
 from typing import Any, Type, cast
@@ -27,22 +26,15 @@ from pydantic import BaseModel, PydanticUndefinedAnnotation
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
-# Prefix for the per-conversion pseudo-modules that let get_type_hints()
-# resolve each schema's forward references.
-_DYNAMIC_MODULE_PREFIX = "jsonschema_pydantic_converter._dynamic"
 
-_dynamic_module_counter = itertools.count()
-
-
-def _create_dynamic_module() -> ModuleType:
-    """Create a pseudo-module unique to one schema conversion.
+def _create_dynamic_module(module_name: str) -> ModuleType:
+    """Register the pseudo-module that holds one schema's generated classes.
 
     The converter reuses generic class names (``DynamicType_0``, ...) across
     schemas, so a shared module would let qualified-name lookups (e.g.
     LangGraph checkpoint deserialization) resolve to a class generated from a
     different schema.
     """
-    module_name = f"{_DYNAMIC_MODULE_PREFIX}_{next(_dynamic_module_counter)}"
     pseudo_module = ModuleType(module_name)
     sys.modules[module_name] = pseudo_module
     return pseudo_module
@@ -50,8 +42,9 @@ def _create_dynamic_module() -> ModuleType:
 
 def create_model(
     schema: dict[str, Any],
+    module_name: str,
 ) -> Type[BaseModel]:
-    """Convert a JSON schema dict to a Pydantic model.
+    """Convert a JSON schema dict to a Pydantic model homed in `module_name`.
 
     Raises:
         AgentStartupError: If the schema contains a type that cannot be resolved.
@@ -71,7 +64,7 @@ def create_model(
             ),
         ) from e
 
-    pseudo_module = _create_dynamic_module()
+    pseudo_module = _create_dynamic_module(module_name)
 
     for type_name, type_def in namespace.items():
         setattr(pseudo_module, type_name, type_def)

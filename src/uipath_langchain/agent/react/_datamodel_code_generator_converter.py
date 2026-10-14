@@ -11,7 +11,7 @@ Both backends resolve ``$ref``s completely.
 Everything below the two public entry points exists to keep three runtime
 contracts intact:
 
-* generated classes live in a per-conversion pseudo-module registered in
+* generated classes live in a per-schema pseudo-module registered in
   ``sys.modules``, so qualified-name lookups resolve (LangGraph checkpoint
   deserialization, and :mod:`uipath_langchain.agent.attachments.pydantic_json`);
 * classes reached through a ``$ref`` carry ``__uipath_marker_name__`` holding the
@@ -21,7 +21,6 @@ contracts intact:
   naming the type, rather than producing a model that breaks later.
 """
 
-import itertools
 import keyword
 import re
 import sys
@@ -43,12 +42,6 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 
 from ._datamodel_code_generator_base import UiPathDatamodelCodeGeneratorBaseModel
 from ._schema_refs import ref_resolves, resolve_pointer
-
-# Prefix for the per-conversion pseudo-modules that let qualified-name lookups
-# resolve each schema's generated classes.
-_DYNAMIC_MODULE_PREFIX = "jsonschema_pydantic_converter._dynamic"
-
-_dynamic_module_counter = itertools.count()
 
 # Import path of the base class every generated model derives from. The generator
 # takes this as a string and emits the import itself.
@@ -95,9 +88,8 @@ def _invalid_schema(detail: str) -> AgentStartupError:
     )
 
 
-def _create_dynamic_module() -> ModuleType:
-    """Create a pseudo-module unique to one conversion, since class names repeat."""
-    module_name = f"{_DYNAMIC_MODULE_PREFIX}_{next(_dynamic_module_counter)}"
+def _create_dynamic_module(module_name: str) -> ModuleType:
+    """Register the pseudo-module for one schema, since class names repeat."""
     pseudo_module = ModuleType(module_name)
     sys.modules[module_name] = pseudo_module
     return pseudo_module
@@ -171,7 +163,7 @@ def _nested_class_name(name: str) -> str:
     return _valid_identifier(pascal, "Model")
 
 
-def _generate(schema: dict[str, Any]) -> tuple[dict[str, type], str]:
+def _generate(schema: dict[str, Any], module_name: str) -> tuple[dict[str, type], str]:
     """Generate the model classes for `schema`, plus the name of its root class."""
     order: list[str] = []
 
@@ -194,14 +186,12 @@ def _generate(schema: dict[str, Any]) -> tuple[dict[str, type], str]:
         custom_class_name_generator=record_name,
         type_mappings=_FORMAT_PINS,
     )
-    module_name = f"{_DYNAMIC_MODULE_PREFIX}_gen_{next(_dynamic_module_counter)}"
     try:
         models = generate_dynamic_models(
             schema,
             config=config,
-            module_name=module_name,
-            # Each conversion gets its own classes, so one caller mutating a
-            # model cannot affect another agent built from an identical schema.
+            module_name=f"{module_name}_gen",
+            # jsonschema_pydantic_converter.create_model caches per schema.
             cache_size=0,
         )
     except AgentStartupError:
@@ -483,14 +473,15 @@ def _guard_unenforceable(
 
 def create_model(
     schema: dict[str, Any],
+    module_name: str,
 ) -> Type[BaseModel]:
-    """Convert a JSON schema dict to a Pydantic model."""
+    """Convert a JSON schema dict to a Pydantic model homed in `module_name`."""
     _assert_refs_resolve(schema)
 
-    models, root_name = _generate(schema)
+    models, root_name = _generate(schema, module_name)
     root = cast(Type[BaseModel], models[root_name])
 
-    pseudo_module = _create_dynamic_module()
+    pseudo_module = _create_dynamic_module(module_name)
     _register_models(models, pseudo_module)
     _tag_referenced_models(root, schema, pseudo_module)
 
