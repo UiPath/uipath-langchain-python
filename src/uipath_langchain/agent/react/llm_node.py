@@ -14,7 +14,6 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
-from uipath.core.feature_flags import FeatureFlags
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
@@ -117,8 +116,6 @@ def _tool_less_turns_error() -> AgentRuntimeError:
     )
 
 
-BEDROCK_PROMPT_CACHING_FF = "EnableBedrockPromptCaching"
-
 StateT = TypeVar("StateT", bound=AgentGraphState)
 InputT = TypeVar("InputT", bound=BaseModel)
 
@@ -193,9 +190,7 @@ class LLMNode(ABC, Generic[StateT]):
             parallel_tool_calls=self.parallel_tool_calls,
             strict_mode=self.strict_mode,
         )
-        if call.cache_prompt and FeatureFlags.is_flag_enabled(
-            BEDROCK_PROMPT_CACHING_FF, default=False
-        ):
+        if call.cache_prompt:
             binding_kwargs.update(call.handler.get_prompt_caching_kwargs())
         llm = call.model.bind_tools(tools, **binding_kwargs)
 

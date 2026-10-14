@@ -9,11 +9,13 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
+from uipath.core.feature_flags import FeatureFlags
 
 from tests.settings import agent_hub_dummy_settings
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 from uipath_langchain.chat.exceptions import ChatModelError
 from uipath_langchain.chat.handlers.bedrock import (
+    PROMPT_CACHING_FF,
     BedrockConversePayloadHandler,
     BedrockInvokePayloadHandler,
 )
@@ -425,6 +427,18 @@ class TestThinkingRejectsForcedToolChoice:
 
 class TestBedrockConverseGetPromptCachingKwargs:
     _CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
+
+    @pytest.fixture(autouse=True)
+    def _enable_caching(self) -> Iterator[None]:
+        FeatureFlags.reset_flags()
+        FeatureFlags.configure_flags({PROMPT_CACHING_FF: True})
+        yield
+        FeatureFlags.reset_flags()
+
+    def test_flag_off_gets_nothing(self) -> None:
+        FeatureFlags.configure_flags({PROMPT_CACHING_FF: False})
+        handler = BedrockConversePayloadHandler(make_converse_model(_CLAUDE))  # type: ignore[arg-type]
+        assert handler.get_prompt_caching_kwargs() == {}
 
     @pytest.mark.parametrize(
         "model_id, expected",
