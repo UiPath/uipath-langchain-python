@@ -125,4 +125,6 @@ async def _build_tool_for_resource(
     elif isinstance(resource, AgentClientSideToolResourceConfig):
         return create_client_side_tool(resource)
 
+    # AgentConversationalAgentToolResourceConfig is built by
+    # create_conversational_agent_tools_and_clients.
     return None
