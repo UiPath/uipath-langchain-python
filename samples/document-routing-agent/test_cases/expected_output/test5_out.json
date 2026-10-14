@@ -1,0 +1,18 @@
+{
+  "document_id": "DOC-2025-005",
+  "routing_id": "RTG-EF9DE65A",
+  "assigned_department": "operations",
+  "routing_confidence": "high",
+  "priority_score": 25,
+  "routing_reasons": [
+    "Document received at 2025-01-02T10:00:00Z",
+    "Analyzed 373 characters of content",
+    "Top departments: operations:1.00, hr:0.00, finance:0.00",
+    "Matched keywords: production, logistics, supply",
+    "Document type 'work_order' matches department",
+    "Priority score: 25 (2-3 business days)"
+  ],
+  "secondary_departments": [],
+  "processing_timestamp": "2025-01-02T10:00:00Z",
+  "estimated_processing_time": "2-3 business days"
+}

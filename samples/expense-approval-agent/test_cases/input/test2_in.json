@@ -1,0 +1,11 @@
+{
+  "employee_id": "EMP002",
+  "employee_name": "Sarah Johnson",
+  "department": "sales",
+  "expense_amount": 85.00,
+  "expense_category": "supplies",
+  "expense_description": "Office supplies for remote work setup",
+  "receipt_attached": false,
+  "expense_date": "2025-09-20",
+  "manager_email": "manager@company.com"
+}

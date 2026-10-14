@@ -1,0 +1,117 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "b068ad9d-0e45-4a74-9968-9ce7441bb62b",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "document_id": {
+                        "description": "Unique document identifier",
+                        "title": "Document Id",
+                        "type": "string"
+                    },
+                    "document_type": {
+                        "description": "Type of document",
+                        "title": "Document Type",
+                        "type": "string"
+                    },
+                    "title": {
+                        "description": "Document title",
+                        "title": "Title",
+                        "type": "string"
+                    },
+                    "content": {
+                        "description": "Document content or description",
+                        "title": "Content",
+                        "type": "string"
+                    },
+                    "sender_email": {
+                        "description": "Email of document sender",
+                        "title": "Sender Email",
+                        "type": "string"
+                    },
+                    "sender_department": {
+                        "type": "string"
+                    },
+                    "urgency_level": {
+                        "default": "medium",
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "critical"
+                        ],
+                        "title": "Urgency Level",
+                        "type": "string"
+                    },
+                    "tags": {
+                        "description": "Document tags/labels",
+                        "items": {
+                            "type": "string"
+                        },
+                        "title": "Tags",
+                        "type": "array"
+                    }
+                },
+                "required": [
+                    "document_id",
+                    "document_type",
+                    "title",
+                    "content",
+                    "sender_email"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "document_id": {
+                        "default": null,
+                        "title": "Document Id",
+                        "type": "string"
+                    },
+                    "routing_id": {
+                        "type": "string"
+                    },
+                    "assigned_department": {
+                        "type": "string"
+                    },
+                    "routing_confidence": {
+                        "type": "string"
+                    },
+                    "priority_score": {
+                        "type": "integer"
+                    },
+                    "routing_reasons": {
+                        "default": null,
+                        "items": {
+                            "type": "string"
+                        },
+                        "title": "Routing Reasons",
+                        "type": "array"
+                    },
+                    "secondary_departments": {
+                        "default": null,
+                        "items": {
+                            "type": "string"
+                        },
+                        "title": "Secondary Departments",
+                        "type": "array"
+                    },
+                    "processing_timestamp": {
+                        "type": "string"
+                    },
+                    "estimated_processing_time": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
