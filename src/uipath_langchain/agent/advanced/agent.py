@@ -1,8 +1,11 @@
 """Advanced agent builder."""
 
+import dataclasses
+import operator
+import threading
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, NotRequired, cast
+from typing import Annotated, Any, Literal, NotRequired, cast
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
@@ -16,10 +19,12 @@ from langchain.agents.middleware import (
     ToolCallRequest,
     ToolErrorMiddleware,
 )
+from langchain.agents.middleware.types import PrivateStateAttr
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command
@@ -118,50 +123,123 @@ class _RuntimeSystemPromptMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return await handler(self._prepare_request(request))
 
 
+_SUBAGENT_ITERATIONS_KEY = "uipath__subagent_iterations"
+_TASK_TOOL_NAME = "task"
+
+
+@dataclass
+class _RunningSubagents:
+    spent: int
+    subagents: int = 0
+    tasks: int = 0
+
+
+class _IterationBudget:
+    """Model calls of subagents that are still running, per thread.
+
+    A subagent's calls reach the main agent's state only when its task call
+    returns, so while it runs they are counted here, against what the turn had
+    spent when it was delegated. Entries live only while a task call runs.
+    """
+
+    def __init__(self, max_iterations: int) -> None:
+        self.max_iterations = max_iterations
+        self._running: dict[Any, _RunningSubagents] = {}
+        self._lock = threading.Lock()
+
+    def _thread_id(self) -> Any:
+        return get_config().get("configurable", {}).get("thread_id")
+
+    def check(self, spent: int) -> None:
+        if spent >= self.max_iterations:
+            raise max_iterations_error(self.max_iterations)
+
+    def start_task(self, spent: int) -> None:
+        with self._lock:
+            running = self._running.setdefault(
+                self._thread_id(), _RunningSubagents(spent)
+            )
+            running.tasks += 1
+
+    def finish_task(self) -> int:
+        """End a task call and hand back the subagent calls not yet in state."""
+        with self._lock:
+            thread_id = self._thread_id()
+            running = self._running[thread_id]
+            drained, running.subagents = running.subagents, 0
+            running.spent += drained
+            running.tasks -= 1
+            if not running.tasks:
+                del self._running[thread_id]
+            return drained
+
+    def spend_subagent(self) -> None:
+        with self._lock:
+            running = self._running.get(self._thread_id())
+            if running is None:
+                return
+            self.check(running.spent + running.subagents)
+            running.subagents += 1
+
+
+def _with_subagent_spend(result: ToolMessage | Command[Any], spent: int) -> Any:
+    if not spent:
+        return result
+    if isinstance(result, Command) and isinstance(result.update, dict):
+        return dataclasses.replace(
+            result, update={**result.update, _SUBAGENT_ITERATIONS_KEY: spent}
+        )
+    if isinstance(result, ToolMessage):
+        return Command(update={"messages": [result], _SUBAGENT_ITERATIONS_KEY: spent})
+    return result
+
+
 class _MaxIterationsMiddleware(AgentMiddleware[AgentState[Any], Any]):
-    """Stop the loop once it has spent its iteration budget for this turn.
+    """Stop the main loop once the turn has spent its iteration budget.
 
     Counts the AI messages the agent produced since the turn started, the way the
-    standard agent's llm node does, and raises the same termination error. Counting
-    messages rather than model calls keeps the budget spent across a suspend and
-    resume, where any per-run counter starts over.
+    standard agent's llm node does, and raises the same termination error. Calls
+    made by finished subagents are added to a private state field when their task
+    call returns. Both live in the checkpoint, so the spend survives a suspend and
+    resume. The field is private, so deepagents never hands it to a subagent.
     """
 
     def __init__(
-        self, max_iterations: int, initial_message_count_key: str | None = None
+        self,
+        budget: _IterationBudget,
+        initial_message_count_key: str | None = None,
     ) -> None:
-        self.max_iterations = max_iterations
+        self.budget = budget
         self.initial_message_count_key = initial_message_count_key
+        annotations: dict[str, Any] = {
+            _SUBAGENT_ITERATIONS_KEY: NotRequired[
+                Annotated[int, operator.add, PrivateStateAttr]
+            ]
+        }
         if initial_message_count_key is not None:
-            self.state_schema = type(
-                "MaxIterationsState",
-                (AgentState,),
-                {
-                    "__annotations__": {
-                        initial_message_count_key: NotRequired[int | None]
-                    }
-                },
-            )
+            annotations[initial_message_count_key] = NotRequired[int | None]
+        self.state_schema = type(
+            "MaxIterationsState", (AgentState,), {"__annotations__": annotations}
+        )
 
-    def _check_budget(self, request: ModelRequest[Any]) -> None:
+    def _spent(self, state: Any) -> int:
         initial_count = (
-            cast("int | None", request.state.get(self.initial_message_count_key)) or 0
+            cast("int | None", state.get(self.initial_message_count_key)) or 0
             if self.initial_message_count_key is not None
             else 0
         )
-        messages = cast("list[Any]", request.state.get("messages") or [])
+        messages = cast("list[Any]", state.get("messages") or [])
         produced = sum(
             1 for message in messages[initial_count:] if isinstance(message, AIMessage)
         )
-        if produced >= self.max_iterations:
-            raise max_iterations_error(self.max_iterations)
+        return produced + (state.get(_SUBAGENT_ITERATIONS_KEY) or 0)
 
     def wrap_model_call(
         self,
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
     ) -> ModelResponse[Any]:
-        self._check_budget(request)
+        self.budget.check(self._spent(request.state))
         return handler(request)
 
     async def awrap_model_call(
@@ -169,7 +247,58 @@ class _MaxIterationsMiddleware(AgentMiddleware[AgentState[Any], Any]):
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
     ) -> ModelResponse[Any]:
-        self._check_budget(request)
+        self.budget.check(self._spent(request.state))
+        return await handler(request)
+
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
+        if request.tool_call["name"] != _TASK_TOOL_NAME:
+            return handler(request)
+        self.budget.start_task(self._spent(request.state))
+        try:
+            result = handler(request)
+        finally:
+            spent = self.budget.finish_task()
+        return _with_subagent_spend(result, spent)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        if request.tool_call["name"] != _TASK_TOOL_NAME:
+            return await handler(request)
+        self.budget.start_task(self._spent(request.state))
+        try:
+            result = await handler(request)
+        finally:
+            spent = self.budget.finish_task()
+        return _with_subagent_spend(result, spent)
+
+
+class _SubagentIterationsMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Charge a subagent's model calls to the turn's iteration budget."""
+
+    def __init__(self, budget: _IterationBudget) -> None:
+        self.budget = budget
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        self.budget.spend_subagent()
+        return handler(request)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        self.budget.spend_subagent()
         return await handler(request)
 
 
@@ -213,12 +342,17 @@ def _resolve_runtime_system_prompt(
     return _RuntimeSystemPrompt(None, system_prompt, state_key)
 
 
-def _max_iterations_middleware(
-    max_iterations: int | None, initial_message_count_key: str | None = None
-) -> list[AgentMiddleware[Any, Any]]:
+def _iteration_budget_middleware(
+    max_iterations: int | None, initial_message_count_key: str | None
+) -> tuple[list[AgentMiddleware[Any, Any]], list[AgentMiddleware[Any, Any]]]:
+    """Middleware for the main agent and for its subagents, sharing one budget."""
     if max_iterations is None:
-        return []
-    return [_MaxIterationsMiddleware(max_iterations, initial_message_count_key)]
+        return [], []
+    budget = _IterationBudget(max_iterations)
+    return (
+        [_MaxIterationsMiddleware(budget, initial_message_count_key)],
+        [_SubagentIterationsMiddleware(budget)],
+    )
 
 
 def _tool_error_content(exc: Exception, request: ToolCallRequest) -> str | None:
@@ -378,6 +512,8 @@ def create_advanced_agent(
     memory: Sequence[str] = (),
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
     skills: Sequence[str] | None = None,
+    max_iterations: int | None = None,
+    initial_message_count_key: str | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
@@ -387,6 +523,11 @@ def create_advanced_agent(
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
+
+    ``max_iterations`` caps the model calls of a turn, subagent calls included;
+    ``None`` leaves it uncapped. ``initial_message_count_key`` names the state field
+    holding the message count at the start of the turn, for agents whose input
+    carries earlier turns.
     """
     tools = [
         tool.with_workspace(backend)
@@ -401,15 +542,20 @@ def create_advanced_agent(
         _PayloadHandlerMiddleware(),
         JobAttachmentsMiddleware(),
     ]
+    main_budget, subagent_budget = _iteration_budget_middleware(
+        max_iterations, initial_message_count_key
+    )
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
         tools=list(tools),
-        subagents=_resolve_subagent_specs(subagents, tools, skills, shared_middleware),
+        subagents=_resolve_subagent_specs(
+            subagents, tools, skills, [*subagent_budget, *shared_middleware]
+        ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*middleware, *shared_middleware],
+        middleware=[*main_budget, *middleware, *shared_middleware],
         skills=list(skills) if skills else None,
     )
 
@@ -441,8 +587,8 @@ def create_advanced_agent_graph(
     reference to an attachment that is not linked to this job, sends the agent
     back for another turn instead of emitting an output it cannot honor.
 
-    ``max_iterations`` caps the model calls the agent loop may make; ``None``
-    leaves it uncapped.
+    ``max_iterations`` caps the model calls the agent loop may make, subagent calls
+    included; ``None`` leaves it uncapped.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -461,12 +607,9 @@ def create_advanced_agent_graph(
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
-        middleware=[
-            *runtime_prompt.middleware,
-            *_max_iterations_middleware(max_iterations),
-            *middleware,
-        ],
+        middleware=[*runtime_prompt.middleware, *middleware],
         skills=skills,
+        max_iterations=max_iterations,
     )
 
     output_file_retries_key = get_unique_model_field_name(
@@ -596,8 +739,8 @@ def create_conversational_advanced_agent_graph(
     extraction call over the exchange's messages, after the loop has finished.
     The loop itself produces messages, so nothing in it can produce those fields.
 
-    ``max_iterations`` caps the model calls the agent loop may make per exchange;
-    ``None`` leaves it uncapped.
+    ``max_iterations`` caps the model calls the agent loop may make per exchange,
+    subagent calls included; ``None`` leaves it uncapped.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -617,12 +760,10 @@ def create_conversational_advanced_agent_graph(
         system_prompt=runtime_prompt.static_prompt,
         backend=backend,
         memory=memory_sources,
-        middleware=[
-            *runtime_prompt.middleware,
-            *_max_iterations_middleware(max_iterations, initial_message_count_key),
-            *middleware,
-        ],
+        middleware=[*runtime_prompt.middleware, *middleware],
         skills=skills,
+        max_iterations=max_iterations,
+        initial_message_count_key=initial_message_count_key,
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
