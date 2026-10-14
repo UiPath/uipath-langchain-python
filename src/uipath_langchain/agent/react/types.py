@@ -136,6 +136,10 @@ class AgentGraphConfig(BaseModel):
         default=False,
         description="If set, the LLM will guarantee schema validation of the tool calls.",
     )
+    prompt_caching: bool = Field(
+        default=False,
+        description="If set, the prompt prefix is marked for caching on providers that need explicit cache markers.",
+    )
     output_files_enabled: bool = Field(
         default=False,
         description=(
