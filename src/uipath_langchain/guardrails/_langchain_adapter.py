@@ -10,9 +10,13 @@ Registers a :class:`LangChainGuardrailAdapter` that teaches the platform
 The adapter is auto-registered when ``uipath_langchain.guardrails`` is imported.
 """
 
+import asyncio
 import json
 import logging
+from collections.abc import Iterable
+from contextvars import ContextVar
 from functools import wraps
+from itertools import chain
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -21,7 +25,16 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
-from uipath.core.guardrails import GuardrailScope, GuardrailValidationResultType
+from uipath.core.guardrails import (
+    GuardrailScope,
+    GuardrailValidationResult,
+    GuardrailValidationResultType,
+)
+from uipath.platform.guardrails import GuardrailAttachment
+from uipath.platform.guardrails.attachments import (
+    MAX_ATTACHMENTS,
+    discover_attachments,
+)
 from uipath.platform.guardrails.decorators._core import (
     _EvaluatorFn,
     _extract_input,
@@ -39,6 +52,13 @@ from uipath_langchain.guardrails._action_context import (
     _action_context,
     component_label,
 )
+from uipath_langchain.guardrails.middlewares._attachments import (
+    JOB_ATTACHMENTS_STATE_KEY,
+    NO_TEXT_PLACEHOLDER,
+    build_registry,
+    output_references,
+    registry_references,
+)
 from uipath_langchain.guardrails.middlewares._utils import create_modified_tool_result
 
 logger = logging.getLogger(__name__)
@@ -48,6 +68,15 @@ logger = logging.getLogger(__name__)
 #: that a guardrail is misconfigured. Takes the guardrail name as its argument.
 _EVALUATION_FAILED_MSG = (
     "Guardrail '%s' evaluation failed; continuing without validation."
+)
+
+_NOT_AGENT_OUTPUT_KEYS = frozenset(
+    {"messages", "structured_response", JOB_ATTACHMENTS_STATE_KEY}
+)
+
+#: The tool guards whose ``ainvoke`` is running, so the ``invoke`` it reaches skips.
+_AINVOKE_GUARDS: ContextVar[frozenset[object]] = ContextVar(
+    "_AINVOKE_GUARDS", default=frozenset()
 )
 
 
@@ -109,6 +138,92 @@ def _run_action(
         raise _convert_block_exception(exc) from exc
     finally:
         _action_context.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# Evaluation with attachments
+# ---------------------------------------------------------------------------
+
+
+def _evaluate(
+    evaluator: _EvaluatorFn,
+    data: str | dict[str, Any],
+    stage: GuardrailExecutionStage,
+    input_data: dict[str, Any] | None,
+    output_data: dict[str, Any] | None,
+    attachments: list[GuardrailAttachment] | None,
+) -> GuardrailValidationResult:
+    """Call the evaluator, passing ``attachments`` when there is something to say.
+
+    A non-empty list is always passed. An empty list (files apply, none found) is
+    passed only to an evaluator that declares ``forwards_attachments``, which
+    ``@guardrail`` sets; ``None`` (say nothing about files) is never passed. An
+    evaluator written before files were supported takes four positional
+    arguments, so a call without files keeps that signature.
+    """
+    if attachments or (
+        attachments is not None
+        and getattr(evaluator, "forwards_attachments", None) is True
+    ):
+        return evaluator(data, stage, input_data, output_data, attachments=attachments)
+    return evaluator(data, stage, input_data, output_data)
+
+
+def _forwards_attachments(evaluator: _EvaluatorFn) -> bool:
+    """Tell whether the evaluator sends files on; one that does not say is assumed to.
+
+    ``@guardrail`` marks its evaluator ``forwards_attachments = False`` when every
+    file would be dropped (text scope, or a validator that takes no files), so a
+    call with files and no text has nothing to evaluate. The uipath-platform
+    release that provides ``uipath.platform.guardrails.attachments`` sets it, so
+    the default only applies to hand-written evaluators.
+    """
+    return getattr(evaluator, "forwards_attachments", True) is not False
+
+
+def _union(
+    *groups: Iterable[GuardrailAttachment] | None,
+) -> list[GuardrailAttachment] | None:
+    """Merge reference lists, keeping the first of each id, up to the API limit.
+
+    ``None`` when any part could not be scanned, so the check says nothing about
+    files rather than forwarding a partial set.
+    """
+    if any(group is None for group in groups):
+        return None
+    unique: dict[str, GuardrailAttachment] = {}
+    for reference in chain.from_iterable(group for group in groups if group):
+        unique.setdefault(reference.id, reference)
+    return list(unique.values())[:MAX_ATTACHMENTS]
+
+
+def _agent_input_attachments(
+    input: dict[str, Any],
+) -> list[GuardrailAttachment] | None:
+    """Return the files the run holds plus the attachments typed state keys carry."""
+    state_keys = {key: value for key, value in input.items() if key != "messages"}
+    return _union(
+        registry_references(build_registry(input)), discover_attachments(state_keys)
+    )
+
+
+def _agent_output_attachments(
+    output: dict[str, Any], message: AIMessage | None
+) -> list[GuardrailAttachment] | None:
+    """Return the held files the output names plus the attachments it returns."""
+    named = output_references(
+        message,
+        build_registry(output),
+        structured_response=output.get("structured_response"),
+    )
+    returned = discover_attachments(
+        {
+            key: value
+            for key, value in output.items()
+            if key not in _NOT_AGENT_OUTPUT_KEYS
+        }
+    )
+    return _union(named, returned)
 
 
 # ---------------------------------------------------------------------------
@@ -214,14 +329,35 @@ def _wrap_tool_with_guardrail(
     name: str,
     stage: GuardrailExecutionStage,
 ) -> BaseTool:
-    """Wrap a ``BaseTool`` using Pydantic ``__class__`` swapping."""
-    _stage = stage
+    """Wrap a ``BaseTool`` using Pydantic ``__class__`` swapping.
+
+    Both ``invoke`` and ``ainvoke`` are guarded. ``Tool`` and ``StructuredTool``
+    without a coroutine run ``ainvoke`` through ``self.invoke`` in an executor, so
+    the ``invoke`` a guarded ``ainvoke`` reaches skips its own check.
+    """
+    guard = object()
+    checks_pre = stage in (
+        GuardrailExecutionStage.PRE,
+        GuardrailExecutionStage.PRE_AND_POST,
+    )
+    checks_post = stage in (
+        GuardrailExecutionStage.POST,
+        GuardrailExecutionStage.PRE_AND_POST,
+    )
 
     def _apply_pre(tool_input: Any) -> Any:
         input_data = _extract_input(tool_input)
+        attachments = (
+            discover_attachments(input_data) if _forwards_attachments(evaluator) else []
+        )
         try:
-            result = evaluator(
-                input_data, GuardrailExecutionStage.PRE, input_data, None
+            result = _evaluate(
+                evaluator,
+                input_data,
+                GuardrailExecutionStage.PRE,
+                input_data,
+                None,
+                attachments,
             )
         except Exception as exc:
             logger.error(
@@ -249,9 +385,19 @@ def _wrap_tool_with_guardrail(
     def _apply_post(tool_input: Any, raw_result: Any) -> Any:
         input_data = _extract_input(tool_input)
         output_data = _lc_extract_output(raw_result)
+        attachments = (
+            discover_attachments(output_data)
+            if _forwards_attachments(evaluator)
+            else []
+        )
         try:
-            result = evaluator(
-                output_data, GuardrailExecutionStage.POST, input_data, output_data
+            result = _evaluate(
+                evaluator,
+                output_data,
+                GuardrailExecutionStage.POST,
+                input_data,
+                output_data,
+                attachments,
             )
         except Exception as exc:
             logger.error(
@@ -283,25 +429,33 @@ def _wrap_tool_with_guardrail(
 
     class _GuardedTool(ConcreteToolType):  # type: ignore[valid-type, misc]
         def invoke(self, tool_input: Any, config: Any = None, **kwargs: Any) -> Any:
-            guarded_input = tool_input
-            if _stage in (
-                GuardrailExecutionStage.PRE,
-                GuardrailExecutionStage.PRE_AND_POST,
-            ):
-                guarded_input = _apply_pre(tool_input)
+            active = _AINVOKE_GUARDS.get()
+            if guard in active:
+                token = _AINVOKE_GUARDS.set(active - {guard})
+                try:
+                    return super().invoke(tool_input, config, **kwargs)
+                finally:
+                    _AINVOKE_GUARDS.reset(token)
+            guarded_input = _apply_pre(tool_input) if checks_pre else tool_input
             result = super().invoke(guarded_input, config, **kwargs)
-            if _stage in (
-                GuardrailExecutionStage.POST,
-                GuardrailExecutionStage.PRE_AND_POST,
-            ):
+            if checks_post:
                 result = _apply_post(guarded_input, result)
             return result
 
-        # ainvoke is intentionally NOT overridden here.
-        # StructuredTool.ainvoke (for sync tools without a coroutine) delegates to
-        # self.invoke via run_in_executor. Overriding ainvoke would cause the POST
-        # guardrail to fire twice: once inside self.invoke and once after
-        # super().ainvoke() returns.
+        async def ainvoke(
+            self, tool_input: Any, config: Any = None, **kwargs: Any
+        ) -> Any:
+            guarded_input = tool_input
+            if checks_pre:
+                guarded_input = await asyncio.to_thread(_apply_pre, tool_input)
+            token = _AINVOKE_GUARDS.set(_AINVOKE_GUARDS.get() | {guard})
+            try:
+                result = await super().ainvoke(guarded_input, config, **kwargs)
+            finally:
+                _AINVOKE_GUARDS.reset(token)
+            if checks_post:
+                result = await asyncio.to_thread(_apply_post, guarded_input, result)
+            return result
 
     tool.__class__ = _GuardedTool
     return tool
@@ -318,15 +472,26 @@ def _apply_llm_pre(
     action: GuardrailAction,
     name: str,
 ) -> None:
-    """Evaluate the last HumanMessage in-place (PRE stage, LLM scope)."""
+    """Evaluate the last HumanMessage in-place (PRE stage, LLM scope).
+
+    Every file the messages hold is sent with the text; files without text
+    evaluate ``NO_TEXT_PLACEHOLDER``, which is never written back. An evaluator
+    that drops files gets none, so files alone are not evaluated.
+    """
     msg = _get_last_human_message(messages)
-    if msg is None:
+    text = _extract_message_text(msg) if msg is not None else ""
+    attachments = (
+        registry_references(build_registry({"messages": messages}))
+        if _forwards_attachments(evaluator)
+        else []
+    )
+    if not text and not attachments:
         return
-    text = _extract_message_text(msg)
-    if not text:
-        return
+    payload = text or NO_TEXT_PLACEHOLDER
     try:
-        result = evaluator(text, GuardrailExecutionStage.PRE, None, None)
+        result = _evaluate(
+            evaluator, payload, GuardrailExecutionStage.PRE, None, None, attachments
+        )
     except Exception:
         logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
@@ -335,13 +500,13 @@ def _apply_llm_pre(
         modified = _run_action(
             action,
             result,
-            text,
+            payload,
             name,
             scope=GuardrailScope.LLM,
             stage=GuardrailExecutionStage.PRE,
             component=component_label(GuardrailScope.LLM),
         )
-    if isinstance(modified, str) and modified != text:
+    if msg is not None and text and isinstance(modified, str) and modified != text:
         _apply_message_text_modification(msg, modified)
 
 
@@ -352,11 +517,26 @@ def _apply_llm_post(
     name: str,
     input_messages: list[BaseMessage] | None = None,
 ) -> None:
-    """Evaluate the AIMessage content in-place (POST stage, LLM scope)."""
-    if not isinstance(response.content, str) or not response.content:
+    """Evaluate the AIMessage content in-place (POST stage, LLM scope).
+
+    The held files the response names are sent with its text, read from the text
+    blocks when the content is a list; files without text evaluate
+    ``NO_TEXT_PLACEHOLDER``. Only string content is written back. An evaluator
+    that drops files gets none, so files alone are not evaluated.
+    """
+    text = response.content if isinstance(response.content, str) else ""
+    attachments = (
+        output_references(response, build_registry({"messages": input_messages or []}))
+        if _forwards_attachments(evaluator)
+        else []
+    )
+    if not text and not attachments:
         return
+    payload = text or _extract_message_text(response) or NO_TEXT_PLACEHOLDER
     try:
-        result = evaluator(response.content, GuardrailExecutionStage.POST, None, None)
+        result = _evaluate(
+            evaluator, payload, GuardrailExecutionStage.POST, None, None, attachments
+        )
     except Exception:
         logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
@@ -365,14 +545,14 @@ def _apply_llm_post(
         modified = _run_action(
             action,
             result,
-            response.content,
+            payload,
             name,
             scope=GuardrailScope.LLM,
             stage=GuardrailExecutionStage.POST,
             component=component_label(GuardrailScope.LLM),
             input_payload=_input_payload_from_messages(input_messages),
         )
-    if isinstance(modified, str) and modified != response.content:
+    if text and isinstance(modified, str) and modified != text:
         response.content = modified
 
 
@@ -445,20 +625,31 @@ def _apply_agent_input_guardrail(
     action: GuardrailAction,
     name: str,
 ) -> None:
-    """Evaluate the last HumanMessage from agent input in-place."""
+    """Evaluate the last HumanMessage from agent input in-place.
+
+    Every file the messages hold and every attachment a typed state key carries
+    is sent with the text; files without text evaluate ``NO_TEXT_PLACEHOLDER``,
+    which is never written back. An evaluator that drops files gets none, so
+    files alone are not evaluated. An input with typed ``Attachment`` keys but no
+    ``messages`` channel is not checked.
+    """
     if not isinstance(input, dict) or "messages" not in input:
         return
     messages = input["messages"]
     if not isinstance(messages, list):
         return
     msg = _get_last_human_message(messages)
-    if msg is None:
+    text = _extract_message_text(msg) if msg is not None else ""
+    attachments = (
+        _agent_input_attachments(input) if _forwards_attachments(evaluator) else []
+    )
+    if not text and not attachments:
         return
-    text = _extract_message_text(msg)
-    if not text:
-        return
+    payload = text or NO_TEXT_PLACEHOLDER
     try:
-        result = evaluator(text, GuardrailExecutionStage.PRE, None, None)
+        result = _evaluate(
+            evaluator, payload, GuardrailExecutionStage.PRE, None, None, attachments
+        )
     except Exception:
         logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
@@ -467,13 +658,13 @@ def _apply_agent_input_guardrail(
         modified = _run_action(
             action,
             result,
-            text,
+            payload,
             name,
             scope=GuardrailScope.AGENT,
             stage=GuardrailExecutionStage.PRE,
             component=component_label(GuardrailScope.AGENT),
         )
-    if isinstance(modified, str) and modified != text:
+    if msg is not None and text and isinstance(modified, str) and modified != text:
         _apply_message_text_modification(msg, modified)
 
 
@@ -483,20 +674,34 @@ def _apply_agent_output_guardrail(
     action: GuardrailAction,
     name: str,
 ) -> None:
-    """Evaluate the last AIMessage from agent output in-place."""
+    """Evaluate the last AIMessage from agent output in-place.
+
+    The held files the message or the structured response names, and the
+    attachments the agent returns in typed state keys, are sent with the text;
+    files without text evaluate ``NO_TEXT_PLACEHOLDER``, which is never written
+    back. An evaluator that drops files gets none, so files alone are not
+    evaluated. A typed input attachment the graph echoes in its output state is
+    forwarded again here.
+    """
     if not isinstance(output, dict) or "messages" not in output:
         return
     messages = output["messages"]
     if not isinstance(messages, list):
         return
     msg = _get_last_ai_message(messages)
-    if msg is None:
+    text = _extract_message_text(msg) if msg is not None else ""
+    attachments = (
+        _agent_output_attachments(output, msg)
+        if _forwards_attachments(evaluator)
+        else []
+    )
+    if not text and not attachments:
         return
-    text = _extract_message_text(msg)
-    if not text:
-        return
+    payload = text or NO_TEXT_PLACEHOLDER
     try:
-        result = evaluator(text, GuardrailExecutionStage.POST, None, None)
+        result = _evaluate(
+            evaluator, payload, GuardrailExecutionStage.POST, None, None, attachments
+        )
     except Exception:
         logger.warning(_EVALUATION_FAILED_MSG, name, exc_info=True)
         return
@@ -505,14 +710,14 @@ def _apply_agent_output_guardrail(
         modified = _run_action(
             action,
             result,
-            text,
+            payload,
             name,
             scope=GuardrailScope.AGENT,
             stage=GuardrailExecutionStage.POST,
             component=component_label(GuardrailScope.AGENT),
             input_payload=_input_payload_from_messages(messages),
         )
-    if isinstance(modified, str) and modified != text:
+    if msg is not None and text and isinstance(modified, str) and modified != text:
         _apply_message_text_modification(msg, modified)
 
 

@@ -232,7 +232,7 @@ class TestRunToolGuardrail:
 
         mock_handler.side_effect = tracked_handler
 
-        def tracked_eval(data):
+        def tracked_eval(data, attachments=None):
             call_order.append("eval")
             return _PASSED
 
@@ -337,7 +337,7 @@ class TestRunToolGuardrail:
 
         call_count = 0
 
-        def counting_eval(data):
+        def counting_eval(data, attachments=None):
             nonlocal call_count
             call_count += 1
             return _PASSED
