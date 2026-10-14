@@ -25,11 +25,46 @@ from .utils import sanitize_tool_name
 
 # When set, only tools in this set are available for the current exchange.
 # None means all client-side tools are available (default for CAS/web UI).
+# In a graph, availability is decided by the tool node from the graph state
+# (`declared_client_side_tools`), before any confirmation: LangGraph runs each
+# node in a copy of the context, so a value set here in another node (such as
+# the init node) is not visible when the tool runs.
 available_client_side_tools: ContextVar[set[str] | None] = ContextVar(
     "available_client_side_tools", default=None
 )
 
 UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY = "uipath__client_side_tools"
+
+
+def declared_tool_names(declared_tools: list[str | dict[str, Any]]) -> set[str]:
+    """Tool names from the client's declarations: strings, or dicts with a 'name' field."""
+    names: set[str] = set()
+    for t in declared_tools:
+        if isinstance(t, str):
+            names.add(t)
+        elif isinstance(t, dict) and "name" in t:
+            names.add(t["name"])
+    return names
+
+
+def declared_client_side_tools(state: Any) -> set[str] | None:
+    """The client-side tools the exchange declared, read from the graph state.
+
+    None when `uipath__client_side_tools` is absent: every client-side tool is
+    available. A list makes only the declared names available, so an empty list
+    makes none available.
+    """
+    declared = getattr(state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None)
+    return declared_tool_names(declared) if isinstance(declared, list) else None
+
+
+def client_side_tool_not_available(tool_name: str, tool_call_id: str) -> ToolMessage:
+    """The result of calling a client-side tool the client has no handler for."""
+    return ToolMessage(
+        content=f"Tool '{tool_name}' is not available — the client has not registered a handler for it.",
+        tool_call_id=tool_call_id,
+        status="error",
+    )
 
 
 def apply_tool_filter(
@@ -47,13 +82,7 @@ def apply_tool_filter(
             from uipath__client_side_tools input.
         agent_tools: The agent's client-side tools keyed by name.
     """
-    declared_names: set[str] = set()
-    for t in declared_tools:
-        if isinstance(t, str):
-            declared_names.add(t)
-        elif isinstance(t, dict) and "name" in t:
-            declared_names.add(t["name"])
-
+    declared_names = declared_tool_names(declared_tools)
     available_client_side_tools.set(declared_names & set(agent_tools.keys()))
 
 
@@ -74,11 +103,7 @@ def create_client_side_tool(
     ) -> Any:
         allowed = available_client_side_tools.get()
         if allowed is not None and tool_name not in allowed:
-            return ToolMessage(
-                content=f"Tool '{tool_name}' is not available — the client has not registered a handler for it.",
-                tool_call_id=tool_call_id,
-                status="error",
-            )
+            return client_side_tool_not_available(tool_name, tool_call_id)
 
         @mockable(
             name=resource.name,

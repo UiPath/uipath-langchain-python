@@ -24,6 +24,10 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
+from uipath_langchain.agent.tools.client_side_tool import (
+    client_side_tool_not_available,
+    declared_client_side_tools,
+)
 from uipath_langchain.chat.hitl import (
     IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     REQUIRE_CONVERSATIONAL_CONFIRMATION,
@@ -85,6 +89,10 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        not_available = self._undeclared_client_side_tool_result(call, state)
+        if not_available is not None:
+            return self._process_result(call, not_available)
+
         # prompt user for approval if tool requires confirmation
         conversational_confirmation = request_conversational_tool_confirmation(
             call, self.tool
@@ -110,6 +118,10 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        not_available = self._undeclared_client_side_tool_result(call, state)
+        if not_available is not None:
+            return self._process_result(call, not_available)
+
         # prompt user for approval if tool requires confirmation
         conversational_confirmation = request_conversational_tool_confirmation(
             call, self.tool
@@ -129,6 +141,22 @@ class UiPathToolNode(RunnableCallable):
             # HITL approved - apply confirmation metadata to tool result message
             conversational_confirmation.annotate_result(output)
         return output
+
+    def _undeclared_client_side_tool_result(
+        self, call: ToolCall, state: AgentGraphState
+    ) -> ToolMessage | None:
+        """The "not available" result for a client-side tool this exchange did not declare.
+
+        Checked before confirmation and before the tool runs, so an undeclared
+        client-side tool never interrupts the run. None for every other tool.
+        """
+        metadata = getattr(self.tool, "metadata", None) or {}
+        if not metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
+            return None
+        declared = declared_client_side_tools(state)
+        if declared is None or self.tool.name in declared:
+            return None
+        return client_side_tool_not_available(self.tool.name, call["id"] or "")
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
         """Extract the tool call from the state messages."""
