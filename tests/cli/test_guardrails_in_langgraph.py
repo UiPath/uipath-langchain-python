@@ -108,7 +108,7 @@ _GUARDRAIL_FAILED = GuardrailValidationResult(
 )
 
 
-def _always_pass(text, guardrail):
+def _always_pass(text, guardrail, **kwargs):
     return _GUARDRAIL_PASSED
 
 
@@ -250,7 +250,7 @@ class TestGuardrailsParity:
             call_id="call_agent_pii_1",
         )
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "Agent PII Detection" and "John Doe" in str(text):
                 return _GUARDRAIL_FAILED
             return _GUARDRAIL_PASSED
@@ -285,7 +285,7 @@ class TestGuardrailsParity:
             llm_call_count += 1
             return AIMessage(content="should not be called")
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             # Only trigger on actual string input — the decorator factory PRE check
             # passes an empty dict {} which should not be treated as a violation.
             if (
@@ -332,7 +332,7 @@ class TestGuardrailsParity:
             call_id="call_tool_pii_1",
         )
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "Tool PII Block Detection" and "John Doe" in str(text):
                 return _GUARDRAIL_FAILED
             return _GUARDRAIL_PASSED
@@ -429,7 +429,7 @@ class TestGuardrailsParity:
             call_id="call_hc_1",
         )
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if (
                 guardrail.name == "Agent Harmful Content Detection"
                 and "violent" in str(text).lower()
@@ -475,7 +475,7 @@ class TestGuardrailsParity:
             call_id="call_tool_pii_post_1",
         )
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "Tool PII POST Block":
                 if isinstance(text, dict) and "output" in text:
                     return _GUARDRAIL_FAILED
@@ -513,7 +513,7 @@ class TestGuardrailsParity:
             call_id="call_tool_hc_post_1",
         )
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "Tool Harmful Content POST Block":
                 if isinstance(text, dict) and "output" in text:
                     return _GUARDRAIL_FAILED
@@ -547,7 +547,7 @@ class TestGuardrailsParity:
             call_id="call_ip_1",
         )
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "LLM IP Detection" and isinstance(text, str) and text:
                 return _GUARDRAIL_FAILED
             return _GUARDRAIL_PASSED
@@ -584,7 +584,7 @@ class TestGuardrailsParity:
 
         seen_guardrails = []
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "Agent LLM Judge":
                 seen_guardrails.append(guardrail)
                 if "gamble" in str(text).lower():
@@ -632,7 +632,7 @@ class TestGuardrailsParity:
 
         seen_byo_guardrails = []
 
-        def mock_evaluate(text, guardrail):
+        def mock_evaluate(text, guardrail, **kwargs):
             if guardrail.name == "Agent BYOG Detection":
                 seen_byo_guardrails.append(guardrail)
                 # Trigger only on real string input — the decorator factory's
@@ -684,7 +684,7 @@ class TestGuardrailsParity:
 _FAIL_REASON = "PII detected: Email"
 
 
-def _fail_on_email(text, guardrail):
+def _fail_on_email(text, guardrail, **kwargs):
     """Fail the escalation PII guardrail when the input contains an email."""
     if guardrail.name == "PII escalation guardrail" and "@" in str(text):
         return GuardrailValidationResult(

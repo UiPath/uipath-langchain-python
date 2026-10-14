@@ -2,9 +2,12 @@
 
 import base64
 import io
+import json
+from typing import Any
 
 import httpx
 import pytest
+from langchain_core.messages import convert_to_openai_data_block
 from PIL import Image
 from pytest_httpx import HTTPXMock
 
@@ -485,3 +488,68 @@ class TestBuildFileContentBlocksFor:
         png_bytes = base64.b64decode(blocks[0]["base64"])
         img = Image.open(io.BytesIO(png_bytes))
         assert img.format == "PNG"
+
+
+_ATTACHMENT_ID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
+
+
+class TestAttachmentTags:
+    """SDK-built blocks name the attachment they came from in ``extras``."""
+
+    @pytest.mark.parametrize(
+        "name,mime_type", [("cv.pdf", "application/pdf"), ("photo.png", "image/png")]
+    )
+    async def test_tags_a_block_built_from_an_attachment(
+        self, httpx_mock: HTTPXMock, name: str, mime_type: str
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"bytes")
+        file_info = FileInfo(
+            url=FILE_URL, name=name, mime_type=mime_type, attachment_id=_ATTACHMENT_ID
+        )
+
+        (block,) = await build_file_content_blocks_for(file_info)
+
+        extras: Any = block.get("extras")
+        assert extras["uipath_attachment_id"] == _ATTACHMENT_ID
+        assert extras["uipath_file_name"] == name
+        assert block["id"] != _ATTACHMENT_ID
+
+    async def test_leaves_a_block_without_an_attachment_untagged(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"bytes")
+        file_info = FileInfo(url=FILE_URL, name="photo.png", mime_type="image/png")
+
+        (block,) = await build_file_content_blocks_for(file_info)
+
+        assert "extras" not in block
+
+    async def test_leaves_tiff_pages_untagged(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=_make_tiff(num_pages=2))
+        file_info = FileInfo(
+            url=FILE_URL,
+            name="scan.tiff",
+            mime_type="image/tiff",
+            attachment_id=_ATTACHMENT_ID,
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert all("extras" not in block for block in blocks)
+
+    @pytest.mark.parametrize(
+        "name,mime_type", [("cv.pdf", "application/pdf"), ("photo.png", "image/png")]
+    )
+    async def test_tags_never_reach_the_provider_payload(
+        self, httpx_mock: HTTPXMock, name: str, mime_type: str
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"bytes")
+        file_info = FileInfo(
+            url=FILE_URL, name=name, mime_type=mime_type, attachment_id=_ATTACHMENT_ID
+        )
+        (block,) = await build_file_content_blocks_for(file_info)
+
+        for api in ("chat/completions", "responses"):
+            payload = json.dumps(convert_to_openai_data_block(dict(block), api=api))
+            assert "uipath_" not in payload
+            assert _ATTACHMENT_ID not in payload

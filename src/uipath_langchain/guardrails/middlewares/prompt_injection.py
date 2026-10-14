@@ -6,7 +6,12 @@ from uuid import uuid4
 
 from langchain.agents.middleware import AgentMiddleware
 from uipath.core.guardrails import GuardrailSelector
-from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BuiltInValidatorGuardrail,
+    DetectionScope,
+    GuardrailScope,
+    with_detection_scope,
+)
 from uipath.platform.guardrails.guardrails import NumberParameterValue
 
 from ..enums import GuardrailExecutionStage
@@ -47,6 +52,9 @@ class UiPathPromptInjectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         description: Optional description for the guardrail
         enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
             Defaults to True.
+        detection_scope: Which content the guardrail evaluates: ``Text`` the text only,
+            ``Files`` the attached files only, ``Both`` both. ``None`` sends no
+            parameter, so the backend default applies (``Text``).
     """
 
     def __init__(
@@ -58,6 +66,7 @@ class UiPathPromptInjectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         name: str = "Prompt Injection Detection",
         description: str | None = None,
         enabled_for_evals: bool = True,
+        detection_scope: DetectionScope | str | None = None,
     ):
         """Initialize prompt injection detection guardrail middleware."""
         if not isinstance(action, GuardrailAction):
@@ -84,7 +93,10 @@ class UiPathPromptInjectionMiddleware(BuiltInGuardrailMiddlewareMixin):
             or f"Detects prompt injection attempts with threshold {threshold}"
         )
 
-        self._guardrail = self._create_guardrail()
+        self.detection_scope = self._resolve_detection_scope(detection_scope)
+        self._guardrail = with_detection_scope(
+            self._create_guardrail(), self.detection_scope
+        )
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
