@@ -1,8 +1,6 @@
 """Factory for creating client-side tools that execute on the client SDK."""
 
 import json
-from collections.abc import Iterator
-from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Annotated, Any
 
@@ -27,9 +25,10 @@ from .utils import sanitize_tool_name
 
 # When set, only tools in this set are available for the current exchange.
 # None means all client-side tools are available (default for CAS/web UI).
-# Set per tool call by `client_side_tool_filter`, from the graph state: LangGraph
-# runs each node in a copy of the context, so a value set in another node (such
-# as the init node) is not visible when the tool runs.
+# In a graph, availability is decided by the tool node from the graph state
+# (`declared_client_side_tools`), before any confirmation: LangGraph runs each
+# node in a copy of the context, so a value set here in another node (such as
+# the init node) is not visible when the tool runs.
 available_client_side_tools: ContextVar[set[str] | None] = ContextVar(
     "available_client_side_tools", default=None
 )
@@ -48,21 +47,24 @@ def declared_tool_names(declared_tools: list[str | dict[str, Any]]) -> set[str]:
     return names
 
 
-@contextmanager
-def client_side_tool_filter(state: Any) -> Iterator[None]:
-    """Apply the exchange's client-side tool declarations for the duration of one tool call.
+def declared_client_side_tools(state: Any) -> set[str] | None:
+    """The client-side tools the exchange declared, read from the graph state.
 
-    Reads `uipath__client_side_tools` from the graph state. Absent (None) keeps
-    every client-side tool available; a list makes only the declared names
-    available, so an empty list makes none available.
+    None when `uipath__client_side_tools` is absent: every client-side tool is
+    available. A list makes only the declared names available, so an empty list
+    makes none available.
     """
     declared = getattr(state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None)
-    allowed = declared_tool_names(declared) if isinstance(declared, list) else None
-    token = available_client_side_tools.set(allowed)
-    try:
-        yield
-    finally:
-        available_client_side_tools.reset(token)
+    return declared_tool_names(declared) if isinstance(declared, list) else None
+
+
+def client_side_tool_not_available(tool_name: str, tool_call_id: str) -> ToolMessage:
+    """The result of calling a client-side tool the client has no handler for."""
+    return ToolMessage(
+        content=f"Tool '{tool_name}' is not available — the client has not registered a handler for it.",
+        tool_call_id=tool_call_id,
+        status="error",
+    )
 
 
 def apply_tool_filter(
@@ -101,11 +103,7 @@ def create_client_side_tool(
     ) -> Any:
         allowed = available_client_side_tools.get()
         if allowed is not None and tool_name not in allowed:
-            return ToolMessage(
-                content=f"Tool '{tool_name}' is not available — the client has not registered a handler for it.",
-                tool_call_id=tool_call_id,
-                status="error",
-            )
+            return client_side_tool_not_available(tool_name, tool_call_id)
 
         @mockable(
             name=resource.name,

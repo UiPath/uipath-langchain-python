@@ -7,7 +7,7 @@ client-side tool stayed available whatever the client declared.
 """
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
@@ -20,6 +20,7 @@ from uipath_langchain.agent.tools.client_side_tool import (
     create_client_side_tool,
 )
 from uipath_langchain.agent.tools.tool_node import UiPathToolNode
+from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
 
 
 class _State(AgentGraphState):
@@ -35,12 +36,25 @@ def _resource(name: str) -> AgentClientSideToolResourceConfig:
     )
 
 
-async def _run(tool_name: str, declared: list[str] | None) -> ToolMessage:
+async def _run(
+    tool_name: str,
+    declared: list[str] | None,
+    *,
+    requires_confirmation: bool = False,
+    confirmation: MagicMock | None = None,
+) -> ToolMessage:
     """Run an init-like node, then the client-side tool's node, and return the tool's message.
 
     The client's answer is stubbed: the interrupt returns the tool's input at once.
+    `confirmation` stands in for the confirmation request, so a test can see whether
+    the node asked for one.
     """
     tool = create_client_side_tool(_resource(tool_name))
+    if requires_confirmation:
+        tool.metadata = {
+            **(tool.metadata or {}),
+            REQUIRE_CONVERSATIONAL_CONFIRMATION: True,
+        }
 
     def init(state: _State) -> dict[str, Any]:
         # What the init node used to do: set the filter in its own node. It must
@@ -60,17 +74,16 @@ async def _run(tool_name: str, declared: list[str] | None) -> ToolMessage:
     graph.add_edge("init", "tool")
     graph.add_edge("tool", END)
 
-    inputs: dict[str, Any] = {
-        "messages": [
+    inputs = _State(
+        messages=[
             HumanMessage(content="hi"),
             AIMessage(
                 content="",
                 tool_calls=[{"name": tool_name, "args": {"q": "x"}, "id": "tc-1"}],
             ),
-        ]
-    }
-    if declared is not None:
-        inputs[UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY] = declared
+        ],
+        uipath__client_side_tools=declared,
+    )
     with (
         patch(
             "uipath_langchain.agent.tools.client_side_tool.durable_interrupt",
@@ -80,6 +93,10 @@ async def _run(tool_name: str, declared: list[str] | None) -> ToolMessage:
             "uipath_langchain.agent.tools.client_side_tool.mockable",
             side_effect=lambda **kw: lambda fn: fn,
         ),
+        patch(
+            "uipath_langchain.agent.tools.tool_node.request_conversational_tool_confirmation",
+            confirmation or MagicMock(return_value=None),
+        ),
     ):
         out = await graph.compile().ainvoke(inputs)
     message = out["messages"][-1]
@@ -87,23 +104,49 @@ async def _run(tool_name: str, declared: list[str] | None) -> ToolMessage:
     return message
 
 
-async def test_undeclared_tool_is_not_available():
+async def test_undeclared_tool_is_not_available() -> None:
     message = await _run("show_map", declared=["get_weather"])
     assert message.status == "error"
     assert "not available" in str(message.content)
 
 
-async def test_empty_declaration_makes_no_tool_available():
+async def test_empty_declaration_makes_no_tool_available() -> None:
     message = await _run("show_map", declared=[])
     assert message.status == "error"
     assert "not available" in str(message.content)
 
 
-async def test_declared_tool_runs():
+async def test_declared_tool_runs() -> None:
     message = await _run("show_map", declared=["show_map"])
     assert message.status == "success"
 
 
-async def test_no_declaration_keeps_every_tool_available():
+async def test_no_declaration_keeps_every_tool_available() -> None:
     message = await _run("show_map", declared=None)
     assert message.status == "success"
+
+
+async def test_undeclared_tool_never_asks_for_confirmation() -> None:
+    """An undeclared tool that requires confirmation must not interrupt the run for it."""
+    confirmation = MagicMock(return_value=None)
+    message = await _run(
+        "show_map",
+        declared=[],
+        requires_confirmation=True,
+        confirmation=confirmation,
+    )
+    assert message.status == "error"
+    assert "not available" in str(message.content)
+    confirmation.assert_not_called()
+
+
+async def test_declared_tool_still_asks_for_confirmation() -> None:
+    confirmation = MagicMock(return_value=None)
+    message = await _run(
+        "show_map",
+        declared=["show_map"],
+        requires_confirmation=True,
+        confirmation=confirmation,
+    )
+    assert message.status == "success"
+    confirmation.assert_called_once()

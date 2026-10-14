@@ -69,9 +69,10 @@ def create_init_node(
             )
             job_attachments_dict.update(message_attachments)
 
-            # Validate the exchange's client-side tool declarations. They are applied
-            # per tool call in the tool node (client_side_tool_filter): a context
-            # variable set here would not reach the tool, which runs in another node.
+            # Validate the exchange's client-side tool declarations. The tool node
+            # applies them, from the graph state (declared_client_side_tools): a
+            # context variable set here would not reach the tool, which runs in
+            # another node.
             if client_side_tools:
                 client_tools_input = getattr(
                     state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None
