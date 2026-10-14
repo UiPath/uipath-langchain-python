@@ -8,7 +8,10 @@ import pytest
 from PIL import Image
 from pytest_httpx import HTTPXMock
 
-from uipath_langchain.agent.multimodal.invoke import build_file_content_blocks_for
+from uipath_langchain.agent.multimodal.invoke import (
+    build_file_content_blocks_for,
+    file_part_filename,
+)
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
     download_file_base64,
@@ -485,3 +488,19 @@ class TestBuildFileContentBlocksFor:
         png_bytes = base64.b64decode(blocks[0]["base64"])
         img = Image.open(io.BytesIO(png_bytes))
         assert img.format == "PNG"
+
+
+@pytest.mark.parametrize(
+    ("name", "mime_type", "expected"),
+    [
+        ("cv_harmful content.pdf", "application/pdf", "cv-harmful content-pdf"),
+        ("notes.txt", "text/plain", "notes-txt"),
+        ("scan.png", "image/png", None),
+        ("fax.tif", "image/tiff", None),
+        ("photo.jpg", "application/octet-stream", None),
+    ],
+)
+def test_file_part_filename_matches_what_is_sent(
+    name: str, mime_type: str, expected: str | None
+) -> None:
+    assert file_part_filename(name, mime_type) == expected

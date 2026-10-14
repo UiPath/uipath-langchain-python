@@ -36,6 +36,7 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupError,
     AgentStartupErrorCode,
 )
+from uipath_langchain.chat.attachment_baggage import trace_baggage
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,9 @@ class _TraceContextHeadersCallback(BaseCallbackHandler):
 
     def _merge_headers(self) -> None:
         existing = get_dynamic_request_headers()
-        existing.update(build_trace_context_headers(extra_baggage=["source=agents"]))
+        existing.update(
+            build_trace_context_headers(extra_baggage=trace_baggage("source=agents"))
+        )
         set_dynamic_request_headers(existing)
 
     def on_chat_model_start(

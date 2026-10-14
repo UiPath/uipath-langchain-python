@@ -17,6 +17,8 @@ from uipath.platform.common import (
     resource_override,
 )
 
+from uipath_langchain.chat.attachment_baggage import trace_baggage
+
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .license_ref_id import get_license_ref_id
 from .supported_models import OpenAIModels
@@ -200,7 +202,7 @@ def _inject_license_ref_id(request: httpx.Request) -> None:
 def _inject_trace_context_headers(request: httpx.Request) -> None:
     """Inject trace context headers per-request from the active OTEL span."""
     for key, value in build_trace_context_headers(
-        extra_baggage=["source=agents"]
+        extra_baggage=trace_baggage("source=agents")
     ).items():
         request.headers[key] = value
 

@@ -15,6 +15,7 @@ from uipath.platform.common import (
 )
 
 from uipath_langchain._utils._environment import get_default_timeout
+from uipath_langchain.chat.attachment_baggage import trace_baggage
 
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
@@ -182,7 +183,9 @@ class AwsBedrockCompletionsPassthroughClient:
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
         headers["X-UiPath-Streaming-Enabled"] = streaming
-        headers.update(build_trace_context_headers(extra_baggage=["source=agents"]))
+        headers.update(
+            build_trace_context_headers(extra_baggage=trace_baggage("source=agents"))
+        )
 
         request.headers.update(headers)
 
