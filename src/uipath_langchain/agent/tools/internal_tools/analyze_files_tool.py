@@ -326,6 +326,9 @@ def create_analyze_file_tool(
                 try:
                     analysis_task, files = await masker.apply(analysis_task, files)
                     _emit_pii_masking_attachments(pii_span, files)
+                except AgentRuntimeError as exc:
+                    pii_span.record_exception(exc)
+                    raise
                 except Exception as exc:
                     pii_span.record_exception(exc)
                     raise AgentRuntimeError(
