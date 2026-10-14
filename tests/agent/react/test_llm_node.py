@@ -1,5 +1,6 @@
 """Tests for LLM node tool call filtering functionality."""
 
+import json
 from typing import Any, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -9,7 +10,13 @@ import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.messages.content import create_text_block, create_tool_call
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import AzureChatOpenAI
@@ -1153,3 +1160,136 @@ class TestCreateLlmNode:
     def test_agents_without_tools_get_the_conversational_node(self) -> None:
         model = _StubChatAnthropic.model_construct(model="claude-opus-4-6")
         assert isinstance(create_llm_node(model, []), ConversationalLLMNode)
+
+
+def _converse_reply(content: dict[str, Any], stop_reason: str) -> dict[str, Any]:
+    return {
+        "output": {"message": {"role": "assistant", "content": [content]}},
+        "stopReason": stop_reason,
+        "usage": {"inputTokens": 10, "outputTokens": 2, "totalTokens": 12},
+        "metrics": {"latencyMs": 1},
+    }
+
+
+def _end_execution_reply(**args: Any) -> dict[str, Any]:
+    tool_use = {"toolUseId": "c1", "name": END_EXECUTION_TOOL.name, "input": args}
+    return _converse_reply({"toolUse": tool_use}, "tool_use")
+
+
+def _cache_point_count(request: dict[str, Any]) -> int:
+    return json.dumps(request).count('"cachePoint"')
+
+
+class TestBedrockPromptCaching:
+    @staticmethod
+    def _converse_model(**kwargs: Any) -> tuple[Any, Mock]:
+        client = Mock()
+        client.converse.side_effect = lambda **_: _end_execution_reply()
+        model: Any = _StubChatBedrockConverse(
+            model_id="anthropic.claude-sonnet-4-5-20250929-v1:0",
+            region_name="us-east-1",
+            client=client,
+            bedrock_client=Mock(),
+            **kwargs,
+        )
+        return model, client
+
+    @staticmethod
+    def _tool() -> BaseTool:
+        return StructuredTool(
+            name="lookup",
+            description="Look something up.",
+            args_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+            func=lambda **_: None,
+        )
+
+    @staticmethod
+    def _state(*messages: BaseMessage) -> AgentGraphState:
+        return AgentGraphState(
+            messages=[SystemMessage(content="You are an agent."), *messages]
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prompt_caching, expected", [(True, 3), (False, 0)])
+    async def test_turns_carry_cache_points_when_enabled(
+        self, prompt_caching: bool, expected: int
+    ) -> None:
+        model, client = self._converse_model()
+        node = create_llm_node(model, [self._tool()], prompt_caching=prompt_caching)
+        messages: list[BaseMessage] = [HumanMessage(content="q")]
+
+        for turn in range(2):
+            result = await node(self._state(*messages))
+            messages += [
+                result["messages"][0],
+                ToolMessage(content=f"result {turn}", tool_call_id="c1"),
+            ]
+
+        counts = [_cache_point_count(c.kwargs) for c in client.converse.call_args_list]
+        assert counts == [expected, expected]
+
+    @pytest.mark.asyncio
+    async def test_conversational_turn_carries_cache_points(self) -> None:
+        model, client = self._converse_model()
+        node = create_llm_node(
+            model, [self._tool()], is_conversational=True, prompt_caching=True
+        )
+        assert isinstance(node, ConversationalLLMNode)
+
+        await node(self._state(HumanMessage(content="hi")))
+
+        assert _cache_point_count(client.converse.call_args.kwargs) == 3
+
+    @pytest.mark.asyncio
+    async def test_other_providers_get_no_cache_control(self) -> None:
+        model: Any = _StubAzureChatOpenAI.model_construct()
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+        )
+
+        await create_llm_node(model, [self._tool()], prompt_caching=True)(
+            self._state(HumanMessage(content="q"))
+        )
+
+        assert "cache_control" not in model.bind_tools.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_forced_extraction_call_has_no_cache_points(self) -> None:
+        model, client = self._converse_model(
+            additional_model_request_fields={
+                "thinking": {"type": "enabled", "budget_tokens": 1024}
+            },
+            supports_tool_choice_values=("auto", "any", "tool"),
+        )
+
+        await create_llm_node(model, [self._tool()], prompt_caching=True)(
+            self._state(HumanMessage(content="q"), AIMessage(content="an answer"))
+        )
+
+        request = client.converse.call_args.kwargs
+        assert "thinking" not in request.get("additionalModelRequestFields", {})
+        assert _cache_point_count(request) == 0
+
+    @pytest.mark.asyncio
+    async def test_auto_tool_choice_finish_call_has_no_cache_points(self) -> None:
+        model, client = self._converse_model()
+        model.model_details = _REJECTS_FORCING
+        client.converse.side_effect = [
+            _converse_reply({"text": "Lisbon is warmer."}, "end_turn"),
+            _end_execution_reply(answer="Lisbon"),
+        ]
+        tools = [self._tool(), *create_flow_control_tools(_Output)]
+
+        node = create_llm_node(model, tools, prompt_caching=True)
+        assert isinstance(node, AutoToolChoiceLLMNode)
+        await node(self._state(HumanMessage(content="q")))
+
+        turn, finish = client.converse.call_args_list
+        assert _cache_point_count(turn.kwargs) == 3
+        assert _cache_point_count(finish.kwargs) == 0

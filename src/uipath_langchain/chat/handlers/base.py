@@ -26,6 +26,9 @@ class ModelPayloadHandler(ABC):
         strict_mode: bool | None = None,
     ) -> dict[str, Any]: ...
 
+    def get_prompt_caching_kwargs(self) -> dict[str, Any]:
+        return {}
+
     @abstractmethod
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check response stop reason and raise exception for faulty terminations.
