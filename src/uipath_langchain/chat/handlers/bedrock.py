@@ -6,13 +6,16 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
+from uipath.core.feature_flags import FeatureFlags
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
 from ..thinking import thinking_rejects_forced_tool_choice
-from .base import ModelPayloadHandler
+from .base import ModelPayloadHandler, is_byo_model
 
 logger = logging.getLogger(__name__)
+
+PROMPT_CACHING_FF = "EnableBedrockPromptCaching"
 
 
 # --- Converse API constants ---
@@ -71,22 +74,6 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Reduce the conversation history or use a model with larger context.",
     ),
 }
-
-
-def _is_byo(model: Any) -> bool:
-    if getattr(model, "byo_connection_id", None):
-        return True
-    settings = getattr(model, "client_settings", None)
-    if settings is None:
-        return False
-    try:
-        info = settings.get_model_info(model.model_name)
-    except Exception:
-        return True
-    subscription = info.get("modelSubscriptionType")
-    return info.get("byomDetails") is not None or (
-        bool(subscription) and subscription != "UiPathOwned"
-    )
 
 
 class BedrockInvokePayloadHandler(ModelPayloadHandler):
@@ -166,10 +153,12 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         return kwargs
 
     def get_prompt_caching_kwargs(self) -> dict[str, Any]:
+        if not FeatureFlags.is_flag_enabled(PROMPT_CACHING_FF, default=False):
+            return {}
         model_id = (getattr(self.model, "model_id", None) or "").lower()
         if "anthropic" not in model_id and "amazon.nova" not in model_id:
             return {}
-        if _is_byo(self.model):
+        if is_byo_model(self.model):
             return {}
         return {"cache_control": {"type": "ephemeral"}}
 

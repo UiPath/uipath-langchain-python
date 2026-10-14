@@ -8,6 +8,22 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
 
+def is_byo_model(model: Any) -> bool:
+    if getattr(model, "byo_connection_id", None):
+        return True
+    settings = getattr(model, "client_settings", None)
+    if settings is None:
+        return False
+    try:
+        info = settings.get_model_info(model.model_name)
+    except Exception:
+        return True
+    subscription = info.get("modelSubscriptionType")
+    return info.get("byomDetails") is not None or (
+        bool(subscription) and subscription != "UiPathOwned"
+    )
+
+
 class ModelPayloadHandler(ABC):
     """Abstract base class for handling model-specific LLM parameters.
 

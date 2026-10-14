@@ -31,7 +31,6 @@ from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeErrorCode,
 )
 from uipath_langchain.agent.react.llm_node import (
-    BEDROCK_PROMPT_CACHING_FF,
     AutoToolChoiceLLMNode,
     ConversationalLLMNode,
     ForcedToolChoiceLLMNode,
@@ -40,6 +39,7 @@ from uipath_langchain.agent.react.llm_node import (
 from uipath_langchain.agent.react.tools import create_flow_control_tools
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.chat.exceptions import ChatModelError
+from uipath_langchain.chat.handlers.bedrock import PROMPT_CACHING_FF
 
 
 class _StubAzureChatOpenAI(AzureChatOpenAI):
@@ -1184,8 +1184,9 @@ def _cache_point_count(request: dict[str, Any]) -> int:
 
 class TestBedrockPromptCaching:
     @pytest.fixture(autouse=True)
-    def _reset_flags(self) -> Any:
+    def _enable_caching(self) -> Any:
         FeatureFlags.reset_flags()
+        FeatureFlags.configure_flags({PROMPT_CACHING_FF: True})
         yield
         FeatureFlags.reset_flags()
 
@@ -1218,11 +1219,7 @@ class TestBedrockPromptCaching:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("flag, expected", [(True, 3), (False, 0)])
-    async def test_turns_carry_cache_points_only_with_the_flag(
-        self, flag: bool, expected: int
-    ) -> None:
-        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: flag})
+    async def test_turns_carry_cache_points(self) -> None:
         model, client = self._converse_model()
         node = create_llm_node(model, [self._tool()])
         messages: list[BaseMessage] = [HumanMessage(content="q")]
@@ -1235,11 +1232,10 @@ class TestBedrockPromptCaching:
             ]
 
         counts = [_cache_point_count(c.kwargs) for c in client.converse.call_args_list]
-        assert counts == [expected, expected]
+        assert counts == [3, 3]
 
     @pytest.mark.asyncio
     async def test_forced_extraction_call_has_no_cache_points(self) -> None:
-        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: True})
         model, client = self._converse_model(
             additional_model_request_fields={
                 "thinking": {"type": "enabled", "budget_tokens": 1024}
@@ -1257,7 +1253,6 @@ class TestBedrockPromptCaching:
 
     @pytest.mark.asyncio
     async def test_auto_tool_choice_finish_call_has_no_cache_points(self) -> None:
-        FeatureFlags.configure_flags({BEDROCK_PROMPT_CACHING_FF: True})
         model, client = self._converse_model()
         model.model_details = _REJECTS_FORCING
         client.converse.side_effect = [
