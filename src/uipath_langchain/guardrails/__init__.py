@@ -4,6 +4,7 @@ Platform guardrail decorators plus LangChain/LangGraph adapter auto-registration
 """
 
 from uipath.agent.models.agent import AgentGuardrailSeverityLevel
+from uipath.platform.guardrails import DetectionScope
 from uipath.platform.guardrails.decorators import (
     BlockAction,
     ByoValidator,
@@ -31,6 +32,8 @@ from uipath.platform.guardrails.decorators import (
     guardrail,
     register_guardrail_adapter,
 )
+
+from uipath_langchain._utils._attachments import render_attachments_block
 
 from ._langchain_adapter import LangChainGuardrailAdapter
 from .escalate_action import EscalateAction
@@ -71,6 +74,9 @@ __all__ = [
     "PIIDetectionEntityType",
     "GuardrailExecutionStage",
     "GuardrailAction",
+    "DetectionScope",
+    # Attachments
+    "render_attachments_block",
     # Actions
     "LogAction",
     "BlockAction",
