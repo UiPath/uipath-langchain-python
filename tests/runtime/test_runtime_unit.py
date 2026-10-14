@@ -1,14 +1,16 @@
 """Unit tests for UiPathLangGraphRuntime helper methods (no graph execution)."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import StateSnapshot
 from uipath.runtime import UiPathRuntimeStatus
 from uipath.runtime.errors import UiPathErrorCategory
+from uipath.runtime.events import UiPathRuntimeMessageEvent
 
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
@@ -69,6 +71,51 @@ class TestBuildNodeName:
 
     def test_none_namespace_falls_back_to_node_name(self) -> None:
         assert self.rt._build_node_name(None, "node") == "node"
+
+
+# ---------------------------------------------------------------------------
+# _is_inside_tool_call
+# ---------------------------------------------------------------------------
+
+
+class TestIsInsideToolCall:
+    def setup_method(self) -> None:
+        self.rt = _make_runtime()
+
+    def test_agent_loop_is_not_inside_a_tool_call(self) -> None:
+        assert not self.rt._is_inside_tool_call(())
+        assert not self.rt._is_inside_tool_call(("advanced_agent:a",))
+
+    def test_graph_run_by_a_tool_is_inside_a_tool_call(self) -> None:
+        assert self.rt._is_inside_tool_call(("advanced_agent:a", "tools:b"))
+
+    def test_node_merely_prefixed_with_tools_is_not_a_tool_call(self) -> None:
+        assert not self.rt._is_inside_tool_call(("tools_router:a",))
+
+    def test_non_tuple_namespace_is_not_inside_a_tool_call(self) -> None:
+        assert not self.rt._is_inside_tool_call(None)
+
+    @pytest.mark.asyncio
+    async def test_stream_emits_only_messages_outside_tool_calls(self) -> None:
+        agent_message = AIMessage(content="agent", id="agent")
+        tool_message = AIMessage(content="subagent", id="subagent")
+
+        async def astream(*args: Any, **kwargs: Any) -> Any:
+            yield (("advanced_agent:a",), "messages", (agent_message, {}))
+            yield (("advanced_agent:a", "tools:b"), "messages", (tool_message, {}))
+
+        self.rt.graph.astream = astream  # type: ignore[method-assign]
+        self.rt._get_graph_input = AsyncMock(return_value={})  # type: ignore[method-assign]
+        self.rt._create_runtime_result = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
+        self.rt.chat.map_event = AsyncMock(side_effect=lambda message: [message])  # type: ignore[method-assign]
+
+        payloads = [
+            event.payload
+            async for event in self.rt.stream()
+            if isinstance(event, UiPathRuntimeMessageEvent)
+        ]
+
+        assert payloads == [agent_message]
 
 
 # ---------------------------------------------------------------------------

@@ -229,7 +229,9 @@ class UiPathLangGraphRuntime:
 
                 # Emit UiPathRuntimeMessageEvent for messages
                 if chunk_type == "messages":
-                    if isinstance(data, tuple):
+                    if isinstance(data, tuple) and not self._is_inside_tool_call(
+                        namespace
+                    ):
                         message, _ = data
                         try:
                             events = await self.chat.map_event(message)
@@ -623,6 +625,17 @@ class UiPathLangGraphRuntime:
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""
         return node_name in self._middleware_node_names
+
+    def _is_inside_tool_call(self, namespace: Any) -> bool:
+        """Whether a chunk comes from a graph run by a tool, e.g. a deep agent subagent.
+
+        Such a graph's messages belong to the tool, not to the agent's conversation.
+        """
+        if not isinstance(namespace, (tuple, list)):
+            return False
+        return any(
+            isinstance(ns, str) and ns.split(":")[0] == "tools" for ns in namespace
+        )
 
     def _build_node_name(self, namespace: Any, node_name: str) -> str:
         """Build a fully qualified node name with subgraph prefix from the namespace.
