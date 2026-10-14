@@ -36,7 +36,7 @@ def _protected_code() -> BuiltInValidatorGuardrail:
             "validatorType": "intellectual_property",
             "validatorParameters": [
                 {"$parameterType": "enum-list", "id": "ipEntities", "value": ["Code"]},
-                {"$parameterType": "enum", "id": "appliesTo", "value": "Both"},
+                {"$parameterType": "enum", "id": "detectionScope", "value": "Both"},
             ],
         }
     )

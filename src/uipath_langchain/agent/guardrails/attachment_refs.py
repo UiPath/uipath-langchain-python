@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 #: Limits enforced by the validate API.
 _MAX_ATTACHMENTS = 5
 _MAX_FILE_NAME_LENGTH = 260
-#: ``appliesTo``: an allow-list, so an unknown value narrows to text only. Absent takes the backend default.
-_APPLIES_TO_PARAMETER = "appliesto"
-_FILE_SCOPES: frozenset[str] = frozenset({"files", "both"})
+#: ``detectionScope``: an allow-list, so an unknown value narrows to text only. Absent takes the backend default.
+_DETECTION_SCOPE_PARAMETER = "detectionscope"
+_FILE_DETECTION_SCOPES: frozenset[str] = frozenset({"files", "both"})
 #: Wire key of a job attachment reference as the model and the tools exchange it.
 _ID_KEY = "ID"
 #: Bounds for scanning a payload, which can be arbitrarily large or deep.
@@ -51,25 +51,26 @@ _MAX_SCAN_DEPTH = 32
 _MAX_SCAN_NODES = 10_000
 
 
-def _scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> bool:
+def _detection_scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> bool:
     try:
         for parameter in guardrail.validator_parameters:
-            if parameter.id.lower() != _APPLIES_TO_PARAMETER:
+            if parameter.id.lower() != _DETECTION_SCOPE_PARAMETER:
                 continue
             if isinstance(parameter.value, str):
                 # Empty means absent, as the backend reads it.
                 scope = parameter.value.strip().lower()
                 if scope:
-                    return scope in _FILE_SCOPES
+                    return scope in _FILE_DETECTION_SCOPES
     except Exception:
         logger.debug(
-            "Could not read the guardrail scope; assuming files apply.", exc_info=True
+            "Could not read the guardrail detection scope; assuming files apply.",
+            exc_info=True,
         )
     return True
 
 
 def _is_text_only(guardrail: BuiltInValidatorGuardrail) -> bool:
-    if _scope_includes_files(guardrail):
+    if _detection_scope_includes_files(guardrail):
         return False
     logger.debug(
         "Guardrail '%s' is scoped to text only; skipping attachment resolution.",

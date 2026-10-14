@@ -62,7 +62,7 @@ def _protected_code_in_files() -> BuiltInValidatorGuardrail:
             "validatorType": "intellectual_property",
             "validatorParameters": [
                 {"$parameterType": "enum-list", "id": "ipEntities", "value": ["Code"]},
-                {"$parameterType": "enum", "id": "appliesTo", "value": "Files"},
+                {"$parameterType": "enum", "id": "detectionScope", "value": "Files"},
             ],
         }
     )
