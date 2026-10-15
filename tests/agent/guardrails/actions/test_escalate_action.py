@@ -7,7 +7,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 from uipath.agent.models.agent import (
     AgentEscalationRecipientType,
@@ -2334,3 +2334,604 @@ class TestAppFolderPathNormalization:
             recipient=DEFAULT_RECIPIENT,
         )
         assert action.app_folder_path == folder
+
+
+# ── Files listed in the task payload ──────────────────────────────────────────
+
+_FILE_ID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
+_FILE_ID_2 = "0b6f3a2d-5e4c-4b1a-8f9e-1d2c3b4a5f60"
+_ESCALATE_MODULE = "uipath_langchain.agent.guardrails.actions.escalate_action"
+
+
+def _attachment(file_name="cv.pdf", attachment_id=_FILE_ID):
+    return {"id": attachment_id, "file_name": file_name, "mime_type": "application/pdf"}
+
+
+def _link(file_name="cv%2Epdf", attachment_id=_FILE_ID):
+    return (
+        f"https://alpha.uipath.com/org-id/agents_/attachments/tenant-id/"
+        f"{attachment_id}?name={file_name}"
+    )
+
+
+def _pre_state(scope, attachments, *, content="Test message"):
+    messages: list[AnyMessage]
+    if scope == GuardrailScope.TOOL:
+        messages = [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "test_tool", "args": {"input": "test"}, "id": "call_1"}
+                ],
+            )
+        ]
+    else:
+        messages = [HumanMessage(content=content)]
+    return AgentGuardrailsGraphState(
+        messages=messages,
+        inner_state=InnerAgentGuardrailsGraphState(
+            guardrail_validation_details="Validation failed",
+            guardrail_attachments=attachments,
+        ),
+    )
+
+
+async def _created_task_data(
+    scope,
+    stage,
+    state,
+    *,
+    base_url="https://alpha.uipath.com/org-id/tenant-id",
+    organization_id="org-id",
+    tenant_id="tenant-id",
+):
+    with (
+        patch(f"{_ESCALATE_MODULE}.UiPathConfig") as mock_config,
+        patch(f"{_ESCALATE_MODULE}.UiPath") as mock_uipath_class,
+        patch(f"{_ESCALATE_MODULE}.resolve_recipient_value") as mock_resolve,
+    ):
+        mock_resolve.return_value = TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
+        mock_config.base_url = base_url
+        mock_config.organization_id = organization_id
+        mock_config.tenant_id = tenant_id
+        mock_config.tenant_name = "TestTenant"
+        mock_config.is_studio_project = True
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(
+            return_value=_make_mock_task(recipient=MOCK_TASK_RECIPIENT)
+        )
+        mock_uipath_class.return_value = mock_client
+
+        _, create_task_fn, _, _ = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            scope,
+            stage,
+            component_name="test_tool",
+        )
+        await create_task_fn(state)
+
+        mock_client.tasks.create_async.assert_called_once()
+        return mock_client.tasks.create_async.call_args[1]["data"]
+
+
+class TestEscalationTaskFiles:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("scope", "expected_input"),
+        [
+            (GuardrailScope.AGENT, "Test message"),
+            (GuardrailScope.LLM, "Test message"),
+            (GuardrailScope.TOOL, {"input": "test"}),
+        ],
+    )
+    async def test_pre_execution_lists_the_files_first(self, scope, expected_input):
+        state = _pre_state(scope, [_attachment()])
+
+        data = await _created_task_data(scope, ExecutionStage.PRE_EXECUTION, state)
+
+        inputs = json.loads(data["Inputs"])
+        assert list(inputs) == ["Files", "Input"]
+        assert inputs["Files"] == {"cv.pdf": _link()}
+        assert inputs["Input"] == expected_input
+        assert data["ToolInputs"] == data["Inputs"]
+        assert "Outputs" not in data
+
+    @pytest.mark.asyncio
+    async def test_post_execution_agent_wraps_inputs_and_keeps_outputs(self):
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="System"), HumanMessage(content="User")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                agent_result={"ok": True},
+                guardrail_attachments=[_attachment()],
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.POST_EXECUTION, state
+        )
+
+        inputs = json.loads(data["Inputs"])
+        assert list(inputs) == ["Files", "Input"]
+        assert inputs["Input"] == "User"
+        assert data["ToolInputs"] == data["Inputs"]
+        assert data["Outputs"] == '{"ok": true}'
+        assert data["ToolOutputs"] == data["Outputs"]
+
+    @pytest.mark.asyncio
+    async def test_post_execution_tool_wraps_inputs_and_keeps_outputs(self):
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "test_tool", "args": {"param": "v"}, "id": "call_1"}
+                    ],
+                ),
+                ToolMessage(content="Tool execution result", tool_call_id="call_1"),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_attachments=[_attachment()]
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION, state
+        )
+
+        inputs = json.loads(data["Inputs"])
+        assert list(inputs) == ["Files", "Input"]
+        assert inputs["Input"] == {"param": "v"}
+        assert data["ToolInputs"] == data["Inputs"]
+        assert data["Outputs"] == "Tool execution result"
+        assert data["ToolOutputs"] == "Tool execution result"
+
+    @pytest.mark.asyncio
+    async def test_post_execution_llm_with_tool_calls_wraps_inputs_only(self):
+        state = AgentGuardrailsGraphState(
+            messages=[
+                HumanMessage(content="Input message"),
+                AIMessage(
+                    content="AI response",
+                    tool_calls=[
+                        {"name": "test_tool", "args": {"a": 1}, "id": "call_1"}
+                    ],
+                ),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_attachments=[_attachment()]
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.LLM, ExecutionStage.POST_EXECUTION, state
+        )
+
+        inputs = json.loads(data["Inputs"])
+        assert list(inputs) == ["Files", "Input"]
+        assert inputs["Input"] == "Input message"
+        assert json.loads(data["Outputs"])["tool_calls"][0]["args"] == {"a": 1}
+        assert data["ToolOutputs"] == data["Outputs"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("attachments", [None, []])
+    async def test_no_attachments_leaves_the_payload_unchanged(self, attachments):
+        state = _pre_state(GuardrailScope.AGENT, attachments)
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        assert data["Inputs"] == '"Test message"'
+        assert data["ToolInputs"] == '"Test message"'
+
+    @pytest.mark.asyncio
+    async def test_files_keep_the_order_sent(self):
+        state = _pre_state(
+            GuardrailScope.AGENT,
+            [_attachment("b.pdf", _FILE_ID_2), _attachment("a.pdf", _FILE_ID)],
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        files = json.loads(data["Inputs"])["Files"]
+        assert list(files) == ["b.pdf", "a.pdf"]
+        assert files == {
+            "b.pdf": _link("b%2Epdf", _FILE_ID_2),
+            "a.pdf": _link("a%2Epdf", _FILE_ID),
+        }
+
+    @pytest.mark.asyncio
+    async def test_files_with_the_same_name_get_distinct_keys(self):
+        state = _pre_state(
+            GuardrailScope.AGENT,
+            [_attachment("cv.pdf", _FILE_ID), _attachment("cv.pdf", _FILE_ID_2)],
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        assert json.loads(data["Inputs"])["Files"] == {
+            "cv.pdf": _link("cv%2Epdf", _FILE_ID),
+            "cv.pdf (2)": _link("cv%2Epdf", _FILE_ID_2),
+        }
+
+    @pytest.mark.asyncio
+    async def test_display_name_is_sanitised_and_the_link_strictly_encoded(self):
+        state = _pre_state(GuardrailScope.AGENT, [_attachment("re\u2028port\n.pdf")])
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        files = json.loads(data["Inputs"])["Files"]
+        assert list(files) == ["re port .pdf"]
+        assert files["re port .pdf"].endswith("name=re%E2%80%A8port%0A%2Epdf")
+
+    @pytest.mark.asyncio
+    async def test_unicode_and_spaces_in_the_name_are_percent_encoded(self):
+        state = _pre_state(GuardrailScope.AGENT, [_attachment("my résumé (1).pdf")])
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        link = json.loads(data["Inputs"])["Files"]["my résumé (1).pdf"]
+        assert link.endswith("name=my%20r%C3%A9sum%C3%A9%20%281%29%2Epdf")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "missing",
+        [{"base_url": None}, {"organization_id": None}, {"tenant_id": None}],
+    )
+    async def test_missing_config_lists_names_without_links(self, missing):
+        state = _pre_state(GuardrailScope.AGENT, [_attachment()])
+
+        data = await _created_task_data(
+            GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state, **missing
+        )
+
+        inputs = json.loads(data["Inputs"])
+        assert inputs["Files"] == {"cv.pdf": ""}
+        assert inputs["Input"] == "Test message"
+
+    @pytest.mark.asyncio
+    async def test_tool_message_that_is_not_json_is_kept_as_text(self):
+        state = AgentGuardrailsGraphState(
+            messages=[ToolMessage(content="not json", tool_call_id="call_1")],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_attachments=[_attachment()]
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        inputs = json.loads(data["Inputs"])
+        assert list(inputs) == ["Files", "Input"]
+        assert inputs["Input"] == "not json"
+
+    @pytest.mark.asyncio
+    async def test_malformed_attachment_is_skipped_with_a_warning(self, caplog):
+        state = _pre_state(
+            GuardrailScope.AGENT,
+            [
+                {"file_name": "broken.pdf", "mime_type": "application/pdf"},
+                _attachment("ok.pdf"),
+            ],
+        )
+
+        with caplog.at_level("WARNING", logger=_ESCALATE_MODULE):
+            data = await _created_task_data(
+                GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, state
+            )
+
+        assert json.loads(data["Inputs"])["Files"] == {"ok.pdf": _link("ok%2Epdf")}
+        assert "broken.pdf" in caplog.text
+
+
+class TestEscalationFilesHelpers:
+    def test_download_url_follows_the_agents_page_template(self):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _attachment_download_url,
+        )
+
+        with patch(f"{_ESCALATE_MODULE}.UiPathConfig") as mock_config:
+            mock_config.base_url = "https://alpha.uipath.com/org-id/tenant-id"
+            mock_config.organization_id = "org-id"
+            mock_config.tenant_id = "tenant-id"
+
+            url = _attachment_download_url(_FILE_ID, "a~b.c.pdf")
+
+        assert url == _link("a%7Eb%2Ec%2Epdf")
+
+    def test_download_url_encodes_the_id_and_tenant(self):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _attachment_download_url,
+        )
+
+        with patch(f"{_ESCALATE_MODULE}.UiPathConfig") as mock_config:
+            mock_config.base_url = "https://alpha.uipath.com/org-id/tenant-id"
+            mock_config.organization_id = "org-id"
+            mock_config.tenant_id = "ten/ant"
+
+            url = _attachment_download_url("a/b", "x.pdf")
+
+        assert url is not None
+        assert "/attachments/ten%2Fant/a%2Fb?name=x%2Epdf" in url
+
+    @pytest.mark.parametrize("missing", ["base_url", "organization_id", "tenant_id"])
+    def test_download_url_is_none_when_config_is_missing(self, missing):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _attachment_download_url,
+        )
+
+        with patch(f"{_ESCALATE_MODULE}.UiPathConfig") as mock_config:
+            mock_config.base_url = "https://alpha.uipath.com/org-id/tenant-id"
+            mock_config.organization_id = "org-id"
+            mock_config.tenant_id = "tenant-id"
+            setattr(mock_config, missing, None)
+
+            assert _attachment_download_url(_FILE_ID, "x.pdf") is None
+
+    def test_unwrap_passes_malformed_json_through_with_a_warning(self, caplog):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _unwrap_reviewed_inputs,
+        )
+
+        data = {"ReviewedInputs": "{not json"}
+
+        with caplog.at_level("WARNING", logger=_ESCALATE_MODULE):
+            assert _unwrap_reviewed_inputs(data, wrapped=True) is data
+
+        assert caplog.records
+
+    def test_unwrap_leaves_raw_args_that_merely_contain_input_alone(self, caplog):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _unwrap_reviewed_inputs,
+        )
+
+        data = {"ReviewedInputs": json.dumps({"Input": 1, "other": 2})}
+
+        with caplog.at_level("WARNING", logger=_ESCALATE_MODULE):
+            assert _unwrap_reviewed_inputs(data, wrapped=True) is data
+
+        assert caplog.records
+
+    def test_unwrap_accepts_a_wrapper_whose_files_row_was_deleted(self):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _unwrap_reviewed_inputs,
+        )
+
+        data = {"ReviewedInputs": json.dumps({"Input": "x"}), "Reason": "ok"}
+
+        assert _unwrap_reviewed_inputs(data, wrapped=True) == {
+            "ReviewedInputs": '"x"',
+            "Reason": "ok",
+        }
+
+    @pytest.mark.parametrize("data", [None, {}])
+    def test_unwrap_keeps_empty_data(self, data):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _unwrap_reviewed_inputs,
+        )
+
+        assert _unwrap_reviewed_inputs(data, wrapped=True) is data
+
+    def test_with_files_survives_an_unserialisable_payload(self, caplog):
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _with_files,
+        )
+
+        content: list[str | dict[str, Any]] = [{"not": {1, 2}}]
+
+        with caplog.at_level("WARNING", logger=_ESCALATE_MODULE):
+            assert _with_files(content, [_attachment()]) is content
+
+        assert caplog.records
+
+
+class TestEscalationFilesResume:
+    @staticmethod
+    def _approved(data):
+        result = MagicMock()
+        result.action = "Approve"
+        result.data = data
+        result.completed_by_user = None
+        return result
+
+    @staticmethod
+    def _wrapped(edited):
+        return json.dumps(
+            {"Files": [{"name": "evil.pdf", "link": "https://x"}], "Input": edited}
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scope", [GuardrailScope.AGENT, GuardrailScope.LLM])
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_message_scopes_receive_the_edited_input_only(
+        self, mock_interrupt, scope
+    ):
+        edited = {"updated": "content"}
+        mock_interrupt.return_value = self._approved(
+            {"ReviewedInputs": self._wrapped(edited)}
+        )
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            scope,
+            ExecutionStage.PRE_EXECUTION,
+        )
+        state = _make_state_with_task_info(
+            [HumanMessage(content="Original")],
+            name,
+            inner_state_kwargs={"guardrail_attachments": [_attachment()]},
+        )
+
+        result = await interrupt_fn(state)
+
+        assert result.update["messages"][0].content == edited
+        review = result.update["inner_state"]["escalation_review_data"]
+        assert review["reviewed_inputs"] == edited
+
+    @pytest.mark.asyncio
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_tool_pre_execution_receives_the_edited_args_only(
+        self, mock_interrupt
+    ):
+        edited = {"input": "updated", "param": "new"}
+        mock_interrupt.return_value = self._approved(
+            {"ReviewedInputs": self._wrapped(edited)}
+        )
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
+            component_name="test_tool",
+        )
+        state = _make_state_with_task_info(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "test_tool", "args": {"input": "o"}, "id": "call_1"}
+                    ],
+                )
+            ],
+            name,
+            inner_state_kwargs={"guardrail_attachments": [_attachment()]},
+        )
+
+        result = await interrupt_fn(state)
+
+        assert result.update["messages"][0].tool_calls[0]["args"] == edited
+        review = result.update["inner_state"]["escalation_review_data"]
+        assert review["reviewed_inputs"] == edited
+
+    @pytest.mark.asyncio
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_no_unwrap_without_attachments_in_state(self, mock_interrupt):
+        whole = {"Files": [{"name": "x"}], "Input": "edited"}
+        mock_interrupt.return_value = self._approved(
+            {"ReviewedInputs": json.dumps(whole)}
+        )
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            GuardrailScope.AGENT,
+            ExecutionStage.PRE_EXECUTION,
+        )
+        state = _make_state_with_task_info([HumanMessage(content="Original")], name)
+
+        result = await interrupt_fn(state)
+
+        assert result.update["messages"][0].content == whole
+
+    @pytest.mark.asyncio
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_approval_without_edits_is_unchanged(self, mock_interrupt):
+        mock_interrupt.return_value = self._approved({})
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            GuardrailScope.AGENT,
+            ExecutionStage.PRE_EXECUTION,
+        )
+        state = _make_state_with_task_info(
+            [HumanMessage(content="Original")],
+            name,
+            inner_state_kwargs={"guardrail_attachments": [_attachment()]},
+        )
+
+        result = await interrupt_fn(state)
+
+        assert "messages" not in result
+        assert result["inner_state"]["escalation_review_data"] is None
+
+    @pytest.mark.asyncio
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_non_wrapper_reviewed_inputs_pass_through_with_a_warning(
+        self, mock_interrupt, caplog
+    ):
+        mock_interrupt.return_value = self._approved({"ReviewedInputs": '{"foo": 1}'})
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            GuardrailScope.AGENT,
+            ExecutionStage.PRE_EXECUTION,
+        )
+        state = _make_state_with_task_info(
+            [HumanMessage(content="Original")],
+            name,
+            inner_state_kwargs={"guardrail_attachments": [_attachment()]},
+        )
+
+        with caplog.at_level("WARNING", logger=_ESCALATE_MODULE):
+            result = await interrupt_fn(state)
+
+        assert result.update["messages"][0].content == {"foo": 1}
+        assert caplog.records
+
+    @pytest.mark.asyncio
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_reviewed_outputs_are_never_unwrapped(self, mock_interrupt):
+        outputs = json.dumps({"Files": [], "Input": "x"})
+        mock_interrupt.return_value = self._approved({"ReviewedOutputs": outputs})
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            GuardrailScope.AGENT,
+            ExecutionStage.POST_EXECUTION,
+        )
+        state = _make_state_with_task_info(
+            [HumanMessage(content="In"), HumanMessage(content="Out")],
+            name,
+            inner_state_kwargs={"guardrail_attachments": [_attachment()]},
+        )
+
+        result = await interrupt_fn(state)
+
+        assert result.update["inner_state"]["agent_result"] == {
+            "Files": [],
+            "Input": "x",
+        }
+        review = result.update["inner_state"]["escalation_review_data"]
+        assert review["reviewed_outputs"] == {"Files": [], "Input": "x"}
+
+    @pytest.mark.asyncio
+    @patch(f"{_ESCALATE_MODULE}.interrupt")
+    async def test_rejection_detail_is_unchanged_with_wrapped_inputs(
+        self, mock_interrupt
+    ):
+        result = MagicMock()
+        result.action = "Reject"
+        result.data = {"Reason": "No", "ReviewedInputs": self._wrapped("e")}
+        mock_interrupt.return_value = result
+        name, _, _, interrupt_fn = _get_action_nodes(
+            _make_default_action(),
+            _make_default_guardrail(),
+            GuardrailScope.AGENT,
+            ExecutionStage.PRE_EXECUTION,
+        )
+        state = _make_state_with_task_info(
+            [HumanMessage(content="Original")],
+            name,
+            inner_state_kwargs={"guardrail_attachments": [_attachment()]},
+        )
+
+        with pytest.raises(AgentRuntimeError) as excinfo:
+            await interrupt_fn(state)
+
+        assert excinfo.value.error_info.detail == (
+            "Action was rejected after reviewing the task created by guardrail "
+            "[Test Guardrail], with reason: No"
+        )
+        review = excinfo.value.escalation_review_data  # type: ignore[attr-defined]
+        assert review["reviewed_inputs"] == "e"

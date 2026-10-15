@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import re
 from typing import Any, Dict, Literal, cast
+from urllib.parse import quote
 
 from langchain_core.messages import (
     AIMessage,
@@ -39,6 +41,14 @@ from ...tools.utils import SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
+from .block_action import _printable
+
+logger = logging.getLogger(__name__)
+
+_FILES_KEY = "Files"
+_INPUT_KEY = "Input"
+# Agents portal page that downloads an attachment by id; change here only.
+_ATTACHMENT_LINK_TEMPLATE = "{origin}/{organization_id}/agents_/attachments/{tenant_id}/{attachment_id}?name={file_name}"
 
 
 class EscalateAction(GuardrailAction):
@@ -187,9 +197,9 @@ class EscalateAction(GuardrailAction):
                     execution_stage,
                     guarded_component_name,
                 )
-                data["Inputs"] = input_content
-                # send ToolInputs for backwards compatibility for agents that use old HITL app
-                data["ToolInputs"] = input_content
+                data["Inputs"] = data["ToolInputs"] = _with_files(
+                    input_content, state.inner_state.guardrail_attachments
+                )
             else:  # POST_EXECUTION
                 if scope == GuardrailScope.AGENT:
                     input_message = state.messages[1]
@@ -212,11 +222,11 @@ class EscalateAction(GuardrailAction):
                     guarded_component_name,
                 )
 
-                data["Inputs"] = input_content
-                data["Outputs"] = output_content
-                # send ToolInputs and ToolOutputs for backwards compatibility for agents that use old HITL app
-                data["ToolInputs"] = input_content
-                data["ToolOutputs"] = output_content
+                data["Inputs"] = data["ToolInputs"] = _with_files(
+                    input_content, state.inner_state.guardrail_attachments
+                )
+                # ToolInputs and ToolOutputs are sent for backwards compatibility with the old HITL app
+                data["Outputs"] = data["ToolOutputs"] = output_content
 
             # Create the escalation task via API
             client = UiPath()
@@ -277,14 +287,22 @@ class EscalateAction(GuardrailAction):
                 )
             )
 
+            escalation_data = (
+                _unwrap_reviewed_inputs(
+                    escalation_result.data,
+                    wrapped=bool(state.inner_state.guardrail_attachments),
+                )
+                or {}
+            )
+
             # Build review data for observability (passed via state, not metadata,
             # because metadata dicts get shallow-copied by the LangGraph config
             # pipeline and mutations from the node body are not visible to callbacks).
             review_data: Dict[str, Any] = {}
-            if escalation_result.data:
-                reviewed_inputs = escalation_result.data.get("ReviewedInputs")
-                reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
-                reason = escalation_result.data.get("Reason")
+            if escalation_data:
+                reviewed_inputs = escalation_data.get("ReviewedInputs")
+                reviewed_outputs = escalation_data.get("ReviewedOutputs")
+                reason = escalation_data.get("Reason")
                 if reviewed_inputs:
                     review_data["reviewed_inputs"] = _parse_reviewed_data(
                         reviewed_inputs
@@ -315,7 +333,7 @@ class EscalateAction(GuardrailAction):
             if escalation_result.action == "Approve":
                 result = _process_escalation_response(
                     state,
-                    escalation_result.data,
+                    escalation_data,
                     scope,
                     execution_stage,
                     guarded_component_name,
@@ -332,7 +350,7 @@ class EscalateAction(GuardrailAction):
             err = AgentRuntimeError(
                 code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title="Escalation rejected",
-                detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
+                detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_data.get('Reason', None)}",
                 category=UiPathErrorCategory.USER,
             )
             err.escalation_review_data = review_data  # type: ignore[attr-defined]
@@ -898,6 +916,89 @@ def _execution_stage_to_string(
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         return "PreExecution"
     return "PostExecution"
+
+
+def _attachment_download_url(attachment_id: str, file_name: str) -> str | None:
+    """Link to the Agents page that downloads an attachment, or None without a full cloud context."""
+    organization_id = UiPathConfig.organization_id
+    tenant_id = UiPathConfig.tenant_id
+    cloud_base_url = UiPathConfig.base_url
+    if not (cloud_base_url and organization_id and tenant_id):
+        return None
+    # The Agents sign-in return-URL check allows no "." or "~" in the query.
+    strict_name = quote(file_name, safe="").replace(".", "%2E").replace("~", "%7E")
+    return _ATTACHMENT_LINK_TEMPLATE.format(
+        origin=UiPathUrl(cloud_base_url).base_url,
+        organization_id=organization_id,
+        tenant_id=quote(tenant_id, safe=""),
+        attachment_id=quote(attachment_id, safe=""),
+        file_name=strict_name,
+    )
+
+
+def _file_entries(attachments: list[dict[str, str]]) -> dict[str, str]:
+    """File name -> download link. Names are keys so the stock app shows them as fixed labels."""
+    entries: dict[str, str] = {}
+    for attachment in attachments:
+        try:
+            file_name = attachment["file_name"]
+            name = _printable(file_name)
+            link = _attachment_download_url(attachment["id"], file_name) or ""
+        except (KeyError, TypeError):
+            logger.warning(
+                "Skipping malformed guardrail attachment %r in the escalation task",
+                attachment.get("file_name") if isinstance(attachment, dict) else None,
+            )
+            continue
+        key, n = name, 1
+        while key in entries:
+            n += 1
+            key = f"{name} ({n})"
+        entries[key] = link
+    return entries
+
+
+def _with_files(
+    content: str | list[str | Dict[str, Any]],
+    attachments: list[dict[str, str]] | None,
+) -> str | list[str | Dict[str, Any]]:
+    if not attachments:
+        return content
+    try:
+        inner = content
+        if isinstance(content, str):
+            try:
+                inner = json.loads(content)
+            except json.JSONDecodeError:
+                pass
+        return json.dumps({_FILES_KEY: _file_entries(attachments), _INPUT_KEY: inner})
+    except Exception:
+        logger.warning(
+            "Could not list the guardrail files in the escalation task", exc_info=True
+        )
+        return content
+
+
+def _unwrap_reviewed_inputs(
+    data: dict[str, Any] | None, wrapped: bool
+) -> dict[str, Any] | None:
+    """Undo `_with_files` on the reviewer's ReviewedInputs; the returned Files list is ignored."""
+    if not (wrapped and data and data.get("ReviewedInputs")):
+        return data
+    try:
+        parsed = json.loads(data["ReviewedInputs"])
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if (
+        not isinstance(parsed, dict)
+        or _INPUT_KEY not in parsed
+        or not parsed.keys() <= {_FILES_KEY, _INPUT_KEY}
+    ):
+        logger.warning(
+            "ReviewedInputs does not have the expected Files/Input shape; using it as is"
+        )
+        return data
+    return {**data, "ReviewedInputs": json.dumps(parsed[_INPUT_KEY])}
 
 
 def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
