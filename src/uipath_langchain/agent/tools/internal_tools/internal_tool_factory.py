@@ -10,7 +10,8 @@ Supported Internal Tools:
     - BATCH_TRANSFORM: Tool for batch transformation of document data
     - HTTP_REQUEST: Tool for issuing outbound HTTP requests to a given URL
     - CREATE_FILE: Tool for creating a file and attaching it to the current job
-    - JEV_CLASSIFIER: Tool for classifying text with TypeSafe's Jev model
+    - CLASSIFIER: Tool for answering typed questions about an input with
+      probabilities (TypeSafe's Jev or OpenAI's Decisions API)
 
 Example:
     >>> from uipath.agent.models.agent import AgentInternalToolResourceConfig
@@ -33,10 +34,10 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 
 from .analyze_files_tool import create_analyze_file_tool
 from .batch_transform_tool import create_batch_transform_tool
+from .classifier import create_classifier_tool
 from .create_file_tool import create_file_tool
 from .deeprag_tool import create_deeprag_tool
 from .http_request_tool import create_http_request_tool
-from .jev_classifier_tool import create_jev_classifier_tool
 
 _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType,
@@ -49,7 +50,7 @@ _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType.CREATE_FILE: lambda resource, _llm: create_file_tool(
         resource
     ),
-    AgentInternalToolType.JEV_CLASSIFIER: create_jev_classifier_tool,
+    AgentInternalToolType.CLASSIFIER: create_classifier_tool,
 }
 
 
