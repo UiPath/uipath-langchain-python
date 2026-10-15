@@ -25,6 +25,18 @@ from .utils import (
 logger = logging.getLogger("uipath")
 
 
+def file_part_filename(name: str, mime_type: str) -> str | None:
+    """Return the ``filename`` a file is sent to the model with.
+
+    Mirrors :func:`build_file_content_blocks_for`: images and TIFF pages go out as
+    image blocks, which carry no filename, so they return ``None``.
+    """
+    sent_mime_type = normalize_mime_type(mime_type, name)
+    if is_tiff(sent_mime_type) or is_image(sent_mime_type):
+        return None
+    return sanitize_filename(name)
+
+
 async def build_file_content_blocks_for(
     file_info: FileInfo,
     *,
@@ -80,7 +92,7 @@ async def build_file_content_blocks_for(
         create_file_block(
             base64=base64_file,
             mime_type=mime_type or "application/octet-stream",
-            filename=sanitize_filename(file_info.name),
+            filename=file_part_filename(file_info.name, file_info.mime_type),
         )
     ]
 

@@ -16,6 +16,8 @@ from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.platform.chat.llm_trace_context import build_trace_context_headers
 from uipath.platform.common import EndpointManager
 
+from uipath_langchain.chat.attachment_baggage import trace_baggage
+
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
 from .http_client.retryers.vertex import AsyncVertexRetryer, VertexRetryer
@@ -98,7 +100,7 @@ class _UrlRewriteTransport(httpx.HTTPTransport):
             request.url = new_url
 
         for key, value in build_trace_context_headers(
-            extra_baggage=["source=agents"]
+            extra_baggage=trace_baggage("source=agents")
         ).items():
             request.headers[key] = value
 
@@ -136,7 +138,7 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
             request.url = new_url
 
         for key, value in build_trace_context_headers(
-            extra_baggage=["source=agents"]
+            extra_baggage=trace_baggage("source=agents")
         ).items():
             request.headers[key] = value
 

@@ -2,6 +2,7 @@
 
 from .invoke import (
     build_file_content_blocks_for,
+    file_part_filename,
     llm_call_with_files,
 )
 from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES, FileInfo
@@ -20,6 +21,7 @@ __all__ = [
     "TIFF_MIME_TYPES",
     "build_file_content_blocks_for",
     "download_file_base64",
+    "file_part_filename",
     "is_image",
     "is_pdf",
     "is_tiff",

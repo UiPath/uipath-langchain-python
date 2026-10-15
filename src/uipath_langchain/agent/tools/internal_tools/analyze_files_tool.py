@@ -46,6 +46,7 @@ from uipath_langchain.agent.exceptions.llm import (
 from uipath_langchain.agent.multimodal import (
     FileInfo,
     build_file_content_blocks_for,
+    file_part_filename,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
@@ -62,6 +63,7 @@ from uipath_langchain.agent.tools.utils import (
     config_without_streaming,
     sanitize_tool_name,
 )
+from uipath_langchain.chat.attachment_baggage import llm_call_attachment_ids
 from uipath_langchain.chat.helpers import (
     append_content_blocks_to_message,
     extract_text_content,
@@ -150,6 +152,30 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
             )
         )
     return json.dumps([att.model_dump(by_alias=True) for att in attachments])
+
+
+def _llm_call_attachment_ids(files: list[FileInfo]) -> dict[str, str]:
+    """Map the ``filename`` each file part is sent with to its Orchestrator attachment id.
+
+    Covers the same file versions as :func:`_llm_call_attachments_payload`, but only
+    ids Orchestrator can serve: a masked copy without a re-upload id, or a file that
+    did not come from Orchestrator, is left out. So are files sent without a filename
+    (images, TIFF pages), which nothing downstream could match, and a filename two
+    different attachments are sent with, which would link one of them to the other.
+    """
+    ids: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for file in files:
+        if file.masked_attachment_url:
+            att_id, name = file.masked_attachment_id, masked_name_for(file.name)
+        else:
+            att_id, name = file.attachment_id, file.name
+        filename = file_part_filename(name, file.mime_type)
+        if not att_id or filename is None:
+            continue
+        if ids.setdefault(filename, att_id) != att_id:
+            ambiguous.add(filename)
+    return {name: att_id for name, att_id in ids.items() if name not in ambiguous}
 
 
 def _config_with_llm_call_attachments(
@@ -354,7 +380,8 @@ def create_analyze_file_tool(
         config = config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
         try:
-            result = await non_streaming_llm.ainvoke(messages, config=config)
+            with llm_call_attachment_ids(_llm_call_attachment_ids(files)):
+                result = await non_streaming_llm.ainvoke(messages, config=config)
         except UiPathAPIError as exc:
             raise_for_provider_http_error(exc)
         except UiPathError as exc:

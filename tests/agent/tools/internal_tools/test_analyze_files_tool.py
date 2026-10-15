@@ -30,10 +30,12 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
     _config_with_llm_call_attachments,
     _is_pii_scope_for_files,
+    _llm_call_attachment_ids,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
     resolve_attachments_to_file_infos,
 )
+from uipath_langchain.chat.attachment_baggage import trace_baggage
 
 
 def _make_enriched_404() -> EnrichedException:
@@ -1453,3 +1455,169 @@ class TestAnalyzeFileToolPassesAttachmentsViaConfig:
         # Verify TAG_NOSTREAM is set to prevent the internal LLM response
         # from leaking into the conversation stream as a content part.
         assert TAG_NOSTREAM in config_arg["tags"]
+
+
+class TestLlmCallAttachmentIds:
+    def test_maps_the_sent_filename_to_the_orchestrator_id(self) -> None:
+        files = [
+            FileInfo(
+                url="https://example.com/a",
+                name="cv_harmful content.pdf",
+                mime_type="application/pdf",
+                attachment_id="id-original",
+            ),
+            FileInfo(
+                url="https://example.com/b",
+                name="notes.txt",
+                mime_type="text/plain",
+                attachment_id="id-notes",
+                masked_attachment_url="https://example.com/b-masked",
+                masked_attachment_id="id-masked",
+            ),
+        ]
+
+        assert _llm_call_attachment_ids(files) == {
+            "cv-harmful content-pdf": "id-original",
+            "pii-masked-notes-txt": "id-masked",
+        }
+
+    def test_leaves_out_files_sent_without_a_filename(self) -> None:
+        files = [
+            FileInfo(
+                url="https://example.com/a",
+                name="scan.png",
+                mime_type="image/png",
+                attachment_id="id-png",
+            ),
+            FileInfo(
+                url="https://example.com/b",
+                name="fax.tiff",
+                mime_type="image/tiff",
+                attachment_id="id-tiff",
+            ),
+            FileInfo(
+                url="https://example.com/c",
+                name="photo.jpg",
+                mime_type="application/octet-stream",
+                attachment_id="id-jpg",
+            ),
+        ]
+
+        assert _llm_call_attachment_ids(files) == {}
+
+    def test_leaves_out_a_filename_two_attachments_are_sent_with(self) -> None:
+        files = [
+            FileInfo(
+                url="https://example.com/a",
+                name="report.pdf",
+                mime_type="application/pdf",
+                attachment_id="id-a",
+            ),
+            FileInfo(
+                url="https://example.com/b",
+                name="report_pdf",
+                mime_type="application/pdf",
+                attachment_id="id-b",
+            ),
+            FileInfo(
+                url="https://example.com/c",
+                name="notes.txt",
+                mime_type="text/plain",
+                attachment_id="id-c",
+            ),
+            FileInfo(
+                url="https://example.com/c",
+                name="notes.txt",
+                mime_type="text/plain",
+                attachment_id="id-c",
+            ),
+        ]
+
+        assert _llm_call_attachment_ids(files) == {"notes-txt": "id-c"}
+
+    def test_leaves_out_files_orchestrator_cannot_serve(self) -> None:
+        files = [
+            FileInfo(
+                url="https://example.com/a", name="a.pdf", mime_type="application/pdf"
+            ),
+            FileInfo(
+                url="https://example.com/b",
+                name="b.txt",
+                mime_type="text/plain",
+                attachment_id="id-b",
+                masked_attachment_url="https://example.com/b-masked",
+            ),
+        ]
+
+        assert _llm_call_attachment_ids(files) == {}
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_the_llm_call_carries_the_attachment_ids_in_its_trace_baggage(
+        self, mock_resolve_attachments, mock_add_files, mock_get_wrapper
+    ) -> None:
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://example.com/file.pdf",
+                name="test.pdf",
+                mime_type="application/pdf",
+                attachment_id="id-test",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="Summarize")
+        seen: list[list[str]] = []
+
+        async def _ainvoke(*_args, **_kwargs):
+            seen.append(trace_baggage("source=agents"))
+            return AIMessage(content="ok")
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(side_effect=_ainvoke)
+        llm.model_copy = Mock(return_value=llm)
+        properties = AgentInternalAnalyzeFilesToolProperties(
+            tool_type=AgentInternalToolType.ANALYZE_FILES
+        )
+        tool = create_analyze_file_tool(
+            AgentInternalToolResourceConfig(
+                name="analyze_files",
+                description="Analyze files with AI",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "analysisTask": {"type": "string"},
+                        "attachments": {"type": "array", "items": {"type": "object"}},
+                    },
+                    "required": ["analysisTask", "attachments"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {"result": {"type": "string"}},
+                },
+                properties=properties,
+            ),
+            llm,
+        )
+
+        assert tool.coroutine is not None
+        await tool.coroutine(
+            analysisTask="Summarize",
+            attachments=[
+                MockAttachment(
+                    ID=str(uuid.uuid4()),
+                    FullName="test.pdf",
+                    MimeType="application/pdf",
+                )
+            ],
+        )
+
+        assert len(seen) == 1
+        assert len(seen[0]) == 2
+        assert seen[0][1].startswith("attachmentIds=")
+        assert trace_baggage("source=agents") == ["source=agents"]
