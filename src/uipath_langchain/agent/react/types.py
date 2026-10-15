@@ -10,7 +10,7 @@ from uipath.agent.react import (
     SET_CONVERSATIONAL_OUTPUT_TOOL,
 )
 from uipath.platform.attachments import Attachment
-from uipath.platform.memory import FieldMatching
+from uipath.platform.memory import FieldMatching, SearchMode
 
 from uipath_langchain.agent.react.reducers import (
     merge_dicts,
@@ -103,6 +103,10 @@ class MemoryConfig(BaseModel):
             "How per-field matches combine: 'Or' matches when any searched field "
             "passes the threshold, 'And' requires every searched field to pass."
         ),
+    )
+    search_mode: SearchMode = Field(
+        default=SearchMode.Hybrid,
+        description="Hybrid (keyword + meaning) or Semantic (meaning only) search.",
     )
     field_weights: dict[str, float] = Field(
         description=(

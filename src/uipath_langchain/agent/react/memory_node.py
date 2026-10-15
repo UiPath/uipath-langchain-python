@@ -13,10 +13,12 @@ loop and the analyze-files tool still receive the full attachment.
 """
 
 import logging
+import re
 import time
 from contextlib import contextmanager
 from typing import Any
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
@@ -26,7 +28,6 @@ from uipath.platform.memory import (
     FieldSettings,
     MemorySearchRequest,
     SearchField,
-    SearchMode,
     SearchSettings,
 )
 
@@ -51,6 +52,17 @@ _FILE_TEXT_MAX_CHARS = 8000
 # the whole run. On timeout the field soft-fails and is skipped, not fatal.
 _ANALYSIS_TIMEOUT_SECONDS = 120.0
 _ANALYSIS_MAX_RETRIES = 2
+# The memory index rejects keyword queries over its length limit with this
+# (always English) message, e.g. "Query text exceeds the maximum length of 4000
+# characters for Keyword search."
+_QUERY_TOO_LONG_PATTERN = re.compile(
+    r"Query text exceeds the maximum length of \d+ characters for \w+ search\.",
+    re.IGNORECASE,
+)
+_MEMORY_DOCS_URL = (
+    "https://docs.uipath.com/agents/automation-cloud/latest/user-guide/"
+    "configuring-agent-memory"
+)
 
 
 @contextmanager
@@ -153,7 +165,7 @@ def create_memory_recall_node(
             settings=SearchSettings(
                 threshold=memory_config.threshold,
                 result_count=memory_config.result_count,
-                search_mode=SearchMode.Hybrid,
+                search_mode=memory_config.search_mode,
                 field_matching=memory_config.field_matching,
             ),
             definition_system_prompt="",
@@ -251,15 +263,9 @@ def create_memory_recall_node(
                         memory_config.memory_space_id,
                         error_detail,
                     )
-                    if otel_trace:
-                        if fewshot_span and hasattr(fewshot_span, "set_status"):
-                            fewshot_span.set_status(
-                                otel_trace.StatusCode.ERROR, error_detail
-                            )
-                        if lookup_span and hasattr(lookup_span, "set_status"):
-                            lookup_span.set_status(
-                                otel_trace.StatusCode.ERROR, error_detail
-                            )
+                    span_error = _query_too_long_message(e) or error_detail
+                    for span in (fewshot_span, lookup_span):
+                        _set_span_error(span, otel_trace, span_error)
 
             # Set result attributes after search completes
             if lookup_span and hasattr(lookup_span, "set_attribute"):
@@ -273,6 +279,42 @@ def create_memory_recall_node(
         return {"inner_state": {"memory_injection": injection}}
 
     return memory_recall_node
+
+
+def _query_too_long_message(error: Exception) -> str | None:
+    """Return an actionable message when the search input exceeded the keyword limit.
+
+    ``EnrichedException.response_content`` is truncated, so the full body is
+    read from the underlying ``httpx.HTTPStatusError``.
+    """
+    if not isinstance(error, EnrichedException) or error.status_code != 400:
+        return None
+    cause = error.__cause__
+    body = (
+        cause.response.text
+        if isinstance(cause, httpx.HTTPStatusError)
+        else error.response_content
+    )
+    match = _QUERY_TOO_LONG_PATTERN.search(body)
+    if not match:
+        return None
+    return (
+        "Memory lookup skipped: the agent input is too long for hybrid "
+        f"(keyword + meaning) search. {match.group(0)} The agent ran without "
+        "memory. To use memory with long inputs, turn on Summarize key in the "
+        "memory space settings, or change Search mode to Semantic (meaning "
+        f"only). Learn more: {_MEMORY_DOCS_URL}"
+    )
+
+
+def _set_span_error(span: Any, otel_trace: Any, message: str) -> None:
+    """Mark a span as failed and record ``message`` as its ``error`` attribute."""
+    if span is None or otel_trace is None:
+        return
+    if hasattr(span, "set_attribute"):
+        span.set_attribute("error", message)
+    if hasattr(span, "set_status"):
+        span.set_status(otel_trace.StatusCode.ERROR, message)
 
 
 async def _fetch_space_settings(space_id: str) -> dict[str, Any] | None:
