@@ -636,7 +636,8 @@ def _provider_message(error: UiPathAPIError) -> str:
 def _is_unknown_model_error(error: UiPathAPIError) -> bool:
     """Whether Jev rejected the call because the configured model does not exist.
 
-    TypeSafe answers 400 ``{"detail": {"message": "Unknown model: <name>"}}``; a
+    TypeSafe answers 400 ``{"detail": {"message": "Unknown model: <name>"}}`` and the
+    LLM Gateway 400 ``{"detail": {"message": "Unsupported model used. ..."}}``; a
     FastAPI-style 422 on ``body.model`` is accepted too. The model comes from the
     tool settings, so the LLM cannot fix it.
     """
@@ -648,7 +649,11 @@ def _is_unknown_model_error(error: UiPathAPIError) -> bool:
             isinstance(item, dict) and list(item.get("loc") or [])[-1:] == ["model"]
             for item in detail
         )
-    return _provider_message(error).lower().startswith("unknown model")
+    return (
+        _provider_message(error)
+        .lower()
+        .startswith(("unknown model", "unsupported model"))
+    )
 
 
 def _read_tool_input(

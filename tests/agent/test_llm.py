@@ -258,6 +258,16 @@ _MAX_TOKENS_BODY: dict[str, object] = {
 }
 
 
+# A raw vendor passthrough error: the gateway relays the vendor's message in an
+# object detail, so it is vendor text, not first-party ProblemDetails text.
+_RAW_VENDOR_BODY: dict[str, object] = {
+    "detail": {
+        "error_type": "api_usage_error",
+        "message": "Cannot classify state for jane.doe@example.com",
+    }
+}
+
+
 @pytest.mark.parametrize(
     "err_factory",
     [
@@ -266,6 +276,7 @@ _MAX_TOKENS_BODY: dict[str, object] = {
             lambda: _api_error(400, {"message": "Malformed input request."}),
             id="bedrock-envelope",
         ),
+        pytest.param(lambda: _api_error(400, _RAW_VENDOR_BODY), id="raw-vendor-detail"),
         pytest.param(lambda: _api_error_text(400, _EDGE_HTML), id="raw-html"),
         pytest.param(lambda: _api_error(400, {}), id="empty-body"),
     ],
@@ -295,6 +306,27 @@ def test_400_does_not_quote_the_provider_body(err_factory):
     for rendered in (error.error_info.detail, str(error), repr(error)):
         assert "65535" not in rendered
         assert "doctype" not in rendered.lower()
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_detail"),
+    [
+        pytest.param(400, None, id="400-canned"),
+        pytest.param(500, "Internal Server Error", id="500-reason-phrase"),
+    ],
+)
+def test_raw_vendor_detail_is_never_displayed(
+    status_code: int, expected_detail: str | None
+) -> None:
+    # An object detail relays the vendor's message, which may carry customer PII.
+    # It must not crash the mapper (it is not a string) nor reach the user.
+    error = _raise(_api_error(status_code, _RAW_VENDOR_BODY))
+
+    if expected_detail is not None:
+        # SYSTEM errors carry the generic prefix; the reason phrase follows it.
+        assert error.error_info.detail.endswith(expected_detail)
+    for rendered in (error.error_info.detail, str(error), repr(error)):
+        assert "jane.doe" not in rendered
 
 
 def test_400_prefers_the_gateway_detail_over_the_canned_text():

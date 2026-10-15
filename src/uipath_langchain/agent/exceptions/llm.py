@@ -204,6 +204,8 @@ def _classify(status_code: int, body: object) -> _Verdict:
     """
     code, category, title, own_detail = _status_verdict(status_code, body)
     gateway_detail = body.get("detail") if isinstance(body, dict) else None
+    if not isinstance(gateway_detail, str):
+        gateway_detail = None
     return code, category, title, gateway_detail or own_detail
 
 
