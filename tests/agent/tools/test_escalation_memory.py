@@ -7,13 +7,17 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from uipath.agent.models.agent import AgentEscalationResourceConfig
 from uipath.platform.common._bindings import (
     GenericResourceOverwrite,
     _resource_overwrites,
 )
-from uipath.platform.memory import EscalationMemorySearchResponse, SearchMode
+from uipath.platform.memory import (
+    EscalationMemorySearchResponse,
+    FieldMatching,
+    SearchMode,
+)
 
 from uipath_langchain.agent.tools.escalation_memory import (
     ESCALATION_MEMORY_STRATEGY,
@@ -419,6 +423,58 @@ class TestGetEscalationMemorySettings:
         settings = EscalationMemorySettings(searchMode="semantic")
 
         assert settings.search_mode.value == "Semantic"
+
+    def test_field_matching_defaults_to_or_when_omitted(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=True,
+            properties={
+                "memory": {
+                    "threshold": 0.8,
+                    "searchMode": "hybrid",
+                    "fieldSettings": [{"name": "customerAccount", "weight": 1}],
+                }
+            },
+        )
+
+        settings = _get_escalation_memory_settings(resource)
+
+        assert settings is not None
+        assert settings.field_matching is FieldMatching.Or
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("or", FieldMatching.Or),
+            ("and", FieldMatching.And),
+            ("Or", FieldMatching.Or),
+            ("And", FieldMatching.And),
+            ("AND", FieldMatching.And),
+            (FieldMatching.And, FieldMatching.And),
+        ],
+    )
+    def test_reads_field_matching_from_studio_web_json(
+        self, raw: str | FieldMatching, expected: FieldMatching
+    ) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=True,
+            properties={
+                "memory": {
+                    "threshold": 0.8,
+                    "searchMode": "hybrid",
+                    "fieldSettings": [],
+                    "fieldMatching": raw,
+                }
+            },
+        )
+
+        settings = _get_escalation_memory_settings(resource)
+
+        assert settings is not None
+        assert settings.field_matching is expected
+
+    def test_rejects_unknown_field_matching(self) -> None:
+        with pytest.raises(ValidationError):
+            EscalationMemorySettings(fieldMatching="xor")
 
 
 class TestGetUserEmail:
@@ -947,6 +1003,31 @@ class TestBuildSearchFields:
     def test_search_mode_validator_returns_unknown_values(self) -> None:
         assert EscalationMemorySettings._normalize_search_mode("keyword") == "keyword"
 
+    @pytest.mark.parametrize(
+        ("field_matching", "expected"),
+        [(FieldMatching.Or, "Or"), (FieldMatching.And, "And")],
+    )
+    def test_search_request_sends_field_matching_under_settings(
+        self, field_matching: FieldMatching, expected: str
+    ) -> None:
+        retriever = EscalationMemoryRetriever(
+            "space-123",
+            memory_settings=EscalationMemorySettings(fieldMatching=field_matching),
+        )
+
+        request = retriever._build_search_request({"keep": "value"})
+        body = request.model_dump(by_alias=True, exclude_none=True, mode="json")
+
+        assert request.settings.result_count == 1
+        assert body["settings"]["fieldMatching"] == expected
+
+    def test_search_request_defaults_field_matching_to_or(self) -> None:
+        request = EscalationMemoryRetriever("space-123")._build_search_request(
+            {"keep": "value"}
+        )
+
+        assert request.settings.field_matching is FieldMatching.Or
+
     def test_search_request_includes_required_definition_prompt(self) -> None:
         request = EscalationMemoryRetriever("space-123")._build_search_request(
             {"keep": "value"}
@@ -1303,6 +1384,7 @@ class TestEscalationMemoryUtilities:
             threshold = 0.8
             searchMode = "Hybrid"
             fieldSettings = [{"name": "object-field", "weight": 0.9}]
+            fieldMatching = "and"
 
         existing = EscalationMemorySettings(threshold=0.1)
         assert _coerce_memory_settings(existing) is existing
@@ -1311,6 +1393,8 @@ class TestEscalationMemoryUtilities:
         ]
         object_settings = _coerce_memory_settings(MemoryObject())
         assert object_settings.threshold == 0.8
+        assert object_settings.field_matching is FieldMatching.And
+        assert _coerce_memory_settings(MemoryModel()).field_matching is FieldMatching.Or
         assert object_settings.field_settings == [
             EscalationMemoryFieldSetting(name="object-field", weight=0.9)
         ]
