@@ -154,6 +154,7 @@ def create_memory_recall_node(
                 threshold=memory_config.threshold,
                 result_count=memory_config.result_count,
                 search_mode=SearchMode.Hybrid,
+                field_matching=memory_config.field_matching,
             ),
             definition_system_prompt="",
         )
