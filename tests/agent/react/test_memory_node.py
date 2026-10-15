@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables.graph import Edge
 from langgraph.graph import StateGraph
 from pydantic import BaseModel, Field
+from uipath.platform.memory import FieldMatching
 
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.react.agent import create_agent
@@ -139,6 +140,41 @@ class TestMemoryRecallNode:
 
         result = await node(_make_state(topic="python"))
         assert result["inner_state"]["memory_injection"] == "\n\nBased on past runs..."
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("field_matching", "expected"),
+        [
+            (None, "Or"),
+            (FieldMatching.And, "And"),
+            ("and", "And"),
+        ],
+    )
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_search_request_carries_field_matching(
+        self,
+        mock_uipath_cls: MagicMock,
+        field_matching: FieldMatching | str | None,
+        expected: str,
+    ) -> None:
+        mock_sdk = MagicMock()
+        mock_uipath_cls.return_value = mock_sdk
+        mock_response = MagicMock()
+        mock_response.results = []
+        mock_response.system_prompt_injection = ""
+        mock_sdk.memory.search_async = AsyncMock(return_value=mock_response)
+
+        kwargs = {} if field_matching is None else {"field_matching": field_matching}
+        config = MemoryConfig(
+            memory_space_id="space-123", field_weights={"topic": 1.0}, **kwargs
+        )
+        node = create_memory_recall_node(config, input_schema=_TopicInput)
+
+        await node(_make_state(topic="python"))
+
+        request = mock_sdk.memory.search_async.call_args.kwargs["request"]
+        body = request.model_dump(by_alias=True, mode="json")
+        assert body["settings"]["fieldMatching"] == expected
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.react.memory_node.UiPath")
