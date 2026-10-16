@@ -2,9 +2,11 @@
 
 The agent selects *ontologies* (not entities). On first invocation this tool:
 
-1. fetches each ontology's **R2RML** (critical — it is the entity allow-list) and
-   **OWL** (optional — grounds the prompt),
-2. parses R2RML into the closed ``(entity_name, folder_path)`` allow-list,
+1. fetches each ontology's **mapping** (critical — it is the entity allow-list)
+   and **OWL** (optional — grounds the prompt) from the Ontology service,
+2. parses the mapping into the closed entity allow-list — YARRRML (the service's
+   native form: table + entity id + folder key) or R2RML Turtle
+   (``(entity_name, folder_path)`` pairs),
 3. resolves each entity to its schema and builds a folder-scoped
    ``EntitiesService`` (see :func:`resolve_ontology_entities`),
 4. compiles the ontology sub-graph (:class:`ontology_subgraph.DataFabricGraph`),
@@ -39,6 +41,7 @@ from ..datafabric_tool import BASE_SYSTEM_PROMPT
 from ..models import DataFabricQueryInput
 from .ontology_fetcher import fence_ontology_block, fetch_ontology_file
 from .ontology_r2rml import parse_r2rml_entities
+from .ontology_yarrrml import MappedEntity, parse_yarrrml_entities
 
 if TYPE_CHECKING:
     from uipath.platform import UiPath
@@ -54,26 +57,10 @@ DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
 async def resolve_ontology_entities(
     sdk: "UiPath",
     pairs: list[tuple[str, str]],
+    mapped: list[MappedEntity] | None = None,
 ) -> tuple[list[Entity], EntitiesService]:
-    """Resolve an R2RML allow-list into schemas + a folder-scoped service.
-
-    Two steps, both concurrent (via ``asyncio.gather``):
-
-    1. Resolve each distinct folder path → key, then fetch each entity **by name**
-       within its folder to discover its ``id`` — R2RML declares entities by
-       ``rr:tableName`` + ``uipath:folderPath``, not by key.
-    2. Hand the resolved ``(id, name, folder_key)`` set to the SDK's public
-       :meth:`EntitiesService.resolve_entity_set_async`, which fetches the schemas
-       and builds the folder-scoped ``EntitiesService`` (routing each entity's
-       queries to its own folder) — so we don't construct that service from SDK
-       internals here.
-
-    Name→folder routing, and same-name-in-different-folders handling, are whatever
-    the SDK's shared entity-set resolution does — identical to the entity tool.
-    Folder keys come only from the trusted folder resolution of the R2RML
-    ``uipath:folderPath`` — never from the LLM.
-    """
-    # Step 1a: resolve each *distinct* folder path -> key, concurrently.
+    """Resolve R2RML ``pairs`` and YARRRML ``mapped`` entities into schemas + a folder-scoped service."""
+    # Step 1a: resolve each *distinct* R2RML folder path -> key, concurrently.
     distinct_paths = list(dict.fromkeys(folder_path for _, folder_path in pairs))
     resolved_keys = await asyncio.gather(
         *(sdk.folders.retrieve_key_async(folder_path=p) for p in distinct_paths)
@@ -87,34 +74,38 @@ async def resolve_ontology_entities(
             )
         folder_key_by_path[folder_path] = folder_key
 
-    # Step 1b: fetch each entity by name (concurrent) to discover its id. Wrap each
-    # fetch so a failure names the offending entity + folder — a bare gather would
-    # surface only the first exception with no indication of which entity failed.
-    folder_keys = [folder_key_by_path[folder_path] for _, folder_path in pairs]
+    wanted: list[tuple[str, str | None, str | None, str]] = [
+        (name, None, folder_key_by_path[folder_path], folder_path)
+        for name, folder_path in pairs
+    ]
+    wanted += [
+        (e.name, e.entity_id, e.folder_key, e.folder_key or "<ontology folder>")
+        for e in mapped or []
+    ]
 
-    async def _fetch(name: str, folder_path: str, folder_key: str) -> Entity:
+    # Step 1b: look up ids by name where the mapping gave none.
+    async def _id_of(
+        name: str, entity_id: str | None, folder_key: str | None, label: str
+    ) -> str:
+        if entity_id:
+            return entity_id
         try:
-            return await sdk.entities.retrieve_by_name_async(
+            entity = await sdk.entities.retrieve_by_name_async(
                 name, folder_key=folder_key
             )
         except Exception as e:
             raise ValueError(
-                f"Failed to resolve ontology entity '{name}' in folder "
-                f"'{folder_path}': {e}"
+                f"Failed to resolve ontology entity '{name}' in folder '{label}': {e}"
             ) from e
+        return entity.id
 
-    named_entities = await asyncio.gather(
-        *(
-            _fetch(name, folder_path, folder_key)
-            for (name, folder_path), folder_key in zip(pairs, folder_keys, strict=True)
-        )
-    )
+    ids = await asyncio.gather(*(_id_of(*w) for w in wanted))
 
     # Step 2: delegate to the SDK's public entity-set resolver, which builds the
     # folder-scoped EntitiesService for us (no reliance on SDK-private attrs).
     items = [
-        DataFabricEntityItem(id=entity.id, name=entity.name, folder_key=folder_key)
-        for entity, folder_key in zip(named_entities, folder_keys, strict=True)
+        DataFabricEntityItem(id=entity_id, name=name, folder_key=folder_key)
+        for (name, _, folder_key, _), entity_id in zip(wanted, ids, strict=True)
     ]
     resolution = await sdk.entities.resolve_entity_set_async(items)
     return resolution.entities, resolution.entities_service
@@ -176,21 +167,31 @@ class DataFabricOntologyQueryHandler:
             owl_blocks: list[str] = []
             r2rml_blocks: list[str] = []
             pairs: list[tuple[str, str]] = []
-            seen: set[tuple[str, str]] = set()
+            mapped: list[MappedEntity] = []
 
             for name, folder_key in self._ontologies:
-                # R2RML is critical (it is the entity allow-list) — fetch failure
-                # is fatal, not degraded.
-                r2rml_content, r2rml_media = await fetch_ontology_file(
-                    sdk.entities, name, "r2rml", folder_key
+                # The mapping is critical (it is the entity allow-list) — fetch
+                # failure is fatal, not degraded.
+                mapping_content, mapping_media = await fetch_ontology_file(
+                    sdk.entities, name, "mapping", folder_key
                 )
                 r2rml_blocks.append(
-                    fence_ontology_block(name, "r2rml", r2rml_content, r2rml_media)
+                    fence_ontology_block(
+                        name, "mapping", mapping_content, mapping_media
+                    )
                 )
-                for pair in parse_r2rml_entities(r2rml_content):
-                    if pair not in seen:
-                        seen.add(pair)
-                        pairs.append(pair)
+                if "yaml" in mapping_media.lower():
+                    mapped += [
+                        e
+                        for e in parse_yarrrml_entities(mapping_content, folder_key)
+                        if e not in mapped
+                    ]
+                else:
+                    pairs += [
+                        p
+                        for p in parse_r2rml_entities(mapping_content)
+                        if p not in pairs
+                    ]
 
                 # OWL only grounds the prompt — degrade to a note on failure.
                 try:
@@ -207,14 +208,16 @@ class DataFabricOntologyQueryHandler:
                         "rely on the R2RML mapping and entity schemas below."
                     )
 
-            if not pairs:
-                raise ValueError("Ontology R2RML declared no entities to query.")
+            if not pairs and not mapped:
+                raise ValueError("Ontology mapping declared no entities to query.")
 
-            entities, scoped_service = await resolve_ontology_entities(sdk, pairs)
+            entities, scoped_service = await resolve_ontology_entities(
+                sdk, pairs, mapped
+            )
             if not entities:
                 raise ValueError(
                     "No Data Fabric entity schemas could be resolved from the "
-                    "ontology. Check the R2RML table names, folder paths, and "
+                    "ontology. Check the mapping's table names, folders, and "
                     "permissions."
                 )
 

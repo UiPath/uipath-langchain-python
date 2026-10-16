@@ -78,12 +78,15 @@ def format_ontology_context(
 
     if r2rml_text:
         lines.append(
-            "## Ontology→Table Mapping (R2RML)\n\n"
-            "The R2RML below maps the ontology to the physical tables and columns "
+            "## Ontology→Table Mapping (R2RML / YARRRML)\n\n"
+            "The mapping below maps the ontology to the physical tables and columns "
             "you must use in SQL: `rr:tableName` is the SQL table, `rr:column` is "
             "the SQL column for each ontology predicate, and `rr:joinCondition` "
             "(child/parent) gives the exact columns to join on. Use it to turn "
-            "ontology terms into precise SQL identifiers and joins.\n\n"
+            "ontology terms into precise SQL identifiers and joins. A mapping "
+            "in YARRRML (YAML) says the same thing: each source's `table` is the "
+            "SQL table and each `$(column)` in `po` is the SQL column for that "
+            "ontology predicate.\n\n"
             f"{r2rml_text}"
         )
         lines.append("")

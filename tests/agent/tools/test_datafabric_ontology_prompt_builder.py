@@ -52,7 +52,7 @@ def test_embeds_ontology_and_r2rml_sections_in_order():
 
     assert "## Available Ontology" in prompt
     assert "OWL_BODY_XYZ" in prompt
-    assert "## Ontology→Table Mapping (R2RML)" in prompt
+    assert "## Ontology→Table Mapping (R2RML / YARRRML)" in prompt
     assert "R2RML_BODY_XYZ" in prompt
     # OWL section precedes the R2RML section.
     assert prompt.index("Available Ontology") < prompt.index("Ontology→Table Mapping")
@@ -72,7 +72,7 @@ def test_still_renders_entity_schema_tables():
 def test_omits_sections_when_empty():
     prompt = build([_fake_entity(_fake_field())])
     assert "## Available Ontology" not in prompt
-    assert "## Ontology→Table Mapping (R2RML)" not in prompt
+    assert "## Ontology→Table Mapping (R2RML / YARRRML)" not in prompt
 
 
 def test_no_entities_returns_empty():

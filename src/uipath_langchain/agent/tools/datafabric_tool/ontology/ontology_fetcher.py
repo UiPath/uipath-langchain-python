@@ -39,7 +39,7 @@ async def fetch_ontology_file(
     Args:
         entities_service: Authenticated SDK service used for the REST call.
         name: Ontology name (pinned from configuration).
-        file_type: The ontology file to fetch — ``"owl"`` or ``"r2rml"``.
+        file_type: The ontology file to fetch — ``"owl"`` (the schema) or ``"mapping"``.
         folder_key: Key of the folder the ontology lives in.
 
     Returns:

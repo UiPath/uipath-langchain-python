@@ -27,6 +27,9 @@ from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_tool import 
     create_datafabric_ontology_tool,
     resolve_ontology_entities,
 )
+from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_yarrrml import (
+    MappedEntity,
+)
 
 # --- factory ----------------------------------------------------------------
 
@@ -116,6 +119,36 @@ async def test_resolve_fetches_by_name_then_delegates_to_sdk_resolver(monkeypatc
     assert [i.id for i in items] == ["id-alpha", "id-beta", "id-gamma"]
 
 
+async def test_resolve_mapped_entities_skip_lookup_when_id_known(monkeypatch):
+    sdk = MagicMock()
+    sdk.folders.retrieve_key_async = AsyncMock()
+    sdk.entities.retrieve_by_name_async = AsyncMock(
+        return_value=SimpleNamespace(id="id-beta")
+    )
+    sdk.entities.resolve_entity_set_async = AsyncMock(
+        return_value=SimpleNamespace(entities=["E"], entities_service="S")
+    )
+
+    entities, service = await resolve_ontology_entities(
+        sdk,
+        [],
+        [MappedEntity("alpha", "id-alpha", "k1"), MappedEntity("beta", None, "k2")],
+    )
+
+    assert (entities, service) == (["E"], "S")
+    sdk.folders.retrieve_key_async.assert_not_awaited()
+    sdk.entities.retrieve_by_name_async.assert_awaited_once_with(
+        "beta", folder_key="k2"
+    )
+    call = sdk.entities.resolve_entity_set_async.await_args
+    assert call is not None
+    items = call.args[0]
+    assert [(i.id, i.name, i.folder_key) for i in items] == [
+        ("id-alpha", "alpha", "k1"),
+        ("id-beta", "beta", "k2"),
+    ]
+
+
 async def test_ensure_graph_guarded_when_flag_off(monkeypatch):
     # Defense in depth: even if the tool is somehow constructed, the handler
     # refuses to do any ontology work when the flag is disabled.
@@ -189,6 +222,35 @@ async def test_ensure_graph_happy_path(monkeypatch):
     assert compiled is sentinel
     # cached on second call (no re-work)
     assert await handler._ensure_graph() is sentinel
+
+
+async def test_ensure_graph_yaml_mapping_uses_yarrrml(monkeypatch):
+    resolve = AsyncMock(return_value=([SimpleNamespace(name="claim")], object()))
+    yarrrml = (
+        "mappings:\n"
+        "  Claim:\n"
+        "    sources:\n"
+        "      - {access: datafabric, table: claim, entityId: e1}\n"
+    )
+
+    async def fetch(_es, _name, file_type, _fk):
+        return (yarrrml, "application/yaml") if file_type == "mapping" else ("OWL", "")
+
+    sentinel = _patch_ensure_graph_deps(
+        monkeypatch,
+        fetch=fetch,
+        parse=lambda _txt: pytest.fail("R2RML parser must not see YAML"),
+        resolve=resolve,
+    )
+    handler = DataFabricOntologyQueryHandler(
+        ontologies=[("clinical", "f1")], llm=MagicMock()
+    )
+
+    assert await handler._ensure_graph() is sentinel
+    assert resolve.await_args is not None
+    _, pairs, mapped = resolve.await_args.args
+    assert pairs == []
+    assert mapped == [MappedEntity("claim", "e1", "f1")]
 
 
 async def test_ensure_graph_owl_failure_degrades(monkeypatch):
