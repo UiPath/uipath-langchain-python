@@ -40,6 +40,7 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     guardrail_validation_details: Optional[str] = None
     guardrail_span_id: Optional[str] = None
     guardrail_flagged_file_names: Optional[list[str]] = None
+    guardrail_attachments: Optional[list[dict[str, str]]] = None
     agent_result: Optional[dict[str, Any]] = None
     hitl_task_info: Optional[Any] = {}
     escalation_review_data: Optional[dict[str, Any]] = None

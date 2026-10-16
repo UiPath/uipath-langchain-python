@@ -85,7 +85,7 @@ async def _evaluate_builtin_guardrail(
     text: str,
     attachments: list[GuardrailAttachment] | None = None,
     termination_mode: GuardrailTerminationMode | None = None,
-):
+) -> tuple[GuardrailValidationResult, list[GuardrailAttachment] | None]:
     """Evaluate built-in validator guardrail.
 
     Args:
@@ -96,17 +96,19 @@ async def _evaluate_builtin_guardrail(
             at the first violation.
 
     Returns:
-        The guardrail evaluation result.
+        The guardrail evaluation result and the attachments the verdict was based on
+        (``None`` after a text-only retry).
     """
     uipath = UiPath()
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             uipath.guardrails.evaluate_guardrail,
             text,
             guardrail,
             attachments=attachments,
             termination_mode=termination_mode,
         )
+        return result, attachments
     except EnrichedException as exc:
         # A 400 with attachments means the references were rejected; a file must never
         # fail the run, so evaluate the text alone.
@@ -117,13 +119,14 @@ async def _evaluate_builtin_guardrail(
             "re-evaluating without attachments.",
             guardrail.name,
         )
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             uipath.guardrails.evaluate_guardrail,
             text,
             guardrail,
             attachments=None,
             termination_mode=termination_mode,
         )
+        return result, None
 
 
 def _flagged_file_names(
@@ -151,8 +154,9 @@ def _create_validation_command(
 ) -> Command[Any]:
     """Create command based on validation result.
 
-    ``guardrail_flagged_file_names`` is written on every outcome so that a value from
-    an earlier guardrail never survives the inner-state merge.
+    ``guardrail_flagged_file_names`` and ``guardrail_attachments`` (the files sent, as
+    plain dicts so the checkpoint stays msgpack-safe) are written on every outcome so
+    that a value from an earlier guardrail never survives the inner-state merge.
 
     Args:
         guardrail_result: The guardrail evaluation result.
@@ -168,12 +172,14 @@ def _create_validation_command(
     """
     span_id = getattr(guardrail_result, "span_id", None)
     flagged_file_names = _flagged_file_names(guardrail_result, attachments)
+    sent_attachments = [a.model_dump() for a in attachments] if attachments else None
 
     if guardrail_result.result == GuardrailValidationResultType.PASSED:
         inner_state: dict[str, Any] = {
             "guardrail_validation_result": True,
             "guardrail_validation_details": guardrail_result.reason,
             "guardrail_flagged_file_names": flagged_file_names,
+            "guardrail_attachments": sent_attachments,
         }
         if span_id:
             inner_state["guardrail_span_id"] = span_id
@@ -187,6 +193,7 @@ def _create_validation_command(
             "guardrail_validation_result": False,
             "guardrail_validation_details": guardrail_result.reason,
             "guardrail_flagged_file_names": flagged_file_names,
+            "guardrail_attachments": sent_attachments,
         }
         if span_id:
             inner_state["guardrail_span_id"] = span_id
@@ -314,7 +321,7 @@ def _create_guardrail_node(
                     state, guardrail, attachment_source
                 )
 
-                result = await _evaluate_builtin_guardrail(
+                result, attachments = await _evaluate_builtin_guardrail(
                     guardrail, payload, attachments, termination_mode
                 )
             else:
