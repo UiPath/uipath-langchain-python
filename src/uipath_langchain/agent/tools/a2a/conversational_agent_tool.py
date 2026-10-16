@@ -1,10 +1,10 @@
 """Conversational agent tool — call a UiPath conversational agent over A2A.
 
 A conversational agent is a published Orchestrator release. It is resolved by
-process name in the execution folder, like a process tool, and reached through
-AgentHub's ``a2a/{folderKey}/{releaseId}`` endpoint. Unlike a Remote A2A agent
-(``a2a_tool``) it is not looked up in the Remote A2A registry, and the model
-addresses its conversations by a ``conversation_id`` it passes back.
+process name in the selected folder, falling back to the execution folder, and
+reached through AgentHub's ``a2a/{folderKey}/{releaseId}`` endpoint. Unlike a
+Remote A2A agent (``a2a_tool``), it is not looked up in the Remote A2A registry.
+The model addresses its conversations by a ``conversation_id`` it passes back.
 
 In the ReAct graph the conversations are kept in ``tools_storage``. Where tools
 run without a wrapper (advanced mode) nothing is stored. Client lifecycle is
@@ -94,11 +94,11 @@ async def _resolve_conversational_a2a_url(
 ) -> tuple[str, bool]:
     """Resolve the AgentHub A2A URL of a conversational agent's Orchestrator release.
 
-    As for process tools, the release is looked up by process name in the
-    execution folder (``folder_path``); ``properties.folderPath`` is not used. A
-    solution ``process.<name>`` binding takes precedence: ``resource_override``
-    replaces both the name and the folder. Without a path, ``UIPATH_FOLDER_KEY``
-    supplies the folder key, as for Remote A2A. The URL is
+    The release is looked up by process name in the selected folder, falling
+    back to the execution folder when none is selected. A solution
+    ``process.<name>`` binding takes precedence: ``resource_override`` replaces
+    both the name and the folder. Without a path, ``UIPATH_FOLDER_KEY`` supplies
+    the folder key, as for Remote A2A. The URL is
     ``{agenthub}/a2a/{folderKey}/{releaseId}``. Returns the URL and whether it
     uses a service override, which requires explicit tenant/account headers.
     """
@@ -164,11 +164,13 @@ class ConversationalAgentA2aClient:
         resource_name: str,
         process_name: str | None,
         protocol_version: str,
+        folder_path: str | None = None,
     ) -> None:
         self._agent_card = agent_card
         self._resource_name = resource_name
         self._process_name = process_name
         self._protocol_version = protocol_version
+        self._folder_path = folder_path
         self._lock = asyncio.Lock()
         self._client: Client | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -192,7 +194,9 @@ class ConversationalAgentA2aClient:
                     "has no processName"
                 )
             a2a_url, is_service_override = await _resolve_conversational_a2a_url(
-                sdk, self._process_name, get_execution_folder_path()
+                sdk,
+                self._process_name,
+                self._folder_path or get_execution_folder_path(),
             )
 
             runtime_card = AgentCard()
@@ -678,6 +682,7 @@ def create_conversational_agent_tools_and_clients(
             resource.name,
             resource.properties.process_name,
             protocol_version,
+            folder_path=resource.properties.folder_path,
         )
         tool = _create_conversational_agent_tool(resource, a2a_client, agent_card)
         if (
