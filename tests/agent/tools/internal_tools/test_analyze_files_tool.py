@@ -90,6 +90,11 @@ class MockBlobInfo(BaseModel):
     name: str
 
 
+_TEST_PDF = FileInfo(
+    url="https://example.com/file.pdf", name="test.pdf", mime_type="application/pdf"
+)
+
+
 class TestCreateAnalyzeFileTool:
     """Test cases for create_analyze_file_tool function."""
 
@@ -126,7 +131,9 @@ class TestCreateAnalyzeFileTool:
             properties=properties,
         )
 
-    async def _invoke_with_llm_error(self, resource_config, mock_llm, error):
+    async def _invoke_with_llm_error(
+        self, resource_config, mock_llm, error, file: FileInfo = _TEST_PDF
+    ):
         with (
             patch(
                 "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
@@ -138,13 +145,7 @@ class TestCreateAnalyzeFileTool:
                 "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
             ),
         ):
-            mock_resolve_attachments.return_value = [
-                FileInfo(
-                    url="https://example.com/file.pdf",
-                    name="test.pdf",
-                    mime_type="application/pdf",
-                )
-            ]
+            mock_resolve_attachments.return_value = [file]
             mock_add_files.return_value = HumanMessage(content="Summarize the document")
             mock_llm.ainvoke.side_effect = error
 
@@ -360,6 +361,29 @@ class TestCreateAnalyzeFileTool:
         assert info.category == UiPathErrorCategory.USER
         assert "'test.pdf' (application/pdf)" in info.detail
         assert "Bad Request" not in info.detail
+        # The file already is a PDF: no advice to convert it to one.
+        assert "Convert the file to PDF" not in info.detail
+
+    async def test_provider_400_names_the_type_the_file_was_sent_as(
+        self, resource_config, mock_llm
+    ):
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            400, request=request, json={"error": {"message": "invalid document"}}
+        )
+        error = UiPathAPIError.from_response(response)
+        file = FileInfo(
+            url="https://example.com/b.csv",
+            name="Budget.csv",
+            mime_type="application/vnd.ms-excel",
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error, file)
+
+        detail = exc_info.value.error_info.detail
+        assert "'Budget.csv' (text/csv)" in detail
+        assert "Convert the file to PDF" in detail
 
     async def test_legacy_client_400_names_the_attached_file(
         self, resource_config, mock_llm
