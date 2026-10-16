@@ -8,6 +8,7 @@ a ``UiPathError`` carrying a semantic ``error_code`` (handled by
 upstream handling can categorise without provider-specific logic.
 """
 
+from collections.abc import Sequence
 from typing import NoReturn
 
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
@@ -66,19 +67,135 @@ _NOT_FOUND_SIGNATURES: tuple[tuple[tuple[str, ...], _Verdict], ...] = (
 )
 
 
-def raise_for_llm_client_error(error: UiPathError) -> None:
-    """Raise a structured agent error for known LLM-client error codes."""
+def raise_for_llm_client_error(
+    error: UiPathError, attachments: Sequence[str] = ()
+) -> None:
+    """Raise a structured agent error for known LLM-client error codes.
+
+    Args:
+        error: The LLM-client error.
+        attachments: Descriptions of the files sent with the request (see
+            :func:`describe_attachment`), named in the error when given.
+    """
     if error.error_code == UiPathLLMErrorCode.UNSUPPORTED_MIME_TYPE:
+        subject = (
+            f"one of these attachments: {', '.join(attachments)}"
+            if attachments
+            else "this attachment"
+        )
         raise AgentRuntimeError(
             code=AgentRuntimeErrorCode.FILE_ERROR,
             title="Unsupported file attachment format.",
             detail=(
-                "The model does not support this attachment's file type. "
+                f"The model does not support the file type of {subject}. "
                 "Remove the attachment or convert it to a supported format."
                 + (f" Provider detail: {error.detail}" if error.detail else "")
             ),
             category=UiPathErrorCategory.USER,
         ) from error
+
+
+def describe_attachment(name: str, mime_type: str) -> str:
+    """An attachment as it is named in user-facing errors: ``'a.csv' (text/csv)``."""
+    return f"'{name}' ({mime_type or 'no file type'})"
+
+
+# Lowercased fragments of the providers' "input exceeds the context window" 400s.
+_CONTEXT_LIMIT_MARKERS = (
+    "prompt is too long",
+    "input is too long",
+    "context window",
+    "context length",
+    "maximum context",
+    "too many tokens",
+    # Gemini: "The input token count (N) exceeds the maximum number of tokens
+    # allowed (M)."
+    "maximum number of tokens",
+)
+
+# Lowercased fragments of a content-safety rejection (Azure OpenAI's
+# ``content_filter``), which is about policy rather than the file's format.
+_CONTENT_FILTER_MARKERS = (
+    "content_filter",
+    "content management policy",
+    "responsibleaipolicyviolation",
+)
+
+
+def raise_for_file_analysis_http_error(
+    error: UiPathAPIError, attachments: Sequence[str], *, all_pdf: bool = False
+) -> NoReturn:
+    """Convert a provider rejection of a file-analysis request into an agent error.
+
+    A 400 on a request whose only inputs are a task and the attached files is
+    about those files: either the model cannot read them, or their content does
+    not fit its context window. The error names the files and says which, so
+    the user knows what to change -- unlike the generic bad-request detail,
+    which points at model settings. Any other status, a 400 carrying the
+    gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
+    rejected the call), and a content-filter rejection are mapped as usual by
+    :func:`raise_for_provider_http_error`.
+
+    The provider's own message is matched for the context-window case but never
+    copied into the error: it may carry customer content, and it is already
+    recorded on the LLM call span.
+
+    Args:
+        error: The normalized provider error.
+        attachments: Descriptions of the files sent with the request (see
+            :func:`describe_attachment`).
+        all_pdf: Every attachment was sent as a PDF, so converting to PDF is
+            not the advice to give.
+    """
+    fields = _body_fields(error.body)
+    if (
+        error.status_code != 400
+        or _gateway_detail(error.body)
+        or _has_marker(fields, _CONTENT_FILTER_MARKERS)
+    ):
+        raise_for_provider_http_error(error)
+
+    files = ", ".join(attachments) or "the attached files"
+    if _has_marker(fields, _CONTEXT_LIMIT_MARKERS):
+        title = "The attached files are too large for the model"
+        detail = (
+            f"The content of {files} does not fit in the model's context window. "
+            "Split the file or reduce its content, or use a model with a larger "
+            "context window."
+        )
+    elif all_pdf:
+        title = "The model could not read the attached files"
+        detail = (
+            f"The model provider rejected the request to analyze {files}. The "
+            "PDF may be damaged, password-protected or have more pages than the "
+            "model accepts. Check the file or use a different model, then run "
+            "the agent again."
+        )
+    else:
+        title = "The model could not read the attached files"
+        detail = (
+            f"The model provider rejected the request to analyze {files}. The "
+            "model may not support this file type or its content. Convert the "
+            "file to PDF or use a different model, then run the agent again."
+        )
+
+    raise AgentRuntimeError(
+        code=AgentRuntimeErrorCode.FILE_ERROR,
+        title=title,
+        detail=detail,
+        category=UiPathErrorCategory.USER,
+        status=error.status_code,
+    ) from error
+
+
+def _has_marker(fields: Sequence[str], markers: Sequence[str]) -> bool:
+    return any(marker in field for field in fields for marker in markers)
+
+
+def _gateway_detail(body: object) -> str | None:
+    """The gateway's own ProblemDetails ``detail``, when it has a non-blank one."""
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return (detail.strip() or None) if isinstance(detail, str) else None
 
 
 def _is_license_error(body: object) -> bool:
@@ -203,10 +320,7 @@ def _classify(status_code: int, body: object) -> _Verdict:
     nor this mapping can name are left with it.
     """
     code, category, title, own_detail = _status_verdict(status_code, body)
-    gateway_detail = body.get("detail") if isinstance(body, dict) else None
-    if not isinstance(gateway_detail, str):
-        gateway_detail = None
-    return code, category, title, gateway_detail or own_detail
+    return code, category, title, _gateway_detail(body) or own_detail
 
 
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:

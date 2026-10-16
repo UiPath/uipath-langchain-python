@@ -40,13 +40,17 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeErrorCode,
 )
 from uipath_langchain.agent.exceptions.llm import (
+    describe_attachment,
+    raise_for_file_analysis_http_error,
     raise_for_llm_client_error,
-    raise_for_provider_http_error,
 )
 from uipath_langchain.agent.multimodal import (
     FileInfo,
+    accepts_only_pdf_documents,
     build_file_content_blocks_for,
     file_part_filename,
+    is_pdf,
+    normalize_mime_type,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
@@ -299,6 +303,7 @@ def create_analyze_file_tool(
     # Explicitly disable streaming - for conversational, no streaming is needed as this
     # internal tool-call does not produce streamed conversation events.
     non_streaming_llm = llm.model_copy(update={"disable_streaming": True})
+    pdf_only_documents = accepts_only_pdf_documents(llm)
 
     @mockable(
         name=resource.name,
@@ -363,7 +368,9 @@ def create_analyze_file_tool(
 
         try:
             human_message = HumanMessage(content=analysis_task)
-            human_message_with_files = await add_files_to_message(human_message, files)
+            human_message_with_files = await add_files_to_message(
+                human_message, files, pdf_only_documents=pdf_only_documents
+            )
         except ValueError as exc:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.FILE_ERROR,
@@ -379,19 +386,28 @@ def create_analyze_file_tool(
         config = var_child_runnable_config.get(None)
         config = config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
+        # Described by the type the file is sent as, not the one it was declared as.
+        sent_types = [normalize_mime_type(f.mime_type, f.name) for f in files]
+        attachment_names = [
+            describe_attachment(f.name, mime_type)
+            for f, mime_type in zip(files, sent_types, strict=True)
+        ]
+        all_pdf = bool(files) and all(is_pdf(mime_type) for mime_type in sent_types)
         try:
             with llm_call_attachment_ids(_llm_call_attachment_ids(files)):
                 result = await non_streaming_llm.ainvoke(messages, config=config)
         except UiPathAPIError as exc:
-            raise_for_provider_http_error(exc)
+            raise_for_file_analysis_http_error(exc, attachment_names, all_pdf=all_pdf)
         except UiPathError as exc:
-            raise_for_llm_client_error(exc)
+            raise_for_llm_client_error(exc, attachment_names)
             raise
         except Exception as exc:
             # legacy clients surface raw provider SDK exceptions.
             uipath_error = as_uipath_error(exc)
             if isinstance(uipath_error, UiPathAPIError):
-                raise_for_provider_http_error(uipath_error)
+                raise_for_file_analysis_http_error(
+                    uipath_error, attachment_names, all_pdf=all_pdf
+                )
             raise
 
         del messages, human_message_with_files, files
@@ -524,12 +540,17 @@ async def _resolve_job_attachment_arguments(
 async def add_files_to_message(
     message: BaseMessage,
     files: list[FileInfo],
+    *,
+    pdf_only_documents: bool = False,
 ) -> BaseMessage:
     """Add file attachments to a message.
 
     Args:
         message: The message to add files to (any BaseMessage subclass)
         files: List of file attachments to add
+        pdf_only_documents: The model accepts base64 documents only as PDF, so
+            other files are sent as text documents (see
+            :func:`build_file_content_blocks_for`).
 
     Returns:
         New message of the same type with file content blocks appended
@@ -549,7 +570,9 @@ async def add_files_to_message(
             if file.masked_attachment_url
             else file
         )
-        blocks = await build_file_content_blocks_for(llm_file)
+        blocks = await build_file_content_blocks_for(
+            llm_file, pdf_only_documents=pdf_only_documents
+        )
         file_content_blocks.extend(blocks)
     return append_content_blocks_to_message(
         message, cast(list[ContentBlock], file_content_blocks)
