@@ -55,7 +55,7 @@ async def build_file_content_blocks_for(
     ``application/vnd.ms-excel`` by a Windows uploader is sent as ``text/csv``
     instead of being parsed by the provider as a corrupt binary workbook. A
     file declared ``application/octet-stream`` (or with no type) whose bytes
-    are a PDF is sent as ``application/pdf``.
+    are a PDF is sent as ``application/pdf``, whatever its extension.
     Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
@@ -97,12 +97,14 @@ async def build_file_content_blocks_for(
     except ValueError as exc:
         raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
-    if is_unlabeled_pdf(mime_type, base64_file):
+    # The declared type, not the extension's: a converted PDF can keep its
+    # source name (``Budget.docx``), which normalization would trust.
+    if is_unlabeled_pdf(file_info.mime_type, base64_file):
         logger.info(
             "Attachment '%s' was declared as %r; sending it as 'application/pdf' "
             "based on its content",
             file_info.name,
-            mime_type,
+            file_info.mime_type,
         )
         mime_type = "application/pdf"
 

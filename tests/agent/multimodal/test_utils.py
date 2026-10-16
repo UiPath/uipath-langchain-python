@@ -767,6 +767,37 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
         assert blocks[0]["type"] == "file"
         assert blocks[0]["mime_type"] == "application/pdf"
 
+    @pytest.mark.parametrize("name", ["Budget.docx", "Budget.xlsx", "report.txt"])
+    @pytest.mark.parametrize("pdf_only_documents", [True, False])
+    async def test_unlabeled_pdf_with_another_extension_is_sent_as_pdf(
+        self, name: str, pdf_only_documents: bool
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x", name=name, mime_type="application/octet-stream"
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"%PDF-1.4\n%binary")):
+            blocks = await build_file_content_blocks_for(
+                file, pdf_only_documents=pdf_only_documents
+            )
+
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "application/pdf"
+
+    async def test_unlabeled_file_keeps_its_extension_type_when_not_a_pdf(
+        self,
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="Budget.docx",
+            mime_type="application/octet-stream",
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"PK\x03\x04docx")):
+            blocks = await build_file_content_blocks_for(file)
+
+        assert blocks[0]["mime_type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
     async def test_text_document_reaches_anthropic_unchanged(self) -> None:
         from langchain_anthropic.chat_models import _format_messages
 

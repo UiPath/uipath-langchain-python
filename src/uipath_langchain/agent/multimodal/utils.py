@@ -132,9 +132,10 @@ def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
     """True when a file declared with no useful type is a PDF by its content.
 
     Connectors that cannot name a type label files ``application/octet-stream``
-    (or nothing at all) and often drop the extension too, so neither
-    :func:`normalize_mime_type` nor the provider can tell it is a PDF. Only the
-    leading signature bytes are decoded.
+    (or nothing at all) and often drop the extension or keep the source file's
+    one, so neither :func:`normalize_mime_type` nor the provider can tell it is
+    a PDF. Pass the declared type, not the normalized one. Only the leading
+    signature bytes are decoded.
     """
     if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
         return False
