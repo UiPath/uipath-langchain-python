@@ -20,6 +20,7 @@ from uipath_langchain.agent.exceptions.llm import (
     describe_attachment,
     raise_for_file_analysis_http_error,
     raise_for_llm_client_error,
+    raise_for_provider_http_error,
 )
 
 _ANTHROPIC_MEDIA_TYPE_400: dict[str, object] = {
@@ -42,9 +43,9 @@ def _api_error(status_code: int, body: dict[str, object]) -> UiPathAPIError:
     return UiPathAPIError.from_response(response)
 
 
-def _raised(error: UiPathAPIError) -> AgentRuntimeError:
+def _raised(error: UiPathAPIError, *, all_pdf: bool = False) -> AgentRuntimeError:
     with pytest.raises(AgentRuntimeError) as exc_info:
-        raise_for_file_analysis_http_error(error, _FILES)
+        raise_for_file_analysis_http_error(error, _FILES, all_pdf=all_pdf)
     return exc_info.value
 
 
@@ -132,4 +133,48 @@ def test_unsupported_mime_type_without_attachments_keeps_the_old_wording() -> No
 
     assert exc_info.value.error_info.detail.startswith(
         "The model does not support the file type of this attachment."
+    )
+
+
+def test_rejected_pdfs_are_not_told_to_convert_to_pdf() -> None:
+    body: dict[str, object] = {
+        "error": {"message": "A maximum of 100 PDF pages may be provided."}
+    }
+    raised = _raised(_api_error(400, body), all_pdf=True)
+
+    info = raised.error_info
+    assert info.title == "The model could not read the attached files"
+    assert "Convert the file to PDF" not in info.detail
+    assert "password-protected" in info.detail
+
+
+def test_content_filter_rejection_uses_the_generic_mapping() -> None:
+    """Azure OpenAI's content filter is about policy, not the file's format."""
+    body: dict[str, object] = {
+        "error": {
+            "code": "content_filter",
+            "message": "The response was filtered due to the prompt triggering "
+            "Azure OpenAI's content management policy.",
+        }
+    }
+    raised = _raised(_api_error(400, body))
+
+    assert raised.error_info.code.endswith(
+        AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value
+    )
+
+
+@pytest.mark.parametrize("detail", ["", "   "])
+def test_blank_gateway_detail_is_no_gateway_rejection(detail: str) -> None:
+    raised = _raised(_api_error(400, {"status": 400, "detail": detail}))
+
+    assert raised.error_info.title == "The model could not read the attached files"
+
+
+def test_generic_mapping_ignores_a_blank_gateway_detail() -> None:
+    with pytest.raises(AgentRuntimeError) as exc_info:
+        raise_for_provider_http_error(_api_error(400, {"detail": "   "}))
+
+    assert exc_info.value.error_info.detail.startswith(
+        "The model provider rejected the request as invalid."
     )

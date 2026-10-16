@@ -49,6 +49,8 @@ from uipath_langchain.agent.multimodal import (
     accepts_only_pdf_documents,
     build_file_content_blocks_for,
     file_part_filename,
+    is_pdf,
+    normalize_mime_type,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
@@ -384,12 +386,18 @@ def create_analyze_file_tool(
         config = var_child_runnable_config.get(None)
         config = config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
-        attachment_names = [describe_attachment(f.name, f.mime_type) for f in files]
+        # Described by the type the file is sent as, not the one it was declared as.
+        sent_types = [normalize_mime_type(f.mime_type, f.name) for f in files]
+        attachment_names = [
+            describe_attachment(f.name, mime_type)
+            for f, mime_type in zip(files, sent_types, strict=True)
+        ]
+        all_pdf = bool(files) and all(is_pdf(mime_type) for mime_type in sent_types)
         try:
             with llm_call_attachment_ids(_llm_call_attachment_ids(files)):
                 result = await non_streaming_llm.ainvoke(messages, config=config)
         except UiPathAPIError as exc:
-            raise_for_file_analysis_http_error(exc, attachment_names)
+            raise_for_file_analysis_http_error(exc, attachment_names, all_pdf=all_pdf)
         except UiPathError as exc:
             raise_for_llm_client_error(exc, attachment_names)
             raise
@@ -397,7 +405,9 @@ def create_analyze_file_tool(
             # legacy clients surface raw provider SDK exceptions.
             uipath_error = as_uipath_error(exc)
             if isinstance(uipath_error, UiPathAPIError):
-                raise_for_file_analysis_http_error(uipath_error, attachment_names)
+                raise_for_file_analysis_http_error(
+                    uipath_error, attachment_names, all_pdf=all_pdf
+                )
             raise
 
         del messages, human_message_with_files, files

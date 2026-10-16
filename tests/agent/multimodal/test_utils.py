@@ -21,6 +21,7 @@ from uipath_langchain.agent.multimodal.utils import (
     decode_text,
     download_file_base64,
     encode_streamed_base64,
+    is_text,
     is_unlabeled_pdf,
     normalize_mime_type,
 )
@@ -601,9 +602,50 @@ class TestDecodeText:
         data = "Gr\u00f6\u00dfe;99,90 \u20ac\n".encode("cp1252")
         assert decode_text(_b64(data)) == "Gr\u00f6\u00dfe;99,90 \u20ac\n"
 
-    def test_bytes_that_are_no_text(self) -> None:
+    @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+    def test_utf16_and_utf32_with_a_bom(self, encoding: str) -> None:
+        # Python writes the byte-order mark for these codecs.
+        assert decode_text(_b64("a,€\n".encode(encoding))) == "a,€\n"
+
+    def test_utf16_without_a_bom_is_not_text(self) -> None:
+        assert decode_text(_b64("a,b\n".encode("utf-16-le"))) is None
+
+    def test_binary_is_not_text(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+        assert decode_text(_b64(png)) is None
+
+    def test_bytes_no_encoding_accepts(self) -> None:
         # 0x81 is undefined in Windows-1252 and invalid as a UTF-8 start byte.
         assert decode_text(_b64(b"\x81\x81")) is None
+
+
+class TestIsText:
+    @pytest.mark.parametrize(
+        "mime_type",
+        [
+            "text/csv",
+            "text/plain; charset=utf-8",
+            "application/csv",
+            "application/json",
+            "application/xml",
+            "application/ld+json",
+            "application/atom+xml",
+        ],
+    )
+    def test_text_formats(self, mime_type: str) -> None:
+        assert is_text(mime_type)
+
+    @pytest.mark.parametrize(
+        "mime_type",
+        [
+            "application/pdf",
+            "application/octet-stream",
+            "",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ],
+    )
+    def test_other_formats(self, mime_type: str) -> None:
+        assert not is_text(mime_type)
 
 
 _DOWNLOAD = "uipath_langchain.agent.multimodal.invoke.download_file_base64"
@@ -622,6 +664,24 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
             blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
 
         assert blocks == [_CSV_DOCUMENT]
+
+    async def test_csv_labelled_application_csv_becomes_a_text_document(
+        self,
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x", name="Budget.csv", mime_type="application/csv"
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"a,b\n")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks == [_CSV_DOCUMENT]
+
+    async def test_binary_labelled_as_text_is_left_to_the_model(self) -> None:
+        file = FileInfo(url="https://blob/x", name="notes", mime_type="text/plain")
+        with patch(_DOWNLOAD, return_value=_b64(b"\x89PNG\r\n\x1a\n\x00\x00")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks[0]["type"] == "file"
 
     async def test_default_still_sends_csv_as_file_block(self) -> None:
         file = FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
