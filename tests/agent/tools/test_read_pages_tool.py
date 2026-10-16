@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from uipath.agent.models.agent import (
     AgentContextQuerySetting,
     AgentContextResourceConfig,
@@ -23,9 +23,12 @@ from uipath.platform.errors import (
 )
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.read_pages_tool import (
+    MAX_PAGES_PER_TURN,
     ReadPagesInput,
     create_read_pages_tool,
+    pages_read_this_turn,
     read_pages_tool_name,
 )
 
@@ -200,7 +203,11 @@ class TestReadPagesToolCall:
             {"source_document_id": DOC_ID, "start_page": 1, "end_page": 3}
         )
 
-        assert output == "File not found."
+        assert output == (
+            f"No document with id '{DOC_ID}' is in this index. Use the "
+            "source_document_id of a search result from this context; if no result "
+            "is from the document you need, search for it first."
+        )
 
     @pytest.mark.asyncio
     async def test_endpoint_unavailable_is_returned_to_the_llm(self, sdk):
@@ -238,3 +245,76 @@ class TestReadPagesToolCall:
         assert tool.coroutine is not None
         with pytest.raises(EnrichedException):
             await tool.coroutine(source_document_id=DOC_ID, start_page=1, end_page=3)
+
+
+def _read_call(
+    call_id: str, start: int, end: int, name: str = "Annual_report_read_pages"
+):
+    return {
+        "name": name,
+        "args": {"source_document_id": DOC_ID, "start_page": start, "end_page": end},
+        "id": call_id,
+        "type": "tool_call",
+    }
+
+
+def _turn(*reads: tuple[str, int, int, str]) -> list[Any]:
+    """A user message followed by page reads, each (call id, start, end, status)."""
+    messages: list[Any] = [HumanMessage(content="question")]
+    for call_id, start, end, status in reads:
+        messages.append(
+            AIMessage(content="", tool_calls=[_read_call(call_id, start, end)])
+        )
+        messages.append(
+            ToolMessage(content="pages", tool_call_id=call_id, status=status)
+        )
+    return messages
+
+
+class TestPageBudget:
+    def test_counts_successful_reads_since_the_last_user_message(self):
+        earlier_turn = _turn(("old", 1, 20, "success"))
+        messages = earlier_turn + _turn(
+            ("a", 1, 3, "success"), ("b", 10, 19, "error"), ("c", 40, 44, "success")
+        )
+
+        assert pages_read_this_turn(messages, "Annual_report_read_pages") == 8
+
+    def test_ignores_other_tools(self):
+        messages = _turn(("a", 1, 3, "success"))
+        messages[1] = AIMessage(
+            content="", tool_calls=[_read_call("a", 1, 3, name="other_tool")]
+        )
+
+        assert pages_read_this_turn(messages, "Annual_report_read_pages") == 0
+
+    @pytest.mark.asyncio
+    async def test_a_read_past_the_budget_is_refused(self, sdk):
+        tool = create_read_pages_tool(_resource())
+        state = AgentGraphState(
+            messages=_turn(("a", 1, MAX_PAGES_PER_TURN - 2, "success"))
+        )
+
+        output = await tool.awrapper(  # type: ignore[attr-defined]
+            tool, _read_call("next", 30, 32), state
+        )
+
+        assert isinstance(output, ToolMessage)
+        assert output.status == "error"
+        assert "Only 2 more pages can be read" in str(output.content)
+        sdk.context_grounding.read_pages_async.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_read_within_the_budget_is_made(self, sdk):
+        tool = create_read_pages_tool(_resource())
+        state = AgentGraphState(
+            messages=_turn(("a", 1, MAX_PAGES_PER_TURN - 2, "success"))
+        )
+
+        output = await tool.awrapper(  # type: ignore[attr-defined]
+            tool, _read_call("next", 30, 31), state
+        )
+
+        assert isinstance(output, ToolMessage)
+        assert output.status == "success"
+        sdk.context_grounding.read_pages_async.assert_awaited_once()
