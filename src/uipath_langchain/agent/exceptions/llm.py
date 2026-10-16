@@ -150,9 +150,17 @@ _CONTEXT_LIMIT_MARKERS = (
     "maximum number of tokens",
 )
 
+# Lowercased fragments of a content-safety rejection (Azure OpenAI's
+# ``content_filter``), which is about policy rather than the file's format.
+_CONTENT_FILTER_MARKERS = (
+    "content_filter",
+    "content management policy",
+    "responsibleaipolicyviolation",
+)
+
 
 def raise_for_file_analysis_http_error(
-    error: UiPathAPIError, attachments: Sequence[str]
+    error: UiPathAPIError, attachments: Sequence[str], *, all_pdf: bool = False
 ) -> NoReturn:
     """Convert a provider rejection of a file-analysis request into an agent error.
 
@@ -160,9 +168,9 @@ def raise_for_file_analysis_http_error(
     about those files: either the model cannot read them, or their content does
     not fit its context window. The error names the files and says which, so
     the user knows what to change -- unlike the generic bad-request detail,
-    which points at model settings. Any other status, and a 400 carrying the
+    which points at model settings. Any other status, a 400 carrying the
     gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
-    rejected the call), is mapped as usual by
+    rejected the call), and a content-filter rejection are mapped as usual by
     :func:`raise_for_provider_http_error`.
 
     The provider's own message is matched for the context-window case but never
@@ -173,21 +181,32 @@ def raise_for_file_analysis_http_error(
         error: The normalized provider error.
         attachments: Descriptions of the files sent with the request (see
             :func:`describe_attachment`).
+        all_pdf: Every attachment was sent as a PDF, so converting to PDF is
+            not the advice to give.
     """
-    gateway_detail = error.body.get("detail") if isinstance(error.body, dict) else None
-    if error.status_code != 400 or (
-        isinstance(gateway_detail, str) and gateway_detail.strip()
+    fields = _body_fields(error.body)
+    if (
+        error.status_code != 400
+        or _gateway_detail(error.body)
+        or _has_marker(fields, _CONTENT_FILTER_MARKERS)
     ):
         raise_for_provider_http_error(error)
 
     files = ", ".join(attachments) or "the attached files"
-    fields = _body_fields(error.body)
-    if any(marker in field for field in fields for marker in _CONTEXT_LIMIT_MARKERS):
+    if _has_marker(fields, _CONTEXT_LIMIT_MARKERS):
         title = "The attached files are too large for the model"
         detail = (
             f"The content of {files} does not fit in the model's context window. "
             "Split the file or reduce its content, or use a model with a larger "
             "context window."
+        )
+    elif all_pdf:
+        title = "The model could not read the attached files"
+        detail = (
+            f"The model provider rejected the request to analyze {files}. The "
+            "PDF may be damaged, password-protected or have more pages than the "
+            "model accepts. Check the file or use a different model, then run "
+            "the agent again."
         )
     else:
         title = "The model could not read the attached files"
@@ -204,6 +223,16 @@ def raise_for_file_analysis_http_error(
         category=UiPathErrorCategory.USER,
         status=error.status_code,
     ) from error
+
+
+def _has_marker(fields: Sequence[str], markers: Sequence[str]) -> bool:
+    return any(marker in field for field in fields for marker in markers)
+
+
+def _gateway_detail(body: object) -> str | None:
+    """The gateway's own ProblemDetails ``detail``, when it has a non-blank one."""
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return (detail.strip() or None) if isinstance(detail, str) else None
 
 
 def _is_license_error(body: object) -> bool:
@@ -342,10 +371,7 @@ def _classify(status_code: int, body: object) -> _Verdict:
     nor this mapping can name are left with it.
     """
     code, category, title, own_detail = _status_verdict(status_code, body)
-    gateway_detail = body.get("detail") if isinstance(body, dict) else None
-    if not isinstance(gateway_detail, str):
-        gateway_detail = None
-    return code, category, title, gateway_detail or own_detail
+    return code, category, title, _gateway_detail(body) or own_detail
 
 
 def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:

@@ -1,6 +1,7 @@
 """Utility functions for multimodal file handling."""
 
 import base64
+import codecs
 import io
 import re
 from collections.abc import AsyncIterator
@@ -169,23 +170,51 @@ def accepts_only_pdf_documents(model: Any) -> bool:
     )
 
 
+# Text formats outside ``text/*`` that a file extension normalizes to.
+_TEXT_APPLICATION_MIME_TYPES = frozenset(
+    {"application/csv", "application/json", "application/xml"}
+)
+
+
 def is_text(mime_type: str) -> bool:
-    """Check if the MIME type represents a text file, such as CSV."""
-    return base_mime_type(mime_type).startswith("text/")
+    """Check if the MIME type represents a text file, such as CSV or JSON."""
+    base_type = base_mime_type(mime_type)
+    return (
+        base_type.startswith("text/")
+        or base_type in _TEXT_APPLICATION_MIME_TYPES
+        or base_type.endswith(("+json", "+xml"))
+    )
+
+
+# Checked longest first: the UTF-32-LE mark begins with the UTF-16-LE one.
+_UNICODE_BOMS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
 
 
 def decode_text(base64_data: str) -> str | None:
     """Decode a base64 text file, or return ``None`` when it is not text.
 
-    UTF-8 (with or without a BOM) is tried first, then Windows-1252, the
-    encoding Excel on Windows uses for "CSV" exports.
+    A UTF-32 or UTF-16 byte-order mark decides the encoding; otherwise UTF-8
+    (with or without a BOM) is tried, then Windows-1252, the encoding Excel on
+    Windows uses for "CSV" exports. Windows-1252 decodes almost any bytes, so
+    a NUL character -- never in text, always in binary and BOM-less UTF-16 --
+    marks the file as not text.
     """
     data = base64.b64decode(base64_data)
-    for encoding in ("utf-8-sig", "cp1252"):
+    encodings = next(
+        ((encoding,) for bom, encoding in _UNICODE_BOMS if data.startswith(bom)),
+        ("utf-8-sig", "cp1252"),
+    )
+    for encoding in encodings:
         try:
-            return data.decode(encoding)
+            text = data.decode(encoding)
         except UnicodeDecodeError:
             continue
+        return None if "\x00" in text else text
     return None
 
 
