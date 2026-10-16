@@ -5,6 +5,7 @@ import io
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 from langchain_core.messages import DataContentBlock
@@ -70,6 +71,18 @@ _EXTENSION_MIME_TYPES: dict[str, tuple[str, ...]] = {
 }
 
 
+# Declared types that say nothing about the content, so the bytes decide.
+_UNLABELED_MIME_TYPES: frozenset[str] = frozenset({"", "application/octet-stream"})
+
+
+def base_mime_type(mime_type: str) -> str:
+    """The MIME type without its parameters, lowercased.
+
+    ``application/pdf; name="inv.pdf"`` is ``application/pdf``.
+    """
+    return (mime_type or "").split(";", 1)[0].strip().lower()
+
+
 def _file_extension(filename: str) -> str:
     """Return the lower-cased extension of ``filename`` without the dot, or ``""``."""
     name = (filename or "").strip()
@@ -101,25 +114,89 @@ def normalize_mime_type(mime_type: str, filename: str) -> str:
     accepted = _EXTENSION_MIME_TYPES.get(_file_extension(filename))
     if not accepted:
         return declared
-    base_type = declared.split(";", 1)[0].strip().lower()
-    if base_type in accepted:
+    if base_mime_type(declared) in accepted:
         return declared
     return accepted[0]
 
 
 def is_pdf(mime_type: str) -> bool:
     """Check if the MIME type represents a PDF document."""
-    return mime_type.lower() == "application/pdf"
+    return base_mime_type(mime_type) == "application/pdf"
+
+
+_PDF_SIGNATURE = b"%PDF-"
+
+
+def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
+    """True when a file declared with no useful type is a PDF by its content.
+
+    Connectors that cannot name a type label files ``application/octet-stream``
+    (or nothing at all) and often drop the extension too, so neither
+    :func:`normalize_mime_type` nor the provider can tell it is a PDF. Only the
+    leading signature bytes are decoded.
+    """
+    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
+        return False
+    try:
+        head = base64.b64decode(base64_data[:8])
+    except ValueError:
+        return False
+    return head.startswith(_PDF_SIGNATURE)
+
+
+# Chat model classes that format messages for the Anthropic Messages API, which
+# accepts a base64 ``document`` only as ``application/pdf``. Matched by name
+# along the MRO so the optional provider packages are never imported here.
+_ANTHROPIC_MESSAGES_MODEL_CLASSES = frozenset(
+    {
+        "langchain_anthropic.chat_models.ChatAnthropic",
+        "langchain_google_vertexai.model_garden.ChatAnthropicVertex",
+    }
+)
+
+
+def accepts_only_pdf_documents(model: Any) -> bool:
+    """True when ``model`` takes base64 documents only as PDF.
+
+    That is Claude reached through the Anthropic Messages API: directly, over
+    Bedrock (``ChatAnthropicBedrock`` is a ``ChatAnthropic``), or through Vertex
+    AI. Claude over the Bedrock Converse API is not included: Converse reads
+    CSV and other document formats natively.
+    """
+    return any(
+        f"{cls.__module__}.{cls.__qualname__}" in _ANTHROPIC_MESSAGES_MODEL_CLASSES
+        for cls in type(model).__mro__
+    )
+
+
+def is_text(mime_type: str) -> bool:
+    """Check if the MIME type represents a text file, such as CSV."""
+    return base_mime_type(mime_type).startswith("text/")
+
+
+def decode_text(base64_data: str) -> str | None:
+    """Decode a base64 text file, or return ``None`` when it is not text.
+
+    UTF-8 (with or without a BOM) is tried first, then Windows-1252, the
+    encoding Excel on Windows uses for "CSV" exports.
+    """
+    data = base64.b64decode(base64_data)
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
 
 
 def is_image(mime_type: str) -> bool:
     """Check if the MIME type represents a supported image format."""
-    return mime_type.lower() in IMAGE_MIME_TYPES
+    return base_mime_type(mime_type) in IMAGE_MIME_TYPES
 
 
 def is_tiff(mime_type: str) -> bool:
     """Check if the MIME type represents a TIFF image."""
-    return mime_type.lower() in TIFF_MIME_TYPES
+    return base_mime_type(mime_type) in TIFF_MIME_TYPES
 
 
 def _format_mb(size_bytes: int, decimals: int = 1) -> str:
