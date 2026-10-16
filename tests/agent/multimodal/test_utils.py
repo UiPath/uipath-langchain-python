@@ -2,9 +2,12 @@
 
 import base64
 import io
+from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
+from langchain_core.messages import HumanMessage
 from PIL import Image
 from pytest_httpx import HTTPXMock
 
@@ -14,8 +17,11 @@ from uipath_langchain.agent.multimodal.invoke import (
 )
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
+    accepts_only_pdf_documents,
+    decode_text,
     download_file_base64,
     encode_streamed_base64,
+    is_unlabeled_pdf,
     normalize_mime_type,
 )
 
@@ -504,3 +510,224 @@ def test_file_part_filename_matches_what_is_sent(
     name: str, mime_type: str, expected: str | None
 ) -> None:
     assert file_part_filename(name, mime_type) == expected
+
+
+class TestAcceptsOnlyPdfDocuments:
+    """Built from the real provider classes, so a renamed or moved class fails here.
+
+    None of the constructors below calls out or needs cloud credentials.
+    """
+
+    def test_chat_anthropic_subclass(self) -> None:
+        from langchain_anthropic import ChatAnthropic
+
+        class UiPathChatAnthropic(ChatAnthropic):
+            pass
+
+        model = UiPathChatAnthropic(model_name="claude-sonnet-4-6", api_key="k")  # type: ignore[call-arg]
+        assert accepts_only_pdf_documents(model)
+
+    def test_anthropic_on_vertex(self) -> None:
+        from langchain_google_vertexai.model_garden import ChatAnthropicVertex
+
+        class UiPathChatAnthropicVertex(ChatAnthropicVertex):
+            pass
+
+        model = UiPathChatAnthropicVertex(
+            model_name="claude-sonnet-4-6", project="p", location="us-east5"
+        )
+        assert accepts_only_pdf_documents(model)
+
+    def test_anthropic_on_bedrock(self) -> None:
+        from langchain_aws.chat_models.anthropic import ChatAnthropicBedrock
+
+        class UiPathChatAnthropicBedrock(ChatAnthropicBedrock):
+            pass
+
+        model = UiPathChatAnthropicBedrock(
+            model="anthropic.claude-sonnet-4-5-20250929-v1:0", region_name="us-east-1"
+        )
+        assert accepts_only_pdf_documents(model)
+
+    def test_bedrock_converse_accepts_other_documents(self) -> None:
+        from langchain_aws import ChatBedrockConverse
+
+        model = ChatBedrockConverse(
+            model_id="anthropic.claude-sonnet-4-5-20250929-v1:0",
+            region_name="us-east-1",
+        )
+        assert not accepts_only_pdf_documents(model)
+
+    def test_other_models(self) -> None:
+        from langchain_openai import ChatOpenAI
+
+        assert not accepts_only_pdf_documents(ChatOpenAI(model="gpt-5.4", api_key="k"))
+        assert not accepts_only_pdf_documents(object())
+
+
+class TestIsUnlabeledPdf:
+    @pytest.mark.parametrize(
+        "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
+    )
+    def test_pdf_bytes_with_a_useless_type(self, mime_type: str) -> None:
+        data = base64.b64encode(b"%PDF-1.7\n...").decode()
+        assert is_unlabeled_pdf(mime_type, data)
+
+    def test_declared_type_is_trusted(self) -> None:
+        data = base64.b64encode(b"%PDF-1.7\n...").decode()
+        assert not is_unlabeled_pdf("text/csv", data)
+
+    def test_other_bytes(self) -> None:
+        data = base64.b64encode(b"PK\x03\x04zip").decode()
+        assert not is_unlabeled_pdf("application/octet-stream", data)
+
+    def test_short_or_invalid_data(self) -> None:
+        assert not is_unlabeled_pdf("application/octet-stream", "")
+        assert not is_unlabeled_pdf("application/octet-stream", "!!!")
+
+
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+
+
+class TestDecodeText:
+    def test_utf8(self) -> None:
+        assert decode_text(_b64("a,€\n".encode())) == "a,€\n"
+
+    def test_utf8_bom_is_stripped(self) -> None:
+        assert decode_text(_b64(b"\xef\xbb\xbfa,b\n")) == "a,b\n"
+
+    def test_windows_1252_csv(self) -> None:
+        data = "Gr\u00f6\u00dfe;99,90 \u20ac\n".encode("cp1252")
+        assert decode_text(_b64(data)) == "Gr\u00f6\u00dfe;99,90 \u20ac\n"
+
+    def test_bytes_that_are_no_text(self) -> None:
+        # 0x81 is undefined in Windows-1252 and invalid as a UTF-8 start byte.
+        assert decode_text(_b64(b"\x81\x81")) is None
+
+
+_DOWNLOAD = "uipath_langchain.agent.multimodal.invoke.download_file_base64"
+
+_CSV_DOCUMENT = {
+    "type": "document",
+    "source": {"type": "text", "media_type": "text/plain", "data": "a,b\n"},
+    "title": "Budget.csv",
+}
+
+
+class TestBuildFileContentBlocksForPdfOnlyModels:
+    async def test_csv_becomes_a_text_document(self) -> None:
+        file = FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
+        with patch(_DOWNLOAD, return_value=_b64(b"a,b\n")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks == [_CSV_DOCUMENT]
+
+    async def test_default_still_sends_csv_as_file_block(self) -> None:
+        file = FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
+        with patch(_DOWNLOAD, return_value=_b64(b"a,b\n")):
+            blocks = await build_file_content_blocks_for(file)
+
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "text/csv"
+
+    async def test_undecodable_text_is_left_to_the_model(self) -> None:
+        file = FileInfo(url="https://blob/x", name="a.csv", mime_type="text/csv")
+        with patch(_DOWNLOAD, return_value=_b64(b"\x81\x81")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks[0]["type"] == "file"
+
+    async def test_other_formats_are_left_to_the_model(self) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="a.xlsx",
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"PK\x03\x04")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks[0]["type"] == "file"
+
+    async def test_pdf_and_images_are_unchanged(self) -> None:
+        pdf = FileInfo(url="https://blob/p", name="a.pdf", mime_type="application/pdf")
+        png = FileInfo(url="https://blob/i", name="a.png", mime_type="image/png")
+        with patch(_DOWNLOAD, return_value=_b64(b"%PDF-1.7 ...")):
+            pdf_blocks = await build_file_content_blocks_for(
+                pdf, pdf_only_documents=True
+            )
+        with patch(_DOWNLOAD, return_value=_b64(b"\x89PNG")):
+            png_blocks = await build_file_content_blocks_for(
+                png, pdf_only_documents=True
+            )
+
+        assert pdf_blocks[0]["type"] == "file"
+        assert pdf_blocks[0]["mime_type"] == "application/pdf"
+        assert png_blocks[0]["type"] == "image"
+
+    @pytest.mark.parametrize("pdf_only_documents", [True, False])
+    async def test_pdf_with_mime_parameters_is_sent_as_pdf(
+        self, pdf_only_documents: bool
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="inv.pdf",
+            mime_type='application/pdf; name="inv.pdf"',
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"%PDF-1.7 ...")):
+            blocks = await build_file_content_blocks_for(
+                file, pdf_only_documents=pdf_only_documents
+            )
+
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "application/pdf"
+
+    async def test_image_with_mime_parameters_is_sent_as_image(self) -> None:
+        file = FileInfo(
+            url="https://blob/i", name="a.png", mime_type="image/png; charset=binary"
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"\x89PNG")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks[0]["type"] == "image"
+        assert blocks[0]["mime_type"] == "image/png"
+
+    @pytest.mark.parametrize("pdf_only_documents", [True, False])
+    async def test_unlabeled_pdf_is_sent_as_pdf(self, pdf_only_documents: bool) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="DownloadRedirectURL",
+            mime_type="application/octet-stream",
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"%PDF-1.4\n%binary")):
+            blocks = await build_file_content_blocks_for(
+                file, pdf_only_documents=pdf_only_documents
+            )
+
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "application/pdf"
+
+    async def test_text_document_reaches_anthropic_unchanged(self) -> None:
+        from langchain_anthropic.chat_models import _format_messages
+
+        _, formatted = _format_messages([await self._csv_message()])
+
+        assert formatted[0]["content"][1] == _CSV_DOCUMENT
+
+    async def test_text_document_reaches_vertex_anthropic_unchanged(self) -> None:
+        from langchain_google_vertexai._anthropic_utils import (
+            _format_messages_anthropic,
+        )
+
+        _, formatted = _format_messages_anthropic(
+            [await self._csv_message()], project="p"
+        )
+
+        assert _CSV_DOCUMENT in formatted[0]["content"]
+
+    async def _csv_message(self) -> HumanMessage:
+        file = FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
+        with patch(_DOWNLOAD, return_value=_b64(b"a,b\n")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+        content: list[Any] = [{"type": "text", "text": "Sum it"}, *blocks]
+        return HumanMessage(content=content)

@@ -9,6 +9,7 @@ upstream handling can categorise without provider-specific logic.
 """
 
 import re
+from collections.abc import Sequence
 from typing import NoReturn
 
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
@@ -103,19 +104,106 @@ _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
 )
 
 
-def raise_for_llm_client_error(error: UiPathError) -> None:
-    """Raise a structured agent error for known LLM-client error codes."""
+def raise_for_llm_client_error(
+    error: UiPathError, attachments: Sequence[str] = ()
+) -> None:
+    """Raise a structured agent error for known LLM-client error codes.
+
+    Args:
+        error: The LLM-client error.
+        attachments: Descriptions of the files sent with the request (see
+            :func:`describe_attachment`), named in the error when given.
+    """
     if error.error_code == UiPathLLMErrorCode.UNSUPPORTED_MIME_TYPE:
+        subject = (
+            f"one of these attachments: {', '.join(attachments)}"
+            if attachments
+            else "this attachment"
+        )
         raise AgentRuntimeError(
             code=AgentRuntimeErrorCode.FILE_ERROR,
             title="Unsupported file attachment format.",
             detail=(
-                "The model does not support this attachment's file type. "
+                f"The model does not support the file type of {subject}. "
                 "Remove the attachment or convert it to a supported format."
                 + (f" Provider detail: {error.detail}" if error.detail else "")
             ),
             category=UiPathErrorCategory.USER,
         ) from error
+
+
+def describe_attachment(name: str, mime_type: str) -> str:
+    """An attachment as it is named in user-facing errors: ``'a.csv' (text/csv)``."""
+    return f"'{name}' ({mime_type or 'no file type'})"
+
+
+# Lowercased fragments of the providers' "input exceeds the context window" 400s.
+_CONTEXT_LIMIT_MARKERS = (
+    "prompt is too long",
+    "input is too long",
+    "context window",
+    "context length",
+    "maximum context",
+    "too many tokens",
+    # Gemini: "The input token count (N) exceeds the maximum number of tokens
+    # allowed (M)."
+    "maximum number of tokens",
+)
+
+
+def raise_for_file_analysis_http_error(
+    error: UiPathAPIError, attachments: Sequence[str]
+) -> NoReturn:
+    """Convert a provider rejection of a file-analysis request into an agent error.
+
+    A 400 on a request whose only inputs are a task and the attached files is
+    about those files: either the model cannot read them, or their content does
+    not fit its context window. The error names the files and says which, so
+    the user knows what to change -- unlike the generic bad-request detail,
+    which points at model settings. Any other status, and a 400 carrying the
+    gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
+    rejected the call), is mapped as usual by
+    :func:`raise_for_provider_http_error`.
+
+    The provider's own message is matched for the context-window case but never
+    copied into the error: it may carry customer content, and it is already
+    recorded on the LLM call span.
+
+    Args:
+        error: The normalized provider error.
+        attachments: Descriptions of the files sent with the request (see
+            :func:`describe_attachment`).
+    """
+    gateway_detail = error.body.get("detail") if isinstance(error.body, dict) else None
+    if error.status_code != 400 or (
+        isinstance(gateway_detail, str) and gateway_detail.strip()
+    ):
+        raise_for_provider_http_error(error)
+
+    files = ", ".join(attachments) or "the attached files"
+    fields = _body_fields(error.body)
+    if any(marker in field for field in fields for marker in _CONTEXT_LIMIT_MARKERS):
+        title = "The attached files are too large for the model"
+        detail = (
+            f"The content of {files} does not fit in the model's context window. "
+            "Split the file or reduce its content, or use a model with a larger "
+            "context window."
+        )
+    else:
+        title = "The model could not read the attached files"
+        detail = (
+            f"The model provider rejected the request to analyze {files}. The "
+            "model may not support this file type or its content. Convert the "
+            "file to PDF or use a different model, then run the agent again."
+        )
+
+    raise AgentRuntimeError(
+        code=AgentRuntimeErrorCode.FILE_ERROR,
+        title=title,
+        detail=detail,
+        category=UiPathErrorCategory.USER,
+        status=error.status_code,
+    ) from error
 
 
 def _is_license_error(body: object) -> bool:

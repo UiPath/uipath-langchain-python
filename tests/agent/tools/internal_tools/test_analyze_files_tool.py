@@ -339,6 +339,138 @@ class TestCreateAnalyzeFileTool:
 
         assert exc_info.value is error
 
+    async def test_provider_400_names_the_attached_file(
+        self, resource_config, mock_llm
+    ):
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={
+                "error": {"message": "media_type: Input should be 'application/pdf'"}
+            },
+        )
+        error = UiPathAPIError.from_response(response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        info = exc_info.value.error_info
+        assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
+        assert info.category == UiPathErrorCategory.USER
+        assert "'test.pdf' (application/pdf)" in info.detail
+        assert "Bad Request" not in info.detail
+
+    async def test_legacy_client_400_names_the_attached_file(
+        self, resource_config, mock_llm
+    ):
+        """Legacy clients raise the provider SDK's own error carrying the response."""
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            400, request=request, json={"error": {"message": "invalid document"}}
+        )
+        error = httpx.HTTPStatusError("Bad Request", request=request, response=response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        info = exc_info.value.error_info
+        assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
+        assert info.title == "The model could not read the attached files"
+        assert "'test.pdf' (application/pdf)" in info.detail
+
+    @pytest.mark.parametrize("pdf_only", [True, False])
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.accepts_only_pdf_documents"
+    )
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_passes_the_models_document_support_to_the_file_blocks(
+        self,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        mock_accepts_only_pdf,
+        pdf_only,
+        resource_config,
+        mock_llm,
+    ):
+        mock_accepts_only_pdf.return_value = pdf_only
+        mock_resolve_attachments.return_value = [
+            FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
+        ]
+        mock_add_files.return_value = HumanMessage(content="Sum the costs")
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        assert tool.coroutine is not None
+        await tool.coroutine(
+            analysisTask="Sum the costs",
+            attachments=[
+                MockAttachment(
+                    ID=str(uuid.uuid4()), FullName="Budget.csv", MimeType="text/csv"
+                )
+            ],
+        )
+
+        mock_accepts_only_pdf.assert_called_once_with(mock_llm)
+        assert mock_add_files.call_args.kwargs == {"pdf_only_documents": pdf_only}
+
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.accepts_only_pdf_documents",
+        return_value=True,
+    )
+    @patch(
+        "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+        return_value="YSxiCjEsMgo=",  # "a,b\n1,2\n"
+    )
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_claude_receives_a_csv_as_a_text_document(
+        self,
+        mock_resolve_attachments,
+        mock_get_wrapper,
+        mock_download,
+        mock_accepts_only_pdf,
+        resource_config,
+        mock_llm,
+    ):
+        mock_resolve_attachments.return_value = [
+            FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
+        ]
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        assert tool.coroutine is not None
+        await tool.coroutine(
+            analysisTask="Sum the costs",
+            attachments=[
+                MockAttachment(
+                    ID=str(uuid.uuid4()), FullName="Budget.csv", MimeType="text/csv"
+                )
+            ],
+        )
+
+        sent = mock_llm.ainvoke.call_args[0][0][1]
+        assert sent.content[-1] == {
+            "type": "document",
+            "source": {
+                "type": "text",
+                "media_type": "text/plain",
+                "data": "a,b\n1,2\n",
+            },
+            "title": "Budget.csv",
+        }
+
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
