@@ -1,8 +1,9 @@
 """Tests for the conversational agent A2A tool.
 
 The AgentHub A2A URL is resolved lazily at runtime from the agent's Orchestrator
-release (by process name, in the execution folder, honoring solution ``process``
-bindings). The model addresses conversations by a ``conversation_id`` handle.
+release (by process name, in the selected folder or execution-folder fallback,
+honoring solution ``process`` bindings). The model addresses conversations by a
+``conversation_id`` handle.
 """
 
 import asyncio
@@ -161,7 +162,7 @@ FOLDER_KEY = "11111111-2222-3333-4444-555555555555"
 
 def _make_conversational_resource(
     *,
-    folder_path: str | None = "Shared/Agents",
+    folder_path: str | None = None,
     cached_agent_card: dict[str, Any] | None = None,
     is_enabled: bool = True,
     process_name: str | None = "My Conversational Agent",
@@ -451,12 +452,14 @@ def test_conversational_disabled_resource_is_skipped() -> None:
     assert clients == []
 
 
+@pytest.mark.parametrize("folder_path", [None, ""])
 async def test_conversational_client_resolves_release_on_first_get(
     monkeypatch: pytest.MonkeyPatch,
+    folder_path: str | None,
 ) -> None:
     sdk = _FakeConversationalSdk([_release(4242)])
     handles = _patch_runtime(monkeypatch, sdk)
-    _, clients = _create_tools([_make_conversational_resource()])
+    _, clients = _create_tools([_make_conversational_resource(folder_path=folder_path)])
 
     # Nothing is resolved while the graph is being built.
     assert sdk.api_client.calls == []
@@ -483,27 +486,43 @@ async def test_conversational_client_resolves_release_on_first_get(
     await clients[0].dispose()
 
 
-async def test_conversational_client_uses_execution_folder_not_properties_folder(
+@pytest.mark.parametrize("execution_folder", ["Deployments/Debug", None])
+async def test_conversational_client_uses_selected_folder(
     monkeypatch: pytest.MonkeyPatch,
+    execution_folder: str | None,
 ) -> None:
-    """Like process tools: the release is looked up in the execution folder;
-    ``properties.folderPath`` ("Shared/Agents" here) is not used."""
-    sdk = _FakeConversationalSdk([_release(7)], {"Deployments/Prod": FOLDER_KEY})
+    sdk = _FakeConversationalSdk([_release(7)], {"Shared/Agents": FOLDER_KEY})
     handles = _patch_runtime(monkeypatch, sdk)
     monkeypatch.setenv("UIPATH_FOLDER_KEY", "unused-environment-folder-key")
     monkeypatch.setattr(
-        conv_tool, "get_execution_folder_path", lambda: "Deployments/Prod"
+        conv_tool, "get_execution_folder_path", lambda: execution_folder
     )
     resource = _make_conversational_resource(folder_path="Shared/Agents")
     _, clients = _create_tools([resource])
 
     await clients[0].get()
 
-    assert sdk.folders.calls == ["Deployments/Prod"]
+    assert sdk.folders.calls == ["Shared/Agents"]
     assert sdk.api_client.calls[0][2]["headers"] == {"x-uipath-folderkey": FOLDER_KEY}
     interface = handles["captured"]["card"].supported_interfaces[0]
     assert interface.url == f"{CONVERSATIONAL_BASE_URL}/agenthub_/a2a/{FOLDER_KEY}/7"
     await clients[0].dispose()
+
+
+async def test_conversational_missing_selected_folder_does_not_use_execution_folder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdk = _FakeConversationalSdk([_release(7)])
+    _patch_runtime(monkeypatch, sdk)
+    _, clients = _create_tools(
+        [_make_conversational_resource(folder_path="Shared/Missing")]
+    )
+
+    with pytest.raises(ValueError, match="folder 'Shared/Missing' not found"):
+        await clients[0].get()
+
+    assert sdk.folders.calls == ["Shared/Missing"]
+    assert sdk.api_client.calls == []
 
 
 async def test_conversational_client_uses_folder_key_when_execution_path_is_absent(
@@ -525,24 +544,26 @@ async def test_conversational_client_uses_folder_key_when_execution_path_is_abse
 
 
 @pytest.mark.parametrize(
-    "binding_key",
+    ("folder_path", "binding_key"),
     [
-        "process.My Conversational Agent",
-        # Bindings qualified by folder match on the execution folder.
-        "process.My Conversational Agent.Shared",
+        (None, "process.My Conversational Agent"),
+        (None, "process.My Conversational Agent.Shared"),
+        ("Shared/Agents", "process.My Conversational Agent"),
+        ("Shared/Agents", "process.My Conversational Agent.Shared/Agents"),
     ],
 )
 async def test_conversational_client_honors_solution_resource_override(
-    monkeypatch: pytest.MonkeyPatch, binding_key: str
+    monkeypatch: pytest.MonkeyPatch,
+    folder_path: str | None,
+    binding_key: str,
 ) -> None:
-    """A solution ``process.<name>`` binding replaces both the process name and
-    the execution folder, as for process tools."""
+    """Solution bindings override both process identity and the selected folder."""
     sdk = _FakeConversationalSdk(
         [_release(9, name="Deployed Agent")],
         {"Shared": "unused-execution-folder-key", "Deployed/Folder": FOLDER_KEY},
     )
     handles = _patch_runtime(monkeypatch, sdk)
-    _, clients = _create_tools([_make_conversational_resource()])
+    _, clients = _create_tools([_make_conversational_resource(folder_path=folder_path)])
 
     async def _overwrites():
         return {
