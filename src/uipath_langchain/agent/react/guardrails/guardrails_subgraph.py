@@ -325,6 +325,7 @@ def create_tools_guardrails_subgraph(
             input_schema=input_schema,
             tool_type=metadata.get("tool_type") if metadata else None,
             display_name=metadata.get("display_name") if metadata else None,
+            selector_aliases=metadata.get("selector_aliases", ()) if metadata else (),
         )
         result[tool_name] = subgraph
 
@@ -431,6 +432,7 @@ def create_tool_guardrails_subgraph(
     input_schema: type[BaseModel] | None = None,
     tool_type: str | None = None,
     display_name: str | None = None,
+    selector_aliases: Sequence[str] = (),
 ):
     """Create a guarded tool node.
 
@@ -443,6 +445,9 @@ def create_tool_guardrails_subgraph(
             selector naming an MCP tool holds that name sanitized, not the qualified
             key, and ``guardrails_factory`` accepts it when validating the same
             selector.
+        selector_aliases: Other names a selector may use for this tool, such as the
+            context a companion tool belongs to, so the context's guardrails also
+            cover it.
 
     Returns:
         Either the original tool node callable (if no matching guardrails) or a compiled
@@ -455,6 +460,7 @@ def create_tool_guardrails_subgraph(
     selector_names = {tool_name}
     if display_name:
         selector_names.add(sanitize_tool_name(display_name))
+    selector_names.update(sanitize_tool_name(alias) for alias in selector_aliases)
     applicable_guardrails = [
         (guardrail, action)
         for (guardrail, action) in (guardrails or [])

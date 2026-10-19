@@ -1,12 +1,15 @@
 """Tests for read_pages_tool.py module."""
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.types import Command
 from uipath.agent.models.agent import (
     AgentContextQuerySetting,
     AgentContextResourceConfig,
@@ -22,10 +25,14 @@ from uipath.platform.errors import (
     EnrichedException,
 )
 
+from uipath_langchain.agent.advanced.page_budget_middleware import (
+    PageBudgetMiddleware,
+)
 from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.read_pages_tool import (
     MAX_PAGES_PER_TURN,
+    PAGE_BUDGET_METADATA_KEY,
     ReadPagesInput,
     create_read_pages_tool,
     pages_read_this_turn,
@@ -103,6 +110,14 @@ class TestReadPagesToolDefinition:
         assert len(name) == 64
         assert name.endswith("_read_pages")
 
+    def test_long_context_names_sharing_a_prefix_get_distinct_names(self):
+        first = read_pages_tool_name(_resource("x" * 53 + "A"))
+        second = read_pages_tool_name(_resource("x" * 53 + "B"))
+
+        assert first != second
+        assert len(first) <= 64 and len(second) <= 64
+        assert first.endswith("_read_pages") and second.endswith("_read_pages")
+
     def test_arguments_are_document_id_and_page_range(self):
         tool = create_read_pages_tool(_resource())
 
@@ -131,7 +146,9 @@ class TestReadPagesToolDefinition:
         assert tool.metadata == {
             "tool_type": "context",
             "display_name": "Annual report (read pages)",
+            "selector_aliases": ["Annual report"],
             "index_name": "report-index",
+            PAGE_BUDGET_METADATA_KEY: MAX_PAGES_PER_TURN,
         }
 
 
@@ -299,9 +316,11 @@ class TestPageBudget:
             tool, _read_call("next", 30, 32), state
         )
 
-        assert isinstance(output, ToolMessage)
-        assert output.status == "error"
-        assert "Only 2 more pages can be read" in str(output.content)
+        assert isinstance(output, Command)
+        [message] = output.update["messages"]  # type: ignore[index]
+        assert message.status == "error"
+        assert message.tool_call_id == "next"
+        assert "Only 2 more pages can be read" in str(message.content)
         sdk.context_grounding.read_pages_async.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -318,3 +337,76 @@ class TestPageBudget:
         assert isinstance(output, ToolMessage)
         assert output.status == "success"
         sdk.context_grounding.read_pages_async.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_conversations_are_counted_apart(self, sdk):
+        """Two runs sharing the tool check their own history, not each other's."""
+
+        async def slow_read(**kwargs: Any) -> ContextGroundingPageRange:
+            await asyncio.sleep(0.01)
+            return ContextGroundingPageRange(source_document_id=DOC_ID)
+
+        sdk.context_grounding.read_pages_async.side_effect = slow_read
+        tool = create_read_pages_tool(_resource())
+        nearly_spent = AgentGraphState(
+            messages=_turn(("a", 1, MAX_PAGES_PER_TURN - 2, "success"))
+        )
+        fresh = AgentGraphState(messages=_turn())
+
+        spent_output, fresh_output = await asyncio.gather(
+            tool.awrapper(tool, _read_call("x", 1, 5), nearly_spent),  # type: ignore[attr-defined]
+            tool.awrapper(tool, _read_call("y", 1, 5), fresh),  # type: ignore[attr-defined]
+        )
+
+        assert isinstance(spent_output, Command)
+        assert isinstance(fresh_output, ToolMessage)
+        assert fresh_output.status == "success"
+
+
+class TestPageBudgetMiddleware:
+    """The advanced agent runs tools without UiPathToolNode, so the middleware checks."""
+
+    @staticmethod
+    def _request(tool: Any, call: Any, messages: list[Any]) -> ToolCallRequest:
+        return ToolCallRequest(
+            tool_call=call, tool=tool, state={"messages": messages}, runtime=MagicMock()
+        )
+
+    @pytest.mark.asyncio
+    async def test_successive_reads_past_the_budget_are_refused(self):
+        tool = create_read_pages_tool(_resource())
+        handler = AsyncMock(return_value=ToolMessage(content="pages", tool_call_id="b"))
+        messages = _turn(("a", 1, 20, "success"))
+
+        output = await PageBudgetMiddleware().awrap_tool_call(
+            self._request(tool, _read_call("b", 21, 40), messages), handler
+        )
+
+        assert isinstance(output, ToolMessage)
+        assert output.status == "error"
+        assert "Only 0 more pages can be read" in str(output.content)
+        handler.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_read_within_the_budget_runs(self):
+        tool = create_read_pages_tool(_resource())
+        handler = AsyncMock(return_value=ToolMessage(content="pages", tool_call_id="b"))
+
+        await PageBudgetMiddleware().awrap_tool_call(
+            self._request(tool, _read_call("b", 1, 20), _turn()), handler
+        )
+
+        handler.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_other_tools_pass_through(self):
+        other = MagicMock(metadata={"tool_type": "context"})
+        handler = AsyncMock(return_value=ToolMessage(content="ok", tool_call_id="b"))
+        messages = _turn(("a", 1, 20, "success"))
+
+        await PageBudgetMiddleware().awrap_tool_call(
+            self._request(other, _read_call("b", 1, 20, name="search"), messages),
+            handler,
+        )
+
+        handler.assert_awaited_once()

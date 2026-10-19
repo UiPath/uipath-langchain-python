@@ -4,6 +4,7 @@ import types
 from typing import Sequence
 from unittest.mock import MagicMock
 
+from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.core.guardrails import BaseGuardrail, GuardrailSelector
 from uipath.platform.guardrails import GuardrailScope
 
@@ -14,6 +15,8 @@ from tests.agent.guardrails.test_guardrail_utils import (
     fake_factory,
 )
 from uipath_langchain.agent.guardrails.actions import GuardrailAction
+from uipath_langchain.agent.tools.context_tool import create_context_tool
+from uipath_langchain.agent.tools.tool_node import create_tool_node
 
 
 class TestToolGuardrailsSubgraph:
@@ -104,6 +107,55 @@ class TestToolGuardrailsSubgraph:
         )
 
         assert result == inner[1]
+
+    def test_selector_matches_an_alias(self):
+        """A companion tool is covered by the guardrails of the context it reads."""
+        inner = ("Annual_report_read_pages", lambda s: s)
+        guardrail = MagicMock()
+        guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL], match_names=["Annual_report"]
+        )
+
+        result = mod.create_tool_guardrails_subgraph(
+            tool_node=inner,
+            guardrails=[(guardrail, MagicMock())],
+            display_name="Annual report (read pages)",
+            selector_aliases=["Annual report"],
+        )
+
+        assert result != inner[1]
+
+    def test_context_guardrail_covers_its_read_pages_tool(self):
+        resource = AgentContextResourceConfig.model_validate(
+            {
+                "$resourceType": "context",
+                "name": "Annual report",
+                "description": "Annual report index",
+                "contextType": "index",
+                "indexName": "report-index",
+                "settings": {
+                    "resultCount": 3,
+                    "retrievalMode": "Semantic",
+                    "query": {"variant": "Dynamic"},
+                    "readPages": True,
+                },
+            }
+        )
+        tools = create_context_tool(resource)
+        assert isinstance(tools, list)
+        nodes = create_tool_node(tools)
+        guardrail = MagicMock()
+        guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL], match_names=["Annual_report"]
+        )
+
+        guarded = mod.create_tools_guardrails_subgraph(
+            nodes, [(guardrail, MagicMock())]
+        )
+
+        assert set(guarded) == {"Annual_report", "Annual_report_read_pages"}
+        for name, node in nodes.items():
+            assert guarded[name] is not node
 
     def test_two_guardrails_build_chains_pre_and_post(self, monkeypatch):
         """Two guardrails should create reverse-ordered pre/post chains with failure edges."""

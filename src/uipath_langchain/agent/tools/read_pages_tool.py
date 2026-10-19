@@ -1,5 +1,6 @@
 """Page-reading companion tool for a semantic index context."""
 
+import hashlib
 from typing import Any
 
 import httpx
@@ -11,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.eval.mocks import mockable
@@ -38,10 +40,16 @@ from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name
 
 READ_PAGES_TOOL_SUFFIX = "_read_pages"
+_MAX_TOOL_NAME_LENGTH = 64
+_DIGEST_LENGTH = 8
 
 # Pages the agent may read for one user message. Without a cap an LLM can keep
 # paging through a document (has_next stays true) until it runs out of iterations.
 MAX_PAGES_PER_TURN = 20
+
+# Marks a tool whose calls count against MAX_PAGES_PER_TURN, for execution paths
+# that run tools without UiPathToolNode (the advanced agent's middleware).
+PAGE_BUDGET_METADATA_KEY = "page_budget"
 
 
 class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
@@ -64,9 +72,19 @@ class ReadPagesInput(BaseModel):
 
 
 def read_pages_tool_name(resource: AgentContextResourceConfig) -> str:
-    """Name of the page tool, kept within the 64-character limit with its suffix."""
+    """Name of the page tool: the context's tool name with a ``_read_pages`` suffix.
+
+    A name past the 64-character cap is shortened with a digest of the full context
+    name, so two long context names sharing a prefix still get distinct tools.
+    """
     base = sanitize_tool_name(resource.name)
-    return base[: 64 - len(READ_PAGES_TOOL_SUFFIX)] + READ_PAGES_TOOL_SUFFIX
+    if len(base) + len(READ_PAGES_TOOL_SUFFIX) <= _MAX_TOOL_NAME_LENGTH:
+        return base + READ_PAGES_TOOL_SUFFIX
+    digest = hashlib.blake2s(
+        resource.name.encode(), digest_size=_DIGEST_LENGTH // 2
+    ).hexdigest()
+    keep = _MAX_TOOL_NAME_LENGTH - len(READ_PAGES_TOOL_SUFFIX) - _DIGEST_LENGTH - 1
+    return f"{base[:keep]}_{digest}{READ_PAGES_TOOL_SUFFIX}"
 
 
 def _page_count(args: dict[str, Any]) -> int:
@@ -91,6 +109,25 @@ def pages_read_this_turn(messages: list[AnyMessage], tool_name: str) -> int:
         _page_count(c["args"])
         for c in calls
         if statuses.get(c["id"] or "") == "success"
+    )
+
+
+def page_budget_refusal(
+    messages: list[AnyMessage], call: ToolCall, tool_name: str
+) -> ToolMessage | None:
+    """An error result for a read that would pass MAX_PAGES_PER_TURN, else None."""
+    remaining = MAX_PAGES_PER_TURN - pages_read_this_turn(messages, tool_name)
+    if _page_count(call["args"]) <= remaining:
+        return None
+    return ToolMessage(
+        content=(
+            f"Only {max(remaining, 0)} more pages can be read for this question "
+            f"(at most {MAX_PAGES_PER_TURN}). Answer with the pages already read, "
+            "or read a smaller range."
+        ),
+        name=call["name"],
+        tool_call_id=call["id"] or "",
+        status="error",
     )
 
 
@@ -154,8 +191,6 @@ def create_read_pages_tool(resource: AgentContextResourceConfig) -> StructuredTo
         "before / after the range, and missing_pages are past its end."
     )
 
-    _pages_already_read = 0
-
     @mockable(
         name=tool_name,
         description=description,
@@ -166,13 +201,6 @@ def create_read_pages_tool(resource: AgentContextResourceConfig) -> StructuredTo
     async def read_pages_fn(
         source_document_id: str, start_page: int, end_page: int
     ) -> dict[str, Any]:
-        remaining = MAX_PAGES_PER_TURN - _pages_already_read
-        if end_page - start_page + 1 > remaining:
-            raise ToolException(
-                f"Only {max(remaining, 0)} more pages can be read for this question "
-                f"(at most {MAX_PAGES_PER_TURN}). Answer with the pages already read, "
-                "or read a smaller range."
-            )
         try:
             result = await UiPath().context_grounding.read_pages_async(
                 name=index_name,
@@ -204,8 +232,11 @@ def create_read_pages_tool(resource: AgentContextResourceConfig) -> StructuredTo
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        nonlocal _pages_already_read
-        _pages_already_read = pages_read_this_turn(state.messages, tool.name)
+        # Checked from this call's own state, so concurrent runs sharing the tool
+        # never see each other's counts.
+        refusal = page_budget_refusal(state.messages, call, tool.name)
+        if refusal is not None:
+            return Command(update={"messages": [refusal]})
         return await tool.ainvoke(call)
 
     tool = StructuredToolWithWrapper(
@@ -218,7 +249,10 @@ def create_read_pages_tool(resource: AgentContextResourceConfig) -> StructuredTo
         metadata={
             "tool_type": "context",
             "display_name": f"{resource.name} (read pages)",
+            # Guardrails selecting the context also cover reading its pages.
+            "selector_aliases": [resource.name],
             "index_name": index_name,
+            PAGE_BUDGET_METADATA_KEY: MAX_PAGES_PER_TURN,
         },
     )
     tool.set_tool_wrappers(awrapper=read_pages_budget_wrapper)
