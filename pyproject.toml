@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.18.46"
+version = "0.18.47"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -60,9 +60,13 @@ fireworks = [
 code-interpreter = [
     "langchain-quickjs>=0.3.5, <0.4.0",
 ]
+video = [
+    "deepagents[video]>=0.7.11, <0.8.0",
+]
 all = [
     "uipath-langchain-client[all]>=1.22.0, <1.23.0",
     "uipath-langchain[code-interpreter]",
+    "uipath-langchain[video]",
 ]
 
 [project.entry-points."uipath.middlewares"]
