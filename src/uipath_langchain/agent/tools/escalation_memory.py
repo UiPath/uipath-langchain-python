@@ -13,6 +13,7 @@ from uipath.platform.common import UiPathConfig
 from uipath.platform.common._bindings import _resource_overwrites
 from uipath.platform.memory import (
     EscalationMemoryIngestRequest,
+    FieldMatching,
     FieldSettings,
     MemorySearchRequest,
     SearchField,
@@ -61,6 +62,9 @@ class EscalationMemorySettings(BaseModel):
     field_settings: list[EscalationMemoryFieldSetting] | None = Field(
         default=None,
         alias="fieldSettings",
+    )
+    field_matching: FieldMatching = Field(
+        default=FieldMatching.Or, alias="fieldMatching"
     )
 
     @field_validator("search_mode", mode="before")
@@ -205,6 +209,7 @@ class EscalationMemoryRetriever:
                 threshold=self.memory_settings.threshold,
                 result_count=1,
                 search_mode=self.memory_settings.search_mode,
+                field_matching=self.memory_settings.field_matching,
             ),
             definition_system_prompt="",
         )
@@ -766,6 +771,8 @@ def _coerce_memory_settings(memory: Any) -> EscalationMemorySettings:
                 "search_mode",
                 "fieldSettings",
                 "field_settings",
+                "fieldMatching",
+                "field_matching",
             )
             if hasattr(memory, key)
         }

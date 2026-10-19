@@ -10,6 +10,7 @@ from uipath.agent.react import (
     SET_CONVERSATIONAL_OUTPUT_TOOL,
 )
 from uipath.platform.attachments import Attachment
+from uipath.platform.memory import FieldMatching
 
 from uipath_langchain.agent.react.reducers import (
     merge_dicts,
@@ -95,6 +96,13 @@ class MemoryConfig(BaseModel):
     # Defaults match FE episodic memory settings (agentEditor.ts:324-328)
     result_count: int = Field(default=3, ge=1, le=10)
     threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    field_matching: FieldMatching = Field(
+        default=FieldMatching.Or,
+        description=(
+            "How per-field matches combine: 'Or' matches when any searched field "
+            "passes the threshold, 'And' requires every searched field to pass."
+        ),
+    )
     field_weights: dict[str, float] = Field(
         description=(
             "Per-field search weights. Keys are input field names, values are "
