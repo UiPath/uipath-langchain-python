@@ -28,8 +28,23 @@ _BAD_REQUEST_DETAIL = (
 )
 
 _Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]
+_ResponseSignature = tuple[tuple[str, ...], _Verdict]
 
-_NOT_FOUND_SIGNATURES: tuple[tuple[tuple[str, ...], _Verdict], ...] = (
+_BAD_REQUEST_SIGNATURES: tuple[_ResponseSignature, ...] = (
+    (
+        ("too many images in request",),
+        (
+            AgentRuntimeErrorCode.FILE_ERROR,
+            UiPathErrorCategory.USER,
+            "The files sent to the model contain too many images or pages",
+            "The model provider limits the number of images in one request and "
+            "counts each PDF page as one image. Split large PDFs into smaller "
+            "files, or analyze fewer files in one call.",
+        ),
+    ),
+)
+
+_NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
     (
         ("no active connection found for endpoint",),
         (
@@ -127,10 +142,12 @@ def _body_fields(body: object) -> list[str]:
     ]
 
 
-def _match_not_found_signature(body: object) -> _Verdict | None:
-    """The verdict for a 404 whose body names its own cause, else ``None``."""
+def _match_signature(
+    signatures: tuple[_ResponseSignature, ...], body: object
+) -> _Verdict | None:
+    """The verdict for a body that names its own cause, else ``None``."""
     fields = _body_fields(body)
-    for markers, verdict in _NOT_FOUND_SIGNATURES:
+    for markers, verdict in signatures:
         if any(all(marker in field for marker in markers) for field in fields):
             return verdict
     return None
@@ -160,17 +177,20 @@ def _status_verdict(status_code: int, body: object) -> _Verdict:
 
     Only 400, 403 and 404 are classified beyond the 5xx/other split.
 
-    403 and 404 are the statuses whose meaning depends on the body; keeping the
+    400, 403 and 404 are the statuses whose meaning depends on the body; keeping the
     code, category, title and detail decided in one place stops them drifting
-    apart. Both name a cause only for a body that names its own --
-    ``_is_license_error`` for 403, ``_NOT_FOUND_SIGNATURES`` for 404 -- and
-    leave the rest unnamed rather than guessing.
+    apart. They name a cause only for a body that names its own --
+    ``_is_license_error`` for 403, ``_BAD_REQUEST_SIGNATURES`` for 400,
+    ``_NOT_FOUND_SIGNATURES`` for 404 -- and leave the rest unnamed rather than
+    guessing.
     """
     if status_code == 403:
         return _forbidden_verdict(body)
 
     if status_code == 400:
-        # The relayed provider message is deliberately not read out of the
+        if (verdict := _match_signature(_BAD_REQUEST_SIGNATURES, body)) is not None:
+            return verdict
+        # The relayed provider message is deliberately not quoted from the
         # body: it may carry customer PII, and it is already recorded on the
         # LLM call span, which is tenant-scoped.
         return (
@@ -180,7 +200,10 @@ def _status_verdict(status_code: int, body: object) -> _Verdict:
             _BAD_REQUEST_DETAIL,
         )
 
-    if status_code == 404 and (verdict := _match_not_found_signature(body)) is not None:
+    if (
+        status_code == 404
+        and (verdict := _match_signature(_NOT_FOUND_SIGNATURES, body)) is not None
+    ):
         return verdict
 
     return (
