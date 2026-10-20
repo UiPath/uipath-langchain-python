@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 _FILES_KEY = "Files"
 _INPUT_KEY = "Input"
+_OUTPUT_KEY = "Output"
 # Agents portal page that downloads an attachment by id; change here only.
 _ATTACHMENT_LINK_TEMPLATE = "{origin}/{organization_id}/agents_/attachments/{tenant_id}/{attachment_id}?name={file_name}"
 
@@ -198,8 +199,9 @@ class EscalateAction(GuardrailAction):
                     guarded_component_name,
                 )
                 data["Inputs"] = data["ToolInputs"] = _with_files(
-                    input_content, state.inner_state.guardrail_attachments
+                    input_content, state.inner_state.guardrail_attachments, _INPUT_KEY
                 )
+                files_listed = data["Inputs"] is not input_content
             else:  # POST_EXECUTION
                 if scope == GuardrailScope.AGENT:
                     input_message = state.messages[1]
@@ -222,11 +224,12 @@ class EscalateAction(GuardrailAction):
                     guarded_component_name,
                 )
 
-                data["Inputs"] = data["ToolInputs"] = _with_files(
-                    input_content, state.inner_state.guardrail_attachments
-                )
                 # ToolInputs and ToolOutputs are sent for backwards compatibility with the old HITL app
-                data["Outputs"] = data["ToolOutputs"] = output_content
+                data["Inputs"] = data["ToolInputs"] = input_content
+                data["Outputs"] = data["ToolOutputs"] = _with_files(
+                    output_content, state.inner_state.guardrail_attachments, _OUTPUT_KEY
+                )
+                files_listed = data["Outputs"] is not output_content
 
             # Create the escalation task via API
             client = UiPath()
@@ -251,6 +254,7 @@ class EscalateAction(GuardrailAction):
                     "hitl_task_info": {
                         create_task_node_name: created_task.model_dump(mode="json")
                     },
+                    "escalation_files_listed": files_listed,
                 }
             }
 
@@ -287,10 +291,15 @@ class EscalateAction(GuardrailAction):
                 )
             )
 
+            files_listed = state.inner_state.escalation_files_listed
+            if files_listed is None:
+                # Tasks created before the marker existed listed files on the inputs only.
+                files_listed = execution_stage == ExecutionStage.PRE_EXECUTION and bool(
+                    state.inner_state.guardrail_attachments
+                )
             escalation_data = (
-                _unwrap_reviewed_inputs(
-                    escalation_result.data,
-                    wrapped=bool(state.inner_state.guardrail_attachments),
+                _unwrap_reviewed(
+                    escalation_result.data, scope, execution_stage, files_listed
                 )
                 or {}
             )
@@ -326,6 +335,7 @@ class EscalateAction(GuardrailAction):
             cleanup_update: Dict[str, Any] = {
                 "inner_state": {
                     "hitl_task_info": {create_task_node_name: None},
+                    "escalation_files_listed": None,
                     "escalation_review_data": review_data if review_data else None,
                 },
             }
@@ -961,6 +971,7 @@ def _file_entries(attachments: list[dict[str, str]]) -> dict[str, str]:
 def _with_files(
     content: str | list[str | Dict[str, Any]],
     attachments: list[dict[str, str]] | None,
+    payload_key: str,
 ) -> str | list[str | Dict[str, Any]]:
     if not attachments:
         return content
@@ -971,7 +982,7 @@ def _with_files(
                 inner = json.loads(content)
             except json.JSONDecodeError:
                 pass
-        return json.dumps({_FILES_KEY: _file_entries(attachments), _INPUT_KEY: inner})
+        return json.dumps({_FILES_KEY: _file_entries(attachments), payload_key: inner})
     except Exception:
         logger.warning(
             "Could not list the guardrail files in the escalation task", exc_info=True
@@ -979,26 +990,46 @@ def _with_files(
         return content
 
 
-def _unwrap_reviewed_inputs(
-    data: dict[str, Any] | None, wrapped: bool
+def _unwrap_reviewed(
+    data: dict[str, Any] | None,
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    wrapped: bool,
 ) -> dict[str, Any] | None:
-    """Undo `_with_files` on the reviewer's ReviewedInputs; the returned Files list is ignored."""
-    if not (wrapped and data and data.get("ReviewedInputs")):
+    """Undo `_with_files` on the reviewed field the stage consumes; the returned Files are ignored.
+
+    A Tool result is assigned to the tool message as is, so its text stays unquoted.
+    """
+    field = get_reviewed_field_name(execution_stage)
+    payload_key = (
+        _INPUT_KEY if execution_stage == ExecutionStage.PRE_EXECUTION else _OUTPUT_KEY
+    )
+    if not (wrapped and data and data.get(field)):
         return data
     try:
-        parsed = json.loads(data["ReviewedInputs"])
+        parsed = json.loads(data[field])
     except (json.JSONDecodeError, TypeError):
         parsed = None
     if (
         not isinstance(parsed, dict)
-        or _INPUT_KEY not in parsed
-        or not parsed.keys() <= {_FILES_KEY, _INPUT_KEY}
+        or payload_key not in parsed
+        or not parsed.keys() <= {_FILES_KEY, payload_key}
     ):
         logger.warning(
-            "ReviewedInputs does not have the expected Files/Input shape; using it as is"
+            "%s does not have the expected %s/%s shape; using it as is",
+            field,
+            _FILES_KEY,
+            payload_key,
         )
         return data
-    return {**data, "ReviewedInputs": json.dumps(parsed[_INPUT_KEY])}
+    reviewed = parsed[payload_key]
+    if (
+        isinstance(reviewed, str)
+        and scope == GuardrailScope.TOOL
+        and execution_stage == ExecutionStage.POST_EXECUTION
+    ):
+        return {**data, field: reviewed}
+    return {**data, field: json.dumps(reviewed)}
 
 
 def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
