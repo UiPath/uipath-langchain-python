@@ -1426,3 +1426,98 @@ class TestSearchDuringIngestionSetting:
         kwargs = await self._retriever_kwargs_for(resource, flag_enabled=True)
 
         assert kwargs["search_during_ingestion"] is True
+
+
+class TestReadPagesSetting:
+    """readPages adds a page tool next to the search tool of an index context."""
+
+    @staticmethod
+    def _resource(read_pages: bool, context_type: str | None = "index"):
+        resource = _make_context_resource(
+            name="Annual report",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+            context_type=context_type,
+        )
+        assert resource.settings is not None
+        resource.settings.read_pages = read_pages
+        return resource
+
+    @staticmethod
+    async def _search_output(tool):
+        documents = [
+            Document(
+                page_content="Total revenue",
+                metadata={
+                    "source": "report.pdf",
+                    "page_number": 7,
+                    "source_document_id": "doc-1",
+                },
+            )
+        ]
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = documents
+            mock_retriever_class.return_value = mock_retriever
+            return await tool.coroutine(query="revenue")
+
+    @pytest.mark.asyncio
+    async def test_off_creates_only_the_search_tool_without_document_ids(self):
+        tool = create_context_tool(self._resource(read_pages=False))
+
+        assert isinstance(tool, StructuredToolWithOutputType)
+        output = await self._search_output(tool)
+        assert output["documents"][0]["metadata"] == {
+            "source": "report.pdf",
+            "page_number": 7,
+        }
+
+    @pytest.mark.asyncio
+    async def test_on_adds_the_page_tool_and_shows_document_ids(self):
+        tools = create_context_tool(self._resource(read_pages=True))
+
+        assert isinstance(tools, list)
+        assert [t.name for t in tools] == [
+            "Annual_report",
+            "Annual_report_read_pages",
+        ]
+        output = await self._search_output(tools[0])
+        assert output["documents"][0]["metadata"]["source_document_id"] == "doc-1"
+
+    def test_on_for_a_legacy_context_without_type(self):
+        tools = create_context_tool(self._resource(read_pages=True, context_type=None))
+
+        assert isinstance(tools, list)
+        assert len(tools) == 2
+
+    def test_on_for_an_attachments_context_creates_only_the_search_tool(self):
+        tool = create_context_tool(
+            self._resource(read_pages=True, context_type="attachments")
+        )
+
+        assert isinstance(tool, StructuredToolWithOutputType)
+
+    def test_on_from_agent_json(self):
+        resource = AgentContextResourceConfig.model_validate(
+            {
+                "$resourceType": "context",
+                "name": "Annual report",
+                "description": "Annual report index",
+                "contextType": "index",
+                "indexName": "report-index",
+                "folderPath": "Shared",
+                "settings": {
+                    "resultCount": 3,
+                    "retrievalMode": "Semantic",
+                    "query": {"variant": "Dynamic"},
+                    "readPages": True,
+                },
+            }
+        )
+
+        tools = create_context_tool(resource)
+
+        assert isinstance(tools, list)
+        assert tools[1].name == "Annual_report_read_pages"

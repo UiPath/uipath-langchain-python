@@ -73,6 +73,7 @@ class ContextGroundingRetriever(BaseRetriever):
                     "search_id": search_id,
                     "reference": x.reference,
                     "page_number": x.page_number,
+                    "source_document_id": x.source_document_id,
                     "score": x.score,
                 },
             )
@@ -120,6 +121,7 @@ class ContextGroundingRetriever(BaseRetriever):
                     "search_id": search_id,
                     "reference": x.reference,
                     "page_number": x.page_number,
+                    "source_document_id": x.source_document_id,
                     "score": x.score,
                 },
             )

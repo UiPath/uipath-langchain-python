@@ -1,9 +1,14 @@
-"""Tests for ContextGroundingRetriever's include_system_indexes plumbing."""
+"""Tests for ContextGroundingRetriever's search plumbing and document metadata."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from uipath.platform import UiPath
+from uipath.platform.context_grounding import (
+    ContextGroundingSearchResultItem,
+    SemanticSearchResult,
+    UnifiedQueryResult,
+)
 
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
@@ -77,3 +82,42 @@ async def test_retriever_async_defaults_include_system_indexes_to_false() -> Non
 
     kwargs = sdk.context_grounding.unified_search_async.call_args.kwargs
     assert kwargs["include_system_indexes"] is False
+
+
+def _make_result_with_one_hit() -> UnifiedQueryResult:
+    return UnifiedQueryResult(
+        semantic_results=SemanticSearchResult(
+            values=[
+                ContextGroundingSearchResultItem(
+                    content="Total revenue",
+                    source="report.pdf",
+                    page_number=7,
+                    source_document_id="doc-1",
+                )
+            ]
+        )
+    )
+
+
+def test_retriever_keeps_the_source_document_id() -> None:
+    sdk = _make_sdk_mock()
+    sdk.context_grounding.unified_search.return_value = _make_result_with_one_hit()
+
+    retriever = ContextGroundingRetriever(index_name="my-index", uipath_sdk=sdk)
+    docs = retriever.invoke("revenue")
+
+    assert docs[0].metadata["source_document_id"] == "doc-1"
+    assert docs[0].metadata["page_number"] == 7
+
+
+@pytest.mark.asyncio
+async def test_retriever_async_keeps_the_source_document_id() -> None:
+    sdk = _make_sdk_mock()
+    sdk.context_grounding.unified_search_async = AsyncMock(
+        return_value=_make_result_with_one_hit()
+    )
+
+    retriever = ContextGroundingRetriever(index_name="my-index", uipath_sdk=sdk)
+    docs = await retriever.ainvoke("revenue")
+
+    assert docs[0].metadata["source_document_id"] == "doc-1"

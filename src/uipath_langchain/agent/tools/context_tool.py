@@ -57,6 +57,7 @@ from uipath_langchain.agent.tools.internal_tools.schema_utils import (
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
+from .read_pages_tool import create_read_pages_tool
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -165,7 +166,7 @@ def create_context_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel | None = None,
     agent: LowCodeAgentDefinition | None = None,
-) -> StructuredTool | BaseTool | None:
+) -> StructuredTool | BaseTool | list[BaseTool] | None:
     tool_name = sanitize_tool_name(resource.name)
 
     # A Data Fabric ontology context is a standalone tool (flag-gated): the agent
@@ -214,7 +215,19 @@ def create_context_tool(
     if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
         return handle_batch_transform(tool_name, resource)
 
-    return handle_semantic_search(tool_name, resource)
+    search_tool = handle_semantic_search(tool_name, resource)
+    if _reads_pages(resource):
+        return [search_tool, create_read_pages_tool(resource)]
+    return search_tool
+
+
+def _reads_pages(resource: AgentContextResourceConfig) -> bool:
+    """Whether an index context opts into the page-reading tool (``readPages``)."""
+    assert resource.settings is not None
+    return resource.settings.read_pages and resource.context_type in (
+        None,
+        AgentContextType.INDEX,
+    )
 
 
 def handle_semantic_search(
@@ -249,6 +262,10 @@ def handle_semantic_search(
     prompt = resource.settings.query.value if static else None
     if static:
         assert prompt is not None
+
+    # The document id is only useful to the page tool; without it, keep the
+    # search result as it was.
+    hidden_metadata = set() if _reads_pages(resource) else {"source_document_id"}
 
     arg_props = _build_arg_props_from_settings(resource)
 
@@ -346,7 +363,14 @@ def handle_semantic_search(
             raise
         return {
             "documents": [
-                {"metadata": doc.metadata, "page_content": doc.page_content}
+                {
+                    "metadata": {
+                        key: value
+                        for key, value in doc.metadata.items()
+                        if key not in hidden_metadata
+                    },
+                    "page_content": doc.page_content,
+                }
                 for doc in docs
             ]
         }

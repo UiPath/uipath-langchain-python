@@ -27,6 +27,9 @@ from uipath_langchain.agent.advanced.agent import (
 from uipath_langchain.agent.advanced.job_attachments_middleware import (
     JobAttachmentsMiddleware,
 )
+from uipath_langchain.agent.advanced.page_budget_middleware import (
+    PageBudgetMiddleware,
+)
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -392,6 +395,7 @@ class TestGeneralPurposeSubagentParity:
             ToolErrorMiddleware.__name__,
             _PayloadHandlerMiddleware.__name__,
             JobAttachmentsMiddleware.__name__,
+            PageBudgetMiddleware.__name__,
         }
         names = [m.name for m in ours["middleware"]]
         assert [n for n in names if n not in added] == [
