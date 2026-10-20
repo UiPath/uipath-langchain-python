@@ -176,6 +176,7 @@ exclude_lines = [
 exclude-newer = "2 days"
 
 [tool.uv.exclude-newer-package]
+uipath-langchain = false
 uipath = false
 uipath-core = false
 uipath-platform = false
