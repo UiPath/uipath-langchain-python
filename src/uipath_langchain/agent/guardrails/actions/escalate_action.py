@@ -201,6 +201,7 @@ class EscalateAction(GuardrailAction):
                 data["Inputs"] = data["ToolInputs"] = _with_files(
                     input_content, state.inner_state.guardrail_attachments, _INPUT_KEY
                 )
+                files_listed = data["Inputs"] is not input_content
             else:  # POST_EXECUTION
                 if scope == GuardrailScope.AGENT:
                     input_message = state.messages[1]
@@ -228,6 +229,7 @@ class EscalateAction(GuardrailAction):
                 data["Outputs"] = data["ToolOutputs"] = _with_files(
                     output_content, state.inner_state.guardrail_attachments, _OUTPUT_KEY
                 )
+                files_listed = data["Outputs"] is not output_content
 
             # Create the escalation task via API
             client = UiPath()
@@ -252,6 +254,7 @@ class EscalateAction(GuardrailAction):
                     "hitl_task_info": {
                         create_task_node_name: created_task.model_dump(mode="json")
                     },
+                    "escalation_files_listed": files_listed,
                 }
             }
 
@@ -288,11 +291,15 @@ class EscalateAction(GuardrailAction):
                 )
             )
 
+            files_listed = state.inner_state.escalation_files_listed
+            if files_listed is None:
+                # Tasks created before the marker existed listed files on the inputs only.
+                files_listed = execution_stage == ExecutionStage.PRE_EXECUTION and bool(
+                    state.inner_state.guardrail_attachments
+                )
             escalation_data = (
                 _unwrap_reviewed(
-                    escalation_result.data,
-                    execution_stage,
-                    wrapped=bool(state.inner_state.guardrail_attachments),
+                    escalation_result.data, scope, execution_stage, files_listed
                 )
                 or {}
             )
@@ -328,6 +335,7 @@ class EscalateAction(GuardrailAction):
             cleanup_update: Dict[str, Any] = {
                 "inner_state": {
                     "hitl_task_info": {create_task_node_name: None},
+                    "escalation_files_listed": None,
                     "escalation_review_data": review_data if review_data else None,
                 },
             }
@@ -983,9 +991,15 @@ def _with_files(
 
 
 def _unwrap_reviewed(
-    data: dict[str, Any] | None, execution_stage: ExecutionStage, wrapped: bool
+    data: dict[str, Any] | None,
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    wrapped: bool,
 ) -> dict[str, Any] | None:
-    """Undo `_with_files` on the reviewed field the stage consumes; the returned Files are ignored."""
+    """Undo `_with_files` on the reviewed field the stage consumes; the returned Files are ignored.
+
+    A Tool result is assigned to the tool message as is, so its text stays unquoted.
+    """
     field = get_reviewed_field_name(execution_stage)
     payload_key = (
         _INPUT_KEY if execution_stage == ExecutionStage.PRE_EXECUTION else _OUTPUT_KEY
@@ -1008,7 +1022,14 @@ def _unwrap_reviewed(
             payload_key,
         )
         return data
-    return {**data, field: json.dumps(parsed[payload_key])}
+    reviewed = parsed[payload_key]
+    if (
+        isinstance(reviewed, str)
+        and scope == GuardrailScope.TOOL
+        and execution_stage == ExecutionStage.POST_EXECUTION
+    ):
+        return {**data, field: reviewed}
+    return {**data, field: json.dumps(reviewed)}
 
 
 def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
