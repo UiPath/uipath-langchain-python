@@ -20,10 +20,8 @@ _UUID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
 
 
 def _judge() -> MagicMock:
-    guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
-    guardrail.name = "Example"
-    guardrail.validator_type = "llm_as_judge"
-    return guardrail
+    """A judge scoped to text and files, so the run's files are in scope."""
+    return _scoped_judge("Both")
 
 
 def _scoped_judge(
@@ -33,7 +31,9 @@ def _scoped_judge(
 
     ``detection_scope=None`` carries no ``detectionScope`` parameter at all.
     """
-    guardrail = _judge()
+    guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+    guardrail.name = "Example"
+    guardrail.validator_type = "llm_as_judge"
     guardrail.validator_parameters = (
         []
         if detection_scope is None
@@ -47,7 +47,7 @@ def _scoped_judge(
 
 
 #: ``detectionScope`` values and whether files stay in scope. ``None`` is a guardrail with no such
-#: parameter, which leaves the decision to the backend's default.
+#: parameter, which is text only like a blank value.
 _SCOPE_CASES = [
     ("Text", False),
     ("text", False),
@@ -57,14 +57,14 @@ _SCOPE_CASES = [
     ("prompts", False),
     ("  PROMPTS  ", False),
     ("something-we-never-shipped", False),
-    ("", True),
-    ("   ", True),
+    ("", False),
+    ("   ", False),
     ("Files", True),
     ("files", True),
     ("  FILES  ", True),
     ("Both", True),
     ("both", True),
-    (None, True),
+    (None, False),
 ]
 
 
@@ -95,8 +95,8 @@ class TestResolveGuardrailAttachments:
         ],
     )
     async def test_resolves_for_any_validator(self, monkeypatch, validator_type):
-        """The runtime forwards for every guardrail; the backend decides who can use it."""
-        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        """The runtime forwards for every guardrail scoped to files; the backend decides who can use it."""
+        guardrail = _judge()
         guardrail.validator_type = validator_type
 
         result = await resolve_guardrail_attachments(_registry(), guardrail)
@@ -199,7 +199,7 @@ class TestResolveGuardrailAttachments:
     async def test_honors_the_detection_scope(
         self, monkeypatch, detection_scope, includes_files
     ):
-        """Only Files and Both forward references; anything else present is text only."""
+        """Only Files and Both forward references; anything else, or nothing, is text only."""
         result = await resolve_guardrail_attachments(
             _registry(), _scoped_judge(detection_scope)
         )
@@ -219,15 +219,12 @@ class TestResolveGuardrailAttachments:
 
         assert result is None
 
-    async def test_resolves_when_the_scope_parameter_is_malformed(self, monkeypatch):
+    async def test_reads_a_malformed_scope_parameter_as_text_only(self, monkeypatch):
         """Never raises: the caller re-raises, which would end the run over a bad parameter."""
         guardrail = _judge()
         guardrail.validator_parameters = 7  # not a list
 
-        result = await resolve_guardrail_attachments(_registry(), guardrail)
-
-        assert result is not None
-        assert [r.file_name for r in result] == ["a.csv"]
+        assert await resolve_guardrail_attachments(_registry(), guardrail) is None
 
 
 def _other_attachment(name: str = "b.pdf", mime: str = "application/pdf"):

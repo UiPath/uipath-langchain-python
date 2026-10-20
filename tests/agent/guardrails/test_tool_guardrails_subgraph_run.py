@@ -39,7 +39,9 @@ def _judge() -> BuiltInValidatorGuardrail:
             "enabledForEvals": True,
             "selector": {"scopes": ["Tool"], "matchNames": [_TOOL]},
             "validatorType": "llm_as_judge",
-            "validatorParameters": [],
+            "validatorParameters": [
+                {"$parameterType": "enum", "id": "detectionScope", "value": "Both"}
+            ],
         }
     )
 
