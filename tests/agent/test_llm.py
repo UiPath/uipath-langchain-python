@@ -405,7 +405,7 @@ def test_400_with_an_oversized_file_maps_to_user_file_error(
 
 
 def test_400_with_an_unrecognized_file_size_message_keeps_the_generic_detail():
-    body = {"message": "image exceeds the allowed size"}
+    body: dict[str, object] = {"message": "image exceeds the allowed size"}
 
     info = _raise(_api_error(400, body)).error_info
 
