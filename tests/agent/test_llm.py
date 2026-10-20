@@ -339,6 +339,26 @@ def test_400_prefers_the_gateway_detail_over_the_canned_text():
     assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
 
 
+# Azure OpenAI renders each PDF page as an image and caps a request at 50 images,
+# so one 51-page PDF sent by Analyze_Files is rejected (PC-5230).
+_TOO_MANY_IMAGES_BODY: dict[str, object] = {
+    "error": {
+        "message": "Too many images in request: 51, maximum allowed: 50.",
+        "type": "invalid_request_error",
+    }
+}
+
+
+def test_400_with_too_many_images_maps_to_user_file_error():
+    info = _raise(_api_error(400, _TOO_MANY_IMAGES_BODY)).error_info
+
+    assert info.status == 400
+    assert info.category == UiPathErrorCategory.USER
+    assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
+    assert "PDF" in info.detail
+    assert "51" not in info.detail
+
+
 def test_user_category_is_not_wrapped_in_the_generic_prefix():
     """USER is outside _SHOULD_WRAP_CATEGORIES, so the canned detail stands alone."""
     info = _raise(_api_error(400, _MAX_TOKENS_BODY)).error_info
