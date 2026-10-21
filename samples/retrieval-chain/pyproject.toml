@@ -4,8 +4,8 @@ version = "0.0.1"
 description = "Sample retrieval chain using UiPath Context Grounding API"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
-    "uipath-langchain",
-    "uipath",
+    "uipath-langchain>=0.18.46",
+    "uipath>=2.14.41",
 ]
 requires-python = ">=3.11"
 

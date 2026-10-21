@@ -6,8 +6,8 @@ authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
     "langchain-anthropic>=1.4.6",
     "mcp==2.0.0",
-    "uipath",
-    "uipath-langchain",
+    "uipath>=2.14.41",
+    "uipath-langchain>=0.18.46",
 ]
 requires-python = ">=3.11"
 

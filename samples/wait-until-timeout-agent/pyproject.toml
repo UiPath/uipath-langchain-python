@@ -5,8 +5,8 @@ description = "LangGraph agent that waits for a child process or a timer"
 authors = [{ name = "UiPath", email = "support@uipath.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "uipath-langchain",
-    "uipath>=2.13.3,<2.14.0",
+    "uipath-langchain>=0.18.46",
+    "uipath>=2.14.41",
 ]
 
 [dependency-groups]

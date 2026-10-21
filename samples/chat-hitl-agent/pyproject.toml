@@ -9,8 +9,8 @@ dependencies = [
     "langchain-anthropic>=1.4.6",
     "tavily-python>=0.7.13",
     "langchain-tavily>=0.2.13",
-    "uipath",
-    "uipath-langchain"
+    "uipath>=2.14.41",
+    "uipath-langchain>=0.18.46"
 ]
 
 [dependency-groups]

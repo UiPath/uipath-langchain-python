@@ -10,8 +10,8 @@ dependencies = [
     "langchain-tavily>=0.2.17",
     "langgraph>=1.0.10",
     "tavily-python>=0.7.21",
-    "uipath",
-    "uipath-langchain",
+    "uipath>=2.14.41",
+    "uipath-langchain>=0.18.46",
 ]
 
 [dependency-groups]
