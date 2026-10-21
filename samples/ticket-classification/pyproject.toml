@@ -13,8 +13,8 @@ dependencies = [
     "aiohttp>=3.14.3",
     "typing-extensions>=4.12.2",
     "ipython>=8.32.0",
-    "uipath",
-    "uipath-langchain",
+    "uipath>=2.14.41",
+    "uipath-langchain>=0.18.46",
 ]
 requires-python = ">=3.11"
 

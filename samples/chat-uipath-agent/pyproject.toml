@@ -8,8 +8,8 @@ dependencies = [
     "langgraph>=1.0.10",
     "langchain-community>=0.4.1",
     "ddgs>=9.6.1",
-    "uipath-langchain",
-    "uipath",
+    "uipath-langchain>=0.18.46",
+    "uipath>=2.14.41",
 ]
 
 [dependency-groups]

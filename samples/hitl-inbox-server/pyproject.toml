@@ -11,7 +11,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "httpx>=0.28.1",
     "python-multipart>=0.0.31",
-    "uipath",
+    "uipath>=2.14.41",
 ]
 requires-python = ">=3.11"
 

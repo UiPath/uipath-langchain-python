@@ -5,8 +5,8 @@ description = "AML alert triage: UiPath coded agent with TypeSafe Jev as the dec
 authors = [{ name = "UiPath" }]
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.0",
-    "uipath-langchain>=0.16",
+    "uipath>=2.14.41",
+    "uipath-langchain>=0.18.46",
     "typesafe-sdk>=0.7",
 ]
 
