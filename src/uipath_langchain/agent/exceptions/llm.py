@@ -8,6 +8,7 @@ a ``UiPathError`` carrying a semantic ``error_code`` (handled by
 upstream handling can categorise without provider-specific logic.
 """
 
+import re
 from typing import NoReturn
 
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
@@ -28,11 +29,11 @@ _BAD_REQUEST_DETAIL = (
 )
 
 _Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]
-_ResponseSignature = tuple[tuple[str, ...], _Verdict]
+_ResponseSignature = tuple[re.Pattern[str], _Verdict]
 
 _BAD_REQUEST_SIGNATURES: tuple[_ResponseSignature, ...] = (
     (
-        ("too many images in request",),
+        re.compile(r"too many images in request"),
         (
             AgentRuntimeErrorCode.FILE_ERROR,
             UiPathErrorCategory.USER,
@@ -42,11 +43,32 @@ _BAD_REQUEST_SIGNATURES: tuple[_ResponseSignature, ...] = (
             "files, or analyze fewer files in one call.",
         ),
     ),
+    (
+        re.compile(r"image exceeds (?P<limit>\d+(?:\.\d+)?) mb"),
+        (
+            AgentRuntimeErrorCode.FILE_ERROR,
+            UiPathErrorCategory.USER,
+            "An image sent to the model is too large",
+            "The model accepts images of up to {limit} MB (base64 encoding). "
+            "Reduce the image's resolution or compress it, or use a different "
+            "model.",
+        ),
+    ),
+    (
+        re.compile(r"maximum document size is (?P<limit>\d+(?:\.\d+)?) mb"),
+        (
+            AgentRuntimeErrorCode.FILE_ERROR,
+            UiPathErrorCategory.USER,
+            "A document sent to the model is too large",
+            "The model accepts documents of up to {limit} MB. Reduce the file "
+            "size or split it into smaller files, or use a different model.",
+        ),
+    ),
 )
 
 _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
     (
-        ("no active connection found for endpoint",),
+        re.compile(r"no active connection found for endpoint"),
         (
             AgentRuntimeErrorCode.LLM_BYO_CONNECTION_UNAVAILABLE,
             UiPathErrorCategory.DEPLOYMENT,
@@ -58,7 +80,7 @@ _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
         ),
     ),
     (
-        ("deploymentnotfound",),
+        re.compile(r"deploymentnotfound"),
         (
             AgentRuntimeErrorCode.LLM_PROVIDER_NOT_FOUND,
             UiPathErrorCategory.DEPLOYMENT,
@@ -69,7 +91,7 @@ _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
         ),
     ),
     (
-        ("reached the end of its life",),
+        re.compile(r"reached the end of its life"),
         (
             AgentRuntimeErrorCode.LLM_PROVIDER_NOT_FOUND,
             UiPathErrorCategory.DEPLOYMENT,
@@ -120,7 +142,7 @@ def _is_license_error(body: object) -> bool:
 
 
 def _body_fields(body: object) -> list[str]:
-    """The body's free-text fields, lowercased, for marker matching only."""
+    """The body's free-text fields, lowercased, for signature matching only."""
     if isinstance(body, str):
         return [body.lower()]
     if not isinstance(body, dict):
@@ -145,11 +167,17 @@ def _body_fields(body: object) -> list[str]:
 def _match_signature(
     signatures: tuple[_ResponseSignature, ...], body: object
 ) -> _Verdict | None:
-    """The verdict for a body that names its own cause, else ``None``."""
+    """The verdict for a body that names its own cause, else ``None``.
+
+    The verdict's detail is a template filled with the pattern's named groups.
+    """
     fields = _body_fields(body)
-    for markers, verdict in signatures:
-        if any(all(marker in field for marker in markers) for field in fields):
-            return verdict
+    for pattern, (code, category, title, detail) in signatures:
+        for field in fields:
+            if match := pattern.search(field):
+                if detail is not None:
+                    detail = detail.format_map(match.groupdict())
+                return code, category, title, detail
     return None
 
 

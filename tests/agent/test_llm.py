@@ -359,6 +359,60 @@ def test_400_with_too_many_images_maps_to_user_file_error():
     assert "51" not in info.detail
 
 
+@pytest.mark.parametrize(
+    "body, title, limit",
+    [
+        (
+            {
+                "message": "The model returned the following errors: "
+                "messages.0.content.5.image.source.bytes: image exceeds 5 MB"
+            },
+            "An image sent to the model is too large",
+            "up to 5 MB",
+        ),
+        (
+            {
+                "error": {
+                    "code": 0,
+                    "message": "messages.0.content.1.image.source.base64: image "
+                    "exceeds 5 MB maximum: 10817992 bytes > 5242880 bytes",
+                }
+            },
+            "An image sent to the model is too large",
+            "up to 5 MB",
+        ),
+        (
+            {
+                "message": "The maximum document size is 4.5 MB. Reduce the size "
+                "of your document and retry your request."
+            },
+            "A document sent to the model is too large",
+            "up to 4.5 MB",
+        ),
+    ],
+)
+def test_400_with_an_oversized_file_maps_to_user_file_error(
+    body: dict[str, object], title: str, limit: str
+):
+    info = _raise(_api_error(400, body)).error_info
+
+    assert info.status == 400
+    assert info.category == UiPathErrorCategory.USER
+    assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
+    assert info.title == title
+    assert limit in info.detail
+    assert "10817992" not in info.detail
+
+
+def test_400_with_an_unrecognized_file_size_message_keeps_the_generic_detail():
+    body: dict[str, object] = {"message": "image exceeds the allowed size"}
+
+    info = _raise(_api_error(400, body)).error_info
+
+    assert info.category == UiPathErrorCategory.USER
+    assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+
+
 def test_user_category_is_not_wrapped_in_the_generic_prefix():
     """USER is outside _SHOULD_WRAP_CATEGORIES, so the canned detail stands alone."""
     info = _raise(_api_error(400, _MAX_TOKENS_BODY)).error_info
