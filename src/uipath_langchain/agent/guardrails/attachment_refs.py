@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 #: Limits enforced by the validate API.
 _MAX_ATTACHMENTS = 5
 _MAX_FILE_NAME_LENGTH = 260
-#: ``detectionScope``: an allow-list, so an unknown value narrows to text only. Absent takes the backend default.
+#: ``detectionScope``: an allow-list, so an absent, blank or unknown value is text only, as the backend reads it.
 _DETECTION_SCOPE_PARAMETER = "detectionscope"
 _FILE_DETECTION_SCOPES: frozenset[str] = frozenset({"files", "both"})
 #: Wire key of a job attachment reference as the model and the tools exchange it.
@@ -57,16 +57,13 @@ def _detection_scope_includes_files(guardrail: BuiltInValidatorGuardrail) -> boo
             if parameter.id.lower() != _DETECTION_SCOPE_PARAMETER:
                 continue
             if isinstance(parameter.value, str):
-                # Empty means absent, as the backend reads it.
-                scope = parameter.value.strip().lower()
-                if scope:
-                    return scope in _FILE_DETECTION_SCOPES
+                return parameter.value.strip().lower() in _FILE_DETECTION_SCOPES
     except Exception:
         logger.debug(
-            "Could not read the guardrail detection scope; assuming files apply.",
+            "Could not read the guardrail detection scope; treating it as text only.",
             exc_info=True,
         )
-    return True
+    return False
 
 
 def _is_text_only(guardrail: BuiltInValidatorGuardrail) -> bool:

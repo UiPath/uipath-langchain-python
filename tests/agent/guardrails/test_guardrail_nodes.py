@@ -1043,9 +1043,16 @@ class TestGuardrailNodeAttachments:
 
     @staticmethod
     def _judge_guardrail() -> MagicMock:
+        from uipath.platform.guardrails.guardrails import EnumParameterValue
+
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         guardrail.validator_type = "llm_as_judge"
+        guardrail.validator_parameters = [
+            EnumParameterValue.model_validate(
+                {"$parameterType": "enum", "id": "detectionScope", "value": "Both"}
+            )
+        ]
         return guardrail
 
     @staticmethod
