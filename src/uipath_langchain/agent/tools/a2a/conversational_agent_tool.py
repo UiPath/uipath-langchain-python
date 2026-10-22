@@ -91,13 +91,19 @@ _CONVERSATION_HINT = (
 )
 
 _SINGLE_CONVERSATION_HINT = (
-    "Each call continues one ongoing conversation with this agent."
+    "Each call continues one ongoing conversation with this agent. "
+    "Make one call at a time."
 )
 
 _NOTE_NOT_FOUND = (
     "The previous conversation was not found; a new conversation was started."
 )
 _NOTE_ENDED = "The previous conversation had ended; a new conversation was started."
+_NOTE_NO_MEMORY = (
+    "The agent has no memory of earlier messages; if your message depends on earlier "
+    "context, send it again with that context."
+)
+_HANDLE_ARGUMENTS = ("conversation_id", "new_conversation")
 
 
 class A2aConversationInput(BaseModel):
@@ -431,17 +437,19 @@ def _message_text(content: str | list[str | dict[str, Any]]) -> str:
     )
 
 
-def _conversation_id_from_result(message: ToolMessage) -> str | None:
-    """Read the conversation id from one of this tool's earlier results.
+def _read_result(message: ToolMessage) -> tuple[str | None, bool]:
+    """Read the conversation of one of this tool's earlier results, and whether it ended.
 
-    Errors carry none worth continuing, so they give nothing.
+    A result without a conversation, such as an error, a cancelled confirmation or
+    an interrupted call, gives ``None``. A failed request still names its
+    conversation, which is alive.
     """
     if message.status == "error":
-        return None
+        return None, False
     try:
         payload = json.loads(_message_text(message.content))
     except ValueError:
-        return None
+        return None, False
     # A call whose arguments the user edited is wrapped with the executed arguments.
     if (
         isinstance(payload, dict)
@@ -449,12 +457,16 @@ def _conversation_id_from_result(message: ToolMessage) -> str | None:
         and isinstance(payload.get("result"), dict)
     ):
         payload = payload["result"]
-    if not isinstance(payload, dict) or payload.get("error"):
-        return None
+    if not isinstance(payload, dict):
+        return None, False
     conversation_id = payload.get("conversation_id")
-    if isinstance(conversation_id, str) and conversation_id:
-        return conversation_id
-    return None
+    if not isinstance(conversation_id, str) or not conversation_id:
+        return None, False
+    ended = (
+        payload.get("error") == "conversation_closed"
+        or payload.get("task_state") in _TERMINAL_TASK_STATES
+    )
+    return conversation_id, ended
 
 
 def _called_tool_name(
@@ -473,12 +485,15 @@ def _called_tool_name(
 def _conversation_id_from_history(
     messages: Sequence[AnyMessage], tool_name: str
 ) -> str | None:
-    """Return the conversation of this tool's last result in the message history.
+    """Return the newest conversation in this tool's results in the history that is open.
 
-    Walks backwards to the last result of this tool. A result is this tool's when
-    the assistant tool call it answers names the tool; ``ToolMessage.name`` is
-    only the fallback, because replayed messages may not carry it.
+    Walks backwards over the tool's results, skipping those without a conversation
+    and the conversations that a later result shows as ended. A result is this
+    tool's when the assistant tool call it answers names the tool;
+    ``ToolMessage.name`` is only the fallback, because replayed messages may not
+    carry it.
     """
+    ended: set[str] = set()
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
         if not isinstance(message, ToolMessage):
@@ -486,8 +501,15 @@ def _conversation_id_from_history(
         called = (
             _called_tool_name(messages, index, message.tool_call_id) or message.name
         )
-        if called == tool_name:
-            return _conversation_id_from_result(message)
+        if called != tool_name:
+            continue
+        conversation_id, has_ended = _read_result(message)
+        if conversation_id is None:
+            continue
+        if has_ended:
+            ended.add(conversation_id)
+        elif conversation_id not in ended:
+            return conversation_id
     return None
 
 
@@ -695,7 +717,7 @@ async def _converse_single(
     if conversation_id and result["conversation_id"] != conversation_id:
         note = _NOTE_NOT_FOUND
     if note:
-        result["note"] = note
+        result["note"] = f"{note} {_NOTE_NO_MEMORY}"
     return json.dumps(result), conversation_state
 
 
@@ -759,6 +781,13 @@ def _create_conversation_tool(
         )
 
         if mode == "single":
+            ignored = [arg for arg in _HANDLE_ARGUMENTS if arg in call["args"]]
+            if ignored:
+                logger.info(
+                    "Ignoring %s: conversational agent tool '%s' is in single mode",
+                    ", ".join(ignored),
+                    tool.name,
+                )
             result, updated_state = await _converse_single(
                 A2aSingleConversationInput.model_validate(call["args"]).message,
                 conversation_state,
