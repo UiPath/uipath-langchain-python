@@ -225,6 +225,7 @@ async def create_task_for_channel(
     data: dict[str, Any],
     recipient: TaskRecipient | None,
     folder_path: str | None,
+    task_source_metadata: dict[str, Any] | None = None,
 ) -> Task:
     """Create the human task backing an escalation channel."""
     if isinstance(channel, AgentQuickFormEscalationChannel):
@@ -241,6 +242,7 @@ async def create_task_for_channel(
             labels=channel.labels,
             is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
             actionable_message_metadata=channel.properties.actionable_message_meta_data,
+            task_source_metadata=task_source_metadata,
         )
     return await client.tasks.create_async(
         title=title,
@@ -252,6 +254,7 @@ async def create_task_for_channel(
         labels=channel.labels,
         is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
         actionable_message_metadata=channel.properties.actionable_message_meta_data,
+        task_source_metadata=task_source_metadata,
     )
 
 
@@ -361,6 +364,7 @@ def create_escalation_tool(
             @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
+                parent_span_id = _span_context.get("parent_span_id")
                 created_task = await create_task_for_channel(
                     client,
                     channel,
@@ -368,6 +372,9 @@ def create_escalation_tool(
                     data=serialized_data,
                     recipient=recipient,
                     folder_path=folder_path,
+                    task_source_metadata=(
+                        {"ParentSpanId": parent_span_id} if parent_span_id else None
+                    ),
                 )
 
                 if created_task.id is not None:

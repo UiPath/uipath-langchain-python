@@ -262,6 +262,36 @@ class TestEscalationToolMetadata:
         # Verify create_async was called with the static title
         create_call = mock_client.tasks.create_async.call_args
         assert create_call[1]["title"] == "Static Task Title"
+        # No escalation span yet, so no ParentSpanId.
+        assert create_call[1]["task_source_metadata"] is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_escalation_task_carries_the_escalation_span_id(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        # The tool instrumentor sets this to the escalation span when the tool starts.
+        assert tool.metadata is not None
+        tool.metadata["_span_context"]["parent_span_id"] = "a3c27222815e80ca"
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        create_call = mock_client.tasks.create_async.call_args
+        assert create_call[1]["task_source_metadata"] == {
+            "ParentSpanId": "a3c27222815e80ca"
+        }
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
@@ -1263,6 +1293,33 @@ class TestQuickFormEscalation:
         assert kwargs["folder_path"] == "/Test/Folder"
         assert "app_name" not in kwargs
         assert "app_folder_path" not in kwargs
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_quick_form_task_carries_the_escalation_span_id(
+        self, mock_interrupt, mock_uipath_class, quick_form_resource
+    ):
+        mock_client = MagicMock()
+        mock_client.tasks.create_quickform_async = AsyncMock(
+            return_value=_make_mock_task(id=779)
+        )
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(quick_form_resource)
+        assert tool.metadata is not None
+        tool.metadata["_span_context"]["parent_span_id"] = "a3c27222815e80ca"
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        kwargs = mock_client.tasks.create_quickform_async.call_args[1]
+        assert kwargs["task_source_metadata"] == {"ParentSpanId": "a3c27222815e80ca"}
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
