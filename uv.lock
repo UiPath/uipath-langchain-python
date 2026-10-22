@@ -14,13 +14,14 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
-jsonschema-pydantic-converter = false
-uipath = false
-uipath-core = false
-uipath-langchain-client = false
-uipath-llm-client = false
-uipath-platform = false
 uipath-runtime = false
+uipath = false
+uipath-platform = false
+uipath-langchain = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
+uipath-langchain-client = false
+uipath-core = false
 
 [[package]]
 name = "a2a-sdk"
@@ -4971,7 +4972,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.22.0,<1.23.0" },
     { name = "uipath-llm-client", specifier = ">=1.22.0,<1.23.0" },
     { name = "uipath-platform", specifier = ">=0.2.39,<0.3.0" },
-    { name = "uipath-runtime", specifier = ">=0.13.0,<0.14.0" },
+    { name = "uipath-runtime", specifier = ">=0.13.5,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpreter", "video", "all"]
 
