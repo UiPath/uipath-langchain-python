@@ -3,12 +3,20 @@
 A conversational agent is a published Orchestrator release. It is resolved by
 process name in the execution folder, like a process tool, and reached through
 AgentHub's ``a2a/{folderKey}/{releaseId}`` endpoint. Unlike a Remote A2A agent
-(``a2a_tool``) it is not looked up in the Remote A2A registry, and the model
-addresses its conversations by a ``conversation_id`` it passes back.
+(``a2a_tool``) it is not looked up in the Remote A2A registry.
 
-In the ReAct graph the conversations are kept in ``tools_storage``. Where tools
-run without a wrapper (advanced mode) nothing is stored. Client lifecycle is
-managed by the caller via ``ConversationalAgentA2aClient.dispose()`` or the
+The tool's ``settings.conversationMode`` picks how the model deals with
+conversations. In ``single`` mode (the default) the model passes only a message
+and every call continues the tool's one conversation. In ``multiple`` mode the
+model addresses conversations by a ``conversation_id`` it passes back.
+
+In the ReAct graph the conversations are kept in ``tools_storage``. Each chat
+message is a new job with empty tool state, but the earlier turns are replayed in
+the messages, so a call that finds no current conversation rebuilds it from this
+tool's last result there. Where tools run without a wrapper (advanced mode)
+nothing is stored: the tool gets the graph's messages injected and reads the
+conversation from them. Client lifecycle is managed by the caller via
+``ConversationalAgentA2aClient.dispose()`` or the
 ``open_conversational_agent_tools`` async context manager.
 """
 
@@ -17,7 +25,15 @@ import json
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
 from logging import getLogger
-from typing import Any, AsyncGenerator, Awaitable, Callable, Sequence
+from typing import (
+    Annotated,
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Literal,
+    Sequence,
+)
 
 import httpx
 from a2a.client import Client
@@ -30,8 +46,9 @@ from a2a.types import (
 )
 from a2a.utils.errors import InvalidRequestError, TaskNotFoundError
 from google.protobuf.json_format import ParseDict
-from langchain_core.messages import ToolCall, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
@@ -73,6 +90,15 @@ _CONVERSATION_HINT = (
     "continue a specific conversation."
 )
 
+_SINGLE_CONVERSATION_HINT = (
+    "Each call continues one ongoing conversation with this agent."
+)
+
+_NOTE_NOT_FOUND = (
+    "The previous conversation was not found; a new conversation was started."
+)
+_NOTE_ENDED = "The previous conversation had ended; a new conversation was started."
+
 
 class A2aConversationInput(BaseModel):
     """Input schema for a conversational agent tool."""
@@ -86,6 +112,15 @@ class A2aConversationInput(BaseModel):
         default=False,
         description="Start a separate conversation. Do not combine with conversation_id.",
     )
+
+
+class A2aSingleConversationInput(BaseModel):
+    """Input schema for a conversational agent tool in single mode.
+
+    Carries only the message: every call continues the tool's one conversation.
+    """
+
+    message: str = Field(description="The message to send to the agent.")
 
 
 @resource_override(resource_type="process", resource_identifier="process_name")
@@ -308,12 +343,16 @@ def _record_conversation(
     *,
     closed: bool,
     make_current: bool,
+    keep_closed_current: bool = False,
 ) -> dict[str, Any]:
     """Return a copy of the state with the conversation recorded as just used.
 
-    ``last_used`` is a counter derived from the stored entries, so the state is
-    deterministic. Beyond ``_MAX_CONVERSATIONS`` the least recently used
-    conversation is evicted, closed ones first.
+    A closed conversation stops being the current one unless
+    ``keep_closed_current`` (single mode, which has no other conversation to
+    point at and starts a new one on the next call). ``last_used`` is a counter
+    derived from the stored entries, so the state is deterministic. Beyond
+    ``_MAX_CONVERSATIONS`` the least recently used conversation is evicted,
+    closed ones first.
     """
     conversations = {
         key: dict(value) for key, value in conversation_state["conversations"].items()
@@ -325,7 +364,7 @@ def _record_conversation(
         "last_used": last_used,
     }
     current = conversation_id if make_current else conversation_state["current"]
-    if closed and current == conversation_id:
+    if closed and not keep_closed_current and current == conversation_id:
         current = None
     while len(conversations) > _MAX_CONVERSATIONS:
         evicted = min(
@@ -365,6 +404,151 @@ def _load_conversation_state(stored: dict[str, Any]) -> dict[str, Any]:
         "current": stored.get("current"),
         "conversations": dict(stored.get("conversations") or {}),
     }
+
+
+def _unavailable_reason(
+    error: _A2aRequestError,
+) -> Literal["not_found", "ended"] | None:
+    """Tell a conversation AgentHub no longer has (or has ended) from other errors."""
+    if isinstance(error.__cause__, TaskNotFoundError):
+        return "not_found"
+    if _is_terminal_state_error(error):
+        return "ended"
+    return None
+
+
+def _empty_conversation_state() -> dict[str, Any]:
+    return {"current": None, "conversations": {}}
+
+
+def _message_text(content: str | list[str | dict[str, Any]]) -> str:
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block if isinstance(block, str) else str(block.get("text", ""))
+        for block in content
+        if isinstance(block, str) or block.get("type") == "text"
+    )
+
+
+def _conversation_id_from_result(message: ToolMessage) -> str | None:
+    """Read the conversation id from one of this tool's earlier results.
+
+    Errors carry none worth continuing, so they give nothing.
+    """
+    if message.status == "error":
+        return None
+    try:
+        payload = json.loads(_message_text(message.content))
+    except ValueError:
+        return None
+    # A call whose arguments the user edited is wrapped with the executed arguments.
+    if (
+        isinstance(payload, dict)
+        and "meta" in payload
+        and isinstance(payload.get("result"), dict)
+    ):
+        payload = payload["result"]
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+    conversation_id = payload.get("conversation_id")
+    if isinstance(conversation_id, str) and conversation_id:
+        return conversation_id
+    return None
+
+
+def _called_tool_name(
+    messages: Sequence[AnyMessage], before: int, tool_call_id: str
+) -> str | None:
+    """Name of the tool that the nearest earlier assistant message called with this id."""
+    for index in range(before - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, AIMessage):
+            for tool_call in message.tool_calls:
+                if tool_call["id"] == tool_call_id:
+                    return tool_call["name"]
+    return None
+
+
+def _conversation_id_from_history(
+    messages: Sequence[AnyMessage], tool_name: str
+) -> str | None:
+    """Return the conversation of this tool's last result in the message history.
+
+    Walks backwards to the last result of this tool. A result is this tool's when
+    the assistant tool call it answers names the tool; ``ToolMessage.name`` is
+    only the fallback, because replayed messages may not carry it.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, ToolMessage):
+            continue
+        called = (
+            _called_tool_name(messages, index, message.tool_call_id) or message.name
+        )
+        if called == tool_name:
+            return _conversation_id_from_result(message)
+    return None
+
+
+def _seed_from_history(
+    conversation_state: dict[str, Any],
+    messages: Sequence[AnyMessage],
+    tool_name: str,
+) -> dict[str, Any]:
+    """Adopt the conversation of the tool's last result, if the state has none.
+
+    Each chat message is a new job whose tool state is empty, while the replayed
+    messages still hold the earlier results. A conversation the state already
+    knows, such as one that has ended, is never reopened this way.
+    """
+    if conversation_state["current"] is not None:
+        return conversation_state
+    conversation_id = _conversation_id_from_history(messages, tool_name)
+    if (
+        conversation_id is None
+        or conversation_id in conversation_state["conversations"]
+    ):
+        return conversation_state
+    return _record_conversation(
+        conversation_state,
+        conversation_id,
+        None,
+        closed=False,
+        make_current=True,
+    )
+
+
+def _record_reply(
+    conversation_state: dict[str, Any],
+    conversation_id: str | None,
+    task_id: str | None,
+    reply: tuple[str, str, str | None, str | None],
+    *,
+    keep_closed_current: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Record the conversation a reply belongs to and return the result with the state.
+
+    ``conversation_id`` and ``task_id`` are those the message was sent with.
+    """
+    text, task_state, new_task_id, new_context_id = reply
+    response_conversation_id = new_context_id or new_task_id or conversation_id
+    if response_conversation_id:
+        conversation_state = _record_conversation(
+            conversation_state,
+            response_conversation_id,
+            new_task_id or task_id,
+            closed=task_state in _TERMINAL_TASK_STATES,
+            make_current=response_conversation_id != conversation_id
+            or conversation_state["current"] is None,
+            keep_closed_current=keep_closed_current,
+        )
+    result = {
+        "agent_response": text,
+        "conversation_id": response_conversation_id,
+        "task_state": task_state,
+    }
+    return result, conversation_state
 
 
 async def _converse(
@@ -410,12 +594,10 @@ async def _converse(
     task_id = known_conversation["task_id"] if known_conversation else None
 
     try:
-        text, task_state, new_task_id, new_context_id = await send(
-            args.message, task_id, conversation_id
-        )
+        reply = await send(args.message, task_id, conversation_id)
     except _A2aRequestError as e:
-        task_not_found = isinstance(e.__cause__, TaskNotFoundError)
-        if conversation_id and (task_not_found or _is_terminal_state_error(e)):
+        reason = _unavailable_reason(e) if conversation_id else None
+        if conversation_id and reason:
             logger.info("A2A conversation %s is unavailable: %s", conversation_id, e)
             conversation_state = _record_conversation(
                 conversation_state,
@@ -426,7 +608,7 @@ async def _converse(
             )
             message = (
                 "This conversation is no longer available. "
-                if task_not_found
+                if reason == "not_found"
                 else "This conversation has ended. "
             )
             return (
@@ -443,25 +625,77 @@ async def _converse(
             conversation_state,
         )
 
-    response_conversation_id = new_context_id or new_task_id or conversation_id
-    if response_conversation_id:
+    result, conversation_state = _record_reply(
+        conversation_state, conversation_id, task_id, reply
+    )
+    if conversation_id and result["conversation_id"] != conversation_id:
+        result["note"] = _NOTE_NOT_FOUND
+    return json.dumps(result), conversation_state
+
+
+async def _converse_single(
+    message: str,
+    conversation_state: dict[str, Any],
+    send: _ConversationSend,
+) -> tuple[str, dict[str, Any]]:
+    """Send one message to the state's ``current`` conversation.
+
+    When it has ended, or AgentHub no longer has it, a new one is started and the
+    result says so in ``note``: the model cannot start one itself. A message
+    that hit such a conversation is sent again, since AgentHub did not act on it.
+    """
+    conversation_id = conversation_state["current"]
+    known_conversation = (
+        conversation_state["conversations"].get(conversation_id)
+        if conversation_id
+        else None
+    )
+    note: str | None = None
+    if known_conversation and known_conversation["state"] == "closed":
+        conversation_id, known_conversation, note = None, None, _NOTE_ENDED
+    task_id = known_conversation["task_id"] if known_conversation else None
+
+    try:
+        reply = await send(message, task_id, conversation_id)
+    except _A2aRequestError as e:
+        reason = _unavailable_reason(e) if conversation_id else None
+        if conversation_id is None or reason is None:
+            logger.exception("A2A conversation request failed")
+            return (
+                _conversation_error("request_failed", conversation_id, f"Error: {e}"),
+                conversation_state,
+            )
+        logger.info("A2A conversation %s is unavailable: %s", conversation_id, e)
         conversation_state = _record_conversation(
             conversation_state,
-            response_conversation_id,
-            new_task_id or task_id,
-            closed=task_state in _TERMINAL_TASK_STATES,
-            make_current=response_conversation_id != conversation_id
-            or conversation_state["current"] is None,
+            conversation_id,
+            task_id,
+            closed=True,
+            make_current=False,
+            keep_closed_current=True,
         )
-    result = {
-        "agent_response": text,
-        "conversation_id": response_conversation_id,
-        "task_state": task_state,
-    }
-    if conversation_id and response_conversation_id != conversation_id:
-        result["note"] = (
-            "The previous conversation was not found; a new conversation was started."
-        )
+        note = _NOTE_NOT_FOUND if reason == "not_found" else _NOTE_ENDED
+        conversation_id, task_id = None, None
+        try:
+            reply = await send(message, None, None)
+        except _A2aRequestError as retry_error:
+            logger.exception("A2A conversation request failed")
+            return (
+                _conversation_error("request_failed", None, f"Error: {retry_error}"),
+                conversation_state,
+            )
+
+    result, conversation_state = _record_reply(
+        conversation_state,
+        conversation_id,
+        task_id,
+        reply,
+        keep_closed_current=True,
+    )
+    if conversation_id and result["conversation_id"] != conversation_id:
+        note = _NOTE_NOT_FOUND
+    if note:
+        result["note"] = note
     return json.dumps(result), conversation_state
 
 
@@ -470,21 +704,35 @@ def _create_conversation_tool(
     description: str,
     metadata: dict[str, str],
     send: _ConversationSend,
+    mode: Literal["single", "multiple"],
 ) -> BaseTool:
     """Create the LLM-facing tool for a conversational agent.
 
-    The model addresses conversations by the ``conversation_id`` returned in each
-    result. In the ReAct graph the wrapper keeps them in ``tools_storage``. Where
-    tools run without a wrapper (advanced mode) nothing is stored: tool instances
-    outlive a run, so a call that passes no ``conversation_id`` starts a new
-    conversation instead of continuing one from an earlier run.
+    The ReAct wrapper keeps the conversations in ``tools_storage``. Where tools
+    run without a wrapper (advanced mode) nothing is stored, because tool
+    instances outlive a run: the graph's messages are injected instead and the
+    conversation is read from them, as a new job does. Called outside a graph,
+    every call without a ``conversation_id`` starts a new conversation.
     """
 
-    async def _send_stateless(
+    async def _send_single(
+        *,
+        message: str,
+        messages: Annotated[Sequence[AnyMessage], InjectedState("messages")] = (),
+    ) -> str:
+        result, _ = await _converse_single(
+            message,
+            _seed_from_history(_empty_conversation_state(), messages, name),
+            send,
+        )
+        return result
+
+    async def _send_multiple(
         *,
         message: str,
         conversation_id: str | None = None,
         new_conversation: bool | None = False,
+        messages: Annotated[Sequence[AnyMessage], InjectedState("messages")] = (),
     ) -> str:
         result, _ = await _converse(
             A2aConversationInput(
@@ -492,7 +740,7 @@ def _create_conversation_tool(
                 conversation_id=conversation_id,
                 new_conversation=new_conversation,
             ),
-            {"current": None, "conversations": {}},
+            _seed_from_history(_empty_conversation_state(), messages, name),
             send,
         )
         return result
@@ -502,15 +750,26 @@ def _create_conversation_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        conversation_state = _load_conversation_state(
-            state.inner_state.tools_storage.get(tool.name) or {}
+        conversation_state = _seed_from_history(
+            _load_conversation_state(
+                state.inner_state.tools_storage.get(tool.name) or {}
+            ),
+            state.messages,
+            tool.name,
         )
 
-        result, updated_state = await _converse(
-            A2aConversationInput.model_validate(call["args"]),
-            conversation_state,
-            send,
-        )
+        if mode == "single":
+            result, updated_state = await _converse_single(
+                A2aSingleConversationInput.model_validate(call["args"]).message,
+                conversation_state,
+                send,
+            )
+        else:
+            result, updated_state = await _converse(
+                A2aConversationInput.model_validate(call["args"]),
+                conversation_state,
+                send,
+            )
 
         return Command(
             update={
@@ -525,13 +784,22 @@ def _create_conversation_tool(
             }
         )
 
-    tool = A2aStructuredToolWithWrapper(
-        name=name,
-        description=f"{description} {_CONVERSATION_HINT}",
-        coroutine=_send_stateless,
-        args_schema=A2aConversationInput,
-        metadata=metadata,
-    )
+    if mode == "single":
+        tool = A2aStructuredToolWithWrapper(
+            name=name,
+            description=f"{description} {_SINGLE_CONVERSATION_HINT}",
+            coroutine=_send_single,
+            args_schema=A2aSingleConversationInput,
+            metadata=metadata,
+        )
+    else:
+        tool = A2aStructuredToolWithWrapper(
+            name=name,
+            description=f"{description} {_CONVERSATION_HINT}",
+            coroutine=_send_multiple,
+            args_schema=A2aConversationInput,
+            metadata=metadata,
+        )
     tool.set_tool_wrappers(awrapper=_conversation_wrapper)
     return tool
 
@@ -625,6 +893,7 @@ def _create_conversational_agent_tool(
         _build_description(agent_card),
         metadata,
         _invoke,
+        config.settings.conversation_mode or "single",
     )
 
 
