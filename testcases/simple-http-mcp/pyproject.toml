@@ -11,7 +11,7 @@ dependencies = [
     "uipath-langchain",
     "pydantic>=2.10.6",
     "typing-extensions>=4.12.2",
-    "mcp==2.0.0",
+    "mcp==2.3.0",
     "starlette>=1.3.1",
     "uvicorn>=0.30.0",
 ]
