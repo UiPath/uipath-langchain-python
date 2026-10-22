@@ -8,8 +8,10 @@ from langchain.agents.middleware import AgentMiddleware
 from uipath.core.guardrails import GuardrailSelector
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
+    DetectionScope,
     EnumListParameterValue,
     GuardrailScope,
+    with_detection_scope,
 )
 
 from ..enums import GuardrailExecutionStage
@@ -35,6 +37,9 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
         name: Optional name for the guardrail.
         description: Optional description for the guardrail.
         enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
+        detection_scope: Which content the guardrail evaluates: ``Text`` the text only,
+            ``Files`` the attached files only, ``Both`` both. ``None`` sends no
+            parameter, which the backend reads as ``Text``.
     """
 
     def __init__(
@@ -46,6 +51,7 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
         name: str = "Intellectual Property Detection",
         description: str | None = None,
         enabled_for_evals: bool = True,
+        detection_scope: DetectionScope | str | None = None,
     ):
         """Initialize intellectual property detection guardrail middleware."""
         if not scopes:
@@ -73,7 +79,10 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
             description or f"Detects intellectual property: {', '.join(entities)}"
         )
 
-        self._guardrail = self._create_guardrail()
+        self.detection_scope = self._resolve_detection_scope(detection_scope)
+        self._guardrail = with_detection_scope(
+            self._create_guardrail(), self.detection_scope
+        )
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
