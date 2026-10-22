@@ -7,9 +7,10 @@ bindings). The model addresses conversations by a ``conversation_id`` handle.
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import httpx
 import pytest
@@ -25,8 +26,10 @@ from a2a.types import (
     TaskState,
     TaskStatus,
 )
-from a2a.utils.errors import InvalidRequestError
-from langchain_core.messages import AIMessage, ToolMessage
+from a2a.utils.errors import InvalidRequestError, TaskNotFoundError
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from opentelemetry import trace as otel_trace
@@ -40,12 +43,21 @@ from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import (
     AgentConversationalAgentToolProperties,
     AgentConversationalAgentToolResourceConfig,
+    AgentConversationalAgentToolSettings,
     AgentToolType,
+)
+from uipath.core.chat import (
+    UiPathConversationContentPart,
+    UiPathConversationMessage,
+    UiPathConversationToolCall,
+    UiPathConversationToolCallResult,
+    UiPathInlineValue,
 )
 from uipath.platform.common import GenericResourceOverwrite, ResourceOverwritesContext
 from uipath.platform.errors import FolderNotFoundException
 
 import uipath_langchain.agent.tools.a2a.conversational_agent_tool as conv_tool
+from uipath_langchain.agent.advanced.agent import create_advanced_agent
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.a2a.a2a_tool import (
     A2aClient,
@@ -53,6 +65,7 @@ from uipath_langchain.agent.tools.a2a.a2a_tool import (
 )
 from uipath_langchain.agent.tools.a2a.conversational_agent_tool import (
     A2aConversationInput,
+    A2aSingleConversationInput,
     ConversationalAgentA2aClient,
     _send_message,
     create_conversational_agent_tools_and_clients,
@@ -63,6 +76,7 @@ from uipath_langchain.agent.tools.tool_node import (
     wrap_tools_with_error_handling,
 )
 from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
+from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 
 def _create_tools(
@@ -161,15 +175,18 @@ FOLDER_KEY = "11111111-2222-3333-4444-555555555555"
 
 def _make_conversational_resource(
     *,
+    name: str = "Support Agent",
     folder_path: str | None = "Shared/Agents",
     cached_agent_card: dict[str, Any] | None = None,
     is_enabled: bool = True,
     process_name: str | None = "My Conversational Agent",
     require_confirmation: bool = False,
+    conversation_mode: Literal["single", "multiple"] | None = "multiple",
 ) -> AgentConversationalAgentToolResourceConfig:
+    """Build a resource. Most tests exercise the conversation handles of multiple mode."""
     return AgentConversationalAgentToolResourceConfig(
         id="conv-id",
-        name="Support Agent",
+        name=name,
         description="Answers support questions",
         is_enabled=is_enabled,
         type=AgentToolType.CONVERSATIONAL_AGENT,
@@ -183,6 +200,9 @@ def _make_conversational_resource(
             folder_path=folder_path,
             cached_agent_card=cached_agent_card,
             require_conversational_confirmation=require_confirmation,
+        ),
+        settings=AgentConversationalAgentToolSettings(
+            conversation_mode=conversation_mode
         ),
     )
 
@@ -705,15 +725,18 @@ async def test_conversational_cached_v03_card_selects_protocol_0_3(
 
 
 async def _run_through_tool_node(
-    tools: list[Any], args: dict[str, Any]
+    tools: list[Any],
+    args: dict[str, Any],
+    history: list[BaseMessage] | None = None,
 ) -> dict[str, Any]:
     tool_node = wrap_tools_with_error_handling(create_tool_node(tools))[tools[0].name]
     state = AgentGraphState(
         messages=[
+            *(history or []),
             AIMessage(
                 content="",
                 tool_calls=[{"name": tools[0].name, "args": args, "id": "call-1"}],
-            )
+            ),
         ]
     )
     result = await tool_node.ainvoke(state)
@@ -831,9 +854,13 @@ def _terminal_task(
 
 
 def _conversation_tool(
-    monkeypatch: pytest.MonkeyPatch, client: _ScriptedA2aClient
+    monkeypatch: pytest.MonkeyPatch,
+    client: _ScriptedA2aClient,
+    conversation_mode: Literal["single", "multiple"] | None = "multiple",
 ) -> tuple[A2aStructuredToolWithWrapper, Any]:
-    tools, clients = _create_tools([_make_conversational_resource()])
+    tools, clients = _create_tools(
+        [_make_conversational_resource(conversation_mode=conversation_mode)]
+    )
 
     async def _get():
         return client
@@ -848,9 +875,11 @@ async def _converse(
     tool: A2aStructuredToolWithWrapper,
     wrapper: Any,
     storage: dict[str, Any] | None,
+    *,
+    history: list[BaseMessage] | None = None,
     **args: Any,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    state = AgentGraphState()
+    state = AgentGraphState(messages=history or [])
     if storage is not None:
         state.inner_state.tools_storage[tool.name] = storage
     call = {"name": tool.name, "args": {"message": "hi", **args}, "id": "call-1"}
@@ -1548,3 +1577,1044 @@ async def test_conversational_failed_request_marks_the_span_error(
     (span,) = [s for s in exporter.get_finished_spans() if s.name == "Support Agent"]
     assert span.status.status_code == StatusCode.ERROR
     assert "conversation_id" not in (span.attributes or {})
+
+
+# --- Conversation mode: single (the default) and multiple ---------------------
+
+
+_CANCELLED_JSON = json.dumps({"meta": "Cancelled by user"})
+
+
+def _request_failed_json(cid: str | None) -> str:
+    return json.dumps(
+        {"error": "request_failed", "conversation_id": cid, "message": "Error: boom"}
+    )
+
+
+def _conversation_closed_json(cid: str) -> str:
+    return json.dumps(
+        {"error": "conversation_closed", "conversation_id": cid, "message": "ended"}
+    )
+
+
+def _assert_restart_note(note: str) -> None:
+    assert "new conversation was started" in note
+    assert "The agent has no memory of earlier messages" in note
+    assert "send it again with that context" in note
+
+
+def _result_json(cid: str | None, state: str = "input_required") -> str:
+    return json.dumps(
+        {"agent_response": "earlier", "conversation_id": cid, "task_state": state}
+    )
+
+
+def _turn(
+    tool_name: str,
+    content: str,
+    call_id: str,
+    *,
+    status: Literal["success", "error"] = "success",
+    name: str | None = None,
+) -> list[BaseMessage]:
+    """One replayed turn: an assistant tool call and the tool's result.
+
+    The result carries no ``name`` unless given, as after a replay.
+    """
+    return [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"name": tool_name, "args": {"message": "earlier"}, "id": call_id}
+            ],
+        ),
+        ToolMessage(content=content, tool_call_id=call_id, status=status, name=name),
+    ]
+
+
+def _with_history(*turns: list[BaseMessage]) -> list[BaseMessage]:
+    return [
+        HumanMessage(content="hello"),
+        *[message for turn in turns for message in turn],
+        HumanMessage(content="and now?"),
+    ]
+
+
+@pytest.mark.parametrize("mode", [None, "single"])
+def test_single_mode_is_the_default_and_exposes_only_the_message(
+    mode: Literal["single"] | None,
+) -> None:
+    tools, _ = _create_tools([_make_conversational_resource(conversation_mode=mode)])
+    tool = tools[0]
+
+    assert tool.args_schema is A2aSingleConversationInput
+    assert set(A2aSingleConversationInput.model_fields) == {"message"}
+    assert set(tool.tool_call_schema.model_fields) == {"message"}
+    parameters = convert_to_openai_tool(tool)["function"]["parameters"]
+    assert set(parameters["properties"]) == {"message"}
+    assert parameters["required"] == ["message"]
+    assert tool.description.startswith("Answers support questions")
+    assert "Each call continues one ongoing conversation" in tool.description
+    assert "Make one call at a time." in tool.description
+    assert "conversation_id" not in tool.description
+    assert "new_conversation" not in tool.description
+
+
+def test_multiple_mode_exposes_the_handle_arguments_to_the_model() -> None:
+    tools, _ = _create_tools(
+        [_make_conversational_resource(conversation_mode="multiple")]
+    )
+    tool = tools[0]
+
+    assert tool.args_schema is A2aConversationInput
+    assert set(tool.tool_call_schema.model_fields) == {
+        "message",
+        "conversation_id",
+        "new_conversation",
+    }
+    assert "Each call continues one ongoing conversation" not in tool.description
+    assert "Make one call at a time." not in tool.description
+    assert "new_conversation=true" in tool.description
+
+
+async def test_single_mode_repeated_calls_continue_one_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient(
+        [_open_task("c1", "one"), _open_task("c1", "two"), _open_task("c1", "three")]
+    )
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+
+    result, entry = await _converse(tool, wrapper, None)
+    assert result == {
+        "agent_response": "one",
+        "conversation_id": "c1",
+        "task_state": "input_required",
+    }
+    result, entry = await _converse(tool, wrapper, entry)
+    result, entry = await _converse(tool, wrapper, entry)
+
+    assert [sent.message.context_id for sent in client.sent] == ["", "c1", "c1"]
+    assert [sent.message.task_id for sent in client.sent] == ["", "c1", "c1"]
+    assert result["conversation_id"] == "c1"
+    assert "note" not in result
+    assert entry["current"] == "c1"
+    assert set(entry["conversations"]) == {"c1"}
+
+
+async def test_single_mode_ignores_handle_arguments_the_model_may_still_send(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    result, entry = await _converse(
+        tool, wrapper, storage, conversation_id="other", new_conversation=True
+    )
+
+    assert result["conversation_id"] == "c1"
+    assert client.sent[0].message.context_id == "c1"
+    assert entry["current"] == "c1"
+
+
+async def test_single_mode_terminal_reply_then_next_call_starts_a_new_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_terminal_task("c1"), _open_task("c2", "fresh")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    result, entry = await _converse(tool, wrapper, storage)
+
+    assert result["task_state"] == "failed"
+    assert result["conversation_id"] == "c1"
+    assert "note" not in result
+    assert entry["conversations"]["c1"]["state"] == "closed"
+
+    result, entry = await _converse(tool, wrapper, entry)
+
+    assert "error" not in result
+    assert result["agent_response"] == "fresh"
+    assert result["conversation_id"] == "c2"
+    _assert_restart_note(result["note"])
+    assert len(client.sent) == 2  # Nothing was sent into the ended conversation.
+    assert client.sent[1].message.context_id == ""
+    assert client.sent[1].message.task_id == ""
+    assert entry["current"] == "c2"
+    assert entry["conversations"]["c1"]["state"] == "closed"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TaskNotFoundError(),
+        InvalidRequestError("Cannot send a message to a task in a terminal state."),
+    ],
+    ids=["task-not-found", "terminal-state"],
+)
+async def test_single_mode_unavailable_conversation_restarts_and_resends_the_message(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    client = _ScriptedA2aClient([error, _open_task("c2", "fresh")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    result, entry = await _converse(tool, wrapper, storage)
+
+    assert "error" not in result
+    assert result["agent_response"] == "fresh"
+    assert result["conversation_id"] == "c2"
+    _assert_restart_note(result["note"])
+    assert [sent.message.context_id for sent in client.sent] == ["c1", ""]
+    assert client.sent[1].message.task_id == ""
+    assert client.sent[1].message.parts[0].text == "hi"
+    assert entry["current"] == "c2"
+    assert entry["conversations"]["c1"]["state"] == "closed"
+
+
+async def test_single_mode_failed_restart_is_a_request_failed_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient(
+        [TaskNotFoundError(), RuntimeError("boom"), _open_task("c3")]
+    )
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    result, entry = await _converse(tool, wrapper, storage)
+
+    assert result["error"] == "request_failed"
+    assert result["conversation_id"] is None
+    assert "boom" in result["message"]
+    assert entry["conversations"]["c1"]["state"] == "closed"
+
+    result, entry = await _converse(tool, wrapper, entry)
+
+    assert result["conversation_id"] == "c3"
+    _assert_restart_note(result["note"])
+    assert [sent.message.context_id for sent in client.sent] == ["c1", "", ""]
+
+
+async def test_single_mode_other_errors_keep_the_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([RuntimeError("boom"), _open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    result, entry = await _converse(tool, wrapper, storage)
+
+    assert result["error"] == "request_failed"
+    assert result["conversation_id"] == "c1"
+    assert entry == storage
+    assert len(client.sent) == 1
+
+    result, _ = await _converse(tool, wrapper, entry)
+
+    assert result["conversation_id"] == "c1"
+    assert client.sent[1].message.context_id == "c1"
+
+
+async def test_single_mode_request_failure_on_the_first_call_has_a_null_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([RuntimeError("boom")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+
+    result, entry = await _converse(tool, wrapper, None)
+
+    assert result["error"] == "request_failed"
+    assert result["conversation_id"] is None
+    assert entry == {"current": None, "conversations": {}}
+
+
+async def test_single_mode_replaced_conversation_id_adds_a_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c9")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    result, entry = await _converse(tool, wrapper, storage)
+
+    assert result["conversation_id"] == "c9"
+    _assert_restart_note(result["note"])
+    assert entry["current"] == "c9"
+
+
+async def test_single_mode_continues_after_the_tool_node_and_reducer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1"), _open_task("c1")])
+    tools, clients = _create_tools(
+        [_make_conversational_resource(conversation_mode=None)]
+    )
+
+    async def _get():
+        return client
+
+    monkeypatch.setattr(clients[0], "get", _get)
+    node = create_tool_node(tools)[tools[0].name]
+    builder = StateGraph(AgentGraphState)
+    builder.add_node("first", node)
+    builder.add_node("second", node)
+    builder.add_edge(START, "first")
+    builder.add_edge("first", "second")
+    builder.add_edge("second", END)
+
+    final = await builder.compile().ainvoke(
+        AgentGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": tools[0].name,
+                            "args": {"message": "a"},
+                            "id": "call-1",
+                        },
+                        {
+                            "name": tools[0].name,
+                            "args": {"message": "b"},
+                            "id": "call-2",
+                        },
+                    ],
+                )
+            ]
+        )
+    )
+
+    stored = final["inner_state"].tools_storage[tools[0].name]
+    assert stored["current"] == "c1"
+    assert set(stored["conversations"]) == {"c1"}
+    assert [sent.message.context_id for sent in client.sent] == ["", "c1"]
+
+
+@pytest.mark.parametrize("protocol_version", ["1.0", "0.3"])
+async def test_single_mode_missing_task_starts_a_new_conversation_over_the_wire(
+    monkeypatch: pytest.MonkeyPatch, protocol_version: str
+) -> None:
+    requests = _patch_jsonrpc_script(
+        monkeypatch,
+        [
+            _wire_open_task(protocol_version, "c1"),
+            {"error": {"code": -32001, "message": "Task not found"}},
+            _wire_open_task(protocol_version, "c2"),
+        ],
+    )
+    resource = _make_conversational_resource(
+        conversation_mode=None,
+        cached_agent_card=_cached_card() if protocol_version == "0.3" else None,
+    )
+    async with open_conversational_agent_tools(
+        [resource], is_conversational=False
+    ) as tools:
+        tool = cast(A2aStructuredToolWithWrapper, tools[0])
+        _, entry = await _converse(tool, tool.awrapper, None)
+        result, entry = await _converse(tool, tool.awrapper, entry)
+
+    assert "error" not in result
+    assert result["conversation_id"] == "c2"
+    _assert_restart_note(result["note"])
+    assert len(requests) == 3
+    resent = json.loads(requests[-1].content)["params"]["message"]
+    assert not resent.get("taskId")
+    assert not resent.get("contextId")
+    assert entry["current"] == "c2"
+
+
+async def test_single_mode_direct_invocation_outside_a_graph_has_no_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("run1"), _open_task("run2")])
+    tool, _ = _conversation_tool(monkeypatch, client, None)
+
+    first = json.loads(await tool.ainvoke({"message": "a"}))
+    second = json.loads(await tool.ainvoke({"message": "b"}))
+
+    assert (first["conversation_id"], second["conversation_id"]) == ("run1", "run2")
+    assert [sent.message.context_id for sent in client.sent] == ["", ""]
+
+
+# --- Cross-message continuity: rebuilt from the replayed history --------------
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_fresh_job_continues_the_conversation_from_replayed_history(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1", "again")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    result, entry = await _converse(tool, wrapper, None, history=history)
+
+    assert result["agent_response"] == "again"
+    assert result["conversation_id"] == "c1"
+    assert "note" not in result
+    assert client.sent[0].message.context_id == "c1"
+    assert entry["current"] == "c1"
+    assert entry["conversations"]["c1"]["state"] == "open"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_of_a_different_tool_is_ignored(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(_turn("Other_Agent", _result_json("c9"), "earlier-1"))
+
+    result, entry = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == ""
+    assert set(entry["conversations"]) == {"c2"}
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+@pytest.mark.parametrize(
+    ("content", "status"),
+    [
+        (_conversation_closed_json("c1"), "success"),
+        (_result_json("c1"), "error"),
+        ("Invalid input for tool", "error"),
+        (_CANCELLED_JSON, "success"),
+        ("", "error"),
+        ("not json at all", "success"),
+        (json.dumps(["conversation_id", "c1"]), "success"),
+        (json.dumps({"agent_response": "no id"}), "success"),
+        (_request_failed_json(None), "success"),
+    ],
+    ids=[
+        "conversation-closed",
+        "error-status",
+        "plain-error",
+        "cancelled-confirmation",
+        "interrupted",
+        "not-json",
+        "not-an-object",
+        "no-conversation-id",
+        "failed-on-a-new-conversation",
+    ],
+)
+async def test_unusable_result_in_history_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: Literal["multiple"] | None,
+    content: str,
+    status: Literal["success", "error"],
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(_turn(tool.name, content, "earlier-1", status=status))
+
+    result, entry = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == ""
+    assert set(entry["conversations"]) == {"c2"}
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_uses_the_last_result_of_this_tool(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(
+        _turn(tool.name, _result_json("c1"), "earlier-1"),
+        _turn(tool.name, _result_json("c2"), "earlier-2"),
+        _turn("Other_Agent", _result_json("c9"), "earlier-3"),
+    )
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == "c2"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_matches_each_result_to_its_nearest_tool_call(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    """Some providers reuse tool call ids from one turn to the next."""
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(
+        _turn(tool.name, _result_json("c1"), "call_1"),
+        _turn("Other_Agent", _result_json("c9"), "call_1"),
+    )
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c1"
+    assert client.sent[0].message.context_id == "c1"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_falls_back_to_the_result_name_without_a_matching_call(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = [
+        HumanMessage(content="hello"),
+        ToolMessage(content=_result_json("c1"), tool_call_id="orphan", name=tool.name),
+        HumanMessage(content="and now?"),
+    ]
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert client.sent[0].message.context_id == "c1"
+    assert result["conversation_id"] == "c1"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_reads_a_result_wrapped_by_the_confirmation_envelope(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    envelope = json.dumps(
+        {
+            "meta": {"message": "User has modified the tool arguments"},
+            "result": json.loads(_result_json("c1")),
+        }
+    )
+    history = _with_history(_turn(tool.name, envelope, "earlier-1"))
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert client.sent[0].message.context_id == "c1"
+    assert result["conversation_id"] == "c1"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_reads_a_result_replayed_as_content_blocks(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(_turn(tool.name, "", "earlier-1"))
+    history[2].content = [{"type": "text", "text": _result_json("c1")}]
+
+    await _converse(tool, wrapper, None, history=history)
+
+    assert client.sent[0].message.context_id == "c1"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_current_conversation_in_the_state_beats_the_history(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    storage = _entry({"c2": ("open", 1)}, current="c2")
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    result, entry = await _converse(tool, wrapper, storage, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == "c2"
+    assert set(entry["conversations"]) == {"c2"}
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_does_not_reopen_a_conversation_the_state_knows_is_closed(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    storage = _entry({"c1": ("closed", 1)}, current=None)
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    result, _ = await _converse(tool, wrapper, storage, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == ""
+
+
+async def test_multiple_mode_continues_across_jobs_unless_told_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1"), _open_task("c5"), _open_task("c7")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, "multiple")
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+    assert result["conversation_id"] == "c1"
+    assert client.sent[0].message.context_id == "c1"
+
+    result, _ = await _converse(
+        tool, wrapper, None, history=history, new_conversation=True
+    )
+    assert result["conversation_id"] == "c5"
+    assert client.sent[1].message.context_id == ""
+
+    result, _ = await _converse(
+        tool, wrapper, None, history=history, conversation_id="c7"
+    )
+    assert client.sent[2].message.context_id == "c7"
+
+
+async def test_multiple_mode_still_reports_a_closed_conversation_to_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient(
+        [InvalidRequestError("Cannot send a message to a task in a terminal state.")]
+    )
+    tool, wrapper = _conversation_tool(monkeypatch, client, "multiple")
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    result, entry = await _converse(tool, wrapper, None, history=history)
+
+    assert result["error"] == "conversation_closed"
+    assert result["conversation_id"] == "c1"
+    assert "new_conversation=true" in result["message"]
+    assert entry["conversations"]["c1"]["state"] == "closed"
+    assert entry["current"] is None
+    assert len(client.sent) == 1
+
+
+async def test_single_mode_through_the_tool_node_continues_from_the_state_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tools, clients = _create_tools(
+        [_make_conversational_resource(conversation_mode=None)]
+    )
+
+    async def _get():
+        return client
+
+    monkeypatch.setattr(clients[0], "get", _get)
+    history = _with_history(_turn(tools[0].name, _result_json("c1"), "earlier-1"))
+
+    content = await _run_through_tool_node(tools, {"message": "next"}, history)
+
+    assert content["conversation_id"] == "c1"
+    assert client.sent[0].message.context_id == "c1"
+
+
+# --- Advanced (deepagents) mode: the history reaches the tool as injected state ---
+
+
+class _AdvancedModel(GenericFakeChatModel):
+    model_name: str = "test-model"
+
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> Any:
+        return {"ls_provider": "openai", "ls_model_name": self.model_name}
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_AdvancedModel":
+        return self
+
+
+def _tool_call(name: str, args: dict[str, Any], call_id: str) -> AIMessage:
+    return AIMessage(
+        content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
+    )
+
+
+async def _run_advanced(
+    tool: Any, script: list[AIMessage], messages: list[BaseMessage]
+) -> list[BaseMessage]:
+    """Run a real deepagents graph, which hands the tool its state."""
+    model = _AdvancedModel(messages=iter([*script, *[AIMessage(content="done")] * 10]))
+    graph = create_advanced_agent(model=model, tools=[tool])
+    result = await graph.ainvoke({"messages": messages})
+    return cast(list[BaseMessage], result["messages"])
+
+
+def _tool_results(messages: list[BaseMessage]) -> list[dict[str, Any]]:
+    return [
+        json.loads(str(message.content))
+        for message in messages
+        if isinstance(message, ToolMessage)
+    ]
+
+
+async def test_advanced_single_mode_continues_one_conversation_within_a_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1", "one"), _open_task("c1", "two")])
+    tool, _ = _conversation_tool(monkeypatch, client, None)
+
+    messages = await _run_advanced(
+        tool,
+        [
+            _tool_call(tool.name, {"message": "a"}, "call-1"),
+            _tool_call(tool.name, {"message": "b"}, "call-2"),
+        ],
+        [HumanMessage(content="hi")],
+    )
+
+    assert [sent.message.context_id for sent in client.sent] == ["", "c1"]
+    assert [r["conversation_id"] for r in _tool_results(messages)] == ["c1", "c1"]
+
+
+async def test_advanced_single_mode_continues_from_the_replayed_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1", "again")])
+    tool, _ = _conversation_tool(monkeypatch, client, None)
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    messages = await _run_advanced(
+        tool, [_tool_call(tool.name, {"message": "next"}, "call-1")], history
+    )
+
+    assert client.sent[0].message.context_id == "c1"
+    assert _tool_results(messages)[-1]["agent_response"] == "again"
+
+
+async def test_advanced_single_mode_restarts_an_ended_conversation_with_a_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient(
+        [
+            InvalidRequestError("Cannot send a message to a task in a terminal state."),
+            _open_task("c2", "fresh"),
+        ]
+    )
+    tool, _ = _conversation_tool(monkeypatch, client, None)
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    messages = await _run_advanced(
+        tool, [_tool_call(tool.name, {"message": "next"}, "call-1")], history
+    )
+
+    result = _tool_results(messages)[-1]
+    assert "error" not in result
+    assert result["conversation_id"] == "c2"
+    _assert_restart_note(result["note"])
+    assert [sent.message.context_id for sent in client.sent] == ["c1", ""]
+
+
+async def test_advanced_single_mode_ignores_the_history_of_another_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, _ = _conversation_tool(monkeypatch, client, None)
+    history = _with_history(_turn("Other_Agent", _result_json("c9"), "earlier-1"))
+
+    await _run_advanced(
+        tool, [_tool_call(tool.name, {"message": "next"}, "call-1")], history
+    )
+
+    assert client.sent[0].message.context_id == ""
+
+
+async def test_advanced_multiple_mode_reads_the_history_and_honors_the_handles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1"), _open_task("c5"), _open_task("c7")])
+    tool, _ = _conversation_tool(monkeypatch, client, "multiple")
+    history = _with_history(_turn(tool.name, _result_json("c1"), "earlier-1"))
+
+    await _run_advanced(
+        tool,
+        [
+            _tool_call(tool.name, {"message": "a"}, "call-1"),
+            _tool_call(tool.name, {"message": "b", "new_conversation": True}, "call-2"),
+            _tool_call(tool.name, {"message": "c", "conversation_id": "c7"}, "call-3"),
+        ],
+        history,
+    )
+
+    assert [sent.message.context_id for sent in client.sent] == ["c1", "", "c7"]
+
+
+# --- Which earlier result the history rebuild trusts ---------------------------
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+@pytest.mark.parametrize(
+    ("content", "status"),
+    [
+        (_request_failed_json(None), "success"),
+        ("Invalid input for tool", "error"),
+        (_CANCELLED_JSON, "success"),
+        ("", "error"),
+        (_conversation_closed_json("c2"), "success"),
+    ],
+    ids=[
+        "failed-on-a-new-conversation",
+        "tool-error",
+        "cancelled-confirmation",
+        "interrupted",
+        "closed-other-conversation",
+    ],
+)
+async def test_history_skips_an_unusable_last_result_and_continues_the_good_one(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: Literal["multiple"] | None,
+    content: str,
+    status: Literal["success", "error"],
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(
+        _turn(tool.name, _result_json("c1"), "earlier-1"),
+        _turn(tool.name, content, "earlier-2", status=status),
+    )
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c1"
+    assert client.sent[0].message.context_id == "c1"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_continues_the_conversation_of_a_failed_request(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    """A request that failed says nothing about the conversation, which lives on."""
+    client = _ScriptedA2aClient([_open_task("c1"), _open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+
+    history = _with_history(_turn(tool.name, _request_failed_json("c1"), "earlier-1"))
+    result, _ = await _converse(tool, wrapper, None, history=history)
+    assert result["conversation_id"] == "c1"
+    assert client.sent[0].message.context_id == "c1"
+
+    history = _with_history(
+        _turn(tool.name, _result_json("c1"), "earlier-1"),
+        _turn(tool.name, _request_failed_json("c2"), "earlier-2"),
+    )
+    result, _ = await _converse(tool, wrapper, None, history=history)
+    assert client.sent[1].message.context_id == "c2"
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+@pytest.mark.parametrize("state", ["completed", "failed", "canceled", "rejected"])
+async def test_history_does_not_reopen_a_conversation_whose_task_has_ended(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None, state: str
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2"), _open_task("c3")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+
+    ended_only = _with_history(_turn(tool.name, _result_json("c1", state), "earlier-1"))
+    result, _ = await _converse(tool, wrapper, None, history=ended_only)
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == ""
+
+    # The earlier good result of the same conversation does not bring it back.
+    ended_after_good = _with_history(
+        _turn(tool.name, _result_json("c1"), "earlier-1"),
+        _turn(tool.name, _result_json("c1", state), "earlier-2"),
+    )
+    result, _ = await _converse(tool, wrapper, None, history=ended_after_good)
+    assert result["conversation_id"] == "c3"
+    assert client.sent[1].message.context_id == ""
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_does_not_reopen_a_conversation_the_agent_reported_closed(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(
+        _turn(tool.name, _result_json("c1"), "earlier-1"),
+        _turn(tool.name, _conversation_closed_json("c1"), "earlier-2"),
+    )
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == ""
+
+
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_falls_back_to_an_older_conversation_that_is_still_open(
+    monkeypatch: pytest.MonkeyPatch, mode: Literal["multiple"] | None
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c2")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, mode)
+    history = _with_history(
+        _turn(tool.name, _result_json("c2"), "earlier-1"),
+        _turn(tool.name, _result_json("c1"), "earlier-2"),
+        _turn(tool.name, _result_json("c1", "failed"), "earlier-3"),
+    )
+
+    result, _ = await _converse(tool, wrapper, None, history=history)
+
+    assert result["conversation_id"] == "c2"
+    assert client.sent[0].message.context_id == "c2"
+
+
+# --- Handle arguments the model sends in single mode ---------------------------
+
+
+async def test_single_mode_logs_the_handle_arguments_it_ignores(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+    storage = _entry({"c1": ("open", 1)}, current="c1")
+
+    with caplog.at_level(logging.INFO, logger=conv_tool.logger.name):
+        await _converse(
+            tool, wrapper, storage, conversation_id="other", new_conversation=True
+        )
+
+    (record,) = [r for r in caplog.records if "single" in r.getMessage()]
+    assert record.levelno == logging.INFO
+    assert "conversation_id, new_conversation" in record.getMessage()
+    assert tool.name in record.getMessage()
+
+
+async def test_single_mode_does_not_log_when_only_the_message_is_sent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, None)
+
+    with caplog.at_level(logging.INFO, logger=conv_tool.logger.name):
+        await _converse(tool, wrapper, None)
+
+    assert not [r for r in caplog.records if "single" in r.getMessage()]
+
+
+async def test_multiple_mode_does_not_log_its_handle_arguments(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1")])
+    tool, wrapper = _conversation_tool(monkeypatch, client, "multiple")
+
+    with caplog.at_level(logging.INFO, logger=conv_tool.logger.name):
+        await _converse(tool, wrapper, None, conversation_id="c1")
+
+    assert not [r for r in caplog.records if "single" in r.getMessage()]
+
+
+# --- The history as the chat runtime really stores and replays it --------------
+
+
+class _MemoryStorage:
+    """The part of the runtime storage that the message mapper uses."""
+
+    def __init__(self) -> None:
+        self.values: dict[tuple[str, str, str], Any] = {}
+
+    async def get_value(self, runtime_id: str, namespace: str, key: str) -> Any:
+        return self.values.get((runtime_id, namespace, key))
+
+    async def set_value(
+        self, runtime_id: str, namespace: str, key: str, value: Any
+    ) -> None:
+        self.values[(runtime_id, namespace, key)] = value
+
+
+_CAS_TIME = "2025-01-15T10:30:00Z"
+
+
+def _cas_message(
+    message_id: str,
+    role: str,
+    text: str = "",
+    tool_calls: list[UiPathConversationToolCall] | None = None,
+) -> UiPathConversationMessage:
+    return UiPathConversationMessage(
+        message_id=message_id,
+        role=role,
+        created_at=_CAS_TIME,
+        updated_at=_CAS_TIME,
+        content_parts=[
+            UiPathConversationContentPart(
+                content_part_id=f"{message_id}-part",
+                mime_type="text/plain",
+                data=UiPathInlineValue(inline=text),
+                citations=[],
+                created_at=_CAS_TIME,
+                updated_at=_CAS_TIME,
+            )
+        ]
+        if text
+        else [],
+        tool_calls=tool_calls or [],
+        interrupts=[],
+    )
+
+
+@pytest.mark.parametrize(
+    "resource_name",
+    ["Support Agent", "Support (EU) / Agent v2!", "  Support   Agent  "],
+    ids=["spaces", "special-characters", "padded"],
+)
+@pytest.mark.parametrize("mode", [None, "multiple"])
+async def test_history_survives_the_chat_message_mapper_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+    resource_name: str,
+    mode: Literal["multiple"] | None,
+) -> None:
+    client = _ScriptedA2aClient([_open_task("c1", "first"), _open_task("c1", "second")])
+    tools, clients = _create_tools(
+        [_make_conversational_resource(name=resource_name, conversation_mode=mode)]
+    )
+
+    async def _get():
+        return client
+
+    monkeypatch.setattr(clients[0], "get", _get)
+    tool = cast(A2aStructuredToolWithWrapper, tools[0])
+    assert tool.awrapper is not None
+
+    # Job 1: the model calls the tool, and the runtime turns both messages into
+    # the events that the chat service stores.
+    ai_message = AIMessage(
+        id="msg-1",
+        content="",
+        tool_calls=[{"name": tool.name, "args": {"message": "hi"}, "id": "call-1"}],
+    )
+    wrapper: Any = tool.awrapper
+    command = await wrapper(
+        tool, ai_message.tool_calls[0], AgentGraphState(messages=[ai_message])
+    )
+    tool_message = command.update["messages"][0]
+    mapper = UiPathChatMessagesMapper("runtime-1", _MemoryStorage())
+    start_events = await mapper.map_event(ai_message)
+    end_events = await mapper.map_event(tool_message)
+    start = next(
+        e.tool_call.start
+        for e in start_events or []
+        if e.tool_call and e.tool_call.start
+    )
+    end = next(
+        e.tool_call.end for e in end_events or [] if e.tool_call and e.tool_call.end
+    )
+
+    # Job 2: the chat service replays what it stored.
+    replayed = UiPathChatMessagesMapper("runtime-2", None).map_messages(
+        [
+            _cas_message("user-1", "user", "hello"),
+            _cas_message(
+                "msg-1",
+                "assistant",
+                tool_calls=[
+                    UiPathConversationToolCall(
+                        tool_call_id="call-1",
+                        name=start.tool_name,
+                        input={"message": "hi"},
+                        result=UiPathConversationToolCallResult(
+                            output=end.output, is_error=bool(end.is_error)
+                        ),
+                        timestamp=_CAS_TIME,
+                        created_at=_CAS_TIME,
+                        updated_at=_CAS_TIME,
+                    )
+                ],
+            ),
+            _cas_message("user-2", "user", "and now?"),
+        ]
+    )
+
+    assert replayed[1].tool_calls[0]["name"] == tool.name
+    assert replayed[2].name is None
+    assert json.loads(replayed[2].content) == json.loads(tool_message.content)
+
+    result, _ = await _converse(tool, tool.awrapper, None, history=replayed)
+
+    assert result["conversation_id"] == "c1"
+    assert client.sent[1].message.context_id == "c1"

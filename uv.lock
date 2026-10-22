@@ -4860,7 +4860,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.18.49"
+version = "0.18.50"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4959,7 +4959,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2.0.0" },
     { name = "rdflib", specifier = ">=7.0.0,<8.0.0" },
-    { name = "uipath", specifier = ">=2.14.40,<2.15.0" },
+    { name = "uipath", specifier = ">=2.14.44,<2.15.0" },
     { name = "uipath-core", specifier = ">=0.5.33,<0.6.0" },
     { name = "uipath-langchain", extras = ["code-interpreter"], marker = "extra == 'all'" },
     { name = "uipath-langchain", extras = ["video"], marker = "extra == 'all'" },
