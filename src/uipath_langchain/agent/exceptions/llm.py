@@ -170,8 +170,9 @@ def raise_for_file_analysis_http_error(
     the user knows what to change -- unlike the generic bad-request detail,
     which points at model settings. Any other status, a 400 carrying the
     gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
-    rejected the call), and a content-filter rejection are mapped as usual by
-    :func:`raise_for_provider_http_error`.
+    rejected the call), a content-filter rejection, and a 400 matching one of
+    the ``_BAD_REQUEST_SIGNATURES`` (which already names the file limit hit)
+    are mapped as usual by :func:`raise_for_provider_http_error`.
 
     The provider's own message is matched for the context-window case but never
     copied into the error: it may carry customer content, and it is already
@@ -189,6 +190,7 @@ def raise_for_file_analysis_http_error(
         error.status_code != 400
         or _gateway_detail(error.body)
         or _has_marker(fields, _CONTENT_FILTER_MARKERS)
+        or _match_signature(_BAD_REQUEST_SIGNATURES, error.body) is not None
     ):
         raise_for_provider_http_error(error)
 

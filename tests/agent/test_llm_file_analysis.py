@@ -178,3 +178,29 @@ def test_generic_mapping_ignores_a_blank_gateway_detail() -> None:
     assert exc_info.value.error_info.detail.startswith(
         "The model provider rejected the request as invalid."
     )
+
+
+@pytest.mark.parametrize(
+    ("message", "title"),
+    [
+        (
+            "Too many images in request. Max allowed: 100",
+            "The files sent to the model contain too many images or pages",
+        ),
+        (
+            "messages.0.content.1.image.source.base64: image exceeds 5 MB maximum",
+            "An image sent to the model is too large",
+        ),
+        (
+            "The maximum document size is 4.5 MB.",
+            "A document sent to the model is too large",
+        ),
+    ],
+)
+def test_named_file_limit_keeps_its_specific_error(message: str, title: str) -> None:
+    """A 400 that names the file limit it hit keeps the generic mapping's error."""
+    raised = _raised(_api_error(400, {"error": {"message": message}}))
+
+    info = raised.error_info
+    assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
+    assert info.title == title
