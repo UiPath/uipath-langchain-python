@@ -1,10 +1,12 @@
 """Tests for context_tool.py module."""
 
 import os
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.documents import Document
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from uipath.agent.models.agent import (
     AgentContextOutputColumn,
     AgentContextQuerySetting,
@@ -927,6 +929,83 @@ class TestHandleBatchTransform:
 
             batch_transform_arg = mock_interrupt.call_args[0][0]
             assert batch_transform_arg.index_folder_path == "/Shared/TestFolder"
+
+
+class TestDynamicQueryDescription:
+    AUTHOR_GUIDANCE = "Search with the docket number and the claim topic"
+
+    MODES: dict[AgentContextRetrievalMode, tuple[dict[str, Any], str]] = {
+        AgentContextRetrievalMode.SEMANTIC: (
+            {},
+            "The query to search for in the knowledge base",
+        ),
+        AgentContextRetrievalMode.DEEP_RAG: (
+            {"citation_mode": AgentContextValueSetting(value="Inline")},
+            "Describe the task: what to research across documents, what to "
+            "synthesize, and how to cite sources",
+        ),
+        AgentContextRetrievalMode.BATCH_TRANSFORM: (
+            {
+                "web_search_grounding": AgentContextValueSetting(value="enabled"),
+                "output_columns": [
+                    AgentContextOutputColumn(name="output", description="Output")
+                ],
+            },
+            "Describe the task for each row: what to analyze, what to extract, "
+            "and how to populate the output columns",
+        ),
+    }
+
+    def _llm_query_description(self, mode, description, variant="dynamic", value=None):
+        mode_settings, _ = self.MODES[mode]
+        resource = AgentContextResourceConfig(
+            name="claims_kb",
+            description="Claims knowledge base",
+            resource_type="context",
+            index_name="claims-index",
+            folder_path="/Shared",
+            settings=AgentContextSettings(
+                result_count=3,
+                retrieval_mode=mode,
+                query=AgentContextQuerySetting(
+                    variant=variant, description=description, value=value
+                ),
+                **mode_settings,
+            ),
+            is_enabled=True,
+        )
+        tool = create_context_tool(resource)
+        assert tool is not None
+        spec = convert_to_openai_tool(tool)
+        return spec["function"]["parameters"]["properties"]["query"].get("description")
+
+    @pytest.mark.parametrize("mode", list(MODES))
+    def test_llm_gets_the_author_description(self, mode):
+        assert (
+            self._llm_query_description(mode, self.AUTHOR_GUIDANCE)
+            == self.AUTHOR_GUIDANCE
+        )
+
+    @pytest.mark.parametrize("description", [None, ""])
+    @pytest.mark.parametrize("mode", list(MODES))
+    def test_llm_gets_the_default_without_an_author_description(
+        self, mode, description
+    ):
+        _, default_description = self.MODES[mode]
+        assert self._llm_query_description(mode, description) == default_description
+
+    @pytest.mark.parametrize("mode", list(MODES))
+    def test_argument_query_keeps_the_default_description(self, mode):
+        _, default_description = self.MODES[mode]
+        assert (
+            self._llm_query_description(
+                mode,
+                self.AUTHOR_GUIDANCE,
+                variant="argument",
+                value="{{claim_topic}}",
+            )
+            == default_description
+        )
 
 
 class TestBuildGlobPattern:

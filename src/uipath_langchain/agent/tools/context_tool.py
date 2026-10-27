@@ -150,6 +150,16 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
     return resource.settings.query.variant.lower() == "static"
 
 
+def _dynamic_query_description(
+    resource: AgentContextResourceConfig, default: str
+) -> str:
+    assert resource.settings is not None
+    query = resource.settings.query
+    if query.variant == "dynamic" and query.description:
+        return query.description
+    return default
+
+
 def _extract_system_prompt(agent: LowCodeAgentDefinition | None) -> str:
     """Extract system prompt from agent definition messages."""
     if agent is None:
@@ -274,7 +284,9 @@ def handle_semantic_search(
             str,
             Field(
                 ...,
-                description="The query to search for in the knowledge base",
+                description=_dynamic_query_description(
+                    resource, "The query to search for in the knowledge base"
+                ),
             ),
         )
 
@@ -438,7 +450,10 @@ def handle_deep_rag(
                 str,
                 Field(
                     ...,
-                    description="Describe the task: what to research across documents, what to synthesize, and how to cite sources",
+                    description=_dynamic_query_description(
+                        resource,
+                        "Describe the task: what to research across documents, what to synthesize, and how to cite sources",
+                    ),
                 ),
             ),
         }
@@ -565,7 +580,10 @@ def handle_batch_transform(
             str,
             Field(
                 ...,
-                description="Describe the task for each row: what to analyze, what to extract, and how to populate the output columns",
+                description=_dynamic_query_description(
+                    resource,
+                    "Describe the task for each row: what to analyze, what to extract, and how to populate the output columns",
+                ),
             ),
         )
     schema_fields["destination_path"] = (
