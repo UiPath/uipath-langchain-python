@@ -2,14 +2,14 @@
 
 import logging
 import uuid
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, WithJsonSchema, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
@@ -68,6 +68,12 @@ from .utils import sanitize_tool_name
 # the tenant; that combination fails the agent at startup rather than quietly
 # downgrading to the old blocking behaviour, so the misconfiguration is visible.
 SEARCH_DURING_INGESTION_FF = "EnableContextGroundingSearchDuringIngestion"
+
+DYNAMIC_FOLDER_PATH_PREFIX_DESCRIPTION = (
+    "Optional folder path prefix that limits the search to documents under that "
+    "folder in the knowledge base, for example 'Reports/2024'. Leave empty to "
+    "search the whole knowledge base."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +290,17 @@ def handle_semantic_search(
         and resource.settings.folder_path_prefix.value
     )
 
+    folder_setting = resource.settings.folder_path_prefix
+    if folder_setting and folder_setting.variant == "dynamic":
+        schema_fields["folder_path_prefix"] = (
+            Annotated[Optional[str], WithJsonSchema({"type": "string"})],
+            Field(
+                default=None,
+                description=folder_setting.description
+                or DYNAMIC_FOLDER_PATH_PREFIX_DESCRIPTION,
+            ),
+        )
+
     _resolved_arg_folder_prefix: str | None = None
 
     input_model = create_model("SemanticSearchInput", **schema_fields)
@@ -297,9 +314,13 @@ def handle_semantic_search(
     )
     async def context_tool_fn(
         query: Optional[str] = None,
+        folder_path_prefix: Optional[str] = None,
     ) -> dict[str, Any]:
         resolved_folder_path_prefix = (
-            static_folder_path_prefix or _resolved_arg_folder_prefix
+            static_folder_path_prefix
+            or _resolved_arg_folder_prefix
+            or (folder_path_prefix or "").strip()
+            or None
         )
 
         debug_run = UiPathConfig.is_studio_project

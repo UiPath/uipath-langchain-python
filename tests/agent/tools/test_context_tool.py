@@ -28,6 +28,7 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupErrorCode,
 )
 from uipath_langchain.agent.tools.context_tool import (
+    DYNAMIC_FOLDER_PATH_PREFIX_DESCRIPTION,
     SEARCH_DURING_INGESTION_FF,
     _normalize_folder_prefix,
     build_glob_pattern,
@@ -1426,3 +1427,155 @@ class TestSearchDuringIngestionSetting:
         kwargs = await self._retriever_kwargs_for(resource, flag_enabled=True)
 
         assert kwargs["search_during_ingestion"] is True
+
+
+class TestDynamicFolderPathPrefix:
+    @staticmethod
+    def _semantic_resource(folder_path_prefix):
+        return _make_context_resource(
+            name="semantic_tool",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+            folder_path_prefix=folder_path_prefix,
+        )
+
+    @staticmethod
+    async def _search_scopes(resource, *calls_args):
+        sdk = MagicMock()
+        search_result = MagicMock()
+        search_result.semantic_results.values = []
+        search_result.semantic_results.metadata.operation_id = "op-1"
+        sdk.context_grounding.unified_search_async = AsyncMock(
+            return_value=search_result
+        )
+        with patch(
+            "uipath_langchain.retrievers.context_grounding_retriever.UiPath",
+            return_value=sdk,
+        ):
+            tool = handle_semantic_search("semantic_tool", resource)
+            for index, args in enumerate(calls_args):
+                await tool.ainvoke(
+                    {
+                        "type": "tool_call",
+                        "id": f"call-{index}",
+                        "name": "semantic_tool",
+                        "args": args,
+                    }
+                )
+
+        search = sdk.context_grounding.unified_search_async
+        assert search.await_count == len(calls_args)
+        return [call.kwargs["scope"] for call in search.call_args_list]
+
+    @classmethod
+    async def _search_scope(cls, resource, **tool_args):
+        [scope] = await cls._search_scopes(resource, tool_args)
+        return scope
+
+    def test_dynamic_folder_path_prefix_is_an_optional_tool_argument(self):
+        resource = self._semantic_resource(AgentContextQuerySetting(variant="dynamic"))
+
+        tool = handle_semantic_search("semantic_tool", resource)
+
+        assert tool.args_schema is not None
+        assert hasattr(tool.args_schema, "model_json_schema")
+        schema = tool.args_schema.model_json_schema()
+        assert schema["properties"]["folder_path_prefix"]["type"] == "string"
+        assert "folder_path_prefix" not in schema.get("required", [])
+
+    def test_dynamic_folder_path_prefix_uses_the_author_description(self):
+        resource = self._semantic_resource(
+            AgentContextQuerySetting(
+                variant="dynamic",
+                description="Docket folder, for example Patents/123",
+            )
+        )
+
+        tool = handle_semantic_search("semantic_tool", resource)
+
+        assert hasattr(tool.args_schema, "model_json_schema")
+        schema = tool.args_schema.model_json_schema()
+        assert (
+            schema["properties"]["folder_path_prefix"]["description"]
+            == "Docket folder, for example Patents/123"
+        )
+
+    @pytest.mark.parametrize("description", [None, ""])
+    def test_dynamic_folder_path_prefix_without_author_description_gets_the_default(
+        self, description
+    ):
+        resource = self._semantic_resource(
+            AgentContextQuerySetting(variant="dynamic", description=description)
+        )
+
+        tool = handle_semantic_search("semantic_tool", resource)
+
+        assert hasattr(tool.args_schema, "model_json_schema")
+        schema = tool.args_schema.model_json_schema()
+        assert (
+            schema["properties"]["folder_path_prefix"]["description"]
+            == DYNAMIC_FOLDER_PATH_PREFIX_DESCRIPTION
+        )
+
+    def test_static_folder_path_prefix_is_not_a_tool_argument(self):
+        resource = self._semantic_resource(
+            AgentContextQuerySetting(variant="static", value="Patents/123")
+        )
+
+        tool = handle_semantic_search("semantic_tool", resource)
+
+        assert hasattr(tool.args_schema, "model_json_schema")
+        schema = tool.args_schema.model_json_schema()
+        assert "folder_path_prefix" not in schema["properties"]
+
+    @pytest.mark.asyncio
+    async def test_folder_chosen_by_the_llm_scopes_the_search(self):
+        resource = self._semantic_resource(AgentContextQuerySetting(variant="dynamic"))
+
+        scope = await self._search_scope(
+            resource, query="invention summary", folder_path_prefix="Patents/123"
+        )
+
+        assert scope is not None
+        assert scope.folder == "Patents/123"
+
+    @pytest.mark.asyncio
+    async def test_each_call_uses_its_own_folder(self):
+        resource = self._semantic_resource(AgentContextQuerySetting(variant="dynamic"))
+
+        first, second = await self._search_scopes(
+            resource,
+            {"query": "invention summary", "folder_path_prefix": "Patents/123"},
+            {"query": "invention summary", "folder_path_prefix": "Patents/456"},
+        )
+
+        assert first.folder == "Patents/123"
+        assert second.folder == "Patents/456"
+
+    @pytest.mark.asyncio
+    async def test_no_folder_from_the_llm_searches_the_whole_index(self):
+        resource = self._semantic_resource(AgentContextQuerySetting(variant="dynamic"))
+
+        scope = await self._search_scope(resource, query="memory segregation")
+
+        assert scope is None
+
+    @pytest.mark.asyncio
+    async def test_blank_folder_from_the_llm_searches_the_whole_index(self):
+        resource = self._semantic_resource(AgentContextQuerySetting(variant="dynamic"))
+
+        scope = await self._search_scope(
+            resource, query="memory segregation", folder_path_prefix="  "
+        )
+
+        assert scope is None
+
+    @pytest.mark.asyncio
+    async def test_null_folder_from_the_llm_searches_the_whole_index(self):
+        resource = self._semantic_resource(AgentContextQuerySetting(variant="dynamic"))
+
+        scope = await self._search_scope(
+            resource, query="memory segregation", folder_path_prefix=None
+        )
+
+        assert scope is None
