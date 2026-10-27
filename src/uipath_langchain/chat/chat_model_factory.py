@@ -36,6 +36,7 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupError,
     AgentStartupErrorCode,
 )
+from uipath_langchain.chat._max_tokens_cap import raise_if_max_tokens_over_cap
 from uipath_langchain.chat.attachment_baggage import trace_baggage
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,7 @@ def get_chat_model(
             if v is not _UNSET
         }
 
-        return get_chat_model_factory(
+        chat_model = get_chat_model_factory(
             model,
             byo_connection_id=byo_connection_id,
             client_settings=client_settings,
@@ -183,6 +184,10 @@ def get_chat_model(
             **optional_kwargs,
             **kwargs,
         )
+        raise_if_max_tokens_over_cap(
+            model, max_tokens, getattr(chat_model, "model_details", None)
+        )
+        return chat_model
     except ModelNotFoundError as e:
         if byo_connection_id:
             detail = (

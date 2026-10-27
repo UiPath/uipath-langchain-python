@@ -3,6 +3,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 
 from uipath_langchain.chat._legacy.types import APIFlavor, LLMProvider
+from uipath_langchain.chat._max_tokens_cap import raise_if_max_tokens_over_cap
 
 _DEFAULT_API_FLAVOR: dict[LLMProvider, APIFlavor] = {
     LLMProvider.OPENAI: APIFlavor.OPENAI_RESPONSES,
@@ -256,6 +257,7 @@ def get_chat_model(
     LLM class based on the apiFlavor field from the matching model configuration.
     """
     model_info = _get_model_info(model, agenthub_config, byo_connection_id)
+    raise_if_max_tokens_over_cap(model, max_tokens, model_info.get("modelDetails"))
 
     vendor, api_flavor = _compute_vendor_and_api_flavor(model_info)
     model_name: str = model_info.get("modelName", model)

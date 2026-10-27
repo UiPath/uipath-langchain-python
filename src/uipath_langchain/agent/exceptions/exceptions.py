@@ -82,6 +82,7 @@ class AgentStartupErrorCode(str, Enum):
 
     # LLM configuration errors
     LLM_INVALID_MODEL = "LLM_INVALID_MODEL"
+    LLM_MAX_TOKENS_EXCEEDED = "LLM_MAX_TOKENS_EXCEEDED"
 
     # Tool configuration errors
     INVALID_TOOL_CONFIG = "INVALID_TOOL_CONFIG"
