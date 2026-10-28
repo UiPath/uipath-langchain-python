@@ -50,6 +50,7 @@ Resolve the bundles in a graph factory: `langgraph.json` points to an async func
 ```
 
 ```python
+import functools
 from typing import Annotated
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
@@ -72,6 +73,12 @@ class GraphState(BaseModel):
     messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
 
+@functools.cache
+def make_llm():
+    # Built on the first agent step and reused, so `uipath init` needs no LLM credentials.
+    return UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
 async def make_graph():
     await SKILLS.load()
     load_skill = SKILLS.load_skill_tool()
@@ -79,7 +86,7 @@ async def make_graph():
     system_prompt = "\n\n".join(p for p in [BASE_PROMPT, SKILLS.prompt_section()] if p)
 
     async def agent(state: GraphState):
-        llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
+        llm = make_llm()
         model = llm.bind_tools(tools) if tools else llm
         prompt = [SystemMessage(system_prompt), HumanMessage(state.task)]
         return {"messages": [await model.ainvoke([*prompt, *state.messages])]}
@@ -96,7 +103,7 @@ async def make_graph():
     return builder.compile()
 ```
 
-- `uipath init` also calls the factory to build `entry-points.json`, so run `uipath auth` first: without credentials the bundles do not resolve, and the graph is built without the `tools` node. The chat model is built inside the node so that `init` itself needs no LLM credentials.
+- `uipath init` also calls the factory to build `entry-points.json`, so run `uipath auth` first: without credentials the bundles do not resolve, and the graph is built without the `tools` node. The chat model is built on the first agent step, not in the factory, so that `init` itself needs no LLM credentials.
 - When no bundle has a skill, `load_skill_tool()` returns `None`: the graph runs without the tool and without a `## Skills` section.
 
 The [skills-agent sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/skills-agent) is this graph with an output node that reports the skills the model loaded, plus a `skills/` folder, `bindings.json` and an override example to run it locally.
@@ -116,7 +123,7 @@ tools = [SKILLS.load_skill_tool()]  # lazy: nothing is fetched at import
 async def agent(state: MessagesState):
     await SKILLS.load()  # once per process; cached afterwards
     load_skill = SKILLS.load_skill_tool()
-    llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
+    llm = make_llm()  # the cached model from the factory example
     model = llm.bind_tools([load_skill]) if load_skill is not None else llm
     system = SystemMessage("\n\n".join(p for p in [BASE_PROMPT, SKILLS.prompt_section()] if p))
     return {"messages": [await model.ainvoke([system, *state["messages"]])]}
@@ -151,14 +158,16 @@ async def make_graph():
     workspace = Path("./workspace").resolve()
     backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
     await SKILLS.load(destination=workspace / "skills")
+    model = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
     return create_advanced_agent(
-        UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0"),
+        model,
         system_prompt=BASE_PROMPT + "\n\n" + autonomous_skills_directive(),
         backend=backend,
         middleware=SKILLS.advanced_middleware(backend),
     )
 ```
 
+- deepagents needs the model when the graph is built, so the model is created in the factory and `uipath init` needs LLM credentials too; building the model on the first step applies to the plain LangGraph patterns above only.
 - Pass the middleware, not `create_advanced_agent`'s `skills` argument; do not pass both.
 - The middleware applies to the main agent only. Subagents do not see the skills list; the prompt tells the main agent to put a skill's `SKILL.md` path in the task it delegates.
 - `destination` is emptied on every load; see [Files on disk](../core/skills.md#files-on-disk).

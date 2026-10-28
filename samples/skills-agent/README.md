@@ -23,9 +23,18 @@ The graph is an `agent` node and a `tools` node (`ToolNode` with `load_skill`) i
 {"answer": "...", "skills_used": ["ops/escalation-policy"]}
 ```
 
-`skills_used` lists the skills the model loaded with `load_skill`, as `<bundle>/<skill>`.
+`skills_used` lists the skills `load_skill` returned, as `<bundle>/<skill>`; a call that failed, such as one naming a skill that is not bound, is not counted.
 
 ## Requirements
+
+> **Before the release:** until the `uipath-platform`, `uipath` and `uipath-langchain` releases on PyPI ship skills, install your local checkouts in editable mode instead of running `uv sync`. `<uipath-python>` is a checkout of the UiPath Python SDK and `<uipath-langchain-python>` one of this repository:
+>
+> ```bash
+> uv venv -p 3.11 .venv
+> uv pip install -p .venv -e "<uipath-langchain-python>[bedrock]" -e <uipath-python>/packages/uipath -e <uipath-python>/packages/uipath-platform -e <uipath-python>/packages/uipath-core
+> ```
+>
+> Then skip `uv venv` and `uv sync` in the steps below and run the rest from the activated `.venv`.
 
 - Python 3.11+
 - A UiPath tenant you can sign in to with `uipath auth`
@@ -79,6 +88,12 @@ At deploy time a binding can be overridden per environment. To try one locally, 
 ```bash
 mkdir -p __uipath
 cp resource-overwrites.example.json __uipath/uipath.json
+```
+
+On Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force __uipath; Copy-Item resource-overwrites.example.json __uipath/uipath.json
 ```
 
 It pins `ops` to version 1 instead of `latest`. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. Change `"version"` to `"2"` to see a failure: the folder only holds version 1, so `ops` is reported as `version_not_found` on the span and the agent runs with the `finance` skills only. Delete `__uipath/uipath.json` to go back to the declared bindings.

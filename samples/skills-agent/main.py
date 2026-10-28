@@ -2,8 +2,15 @@
 
 from typing import Annotated
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.language_models import BaseChatModel, LanguageModelInput
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langchain_core.runnables import Runnable
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
@@ -55,14 +62,20 @@ def make_llm() -> BaseChatModel:
 
 
 def skills_used(messages: list[AnyMessage]) -> list[str]:
-    """Qualified names of the skills the model loaded, in first-load order."""
+    """Qualified names of the skills ``load_skill`` returned, in first-load order."""
+    requested: dict[str, str] = {}
     names: list[str] = []
     for message in messages:
-        if not isinstance(message, AIMessage):
-            continue
-        for call in message.tool_calls:
-            name = call["args"].get("name")
-            if call["name"] == "load_skill" and name and name not in names:
+        if isinstance(message, AIMessage):
+            for call in message.tool_calls:
+                if call["name"] == "load_skill" and call["id"]:
+                    requested[call["id"]] = str(call["args"].get("name", ""))
+        elif isinstance(message, ToolMessage) and message.tool_call_id in requested:
+            name = requested[message.tool_call_id]
+            loaded = message.status != "error" and not message.text.startswith(
+                "Unknown skill"
+            )
+            if loaded and name not in names:
                 names.append(name)
     return names
 
@@ -73,11 +86,15 @@ async def make_graph() -> CompiledStateGraph[GraphState, None, GraphInput, Graph
     load_skill = SKILLS.load_skill_tool()
     tools = [load_skill] if load_skill is not None else []
     system_prompt = "\n\n".join(p for p in [BASE_PROMPT, SKILLS.prompt_section()] if p)
+    model: Runnable[LanguageModelInput, AIMessage] | None = None
 
     async def agent(state: GraphState) -> dict[str, list[AnyMessage]]:
-        # Built here, not in the factory, so `uipath init` needs no credentials.
-        llm = make_llm()
-        model = llm.bind_tools(tools) if tools else llm
+        nonlocal model
+        if model is None:
+            # Built on the first step, not in the factory, so `uipath init`
+            # needs no LLM credentials.
+            llm = make_llm()
+            model = llm.bind_tools(tools) if tools else llm
         prompt = [SystemMessage(system_prompt), HumanMessage(state.task)]
         response = await model.ainvoke([*prompt, *state.messages])
         return {"messages": [response]}
