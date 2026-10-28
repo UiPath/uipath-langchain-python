@@ -103,6 +103,8 @@ class UiPathSkills:
         """The loop the in-flight resolution runs on; ``None`` for a sync one."""
         self._generation = 0
         """Bumped by ``cleanup``: a resolution claimed before it is not stored."""
+        self._uncached: list[SkillSet] = []
+        """Sets the same-loop ``load_sync`` fallback handed out; ``cleanup`` removes them."""
 
     @property
     def bundles(self) -> tuple[SkillBundleRef, ...]:
@@ -125,7 +127,9 @@ class UiPathSkills:
         ``source_unavailable``, so the agent does not retry on every turn.
         ``force=True`` resolves again (or joins a resolution in progress); the
         previous set's temp folder, if it owns one, is then removed, so a real
-        tool from ``load_skill_tool`` built for it stops working.
+        tool from ``load_skill_tool`` built for it stops working. When
+        ``cleanup`` runs during the resolution, the caller that ran it gets a
+        cleaned set (``root is None``) and nothing is cached.
 
         Args:
             destination: Overrides the constructor's ``destination``; applies
@@ -160,8 +164,8 @@ class UiPathSkills:
 
         Called on the event loop that is running ``load`` (blocking on it
         would deadlock), it resolves separately into a fresh temp folder and
-        returns that set uncached: the caller owns it and should call its
-        ``cleanup`` when done.
+        returns that set uncached. ``UiPathSkills.cleanup`` removes it too; a
+        caller done with it earlier may call the set's own ``cleanup``.
 
         Args:
             destination: Overrides the constructor's ``destination``; applies
@@ -178,7 +182,7 @@ class UiPathSkills:
     def _load_sync(
         self, destination: Path | None, force: bool
     ) -> tuple[SkillSet, bool]:
-        """``load_sync``, plus whether the set is the shared one (``False``: caller cleans up)."""
+        """``load_sync``, plus whether the set is the shared one (``False``: tracked in ``_uncached``)."""
         target = destination if destination is not None else self._destination
         try:
             loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
@@ -204,7 +208,10 @@ class UiPathSkills:
                     "load_sync called on the event loop that is running load(); "
                     "resolving the skill bundles separately"
                 )
-                return self._fetch_sync(None), False
+                separate = self._fetch_sync(None)
+                with self._lock:
+                    self._uncached.append(separate)
+                return separate, False
             waited = claim.future.result()
             if waited is not None:
                 return waited, True
@@ -291,17 +298,19 @@ class UiPathSkills:
     def cleanup(self) -> None:
         """Remove the set's temp folder, if it owns one, and forget the set.
 
-        A resolution in progress is not stored when it finishes: its set is
-        cleaned up and handed only to the ``load`` call that ran it; calls
-        waiting on it resolve again.
+        Also removes the uncached sets the same-loop ``load_sync`` fallback
+        handed out. A resolution in progress is not stored when it finishes:
+        its set is cleaned up and handed only to the ``load`` call that ran
+        it; calls waiting on it resolve again.
         """
         with self._lock:
             skill_set = self._skill_set
             self._skill_set = None
             self._tool = None
             self._generation += 1
-        if skill_set is not None:
-            skill_set.cleanup()
+            uncached, self._uncached = self._uncached, []
+        for stale in [*uncached, *([skill_set] if skill_set is not None else [])]:
+            stale.cleanup()
 
     def _claim(self, force: bool, loop: asyncio.AbstractEventLoop | None) -> _Claim:
         """Return the cached set, join the resolution in progress, or start one."""
@@ -327,25 +336,31 @@ class UiPathSkills:
         When ``cleanup`` ran since the claim (``generation`` moved), ``result``
         is cleaned up instead of stored and the waiters claim again.
         """
+        # Decide and store under one lock, so a ``cleanup`` cannot slip in
+        # between and be undone by the store.
+        previous: SkillSet | None = None
         with self._lock:
+            self._inflight = None
+            self._owner_loop = None
             stale = generation != self._generation
-            if stale:
-                self._inflight = None
-                self._owner_loop = None
+            if not stale:
+                previous = self._skill_set
+                self._skill_set = result
+                self._tool = None
         if stale:
             future.set_result(None)
             result.cleanup()
             return result
-        with self._lock:
-            previous = self._skill_set
-            self._skill_set = result
-            self._tool = None
-            self._inflight = None
-            self._owner_loop = None
         future.set_result(result)
         if previous is not None and previous is not result and previous.owns_root:
             previous.cleanup()
         return result
+
+    def _release_uncached(self, skill_set: SkillSet) -> None:
+        """Stop tracking a same-loop fallback set and remove its temp folder."""
+        with self._lock:
+            self._uncached = [s for s in self._uncached if s is not skill_set]
+        skill_set.cleanup()
 
     def _abandon(self, future: Future[SkillSet | None]) -> None:
         """Let the waiters of a cancelled resolution claim again."""
@@ -428,7 +443,7 @@ class UiPathSkills:
             finally:
                 if not shared:
                     # The separate same-loop resolution: nobody else holds it.
-                    skill_set.cleanup()
+                    self._release_uncached(skill_set)
 
         async def aload(name: str, path: str = _SKILL_MD) -> str:
             coroutine = self._tool_for(await self.load()).coroutine
