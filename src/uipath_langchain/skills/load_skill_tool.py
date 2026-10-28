@@ -31,6 +31,14 @@ def _render(bundle: SkillBundle, skill: Skill, path: str, text: str) -> str:
     return f"# {qualified} — {path}\n\n{text}"
 
 
+def _validate_tool_name(tool_name: str) -> None:
+    """Raise ``ValueError`` unless ``tool_name`` is 1-64 letters, digits, ``_`` or ``-``."""
+    if not _TOOL_NAME.fullmatch(tool_name):
+        raise ValueError(
+            f"tool_name must be 1-64 letters, digits, '_' or '-': {tool_name!r}"
+        )
+
+
 def _truncate(text: str) -> str:
     """``text`` cut to ``MAX_OUTPUT_CHARS``, with a note saying how much was left out."""
     if len(text) <= MAX_OUTPUT_CHARS:
@@ -65,10 +73,7 @@ def create_load_skill_tool(
     Raises:
         ValueError: ``tool_name`` is not 1-64 letters, digits, ``_`` or ``-``.
     """
-    if not _TOOL_NAME.fullmatch(tool_name):
-        raise ValueError(
-            f"tool_name must be 1-64 letters, digits, '_' or '-': {tool_name!r}"
-        )
+    _validate_tool_name(tool_name)
     names = skill_set.names()
     name_type: Any = (
         Literal[tuple(names)] if names and len(names) <= MAX_ENUM_NAMES else str
