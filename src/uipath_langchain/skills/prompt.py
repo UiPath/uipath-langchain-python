@@ -23,12 +23,8 @@ def skills_prompt_section(skill_set: SkillSet, *, tool_name: str = "load_skill")
     return (
         f"{base}\n\n"
         "**How to use a skill**\n\n"
-        f"1. When the task matches a skill's description, call `{tool_name}` with "
-        "its name and read the result before acting.\n"
-        f"2. A skill may reference supporting files; call `{tool_name}` with the "
-        "same name and the file `path` to read one.\n"
-        "3. Scripts inside a skill cannot be executed here; use their content as "
-        "reference only.\n"
-        "4. A skill may name tools you do not have; continue with the tools you "
-        "have and note what was missing."
+        f"1. When a skill matches the task, call `{tool_name}` with its name and "
+        "read the result before acting.\n"
+        "2. To read a supporting file the skill mentions, call "
+        f"`{tool_name}` with the same name and its `path`."
     )
