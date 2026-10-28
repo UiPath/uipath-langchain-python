@@ -1,6 +1,7 @@
 """Tests for ``UiPathSkills``."""
 
 import asyncio
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -441,3 +442,94 @@ async def test_failure_is_logged_with_the_traceback(
     [record] = caplog.records
     assert record.exc_info is not None
     assert isinstance(record.exc_info[1], RuntimeError)
+
+
+def _owned_copy(skill_set: SkillSet, root: Path) -> SkillSet:
+    """``skill_set`` copied into ``root``, which the copy owns (as a temp folder)."""
+    assert skill_set.root is not None
+    shutil.copytree(skill_set.root, root)
+    return skill_set.model_copy(update={"root": root, "owns_root": True})
+
+
+async def test_same_loop_load_sync_resolves_into_a_fresh_temp_folder(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        started.set()
+        await release.wait()
+        return skill_set
+
+    sdk = _sdk(skill_set)
+    sdk.skills.load_all_async = AsyncMock(side_effect=slow)
+    shared = tmp_path / "shared"
+    skills = UiPathSkills(REFS, uipath_sdk=sdk, destination=shared)
+    task = asyncio.create_task(skills.load())
+    await started.wait()
+    skills.load_sync()
+    # Never the folder the in-flight owner is writing.
+    sdk.skills.load_all.assert_called_once_with(REFS, destination=None)
+    release.set()
+    assert await task is skill_set
+    sdk.skills.load_all_async.assert_awaited_once_with(REFS, destination=shared)
+
+
+async def test_lazy_tool_cleans_up_the_uncached_same_loop_set(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        started.set()
+        await release.wait()
+        return skill_set
+
+    separate = _owned_copy(skill_set, tmp_path / "separate")
+    sdk = _sdk(separate)
+    sdk.skills.load_all_async = AsyncMock(side_effect=slow)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    tool = skills.load_skill_tool()
+    assert tool is not None
+    task = asyncio.create_task(skills.load())
+    await started.wait()
+    out = tool.invoke({"name": "ops/vendor-lookup"})
+    assert out.startswith("# ops/vendor-lookup")
+    sdk.skills.load_all.assert_called_once()
+    assert not (tmp_path / "separate").exists()
+    assert separate.root is None
+    release.set()
+    assert await task is skill_set
+    assert skills.skill_set is skill_set
+    assert skill_set.root is not None and skill_set.root.exists()
+
+
+async def test_cleanup_during_a_resolution_discards_its_result(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    result = _owned_copy(skill_set, tmp_path / "owned")
+
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        started.set()
+        await release.wait()
+        return result
+
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=slow)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    task = asyncio.create_task(skills.load())
+    await started.wait()
+    skills.cleanup()
+    release.set()
+    assert await task is result
+    assert skills.skill_set is None
+    assert not (tmp_path / "owned").exists()
+    assert result.root is None
+    # The next load resolves again and is cached as usual.
+    sdk.skills.load_all_async = AsyncMock(return_value=skill_set)
+    assert await skills.load() is skill_set
+    assert skills.skill_set is skill_set

@@ -34,6 +34,8 @@ class _Claim(NamedTuple):
     future: Future[SkillSet | None] | None
     owner: bool
     owner_loop: asyncio.AbstractEventLoop | None
+    generation: int
+    """``UiPathSkills._generation`` at claim time; ``cleanup`` moves it on."""
 
 
 class UiPathSkills:
@@ -99,6 +101,8 @@ class UiPathSkills:
         """The resolution in progress; its result is ``None`` when it was abandoned."""
         self._owner_loop: asyncio.AbstractEventLoop | None = None
         """The loop the in-flight resolution runs on; ``None`` for a sync one."""
+        self._generation = 0
+        """Bumped by ``cleanup``: a resolution claimed before it is not stored."""
 
     @property
     def bundles(self) -> tuple[SkillBundleRef, ...]:
@@ -143,7 +147,7 @@ class UiPathSkills:
                 except BaseException:
                     self._abandon(claim.future)
                     raise
-                return self._finish(claim.future, result)
+                return self._finish(claim.future, result, claim.generation)
             waited = await asyncio.wrap_future(claim.future)
             if waited is not None:
                 return waited
@@ -154,15 +158,27 @@ class UiPathSkills:
     ) -> SkillSet:
         """``load`` for sync code; safe to call from inside a running event loop.
 
+        Called on the event loop that is running ``load`` (blocking on it
+        would deadlock), it resolves separately into a fresh temp folder and
+        returns that set uncached: the caller owns it and should call its
+        ``cleanup`` when done.
+
         Args:
             destination: Overrides the constructor's ``destination``; applies
-                only when this call actually runs a resolution.
+                only when this call actually runs a shared resolution.
             force: Resolve again even when a set is cached.
 
         Returns:
-            The resolved set, cached and shared like ``load``'s; never raises
-            except on ``KeyboardInterrupt`` and the like.
+            The resolved set, cached and shared like ``load``'s except in the
+            case above; never raises except on ``KeyboardInterrupt`` and the
+            like.
         """
+        return self._load_sync(destination, force)[0]
+
+    def _load_sync(
+        self, destination: Path | None, force: bool
+    ) -> tuple[SkillSet, bool]:
+        """``load_sync``, plus whether the set is the shared one (``False``: caller cleans up)."""
         target = destination if destination is not None else self._destination
         try:
             loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
@@ -171,7 +187,7 @@ class UiPathSkills:
         while True:
             claim = self._claim(force, None)
             if claim.cached is not None:
-                return claim.cached
+                return claim.cached, True
             assert claim.future is not None
             if claim.owner:
                 try:
@@ -179,18 +195,19 @@ class UiPathSkills:
                 except BaseException:
                     self._abandon(claim.future)
                     raise
-                return self._finish(claim.future, result)
+                return self._finish(claim.future, result, claim.generation), True
             if loop is not None and claim.owner_loop is loop:
                 # The resolution in progress runs on this thread's loop, which
-                # blocking here would starve: resolve separately, uncached.
+                # blocking here would starve: resolve separately, uncached, into
+                # a fresh temp folder so the owner's folder is never emptied.
                 logger.warning(
                     "load_sync called on the event loop that is running load(); "
                     "resolving the skill bundles separately"
                 )
-                return self._fetch_sync(target)
+                return self._fetch_sync(None), False
             waited = claim.future.result()
             if waited is not None:
-                return waited
+                return waited, True
 
     def prompt_section(self) -> str:
         """The ``## Skills`` system-prompt section; ``""`` before ``load`` or with no skills."""
@@ -272,31 +289,53 @@ class UiPathSkills:
         ]
 
     def cleanup(self) -> None:
-        """Remove the set's temp folder, if it owns one, and forget the set."""
+        """Remove the set's temp folder, if it owns one, and forget the set.
+
+        A resolution in progress is not stored when it finishes: its set is
+        cleaned up and handed only to the ``load`` call that ran it; calls
+        waiting on it resolve again.
+        """
         with self._lock:
             skill_set = self._skill_set
             self._skill_set = None
             self._tool = None
+            self._generation += 1
         if skill_set is not None:
             skill_set.cleanup()
 
     def _claim(self, force: bool, loop: asyncio.AbstractEventLoop | None) -> _Claim:
         """Return the cached set, join the resolution in progress, or start one."""
         with self._lock:
+            generation = self._generation
             if self._inflight is not None:
-                return _Claim(None, self._inflight, False, self._owner_loop)
+                return _Claim(None, self._inflight, False, self._owner_loop, generation)
             if self._skill_set is not None and not force:
-                return _Claim(self._skill_set, None, False, None)
+                return _Claim(self._skill_set, None, False, None, generation)
             future: Future[SkillSet | None] = Future()
             # A running future cannot be cancelled, so a waiter whose
             # ``wrap_future`` is cancelled does not cancel it for the others.
             future.set_running_or_notify_cancel()
             self._inflight = future
             self._owner_loop = loop
-            return _Claim(None, future, True, loop)
+            return _Claim(None, future, True, loop, generation)
 
-    def _finish(self, future: Future[SkillSet | None], result: SkillSet) -> SkillSet:
-        """Store ``result``, release the waiters and remove the replaced set's temp folder."""
+    def _finish(
+        self, future: Future[SkillSet | None], result: SkillSet, generation: int
+    ) -> SkillSet:
+        """Store ``result``, release the waiters and remove the replaced set's temp folder.
+
+        When ``cleanup`` ran since the claim (``generation`` moved), ``result``
+        is cleaned up instead of stored and the waiters claim again.
+        """
+        with self._lock:
+            stale = generation != self._generation
+            if stale:
+                self._inflight = None
+                self._owner_loop = None
+        if stale:
+            future.set_result(None)
+            result.cleanup()
+            return result
         with self._lock:
             previous = self._skill_set
             self._skill_set = result
@@ -381,9 +420,15 @@ class UiPathSkills:
         template = create_load_skill_tool(self._empty_set(), tool_name=self._tool_name)
 
         def load(name: str, path: str = _SKILL_MD) -> str:
-            func = self._tool_for(self.load_sync()).func
-            assert func is not None
-            return func(name, path)
+            skill_set, shared = self._load_sync(None, False)
+            try:
+                func = self._tool_for(skill_set).func
+                assert func is not None
+                return func(name, path)
+            finally:
+                if not shared:
+                    # The separate same-loop resolution: nobody else holds it.
+                    skill_set.cleanup()
 
         async def aload(name: str, path: str = _SKILL_MD) -> str:
             coroutine = self._tool_for(await self.load()).coroutine
