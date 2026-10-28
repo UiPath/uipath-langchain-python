@@ -15,6 +15,11 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 from pydantic import Field
+from uipath.platform.common import (
+    ResourceOverwrite,
+    ResourceOverwriteParser,
+    ResourceOverwritesContext,
+)
 
 SAMPLE = Path(__file__).parents[2] / "samples" / "skills-agent"
 TASK = "Supplier Acme's invoice INV-1042 is 45 days overdue. What should I do?"
@@ -26,6 +31,8 @@ class _ScriptedModel(GenericFakeChatModel):
 
     prompts: list[list[BaseMessage]] = Field(default_factory=list)
     bound: list[str] = Field(default_factory=list)
+    built: int = 0
+    """How many times the sample's ``make_llm`` returned this model."""
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "_ScriptedModel":
         self.bound = [tool.name for tool in tools]
@@ -70,8 +77,32 @@ def _script(
     monkeypatch: pytest.MonkeyPatch, sample: ModuleType, replies: list[AIMessage]
 ) -> _ScriptedModel:
     model = _ScriptedModel(messages=iter(replies))
-    monkeypatch.setattr(sample, "make_llm", lambda: model)
+
+    def make_llm() -> _ScriptedModel:
+        model.built += 1
+        return model
+
+    monkeypatch.setattr(sample, "make_llm", make_llm)
     return model
+
+
+def _load(*names: str) -> AIMessage:
+    """A model turn that calls ``load_skill`` once per name."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "load_skill", "args": {"name": name}, "id": f"call-{i}"}
+            for i, name in enumerate(names)
+        ],
+    )
+
+
+def _skill_loads(exporter: InMemorySpanExporter) -> list[str]:
+    return [
+        s.name
+        for s in exporter.get_finished_spans()
+        if s.name.startswith("Skill load - ")
+    ]
 
 
 async def test_sample_loads_a_skill_and_reports_it(
@@ -79,19 +110,16 @@ async def test_sample_loads_a_skill_and_reports_it(
     sample: ModuleType,
     exporter: InMemorySpanExporter,
 ) -> None:
-    load = AIMessage(
-        content="",
-        tool_calls=[
-            {"name": "load_skill", "args": {"name": "ops/escalation-policy"}, "id": "1"}
-        ],
-    )
-    model = _script(monkeypatch, sample, [load, AIMessage(content=ANSWER)])
+    replies = [_load("ops/escalation-policy"), AIMessage(content=ANSWER)]
+    model = _script(monkeypatch, sample, replies)
 
     graph = await sample.make_graph()
     assert set(graph.nodes) >= {"agent", "tools", "finish"}
+    assert model.built == 0
     output = await graph.ainvoke({"task": TASK})
 
     assert output == {"answer": ANSWER, "skills_used": ["ops/escalation-policy"]}
+    assert model.built == 1
     assert model.bound == ["load_skill"]
     system = model.prompts[0][0]
     assert isinstance(system, SystemMessage)
@@ -100,12 +128,86 @@ async def test_sample_loads_a_skill_and_reports_it(
     tool_result = model.prompts[1][-1]
     assert isinstance(tool_result, ToolMessage)
     assert tool_result.text.startswith("# ops/escalation-policy (bundle ops v1)")
-    loads = [
-        s.name
-        for s in exporter.get_finished_spans()
-        if s.name.startswith("Skill load - ")
+    assert _skill_loads(exporter) == ["Skill load - ops/escalation-policy"]
+
+
+async def test_sample_does_not_count_a_failed_load(
+    monkeypatch: pytest.MonkeyPatch,
+    sample: ModuleType,
+    exporter: InMemorySpanExporter,
+) -> None:
+    replies = [
+        _load("ops/no-such-skill"),
+        _load("ops/escalation-policy"),
+        AIMessage(content=ANSWER),
     ]
-    assert loads == ["Skill load - ops/escalation-policy"]
+    model = _script(monkeypatch, sample, replies)
+
+    output = await (await sample.make_graph()).ainvoke({"task": TASK})
+
+    assert output["skills_used"] == ["ops/escalation-policy"]
+    rejected = model.prompts[1][-1]
+    assert isinstance(rejected, ToolMessage) and rejected.status == "error"
+    assert _skill_loads(exporter) == ["Skill load - ops/escalation-policy"]
+    assert model.built == 1
+
+
+def test_skills_used_skips_an_unknown_skill_answer(sample: ModuleType) -> None:
+    # The lazy tool takes any string and answers an unknown name with text.
+    messages = [
+        _load("ops/nope", "finance/vendor-lookup"),
+        ToolMessage("Unknown skill 'ops/nope'. Available: ...", tool_call_id="call-0"),
+        ToolMessage(
+            "# finance/vendor-lookup (bundle finance v3)", tool_call_id="call-1"
+        ),
+    ]
+    assert sample.skills_used(messages) == ["finance/vendor-lookup"]
+
+
+async def test_sample_reads_bundles_through_the_mock_skills_api(
+    monkeypatch: pytest.MonkeyPatch,
+    sample: ModuleType,
+    exporter: InMemorySpanExporter,
+) -> None:
+    monkeypatch.setenv("UIPATH_SKILLS_SOURCE", "mock")
+    monkeypatch.setenv("UIPATH_SKILLS_MOCK_ROOT", str(SAMPLE / "skills"))
+    replies = [_load("ops/escalation-policy"), AIMessage(content=ANSWER)]
+    _script(monkeypatch, sample, replies)
+
+    output = await (await sample.make_graph()).ainvoke({"task": TASK})
+
+    assert output == {"answer": ANSWER, "skills_used": ["ops/escalation-policy"]}
+    skill_set = sample.SKILLS.skill_set
+    assert skill_set.source == "mock"
+    assert {b.ref.name: b.version for b in skill_set.bundles} == {
+        "finance": "3",
+        "ops": "1",
+    }
+    assert _skill_loads(exporter) == ["Skill load - ops/escalation-policy"]
+
+
+async def test_sample_applies_a_binding_override(
+    monkeypatch: pytest.MonkeyPatch, sample: ModuleType
+) -> None:
+    monkeypatch.setenv("UIPATH_SKILLS_SOURCE", "mock")
+    monkeypatch.setenv("UIPATH_SKILLS_MOCK_ROOT", str(SAMPLE / "skills"))
+    _script(monkeypatch, sample, [])
+
+    async def overwrites() -> dict[str, ResourceOverwrite]:
+        key = "skillBundle.ops"
+        value = {"versionMode": "pinned", "version": "2"}
+        return {key: ResourceOverwriteParser.parse(key, value)}
+
+    async with ResourceOverwritesContext(overwrites):
+        await sample.make_graph()
+
+    skill_set = sample.SKILLS.skill_set
+    assert [b.ref.name for b in skill_set.bundles] == ["finance"]
+    assert [(f.ref.name, f.reason) for f in skill_set.failures] == [
+        ("ops", "version_not_found")
+    ]
+    assert "finance/invoice-triage" in sample.SKILLS.prompt_section()
+    assert "ops/" not in sample.SKILLS.prompt_section()
 
 
 async def test_sample_runs_without_tools_when_no_bundle_resolves(
