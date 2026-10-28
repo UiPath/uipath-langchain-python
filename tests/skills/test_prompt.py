@@ -1,5 +1,7 @@
 """Tests for the skills prompt section."""
 
+import re
+
 from uipath.platform.skills import SkillSet
 
 from uipath_langchain.skills import skills_prompt_section
@@ -22,7 +24,9 @@ def test_prompt_section_wraps_the_sdk_section(skill_set: SkillSet) -> None:
 def test_prompt_section_does_not_repeat_the_sdk_rules(skill_set: SkillSet) -> None:
     text = skills_prompt_section(skill_set, tool_name="load_skill")
     assert text.count("cannot be executed") == 1
-    assert "3. " not in text
+    rules = text.split("**How to use a skill**", 1)[1]
+    numbered = [line for line in rules.splitlines() if re.match(r"\d+\. ", line)]
+    assert [line[:3] for line in numbered] == ["1. ", "2. "]
 
 
 def test_prompt_section_uses_the_tool_name(skill_set: SkillSet) -> None:

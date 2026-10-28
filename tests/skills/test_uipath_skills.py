@@ -1,6 +1,9 @@
 """Tests for ``UiPathSkills``."""
 
 import asyncio
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,6 +24,22 @@ def _sdk(result: SkillSet | None = None) -> MagicMock:
     sdk.skills.load_all_async = AsyncMock(return_value=result)
     sdk.skills.load_all = MagicMock(return_value=result)
     return sdk
+
+
+def _slow_sync(result: SkillSet) -> MagicMock:
+    def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        time.sleep(0.05)
+        return result
+
+    return MagicMock(side_effect=slow)
+
+
+def _slow_async(result: SkillSet) -> AsyncMock:
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        await asyncio.sleep(0.05)
+        return result
+
+    return AsyncMock(side_effect=slow)
 
 
 def _schema(tool: StructuredTool) -> dict[str, Any]:
@@ -118,8 +137,8 @@ def test_lazy_tool_sync_call_without_a_running_loop(skill_set: SkillSet) -> None
         {"name": "finance/invoice-triage", "path": "reference/vendors.md"}
     )
     assert out.startswith("# finance/invoice-triage — reference/vendors.md")
-    sdk.skills.load_all_async.assert_awaited_once()
-    sdk.skills.load_all.assert_not_called()
+    sdk.skills.load_all.assert_called_once()
+    sdk.skills.load_all_async.assert_not_awaited()
 
 
 async def test_lazy_tool_sync_call_inside_a_running_loop_uses_load_all(
@@ -240,3 +259,185 @@ def test_load_sync_never_raises() -> None:
     sdk.skills.load_all = MagicMock(side_effect=OSError("disk"))
     result = UiPathSkills(REFS, uipath_sdk=sdk).load_sync()
     assert {f.reason for f in result.failures} == {"source_unavailable"}
+
+
+def test_bundles_are_the_declared_refs() -> None:
+    skills = UiPathSkills(REFS)
+    assert skills.bundles == tuple(REFS)
+
+
+def test_load_sync_passes_destination_when_forced(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    sdk = _sdk(skill_set)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk, destination=tmp_path / "a")
+    skills.load_sync()
+    sdk.skills.load_all.assert_called_with(REFS, destination=tmp_path / "a")
+    skills.load_sync(destination=tmp_path / "b")
+    assert sdk.skills.load_all.call_count == 1  # cached: destination unused
+    skills.load_sync(destination=tmp_path / "b", force=True)
+    sdk.skills.load_all.assert_called_with(REFS, destination=tmp_path / "b")
+
+
+def test_two_threads_invoking_the_lazy_tool_resolve_once(skill_set: SkillSet) -> None:
+    sdk = _sdk()
+    sdk.skills.load_all = _slow_sync(skill_set)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    tool = skills.load_skill_tool()
+    assert tool is not None
+    barrier = threading.Barrier(2)
+
+    def call(_: int) -> str:
+        barrier.wait()
+        return tool.invoke({"name": "ops/vendor-lookup"})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outs = list(pool.map(call, range(2)))
+    assert all(out.startswith("# ops/vendor-lookup") for out in outs)
+    assert sdk.skills.load_all.call_count == 1
+
+
+def test_load_and_load_sync_in_two_threads_resolve_once(skill_set: SkillSet) -> None:
+    sdk = _sdk()
+    sdk.skills.load_all = _slow_sync(skill_set)
+    sdk.skills.load_all_async = _slow_async(skill_set)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    barrier = threading.Barrier(2)
+
+    def run_async() -> SkillSet:
+        barrier.wait()
+        return asyncio.run(skills.load())
+
+    def run_sync() -> SkillSet:
+        barrier.wait()
+        return skills.load_sync()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [pool.submit(run_async), pool.submit(run_sync)]
+        assert all(r.result() is skill_set for r in results)
+    assert sdk.skills.load_all.call_count + sdk.skills.load_all_async.await_count == 1
+
+
+async def test_load_sync_on_the_loop_running_load_resolves_separately(
+    skill_set: SkillSet,
+) -> None:
+    started = asyncio.Event()
+
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        started.set()
+        await asyncio.sleep(0.05)
+        return skill_set
+
+    sdk = _sdk(skill_set)
+    sdk.skills.load_all_async = AsyncMock(side_effect=slow)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    task = asyncio.create_task(skills.load())
+    await started.wait()
+    # Blocking on the in-flight load() here would deadlock this loop.
+    assert skills.load_sync() is skill_set
+    sdk.skills.load_all.assert_called_once()
+    assert await task is skill_set
+
+
+async def test_cancelled_owner_lets_a_waiter_resolve(skill_set: SkillSet) -> None:
+    started = asyncio.Event()
+    calls: list[int] = []
+
+    async def side(*args: Any, **kwargs: Any) -> SkillSet:
+        calls.append(1)
+        if len(calls) == 1:
+            started.set()
+            await asyncio.sleep(10)
+        return skill_set
+
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=side)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    owner = asyncio.create_task(skills.load())
+    await started.wait()
+    waiter = asyncio.create_task(skills.load())
+    await asyncio.sleep(0)
+    owner.cancel()
+    assert await waiter is skill_set
+    assert len(calls) == 2
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+
+
+async def test_force_reload_removes_the_old_owned_temp_root(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    old_root = tmp_path / "old"
+    old_root.mkdir()
+    (old_root / "marker").write_text("x")
+    old = skill_set.model_copy(update={"root": old_root, "owns_root": True})
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=[old, skill_set])
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    await skills.load()
+    old_tool = skills.load_skill_tool()
+    assert old_tool is not None
+    assert await skills.load(force=True) is skill_set
+    assert not old_root.exists()
+    assert old.root is None
+    new_tool = skills.load_skill_tool()
+    assert new_tool is not None and new_tool is not old_tool
+    out = await new_tool.ainvoke({"name": "ops/vendor-lookup"})
+    assert out.startswith("# ops/vendor-lookup")
+    stale = await old_tool.ainvoke({"name": "ops/vendor-lookup"})
+    assert stale.startswith("Skill 'ops/vendor-lookup' is not available any more")
+
+
+async def test_force_reload_keeps_a_root_the_old_set_does_not_own(
+    skill_set: SkillSet,
+) -> None:
+    old = skill_set.model_copy()
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=[old, skill_set])
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    await skills.load()
+    await skills.load(force=True)
+    assert old.root is not None and old.root.exists()
+
+
+async def test_lazy_tool_follows_a_forced_reload(
+    skill_set: SkillSet, empty_skill_set: SkillSet
+) -> None:
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=[empty_skill_set, skill_set])
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    lazy = skills.load_skill_tool()
+    assert lazy is not None
+    before = await lazy.ainvoke({"name": "ops/vendor-lookup"})
+    assert before == "Unknown skill 'ops/vendor-lookup'. Available: none"
+    await skills.load(force=True)
+    after = await lazy.ainvoke({"name": "ops/vendor-lookup"})
+    assert after.startswith("# ops/vendor-lookup (bundle ops v1)")
+
+
+async def test_lazy_tool_resolves_again_after_cleanup(skill_set: SkillSet) -> None:
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(
+        side_effect=lambda *args, **kwargs: skill_set.model_copy()
+    )
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    lazy = skills.load_skill_tool()
+    assert lazy is not None
+    await lazy.ainvoke({"name": "ops/vendor-lookup"})
+    skills.cleanup()
+    assert skills.skill_set is None
+    out = await lazy.ainvoke({"name": "ops/vendor-lookup"})
+    assert out.startswith("# ops/vendor-lookup (bundle ops v1)")
+    assert sdk.skills.load_all_async.await_count == 2
+
+
+async def test_failure_is_logged_with_the_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=RuntimeError("boom"))
+    with caplog.at_level("WARNING", logger="uipath_langchain.skills.uipath_skills"):
+        await UiPathSkills(REFS, uipath_sdk=sdk).load()
+    [record] = caplog.records
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], RuntimeError)
