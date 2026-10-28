@@ -66,6 +66,7 @@ from .job_attachments_middleware import (
     JobAttachmentsMiddleware,
     dump_attachments,
 )
+from .page_budget_middleware import PageBudgetMiddleware
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -541,6 +542,7 @@ def create_advanced_agent(
         ToolErrorMiddleware(_tool_error_content),
         _PayloadHandlerMiddleware(),
         JobAttachmentsMiddleware(),
+        PageBudgetMiddleware(),
     ]
     main_budget, subagent_budget = _iteration_budget_middleware(
         max_iterations, initial_message_count_key
