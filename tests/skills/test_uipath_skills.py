@@ -586,17 +586,17 @@ async def test_cleanup_right_after_the_finish_decision_is_not_lost(
     skill_set: SkillSet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     result = _owned_copy(skill_set, tmp_path / "owned")
-    skills = UiPathSkills(REFS, uipath_sdk=_sdk())
-    lock = _HookLock(skills.cleanup)
-    monkeypatch.setattr(skills, "_lock", lock)
 
     async def arm_then_return(*args: Any, **kwargs: Any) -> SkillSet:
         # The next lock release is the first one inside _finish.
         lock.armed = True
         return result
 
-    assert skills._sdk is not None
-    skills._sdk.skills.load_all_async = AsyncMock(side_effect=arm_then_return)
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=arm_then_return)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    lock = _HookLock(skills.cleanup)
+    monkeypatch.setattr(skills, "_lock", lock)
     assert await skills.load() is result
     assert skills.skill_set is None
     assert not (tmp_path / "owned").exists()
