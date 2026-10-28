@@ -8,7 +8,7 @@ import threading
 from collections.abc import Sequence
 from concurrent.futures import Future
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.tools import StructuredTool
 from uipath.platform import UiPath
@@ -16,6 +16,10 @@ from uipath.platform.skills import BundleFailure, SkillBundleRef, SkillSet
 
 from .load_skill_tool import _SKILL_MD, _validate_tool_name, create_load_skill_tool
 from .prompt import skills_prompt_section
+
+if TYPE_CHECKING:
+    from deepagents.backends import BackendProtocol
+    from langchain.agents.middleware import AgentMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +215,61 @@ class UiPathSkills:
         if not skill_set.names():
             return None
         return self._tool_for(skill_set)
+
+    def advanced_middleware(
+        self, backend: BackendProtocol
+    ) -> list[AgentMiddleware[Any, Any]]:
+        """The skills middleware for an advanced (deepagents) agent.
+
+        Load with ``destination=<workspace>/skills``, where ``<workspace>`` is
+        the backend's root, so the files live in the backend's filesystem at
+        ``/skills/<bundle>/<skill>/``::
+
+            backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
+            await skills.load(destination=workspace / "skills")
+            agent = create_advanced_agent(
+                model, middleware=skills.advanced_middleware(backend), backend=backend
+            )
+
+        The model reads skills with ``read_file``; pass ``middleware`` here
+        instead of ``create_advanced_agent``'s ``skills`` argument.
+
+        Args:
+            backend: The workspace backend whose ``/skills`` folder holds the set.
+
+        Returns:
+            ``[UiPathSkillsMiddleware, SkillLoadTraceMiddleware]``, or ``[]``
+            when no bundle has a skill.
+
+        Raises:
+            RuntimeError: ``load`` has not run, or the set's folder is gone
+                (``cleanup`` ran).
+        """
+        skill_set = self._skill_set
+        if skill_set is None:
+            raise RuntimeError(
+                "call await skills.load(destination=<workspace>/skills) first"
+            )
+        if not skill_set.names():
+            return []
+        if skill_set.root is None:
+            raise RuntimeError(
+                "the skill set has no folder (cleaned up); call "
+                "await skills.load(destination=<workspace>/skills, force=True)"
+            )
+        if skill_set.root.name != "skills":
+            logger.warning(
+                "Skill bundles were loaded into %s; an advanced agent reads them "
+                "at /skills/<bundle>/<skill>/, so load with "
+                "destination=<workspace>/skills",
+                skill_set.root,
+            )
+        from .middleware import SkillLoadTraceMiddleware, create_skills_middleware
+
+        return [
+            create_skills_middleware(backend, skill_set),
+            SkillLoadTraceMiddleware(skill_set),
+        ]
 
     def cleanup(self) -> None:
         """Remove the set's temp folder, if it owns one, and forget the set."""

@@ -1,4 +1,9 @@
-"""Prompt text for skills in a coded LangGraph agent."""
+"""Prompt text for skills in a coded LangGraph agent.
+
+``skills_prompt_section`` goes with the ``load_skill`` tool.
+``UIPATH_SKILLS_PROMPT`` is the ``SkillsMiddleware`` template for an advanced
+(deepagents) agent that reads skills with ``read_file``.
+"""
 
 from __future__ import annotations
 
@@ -28,3 +33,52 @@ def skills_prompt_section(skill_set: SkillSet, *, tool_name: str = "load_skill")
         "2. To read a supporting file the skill mentions, call "
         f"`{tool_name}` with the same name and its `path`."
     )
+
+
+UIPATH_SKILLS_PROMPT = """## Skills
+
+Skills are packaged instructions bound to this agent, grouped in bundles. Each skill below is \
+named `<bundle>/<skill>` and lists what it does and when to use it; its full instructions live \
+in a `SKILL.md` file you read on demand. Skills with the same name in different bundles are \
+different skills; pick by description.
+
+{skills_locations}{skills_load_warnings}
+
+**Available skills**
+
+{skills_list}
+
+**How to use a skill**
+
+1. When the task matches a skill's description, read its instructions first: \
+`read_file(file_path="<the SKILL.md path above>", limit=1000)`.
+2. Follow them step by step. A skill may reference supporting files in its folder; read those \
+with `read_file`. Paths inside a skill are relative to its folder: a reference to \
+`references/x.md` in `/skills/<bundle>/<skill>/SKILL.md` means \
+`/skills/<bundle>/<skill>/references/x.md`.
+3. Scripts inside a skill are reference material; do not run them unless your tools explicitly \
+support it and the task requires it.
+4. A skill may mention tools by name. If a named tool is missing, continue with the tools you \
+have and note in your answer what was missing.
+5. Skill folders are read-only. Write your own work elsewhere in the filesystem.
+6. Subagents you delegate to do not see this list. When a delegated task is covered by a skill, \
+put that skill's SKILL.md path in the task instructions so the subagent reads it first."""
+"""``SkillsMiddleware`` system-prompt template; deepagents fills the three ``{...}`` slots."""
+
+_AUTONOMOUS_SKILLS_DIRECTIVE = """\
+**Skills without a human in the loop**
+You run autonomously; no one can answer a question or approve a step. When a skill asks you to \
+choose something (for example a framework, a folder, or a name), pick the default the skill \
+implies and continue. When a skill requires the user's approval before a step, or a command \
+would delete, disable, overwrite, or stop something that already exists in the tenant, do not \
+run it: stop and report which step you skipped and why. Do not reach the same effect another \
+way."""
+
+
+def autonomous_skills_directive() -> str:
+    """Skills guidance for an autonomous agent (a conversational agent can ask the user).
+
+    Returns:
+        The directive text to append to an autonomous agent's system prompt.
+    """
+    return _AUTONOMOUS_SKILLS_DIRECTIVE
