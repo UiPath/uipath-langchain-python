@@ -48,6 +48,8 @@ def exporter(monkeypatch: pytest.MonkeyPatch) -> InMemorySpanExporter:
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    # The global tracer provider can be set only once per process, so swap the
+    # SDK module-level tracer instead of installing a provider.
     monkeypatch.setattr(
         "uipath.platform.skills._telemetry._tracer", provider.get_tracer("test")
     )
