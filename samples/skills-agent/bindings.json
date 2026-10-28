@@ -1,0 +1,26 @@
+{
+  "version": "2.0",
+  "resources": [
+    {
+      "resource": "skillBundle",
+      "key": "finance.Shared/Skills",
+      "value": {
+        "name": { "defaultValue": "finance", "isExpression": false, "displayName": "Name" },
+        "folderPath": { "defaultValue": "Shared/Skills", "isExpression": false, "displayName": "Folder Path" },
+        "versionMode": { "defaultValue": "pinned", "isExpression": false, "displayName": "Version Mode" },
+        "version": { "defaultValue": "3", "isExpression": false, "displayName": "Version" }
+      },
+      "metadata": { "ActivityName": "load_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName" }
+    },
+    {
+      "resource": "skillBundle",
+      "key": "ops.Shared/Skills",
+      "value": {
+        "name": { "defaultValue": "ops", "isExpression": false, "displayName": "Name" },
+        "folderPath": { "defaultValue": "Shared/Skills", "isExpression": false, "displayName": "Folder Path" },
+        "versionMode": { "defaultValue": "latest", "isExpression": false, "displayName": "Version Mode" }
+      },
+      "metadata": { "ActivityName": "load_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName" }
+    }
+  ]
+}
