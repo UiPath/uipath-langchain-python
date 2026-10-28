@@ -6,7 +6,9 @@ import asyncio
 import logging
 import threading
 from collections.abc import Sequence
+from concurrent.futures import Future
 from pathlib import Path
+from typing import NamedTuple
 
 from langchain_core.tools import StructuredTool
 from uipath.platform import UiPath
@@ -19,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 _NO_SOURCE = "none"
 """``SkillSet.source`` when no source was consulted: no bundles, or the SDK failed."""
+
+
+class _Claim(NamedTuple):
+    """What a ``load`` caller does next: return ``cached``, or resolve / wait on ``future``."""
+
+    cached: SkillSet | None
+    future: Future[SkillSet | None] | None
+    owner: bool
+    owner_loop: asyncio.AbstractEventLoop | None
 
 
 class UiPathSkills:
@@ -38,6 +49,15 @@ class UiPathSkills:
     Nothing here needs credentials until ``load`` runs, so importing the agent
     module is cheap. ``load`` never raises for a bundle or a platform error:
     those land in ``SkillSet.failures`` and the agent runs without the skill.
+    Concurrent first calls, from any mix of threads, event loops, ``load`` and
+    ``load_sync``, share one resolution.
+
+    The set lives in this process only: a job resumed in a new process
+    resolves the bundles again, so a ``latest`` bundle may come back newer.
+
+    A real tool from ``load_skill_tool`` (after ``load``) is bound to the set
+    it was built for and stops working after ``load(force=True)`` or
+    ``cleanup``; the lazy tool (before ``load``) always follows the current set.
     """
 
     def __init__(
@@ -62,15 +82,24 @@ class UiPathSkills:
             ValueError: ``tool_name`` is not 1-64 letters, digits, ``_`` or ``-``.
         """
         _validate_tool_name(tool_name)
-        self._bundles = list(bundles)
+        self._bundles = tuple(bundles)
         self._sdk = uipath_sdk
         self._destination = destination
         self._tool_name = tool_name
+        self._lock = threading.Lock()
+        """Guards the SDK and every field below."""
         self._skill_set: SkillSet | None = None
-        self._tool: StructuredTool | None = None
-        self._lock: asyncio.Lock | None = None
-        self._lock_loop: asyncio.AbstractEventLoop | None = None
-        self._sync_lock = threading.Lock()
+        self._tool: tuple[SkillSet, StructuredTool] | None = None
+        """The real tool and the set it was built for."""
+        self._inflight: Future[SkillSet | None] | None = None
+        """The resolution in progress; its result is ``None`` when it was abandoned."""
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        """The loop the in-flight resolution runs on; ``None`` for a sync one."""
+
+    @property
+    def bundles(self) -> tuple[SkillBundleRef, ...]:
+        """The declared bundle references."""
+        return self._bundles
 
     @property
     def skill_set(self) -> SkillSet | None:
@@ -86,30 +115,35 @@ class UiPathSkills:
         cached set. A platform error, including one building ``UiPath()``, is
         logged and cached as a set whose failures mark every bundle
         ``source_unavailable``, so the agent does not retry on every turn.
+        ``force=True`` resolves again (or joins a resolution in progress); the
+        previous set's temp folder, if it owns one, is then removed, so a real
+        tool from ``load_skill_tool`` built for it stops working.
 
         Args:
-            destination: Overrides the constructor's ``destination`` for this call.
+            destination: Overrides the constructor's ``destination``; applies
+                only when this call actually runs a resolution.
             force: Resolve again even when a set is cached.
 
         Returns:
             The resolved set; never raises except on cancellation.
         """
-        if self._skill_set is not None and not force:
-            return self._skill_set
-        async with self._loop_lock():
-            if self._skill_set is not None and not force:
-                return self._skill_set
-            target = destination if destination is not None else self._destination
-            if not self._bundles:
-                result = self._empty_set()
-            else:
+        target = destination if destination is not None else self._destination
+        while True:
+            claim = self._claim(force, asyncio.get_running_loop())
+            if claim.cached is not None:
+                return claim.cached
+            assert claim.future is not None
+            if claim.owner:
                 try:
-                    result = await self._sdk_or_new().skills.load_all_async(
-                        self._bundles, destination=target
-                    )
-                except Exception as e:
-                    result = self._failed_set(e)
-            return self._store(result)
+                    result = await self._fetch_async(target)
+                except BaseException:
+                    self._abandon(claim.future)
+                    raise
+                return self._finish(claim.future, result)
+            waited = await asyncio.wrap_future(claim.future)
+            if waited is not None:
+                return waited
+            # The owner was cancelled before it finished: claim again.
 
     def load_sync(
         self, *, destination: Path | None = None, force: bool = False
@@ -117,76 +151,137 @@ class UiPathSkills:
         """``load`` for sync code; safe to call from inside a running event loop.
 
         Args:
-            destination: Overrides the constructor's ``destination`` for this call.
+            destination: Overrides the constructor's ``destination``; applies
+                only when this call actually runs a resolution.
             force: Resolve again even when a set is cached.
 
         Returns:
-            The resolved set, cached like ``load``'s; never raises.
+            The resolved set, cached and shared like ``load``'s; never raises
+            except on ``KeyboardInterrupt`` and the like.
         """
-        if self._skill_set is not None and not force:
-            return self._skill_set
-        with self._sync_lock:
-            if self._skill_set is not None and not force:
-                return self._skill_set
-            target = destination if destination is not None else self._destination
-            if not self._bundles:
-                result = self._empty_set()
-            else:
+        target = destination if destination is not None else self._destination
+        try:
+            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        while True:
+            claim = self._claim(force, None)
+            if claim.cached is not None:
+                return claim.cached
+            assert claim.future is not None
+            if claim.owner:
                 try:
-                    result = self._sdk_or_new().skills.load_all(
-                        self._bundles, destination=target
-                    )
-                except Exception as e:
-                    result = self._failed_set(e)
-            return self._store(result)
+                    result = self._fetch_sync(target)
+                except BaseException:
+                    self._abandon(claim.future)
+                    raise
+                return self._finish(claim.future, result)
+            if loop is not None and claim.owner_loop is loop:
+                # The resolution in progress runs on this thread's loop, which
+                # blocking here would starve: resolve separately, uncached.
+                logger.warning(
+                    "load_sync called on the event loop that is running load(); "
+                    "resolving the skill bundles separately"
+                )
+                return self._fetch_sync(target)
+            waited = claim.future.result()
+            if waited is not None:
+                return waited
 
     def prompt_section(self) -> str:
         """The ``## Skills`` system-prompt section; ``""`` before ``load`` or with no skills."""
-        if self._skill_set is None:
+        skill_set = self._skill_set
+        if skill_set is None:
             return ""
-        return skills_prompt_section(self._skill_set, tool_name=self._tool_name)
+        return skills_prompt_section(skill_set, tool_name=self._tool_name)
 
     def load_skill_tool(self) -> StructuredTool | None:
         """The ``load_skill`` tool for the model.
 
         After ``load`` this is the ``create_load_skill_tool`` tool for the set,
-        built once and reused, or ``None`` when the set has no skills. Before
-        ``load`` it is a lazy tool with the same name and metadata whose
-        ``name`` argument is a plain string: its first call runs ``load`` and
-        then answers exactly as the real tool does.
+        built once and reused, or ``None`` when the set has no skills; it is
+        bound to that set and stops working after ``load(force=True)`` or
+        ``cleanup``. Before ``load`` it is a lazy tool with the same name and
+        metadata whose ``name`` argument is a plain string: each call loads (or
+        reuses) the current set and then answers exactly as the real tool does.
         """
-        if self._skill_set is None:
+        skill_set = self._skill_set
+        if skill_set is None:
             return self._lazy_tool()
-        if not self._skill_set.names():
+        if not skill_set.names():
             return None
-        return self._real_tool()
+        return self._tool_for(skill_set)
 
     def cleanup(self) -> None:
         """Remove the set's temp folder, if it owns one, and forget the set."""
-        if self._skill_set is not None:
-            self._skill_set.cleanup()
-        self._skill_set = None
-        self._tool = None
+        with self._lock:
+            skill_set = self._skill_set
+            self._skill_set = None
+            self._tool = None
+        if skill_set is not None:
+            skill_set.cleanup()
 
-    def _loop_lock(self) -> asyncio.Lock:
-        """The lock for the running loop; a new loop (``asyncio.run``) gets a new lock."""
-        loop = asyncio.get_running_loop()
-        if self._lock is None or self._lock_loop is not loop:
-            self._lock = asyncio.Lock()
-            self._lock_loop = loop
-        return self._lock
+    def _claim(self, force: bool, loop: asyncio.AbstractEventLoop | None) -> _Claim:
+        """Return the cached set, join the resolution in progress, or start one."""
+        with self._lock:
+            if self._inflight is not None:
+                return _Claim(None, self._inflight, False, self._owner_loop)
+            if self._skill_set is not None and not force:
+                return _Claim(self._skill_set, None, False, None)
+            future: Future[SkillSet | None] = Future()
+            # A running future cannot be cancelled, so a waiter whose
+            # ``wrap_future`` is cancelled does not cancel it for the others.
+            future.set_running_or_notify_cancel()
+            self._inflight = future
+            self._owner_loop = loop
+            return _Claim(None, future, True, loop)
+
+    def _finish(self, future: Future[SkillSet | None], result: SkillSet) -> SkillSet:
+        """Store ``result``, release the waiters and remove the replaced set's temp folder."""
+        with self._lock:
+            previous = self._skill_set
+            self._skill_set = result
+            self._tool = None
+            self._inflight = None
+            self._owner_loop = None
+        future.set_result(result)
+        if previous is not None and previous is not result and previous.owns_root:
+            previous.cleanup()
+        return result
+
+    def _abandon(self, future: Future[SkillSet | None]) -> None:
+        """Let the waiters of a cancelled resolution claim again."""
+        with self._lock:
+            self._inflight = None
+            self._owner_loop = None
+        future.set_result(None)
+
+    async def _fetch_async(self, target: Path | None) -> SkillSet:
+        if not self._bundles:
+            return self._empty_set()
+        try:
+            return await self._sdk_or_new().skills.load_all_async(
+                list(self._bundles), destination=target
+            )
+        except Exception as e:
+            return self._failed_set(e)
+
+    def _fetch_sync(self, target: Path | None) -> SkillSet:
+        if not self._bundles:
+            return self._empty_set()
+        try:
+            return self._sdk_or_new().skills.load_all(
+                list(self._bundles), destination=target
+            )
+        except Exception as e:
+            return self._failed_set(e)
 
     def _sdk_or_new(self) -> UiPath:
         """The SDK to load through, built on first use so import needs no credentials."""
-        if self._sdk is None:
-            self._sdk = UiPath()
-        return self._sdk
-
-    def _store(self, result: SkillSet) -> SkillSet:
-        """Cache ``result``, dropping the tool built for the previous set."""
-        self._skill_set = result
-        self._tool = None
-        return result
+        with self._lock:
+            if self._sdk is None:
+                self._sdk = UiPath()
+            return self._sdk
 
     def _empty_set(self) -> SkillSet:
         return SkillSet(source=_NO_SOURCE, bundles=[], failures=[])
@@ -194,7 +289,8 @@ class UiPathSkills:
     def _failed_set(self, error: Exception) -> SkillSet:
         """A set that marks every bundle ``source_unavailable`` because of ``error``."""
         logger.warning(
-            "Skill bundles could not be loaded; continuing without skills: %r", error
+            "Skill bundles could not be loaded; continuing without skills",
+            exc_info=error,
         )
         return SkillSet(
             source=_NO_SOURCE,
@@ -205,41 +301,33 @@ class UiPathSkills:
             ],
         )
 
-    def _real_tool(self) -> StructuredTool:
-        """The ``create_load_skill_tool`` tool for the loaded set, built once per set."""
-        assert self._skill_set is not None
-        if self._tool is None:
-            self._tool = create_load_skill_tool(
-                self._skill_set, tool_name=self._tool_name
-            )
-        return self._tool
-
-    def _ensure_loaded_sync(self) -> None:
-        """Load from sync code: on a fresh loop when none runs here, else via the SDK's sync twin."""
-        if self._skill_set is not None:
-            return
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(self.load())
-        else:
-            self.load_sync()
+    def _tool_for(self, skill_set: SkillSet) -> StructuredTool:
+        """The real tool for ``skill_set``, built once while it is the current set."""
+        with self._lock:
+            if self._tool is not None and self._tool[0] is skill_set:
+                return self._tool[1]
+        tool = create_load_skill_tool(skill_set, tool_name=self._tool_name)
+        with self._lock:
+            if skill_set is not self._skill_set:
+                return tool
+            if self._tool is not None and self._tool[0] is skill_set:
+                return self._tool[1]
+            self._tool = (skill_set, tool)
+        return tool
 
     def _lazy_tool(self) -> StructuredTool:
-        """A tool that loads the set on first call, then delegates to the real tool."""
+        """A tool that loads the current set on each call, then delegates to its real tool."""
         # A tool for an empty set has the real tool's description, metadata and
         # plain-string ``name`` schema; only its implementations are swapped.
         template = create_load_skill_tool(self._empty_set(), tool_name=self._tool_name)
 
         def load(name: str, path: str = _SKILL_MD) -> str:
-            self._ensure_loaded_sync()
-            func = self._real_tool().func
+            func = self._tool_for(self.load_sync()).func
             assert func is not None
             return func(name, path)
 
         async def aload(name: str, path: str = _SKILL_MD) -> str:
-            await self.load()
-            coroutine = self._real_tool().coroutine
+            coroutine = self._tool_for(await self.load()).coroutine
             assert coroutine is not None
             return await coroutine(name, path)
 
