@@ -4,6 +4,7 @@ import asyncio
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -500,6 +501,7 @@ async def test_lazy_tool_cleans_up_the_uncached_same_loop_set(
     sdk.skills.load_all.assert_called_once()
     assert not (tmp_path / "separate").exists()
     assert separate.root is None
+    assert skills._uncached == []
     release.set()
     assert await task is skill_set
     assert skills.skill_set is skill_set
@@ -532,4 +534,102 @@ async def test_cleanup_during_a_resolution_discards_its_result(
     # The next load resolves again and is cached as usual.
     sdk.skills.load_all_async = AsyncMock(return_value=skill_set)
     assert await skills.load() is skill_set
+    assert skills.skill_set is skill_set
+
+
+async def test_cleanup_removes_the_uncached_same_loop_sets(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        started.set()
+        await release.wait()
+        return skill_set
+
+    separate = _owned_copy(skill_set, tmp_path / "separate")
+    sdk = _sdk(separate)
+    sdk.skills.load_all_async = AsyncMock(side_effect=slow)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    task = asyncio.create_task(skills.load())
+    await started.wait()
+    assert skills.load_sync() is separate
+    release.set()
+    assert await task is skill_set
+    assert (tmp_path / "separate").exists()
+    skills.cleanup()
+    assert not (tmp_path / "separate").exists()
+    assert separate.root is None
+
+
+class _HookLock:
+    """A lock that runs ``hook`` once, right after the first release once armed."""
+
+    def __init__(self, hook: Callable[[], None]) -> None:
+        self._inner = threading.Lock()
+        self._hook = hook
+        self.armed = False
+
+    def __enter__(self) -> "_HookLock":
+        self._inner.acquire()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._inner.release()
+        if self.armed:
+            self.armed = False
+            self._hook()
+
+
+async def test_cleanup_right_after_the_finish_decision_is_not_lost(
+    skill_set: SkillSet, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _owned_copy(skill_set, tmp_path / "owned")
+    skills = UiPathSkills(REFS, uipath_sdk=_sdk())
+    lock = _HookLock(skills.cleanup)
+    monkeypatch.setattr(skills, "_lock", lock)
+
+    async def arm_then_return(*args: Any, **kwargs: Any) -> SkillSet:
+        # The next lock release is the first one inside _finish.
+        lock.armed = True
+        return result
+
+    assert skills._sdk is not None
+    skills._sdk.skills.load_all_async = AsyncMock(side_effect=arm_then_return)
+    assert await skills.load() is result
+    assert skills.skill_set is None
+    assert not (tmp_path / "owned").exists()
+
+
+async def test_waiter_of_a_stale_resolution_claims_again(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    first = _owned_copy(skill_set, tmp_path / "first")
+    calls: list[int] = []
+
+    async def side(*args: Any, **kwargs: Any) -> SkillSet:
+        calls.append(1)
+        if len(calls) == 1:
+            started.set()
+            await release.wait()
+            return first
+        return skill_set
+
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=side)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    owner = asyncio.create_task(skills.load())
+    await started.wait()
+    waiter = asyncio.create_task(skills.load())
+    await asyncio.sleep(0)
+    assert skills._inflight is not None
+    skills.cleanup()
+    release.set()
+    assert await owner is first
+    assert first.root is None
+    assert await waiter is skill_set
+    assert len(calls) == 2
     assert skills.skill_set is skill_set
