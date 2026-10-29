@@ -60,13 +60,13 @@ def test_template_formats_without_other_placeholders() -> None:
     assert "{" not in rendered and "}" not in rendered
 
 
-def test_template_says_scripts_are_reference_and_never_mentions_deepagents() -> None:
+def test_template_says_scripts_cannot_run_and_never_mentions_deepagents() -> None:
+    # D15: scripts are stored, never run; the low-code harness says the same.
     assert (
-        "Scripts inside a skill are reference material; do not run them unless "
-        "your tools explicitly support it and the task requires it."
+        "Scripts or executables inside a skill cannot be executed in this "
+        "environment. Do not try to run them; use their content as reference only."
         in " ".join(UIPATH_SKILLS_PROMPT.split())
     )
-    assert "cannot be executed" not in UIPATH_SKILLS_PROMPT
     assert (
         "Deepagents" not in UIPATH_SKILLS_PROMPT
         and "deepagents" not in UIPATH_SKILLS_PROMPT
