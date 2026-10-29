@@ -164,13 +164,11 @@ def test_skills_used_skips_an_unknown_skill_answer(sample: ModuleType) -> None:
     assert sample.skills_used(messages) == ["finance/vendor-lookup"]
 
 
-async def test_sample_reads_bundles_through_the_mock_skills_api(
+async def test_sample_reads_its_own_bundles(
     monkeypatch: pytest.MonkeyPatch,
     sample: ModuleType,
     exporter: InMemorySpanExporter,
 ) -> None:
-    monkeypatch.setenv("UIPATH_SKILLS_SOURCE", "mock")
-    monkeypatch.setenv("UIPATH_SKILLS_MOCK_ROOT", str(SAMPLE / "skills"))
     replies = [_load("ops/escalation-policy"), AIMessage(content=ANSWER)]
     _script(monkeypatch, sample, replies)
 
@@ -178,7 +176,7 @@ async def test_sample_reads_bundles_through_the_mock_skills_api(
 
     assert output == {"answer": ANSWER, "skills_used": ["ops/escalation-policy"]}
     skill_set = sample.SKILLS.skill_set
-    assert skill_set.source == "mock"
+    assert skill_set.source == "local"
     assert {b.ref.name: b.version for b in skill_set.bundles} == {
         "finance": "3",
         "ops": "1",
@@ -189,25 +187,24 @@ async def test_sample_reads_bundles_through_the_mock_skills_api(
 async def test_sample_applies_a_binding_override(
     monkeypatch: pytest.MonkeyPatch, sample: ModuleType
 ) -> None:
-    monkeypatch.setenv("UIPATH_SKILLS_SOURCE", "mock")
-    monkeypatch.setenv("UIPATH_SKILLS_MOCK_ROOT", str(SAMPLE / "skills"))
     _script(monkeypatch, sample, [])
 
     async def overwrites() -> dict[str, ResourceOverwrite]:
         key = "skillBundle.ops"
-        value = {"versionMode": "pinned", "version": "2"}
+        value = {"name": "finance"}
         return {key: ResourceOverwriteParser.parse(key, value)}
 
     async with ResourceOverwritesContext(overwrites):
         await sample.make_graph()
 
     skill_set = sample.SKILLS.skill_set
-    assert [b.ref.name for b in skill_set.bundles] == ["finance"]
-    assert [(f.ref.name, f.reason) for f in skill_set.failures] == [
-        ("ops", "version_not_found")
+    assert [(b.ref.name, b.ref.lookup_name) for b in skill_set.bundles] == [
+        ("finance", "finance"),
+        ("ops", "finance"),
     ]
-    assert "finance/invoice-triage" in sample.SKILLS.prompt_section()
-    assert "ops/" not in sample.SKILLS.prompt_section()
+    assert skill_set.failures == []
+    assert "ops/invoice-triage" in sample.SKILLS.prompt_section()
+    assert "ops/escalation-policy" not in sample.SKILLS.prompt_section()
 
 
 async def test_sample_runs_without_tools_when_no_bundle_resolves(
