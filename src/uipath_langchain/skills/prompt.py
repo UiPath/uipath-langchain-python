@@ -56,8 +56,8 @@ different skills; pick by description.
 with `read_file`. Paths inside a skill are relative to its folder: a reference to \
 `references/x.md` in `/skills/<bundle>/<skill>/SKILL.md` means \
 `/skills/<bundle>/<skill>/references/x.md`.
-3. Scripts inside a skill are reference material; do not run them unless your tools explicitly \
-support it and the task requires it.
+3. Scripts or executables inside a skill cannot be executed in this environment. Do not try to \
+run them; use their content as reference only.
 4. A skill may mention tools by name. If a named tool is missing, continue with the tools you \
 have and note in your answer what was missing.
 5. Skill folders are read-only. Write your own work elsewhere in the filesystem.

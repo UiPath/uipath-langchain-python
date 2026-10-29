@@ -144,7 +144,7 @@ def test_rendered_section_lists_qualified_names_and_paths(
     assert "**finance v3 Skills**: `/skills/finance/`" in text
     assert "- **finance/vendor-lookup**:" in text and "- **ops/vendor-lookup**:" in text
     assert "/skills/ops/vendor-lookup/SKILL.md" in text
-    assert "Scripts inside a skill are reference material" in text
+    assert "cannot be executed in this environment" in " ".join(text.split())
 
 
 def test_modify_request_appends_the_section_to_the_system_message(
