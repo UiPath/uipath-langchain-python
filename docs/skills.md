@@ -181,7 +181,7 @@ async def make_graph():
 `uipath run agent '{...}' --trace-file trace.jsonl` writes the spans to a JSON Lines file. A run of the sample that loads one skill contains, among the LangGraph spans:
 
 ```
-Skill bundles resolved                   skill.source=mock  skill.bundle.count=2  skill.count=4
+Skill bundles resolved                   skill.source=local  skill.bundle.count=2  skill.count=4
   event skill.bundle.resolved            skill.bundle.name=finance  skill.version=3  skill.version_mode=pinned
   event skill.bundle.resolved            skill.bundle.name=ops      skill.version=1  skill.version_mode=latest
 Skill load - ops/escalation-policy       skill.version=1  skill.invoked_by=model
@@ -194,6 +194,6 @@ What each span and event carries is listed under [Traces](../core/skills.md#trac
 ## See Also
 
 - [Declare and load bundles](../core/skills.md#declare-and-load-bundles): version modes, folders and what a failed bundle looks like.
-- [Local development](../core/skills.md#local-development) and [Environment variables](../core/environment_variables.md#skill-bundles): the `local`, `mock` and `orchestrator` sources.
+- [Local development](../core/skills.md#local-development) and [Environment variables](../core/environment_variables.md#skill-bundles): the `local` source and the `orchestrator` placeholder.
 - [Bindings](../core/skills.md#bindings) and [Overrides per environment](../core/skills.md#overrides-per-environment).
 - [Limits](../core/skills.md#limits): file, bundle and time limits.
