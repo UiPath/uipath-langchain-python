@@ -4,7 +4,7 @@ A LangGraph agent that answers accounts-payable questions with skills from two b
 
 See [Skills](../../docs/skills.md) for the LangChain patterns and the SDK's [Skills](https://uipath.github.io/uipath-python/core/skills/) page for how bundles are resolved.
 
-> **Preview:** the Orchestrator Skills API is not live yet. This sample serves its own `skills/` folder through the Skills API client (`UIPATH_SKILLS_SOURCE=mock`), so no bundle has to exist in Orchestrator. The chat model still runs through the UiPath LLM gateway, so you need a tenant.
+> **Preview:** the Orchestrator Skills API is not live yet. This sample reads its own `skills/` folder (`UIPATH_SKILLS_SOURCE=local`), so no bundle has to exist in Orchestrator. The chat model still runs through the UiPath LLM gateway, so you need a tenant.
 
 ## What it contains
 
@@ -69,14 +69,14 @@ uipath run agent -f input.json --trace-file trace.jsonl
 The log shows the bundles being resolved before the graph starts:
 
 ```
-Resolved 2 skill bundle(s) from mock: finance@3 (2 skills), ops@1 (2 skills)
+Resolved 2 skill bundle(s) from local: finance@3 (2 skills), ops@1 (2 skills)
 ```
 
 The model sees four skills in its system prompt (`finance/invoice-triage`, `finance/vendor-lookup`, `ops/escalation-policy`, `ops/vendor-lookup`), calls `load_skill` with `ops/escalation-policy`, and answers by following its steps. The output carries `"skills_used": ["ops/escalation-policy"]`. The model chooses which skills to load, so another run may load an extra one, such as `finance/vendor-lookup`.
 
 `trace.jsonl` holds one span per line. Look for:
 
-- `Skill bundles resolved`: the source (`mock`), the bundle and skill counts, and one event per resolved bundle with its folder, version and version mode.
+- `Skill bundles resolved`: the source (`local`), the bundle and skill counts, and one event per resolved bundle with its folder, version and version mode.
 - `Skill load - ops/escalation-policy`: the read of the skill's `SKILL.md`, with the bundle version and `skill.invoked_by` = `model`.
 
 Both bundles hold a `vendor-lookup` skill, so the log also warns that both stay available as `finance/vendor-lookup` and `ops/vendor-lookup`.
@@ -96,12 +96,11 @@ On Windows PowerShell:
 New-Item -ItemType Directory -Force __uipath; Copy-Item resource-overwrites.example.json __uipath/uipath.json
 ```
 
-It pins `ops` to version 1 instead of `latest`. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. Change `"version"` to `"2"` to see a failure: the folder only holds version 1, so `ops` is reported as `version_not_found` on the span and the agent runs with the `finance` skills only. Delete `__uipath/uipath.json` to go back to the declared bindings.
+It pins `ops` to version 1 instead of `latest`. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. A local folder holds one version only, so pinning a version it does not hold loads the folder anyway, with a warning. To point the binding at another bundle, replace the entry with `{ "name": "finance" }`: `ops` is then read from the `finance` folder, the agent still sees it as `ops` (`ops/invoice-triage`, `ops/vendor-lookup`), and its event has `skill.bundle.lookup_name` = `finance`. Delete `__uipath/uipath.json` to go back to the declared bindings.
 
 ## Switch the source
 
 `UIPATH_SKILLS_SOURCE` in `.env` selects where bundles come from:
 
-- `mock` (this sample): serves `UIPATH_SKILLS_MOCK_ROOT` through the Skills API client, so the run exercises the same download path as Orchestrator.
-- `local`: copies `UIPATH_SKILLS_LOCAL_ROOT` (default `./skills`) directly. Set `UIPATH_SKILLS_SOURCE=local` and, if the folder is elsewhere, `UIPATH_SKILLS_LOCAL_ROOT`.
-- `orchestrator`: calls the Orchestrator Skills API, once it is live; the bundles must then exist in the `Shared/Skills` folder.
+- `local` (this sample, and the default): copies `UIPATH_SKILLS_LOCAL_ROOT` (default `./skills`). Set `UIPATH_SKILLS_LOCAL_ROOT` if the folder is elsewhere.
+- `orchestrator`: the Orchestrator Skills API. Until it ships this is a placeholder that skips every bundle as `source_unavailable`, so the agent runs without skills; once it is live the bundles must exist in the `Shared/Skills` folder.
