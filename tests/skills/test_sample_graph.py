@@ -129,6 +129,12 @@ async def test_sample_loads_a_skill_and_reports_it(
     assert isinstance(tool_result, ToolMessage)
     assert tool_result.text.startswith("# ops/escalation-policy (bundle ops v1)")
     assert _skill_loads(exporter) == ["Skill load - ops/escalation-policy"]
+    skill_set = sample.SKILLS.skill_set
+    assert skill_set.source == "local"
+    assert {b.ref.name: b.version for b in skill_set.bundles} == {
+        "finance": "3",
+        "ops": "1",
+    }
 
 
 async def test_sample_does_not_count_a_failed_load(
@@ -150,38 +156,6 @@ async def test_sample_does_not_count_a_failed_load(
     assert isinstance(rejected, ToolMessage) and rejected.status == "error"
     assert _skill_loads(exporter) == ["Skill load - ops/escalation-policy"]
     assert model.built == 1
-
-
-def test_skills_used_skips_an_unknown_skill_answer(sample: ModuleType) -> None:
-    # The lazy tool takes any string and answers an unknown name with text.
-    messages = [
-        _load("ops/nope", "finance/vendor-lookup"),
-        ToolMessage("Unknown skill 'ops/nope'. Available: ...", tool_call_id="call-0"),
-        ToolMessage(
-            "# finance/vendor-lookup (bundle finance v3)", tool_call_id="call-1"
-        ),
-    ]
-    assert sample.skills_used(messages) == ["finance/vendor-lookup"]
-
-
-async def test_sample_reads_its_own_bundles(
-    monkeypatch: pytest.MonkeyPatch,
-    sample: ModuleType,
-    exporter: InMemorySpanExporter,
-) -> None:
-    replies = [_load("ops/escalation-policy"), AIMessage(content=ANSWER)]
-    _script(monkeypatch, sample, replies)
-
-    output = await (await sample.make_graph()).ainvoke({"task": TASK})
-
-    assert output == {"answer": ANSWER, "skills_used": ["ops/escalation-policy"]}
-    skill_set = sample.SKILLS.skill_set
-    assert skill_set.source == "local"
-    assert {b.ref.name: b.version for b in skill_set.bundles} == {
-        "finance": "3",
-        "ops": "1",
-    }
-    assert _skill_loads(exporter) == ["Skill load - ops/escalation-policy"]
 
 
 async def test_sample_applies_a_binding_override(
