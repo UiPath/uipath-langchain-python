@@ -13,10 +13,9 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from uipath.platform.skills import SkillSet
 
-from uipath_langchain.skills import (
-    UIPATH_SKILLS_PROMPT,
+from uipath_langchain.skills import UIPATH_SKILLS_PROMPT, UiPathSkills
+from uipath_langchain.skills.middleware import (
     SkillLoadTraceMiddleware,
-    UiPathSkills,
     UiPathSkillsMiddleware,
     create_skills_middleware,
     deepagents_sources,
@@ -231,7 +230,8 @@ def test_importing_the_package_does_not_import_deepagents() -> None:
         "import sys, uipath_langchain.skills as s\n"
         "assert 'deepagents' not in sys.modules, 'deepagents imported'\n"
         "assert 'uipath_langchain.skills.middleware' not in sys.modules\n"
-        "s.create_skills_middleware\n"
+        "assert not hasattr(s, 'create_skills_middleware')\n"
+        "import uipath_langchain.skills.middleware\n"
         "assert 'deepagents' in sys.modules\n"
     )
     result = subprocess.run(
