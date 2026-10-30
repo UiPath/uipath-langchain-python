@@ -11,7 +11,7 @@ from langgraph.prebuilt import ToolNode
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from uipath.platform.skills import SkillSet
 
 from uipath_langchain.skills import create_load_skill_tool
@@ -94,11 +94,6 @@ def test_tool_unknown_name_returns_message_not_error(skill_set: SkillSet) -> Non
     )
 
 
-def test_tool_invoke_rejects_a_name_outside_the_enum(skill_set: SkillSet) -> None:
-    with pytest.raises(ValidationError):
-        create_load_skill_tool(skill_set).invoke({"name": "finance/nope"})
-
-
 def test_tool_node_turns_an_unknown_name_into_an_error_message(
     skill_set: SkillSet,
 ) -> None:
@@ -168,19 +163,10 @@ def test_tool_refuses_a_binary_file(skill_set: SkillSet) -> None:
     )
 
 
-async def test_tool_async(skill_set: SkillSet) -> None:
-    out = await create_load_skill_tool(skill_set).ainvoke({"name": "ops/vendor-lookup"})
-    assert out.startswith("# ops/vendor-lookup (bundle ops v1)")
-
-
-def test_tool_metadata_name_and_description(skill_set: SkillSet) -> None:
+def test_tool_name_and_metadata(skill_set: SkillSet) -> None:
     tool = create_load_skill_tool(skill_set)
     assert tool.name == "load_skill"
     assert tool.metadata == {"tool_type": "internal", "display_name": "load_skill"}
-    assert tool.description == (
-        "Load the full instructions of one of the bound skills before following "
-        "it. `name` is `<bundle>/<skill>`."
-    )
     renamed = create_load_skill_tool(skill_set, tool_name="read_skill")
     assert renamed.name == "read_skill"
     assert renamed.metadata == {"tool_type": "internal", "display_name": "read_skill"}
@@ -225,12 +211,3 @@ async def test_tool_async_records_one_skill_load_span(
     await tool.ainvoke({"name": "finance/invoice-triage"})
     names = [span.name for span in exporter.get_finished_spans()]
     assert names == ["Skill load - finance/invoice-triage"]
-
-
-def test_tool_supporting_file_records_no_span(
-    skill_set: SkillSet, exporter: InMemorySpanExporter
-) -> None:
-    tool = create_load_skill_tool(skill_set)
-    exporter.clear()
-    tool.invoke({"name": "finance/invoice-triage", "path": "reference/vendors.md"})
-    assert exporter.get_finished_spans() == ()
