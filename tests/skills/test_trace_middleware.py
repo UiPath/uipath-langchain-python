@@ -10,7 +10,7 @@ from langgraph.types import Command
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from uipath.platform.skills import SkillSet
 
-from uipath_langchain.skills import SkillLoadTraceMiddleware
+from uipath_langchain.skills.middleware import SkillLoadTraceMiddleware
 
 SKILL_MD = "/skills/finance/vendor-lookup/SKILL.md"
 
