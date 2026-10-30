@@ -1,15 +1,18 @@
+import copy
 import functools
 import inspect
 import json
 from inspect import Parameter
 from typing import Annotated, Any, Callable, NamedTuple
 
+from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId
 from langchain_core.tools import tool as langchain_tool
 from uipath.core.chat import UiPathConversationToolCallConfirmationEvent
 
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.contracts.static_args import SENSITIVE_ARG_PLACEHOLDER
 
 CANCELLED_MESSAGE = "Cancelled by user"
 ARGS_MODIFIED_MESSAGE = "User has modified the tool arguments"
@@ -147,6 +150,83 @@ def request_approval(
     return confirmation.input if confirmation.input is not None else tool_args
 
 
+def _set_static_arg_paths(
+    tool: BaseTool,
+    args: dict[str, Any],
+    value_for: Callable[[str, Any], Any | None],
+) -> dict[str, Any]:
+    """Set each static arg path present in ``args`` to ``value_for(path, props)``.
+
+    Paths for which ``value_for`` returns None are left as they are.
+    """
+    argument_properties = getattr(tool, "argument_properties", None) or {}
+    updated = args
+    for json_path, props in argument_properties.items():
+        value = value_for(json_path, props)
+        if value is None:
+            continue
+        if updated is args:
+            updated = copy.deepcopy(args)
+        parse(json_path).update_or_create(updated, value)
+    return updated
+
+
+def _restore_static_args(
+    tool: BaseTool,
+    original_args: dict[str, Any],
+    approved_args: dict[str, Any],
+) -> dict[str, Any]:
+    """Re-apply the static args, as applied to the model's call, to the approved args.
+
+    Static args are pinned by the agent author, so approval must not change them.
+    Sensitive ones are only shown masked, and the secret must never follow an
+    edited arg (e.g. to another host).
+    """
+    # Imported lazily: agent.tools imports this module.
+    from uipath_langchain.agent.tools.static_args import (
+        apply_static_args,
+        deduplicate_argument_properties,
+    )
+
+    argument_properties = getattr(tool, "argument_properties", None) or {}
+    restored = copy.deepcopy(approved_args)
+    for json_path, _ in deduplicate_argument_properties(argument_properties):
+        # Every match of a path got the same value, so any match recovers it.
+        # A path without a match wasn't applied, so it isn't pinned.
+        if json_path.endswith("[*]"):
+            array_expr = parse(json_path[:-3])
+            items = [
+                m.value[0]
+                for m in array_expr.find(original_args)
+                if isinstance(m.value, list) and m.value
+            ]
+            if not items:
+                continue
+            if not array_expr.find(restored):
+                # The client dropped the array, so there is nothing to pin into
+                array_expr.update_or_create(restored, [copy.deepcopy(items[0])])
+                continue
+            value = items[0]
+        else:
+            matches = parse(json_path).find(original_args)
+            if not matches:
+                continue
+            value = matches[0].value
+        restored = apply_static_args({json_path: copy.deepcopy(value)}, restored)
+    return restored
+
+
+def _mask_sensitive_static_args(tool: BaseTool, args: dict[str, Any]) -> dict[str, Any]:
+    """Mask sensitive static args in args that are sent to the model or client."""
+
+    def placeholder(json_path: str, props: Any) -> Any | None:
+        if not getattr(props, "is_sensitive", False):
+            return None
+        return SENSITIVE_ARG_PLACEHOLDER if parse(json_path).find(args) else None
+
+    return _set_static_arg_paths(tool, args, placeholder)
+
+
 # for conversational low code agents
 def request_conversational_tool_confirmation(
     call: ToolCall, tool: BaseTool
@@ -166,16 +246,19 @@ def request_conversational_tool_confirmation(
             tool_call_id=call["id"],
         )
         cancelled_msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
-            original_args
+            _mask_sensitive_static_args(tool, original_args)
         )
         return ConfirmationResult(cancelled=cancelled_msg, args_modified=False)
+
+    approved_args = _restore_static_args(tool, original_args, approved_args)
 
     # Mutate call args so the tool executes with the approved values
     call["args"] = approved_args
     return ConfirmationResult(
         cancelled=None,
         args_modified=approved_args != original_args,
-        approved_args=approved_args,
+        # Sent back to the model and client, so keep sensitive args masked
+        approved_args=_mask_sensitive_static_args(tool, approved_args),
     )
 
 

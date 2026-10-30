@@ -21,6 +21,9 @@ from uipath.core.chat import (
     UiPathInlineValue,
 )
 
+from uipath_langchain.agent.contracts.static_args import (
+    STATIC_ARGS_DISPLAY_METADATA_KEY,
+)
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 # Helper timestamp string for tests
@@ -2469,6 +2472,99 @@ class TestExecutingToolCallEmission:
         assert executing_events[0].tool_call is not None
         assert executing_events[0].tool_call.executing is not None
         assert executing_events[0].tool_call.executing.input == {"title": "Avatar"}
+
+
+class TestStaticArgsDisplay:
+    """Tests that tool call events show static args resolved after the model call."""
+
+    @staticmethod
+    def _tool_call_inputs(result):
+        start = next(e for e in result if e.tool_call and e.tool_call.start)
+        executing = next(e for e in result if e.tool_call and e.tool_call.executing)
+        return start.tool_call.start.input, executing.tool_call.executing.input
+
+    @pytest.mark.asyncio
+    async def test_streamed_tool_call_shows_static_args(self):
+        """Should override the model-inferred args with the static args from metadata."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        metadata = {
+            STATIC_ARGS_DISPLAY_METADATA_KEY: {
+                "EchoTool": {"$['slack_id']": "U-REAL-777"}
+            }
+        }
+
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-1",
+            tool_calls=[
+                {
+                    "id": "tc-1",
+                    "name": "EchoTool",
+                    "args": {"slack_id": "LLM-GUESS-123", "text": "hello"},
+                }
+            ],
+        )
+        await mapper.map_event(first_chunk, metadata)
+
+        last_chunk = AIMessageChunk(content="", id="msg-1")
+        object.__setattr__(last_chunk, "chunk_position", "last")
+        result = await mapper.map_event(last_chunk, metadata)
+
+        assert result is not None
+        expected = {"slack_id": "U-REAL-777", "text": "hello"}
+        assert self._tool_call_inputs(result) == (expected, expected)
+        # The streamed message itself is left untouched
+        assert mapper.current_message.tool_calls[0]["args"]["slack_id"] == (
+            "LLM-GUESS-123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_full_message_tool_call_shows_static_args(self):
+        """Should apply static args from metadata to a full (non-streamed) AIMessage."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        message = AIMessage(
+            content="",
+            id="msg-1",
+            tool_calls=[
+                {"id": "tc-1", "name": "EchoTool", "args": {"slack_id": "guess"}}
+            ],
+        )
+
+        result = await mapper.map_event(
+            message,
+            {STATIC_ARGS_DISPLAY_METADATA_KEY: {"EchoTool": {"$['slack_id']": "real"}}},
+        )
+
+        assert result is not None
+        assert self._tool_call_inputs(result) == (
+            {"slack_id": "real"},
+            {"slack_id": "real"},
+        )
+        assert message.tool_calls[0]["args"] == {"slack_id": "guess"}
+
+    @pytest.mark.asyncio
+    async def test_static_args_only_apply_to_their_tool(self):
+        """Should leave tool calls of other tools unchanged."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        message = AIMessage(
+            content="",
+            id="msg-1",
+            tool_calls=[{"id": "tc-1", "name": "OtherTool", "args": {"x": 1}}],
+        )
+
+        result = await mapper.map_event(
+            message,
+            {STATIC_ARGS_DISPLAY_METADATA_KEY: {"EchoTool": {"$['x']": 2}}},
+        )
+
+        assert result is not None
+        assert self._tool_call_inputs(result) == ({"x": 1}, {"x": 1})
 
 
 class TestClientSideToolEndSuppression:

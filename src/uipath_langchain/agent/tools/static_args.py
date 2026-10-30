@@ -22,6 +22,7 @@ from uipath.agent.models.agent import (
 from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.contracts.static_args import SENSITIVE_ARG_PLACEHOLDER
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -53,7 +54,23 @@ class ToolStaticArgument(BaseModel):
 
 _INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
 
-_SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
+
+def deduplicate_argument_properties(
+    properties: Mapping[str, AgentToolArgumentProperties],
+) -> Iterator[tuple[str, AgentToolArgumentProperties]]:
+    """Skips more specific argument properties. In effect, prioritizes parent paths over child paths.
+
+    An objectBuilder is only a marker and never shadows its children, which
+    carry their own argument properties."""
+
+    last_yielded: str | None = None
+    for json_path in sorted(properties.keys()):
+        if last_yielded is not None and json_path.startswith(last_yielded):
+            continue
+        if isinstance(properties[json_path], AgentToolObjectBuilderArgumentProperties):
+            continue
+        yield json_path, properties[json_path]
+        last_yielded = json_path
 
 
 def _resolve_argument_properties(
@@ -154,7 +171,7 @@ def _resolve_argument_properties(
             else:
                 runtime_items.append(resolved.value)
                 display_value = (
-                    _SENSITIVE_ITEM_PLACEHOLDER
+                    SENSITIVE_ARG_PLACEHOLDER
                     if resolved.is_sensitive
                     else resolved.display_value
                 )
@@ -163,25 +180,6 @@ def _resolve_argument_properties(
         return ToolStaticArgument(
             value=runtime_items, display_value=display_items, is_sensitive=False
         )
-
-    def deduplicate_argument_properties(
-        properties: Mapping[str, AgentToolArgumentProperties],
-    ) -> Iterator[tuple[str, AgentToolArgumentProperties]]:
-        """Skips more specific argument properties. In effect, prioritizes parent paths over child paths.
-
-        An objectBuilder is only a marker and never shadows its children, which
-        carry their own argument properties."""
-
-        last_yielded: str | None = None
-        for json_path in sorted(properties.keys()):
-            if last_yielded is not None and json_path.startswith(last_yielded):
-                continue
-            if isinstance(
-                properties[json_path], AgentToolObjectBuilderArgumentProperties
-            ):
-                continue
-            yield json_path, properties[json_path]
-            last_yielded = json_path
 
     static_args: dict[str, ToolStaticArgument] = {}
     for json_path, props in deduplicate_argument_properties(argument_properties):
@@ -312,10 +310,12 @@ class StaticArgsHandler:
     """Resolves and applies static args to tool schemas and tool calls."""
 
     _sanitized_static_values: dict[str, dict[str, Any]] | None
+    _display_static_values: dict[str, dict[str, Any]] | None
     _processed_tools: list[BaseTool] | None
 
     def __init__(self) -> None:
         self._sanitized_static_values = None
+        self._display_static_values = None
         self._processed_tools = None
 
     def initialize(
@@ -332,6 +332,7 @@ class StaticArgsHandler:
 
         self._processed_tools = []
         self._sanitized_static_values = {}
+        self._display_static_values = {}
         for tool in tools:
             if (
                 isinstance(tool, ArgumentPropertiesMixin)
@@ -355,10 +356,26 @@ class StaticArgsHandler:
                 self._sanitized_static_values[tool.name] = (
                     sanitize_dict_for_serialization(applied_static_values)
                 )
+                self._display_static_values[tool.name] = (
+                    sanitize_dict_for_serialization(
+                        {
+                            path: SENSITIVE_ARG_PLACEHOLDER
+                            if sa.is_sensitive
+                            else sa.display_value
+                            for path, sa in static_args.items()
+                            if path in applied_paths
+                        }
+                    )
+                )
             else:
                 self._processed_tools.append(tool)
 
         return self._processed_tools
+
+    @property
+    def display_static_values(self) -> dict[str, dict[str, Any]]:
+        """Static args per tool name with sensitive values masked, for display."""
+        return self._display_static_values or {}
 
     def apply_to_response(self, tool_calls: list[ToolCall]) -> None:
         """Applies cached static args to tool calls in-place."""

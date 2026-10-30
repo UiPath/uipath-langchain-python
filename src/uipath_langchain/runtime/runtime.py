@@ -232,9 +232,9 @@ class UiPathLangGraphRuntime:
                     if isinstance(data, tuple) and not self._is_inside_tool_call(
                         namespace
                     ):
-                        message, _ = data
+                        message, metadata = data
                         try:
-                            events = await self.chat.map_event(message)
+                            events = await self.chat.map_event(message, metadata)
                         except Exception as e:
                             logger.warning(f"Error mapping message event: {e}")
                             events = None

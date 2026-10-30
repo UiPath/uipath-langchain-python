@@ -1,6 +1,7 @@
 """Tests for LLM node tool call filtering functionality."""
 
-from typing import Any, Literal
+import json
+from typing import Any, Iterator, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -9,11 +10,20 @@ import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+)
 from langchain_core.messages.content import create_text_block, create_tool_call
+from langchain_core.messages.tool import tool_call_chunk
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import AzureChatOpenAI
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
+from uipath.agent.models.agent import AgentToolStaticArgumentProperties
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.runtime.errors import UiPathErrorCategory
@@ -30,7 +40,11 @@ from uipath_langchain.agent.react.llm_node import (
 )
 from uipath_langchain.agent.react.tools import create_flow_control_tools
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 from uipath_langchain.chat.exceptions import ChatModelError
+from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 
 class _StubAzureChatOpenAI(AzureChatOpenAI):
@@ -587,7 +601,7 @@ class TestForcedExtractionEscalation:
     ) -> list[Any]:
         captured: dict[str, Any] = {}
 
-        async def fake_ainvoke(msgs: Any) -> AIMessage:
+        async def fake_ainvoke(msgs: Any, config: Any = None) -> AIMessage:
             captured["msgs"] = msgs
             return AIMessage(
                 content="",
@@ -1153,3 +1167,112 @@ class TestCreateLlmNode:
     def test_agents_without_tools_get_the_conversational_node(self) -> None:
         model = _StubChatAnthropic.model_construct(model="claude-opus-4-6")
         assert isinstance(create_llm_node(model, []), ConversationalLLMNode)
+
+
+class _StreamingToolCallModel(BaseChatModel):
+    """Streams a single tool call with the given (model-inferred) args."""
+
+    tool_name: str
+    tool_args: dict[str, Any]
+
+    @property
+    def _llm_type(self) -> str:
+        return "streaming-tool-call-fake"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        return self
+
+    def _generate(
+        self,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise NotImplementedError
+
+    def _stream(
+        self,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content="",
+                id="msg-1",
+                tool_call_chunks=[
+                    tool_call_chunk(
+                        name=self.tool_name,
+                        args=json.dumps(self.tool_args),
+                        id="tc-1",
+                        index=0,
+                    )
+                ],
+            )
+        )
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(content="", id="msg-1", chunk_position="last")
+        )
+
+
+class TestStaticArgsInConversationEvents:
+    """Tool call events show the static args the tool is called with, not the model's."""
+
+    @pytest.mark.asyncio
+    async def test_streamed_tool_call_event_shows_static_args(self):
+        async def echo(slack_id: str) -> str:
+            return f"ECHO:{slack_id}"
+
+        class EchoArgs(BaseModel):
+            slack_id: str
+
+        tool = StructuredToolWithArgumentProperties(
+            name="EchoTool",
+            description="Echoes the slack id",
+            args_schema=EchoArgs,
+            coroutine=echo,
+            output_type=None,
+            argument_properties={
+                "$['slack_id']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="U-REAL-777"
+                ),
+            },
+        )
+        model = _StreamingToolCallModel(
+            tool_name="EchoTool", tool_args={"slack_id": "LLM-GUESS-123"}
+        )
+        builder = StateGraph(AgentGraphState)
+        builder.add_node("llm", create_llm_node(model, [tool], is_conversational=True))
+        builder.add_edge(START, "llm")
+        builder.add_edge("llm", END)
+        graph: Any = builder.compile()
+
+        storage = AsyncMock()
+        storage.get_value = AsyncMock(return_value={})
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        events = []
+        final_state: dict[str, Any] = {}
+        async for mode, data in graph.astream(
+            {"messages": [HumanMessage(content="hello")]},
+            stream_mode=["messages", "values"],
+        ):
+            if mode == "messages":
+                message, metadata = data
+                events.extend(await mapper.map_event(message, metadata) or [])
+            else:
+                final_state = data
+
+        start = next(e for e in events if e.tool_call and e.tool_call.start)
+        executing = next(e for e in events if e.tool_call and e.tool_call.executing)
+        assert start.tool_call is not None and start.tool_call.start is not None
+        assert start.tool_call.start.input == {"slack_id": "U-REAL-777"}
+        assert executing.tool_call is not None
+        assert executing.tool_call.executing is not None
+        assert executing.tool_call.executing.input == {"slack_id": "U-REAL-777"}
+        # The tool is called with the same args the event shows
+        assert final_state["messages"][-1].tool_calls[0]["args"] == {
+            "slack_id": "U-REAL-777"
+        }
