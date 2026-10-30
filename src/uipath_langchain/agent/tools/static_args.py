@@ -312,10 +312,12 @@ class StaticArgsHandler:
     """Resolves and applies static args to tool schemas and tool calls."""
 
     _sanitized_static_values: dict[str, dict[str, Any]] | None
+    _display_static_values: dict[str, dict[str, Any]] | None
     _processed_tools: list[BaseTool] | None
 
     def __init__(self) -> None:
         self._sanitized_static_values = None
+        self._display_static_values = None
         self._processed_tools = None
 
     def initialize(
@@ -332,6 +334,7 @@ class StaticArgsHandler:
 
         self._processed_tools = []
         self._sanitized_static_values = {}
+        self._display_static_values = {}
         for tool in tools:
             if (
                 isinstance(tool, ArgumentPropertiesMixin)
@@ -355,10 +358,26 @@ class StaticArgsHandler:
                 self._sanitized_static_values[tool.name] = (
                     sanitize_dict_for_serialization(applied_static_values)
                 )
+                self._display_static_values[tool.name] = (
+                    sanitize_dict_for_serialization(
+                        {
+                            path: _SENSITIVE_ITEM_PLACEHOLDER
+                            if sa.is_sensitive
+                            else sa.display_value
+                            for path, sa in static_args.items()
+                            if path in applied_paths
+                        }
+                    )
+                )
             else:
                 self._processed_tools.append(tool)
 
         return self._processed_tools
+
+    @property
+    def display_static_values(self) -> dict[str, dict[str, Any]]:
+        """Static args per tool name with sensitive values masked, for display."""
+        return self._display_static_values or {}
 
     def apply_to_response(self, tool_calls: list[ToolCall]) -> None:
         """Applies cached static args to tool calls in-place."""

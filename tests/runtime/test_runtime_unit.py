@@ -107,7 +107,9 @@ class TestIsInsideToolCall:
         self.rt.graph.astream = astream  # type: ignore[method-assign]
         self.rt._get_graph_input = AsyncMock(return_value={})  # type: ignore[method-assign]
         self.rt._create_runtime_result = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
-        self.rt.chat.map_event = AsyncMock(side_effect=lambda message: [message])  # type: ignore[method-assign]
+        self.rt.chat.map_event = AsyncMock(  # type: ignore[method-assign]
+            side_effect=lambda message, metadata: [message]
+        )
 
         payloads = [
             event.payload

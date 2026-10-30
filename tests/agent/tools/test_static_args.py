@@ -471,6 +471,34 @@ class TestStaticArgsHandler:
         )
         assert exc_info.value.error_info.category == UiPathErrorCategory.USER
 
+    def test_display_static_values_mask_sensitive_args(self):
+        """Display values carry the real non-sensitive values and mask sensitive ones."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+                "$['api_key']": AgentToolStaticArgumentProperties(
+                    is_sensitive=True, value="secret-key-123"
+                ),
+                "$['nonexistent_field']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="skipped"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        assert handler.display_static_values == {}
+
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        assert handler.display_static_values == {
+            "test_tool": {
+                "$['host']": "api.example.com",
+                "$['api_key']": "<hidden>",
+            }
+        }
+
 
 class TestApplyStaticArgs:
     """Test cases for apply_static_args function."""

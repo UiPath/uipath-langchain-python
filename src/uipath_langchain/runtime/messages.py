@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import uuid
@@ -42,6 +43,9 @@ from uipath.runtime import UiPathRuntimeStorageProtocol
 
 from uipath_langchain._utils._attachments import render_attachments_block
 from uipath_langchain.agent.contracts.client_side_tools import ClientSideToolInfo
+from uipath_langchain.agent.contracts.static_args import (
+    STATIC_ARGS_DISPLAY_METADATA_KEY,
+)
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ._citations import (
@@ -292,22 +296,28 @@ class UiPathChatMessagesMapper:
     async def map_event(
         self,
         message: BaseMessage,
+        metadata: dict[str, Any] | None = None,
     ) -> list[UiPathConversationMessageEvent] | None:
         """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationMessageEvent.
 
         Args:
             message: The LangChain message to convert
+            metadata: The LangGraph stream metadata of the run that produced the message
 
         Returns:
             A UiPathConversationMessageEvent if the message should be emitted, None otherwise.
         """
+        static_args_display = (metadata or {}).get(STATIC_ARGS_DISPLAY_METADATA_KEY)
+
         # --- Streaming AIMessageChunk (check before AIMessage since it's a subclass) ---
         if isinstance(message, AIMessageChunk):
-            return await self.map_ai_message_chunk_to_events(message)
+            return await self.map_ai_message_chunk_to_events(
+                message, static_args_display
+            )
 
         # --- Full AIMessage (e.g. when PII-masking is enabled) ---
         if isinstance(message, AIMessage):
-            return await self.map_ai_message_to_events(message)
+            return await self.map_ai_message_to_events(message, static_args_display)
 
         # --- ToolMessage ---
         if isinstance(message, ToolMessage):
@@ -358,7 +368,9 @@ class UiPathChatMessagesMapper:
             return None
 
     async def map_ai_message_chunk_to_events(
-        self, message: AIMessageChunk
+        self,
+        message: AIMessageChunk,
+        static_args_display: dict[str, dict[str, Any]] | None = None,
     ) -> list[UiPathConversationMessageEvent]:
         if message.id is None:  # Should we throw instead?
             return []
@@ -424,7 +436,9 @@ class UiPathChatMessagesMapper:
                 and len(self.current_message.tool_calls) > 0
             ):
                 events.extend(
-                    await self.map_current_message_to_start_tool_call_events()
+                    await self.map_current_message_to_start_tool_call_events(
+                        static_args_display
+                    )
                 )
             else:
                 events.append(self.map_to_message_end_event(message.id))
@@ -432,7 +446,9 @@ class UiPathChatMessagesMapper:
         return events
 
     async def map_ai_message_to_events(
-        self, message: AIMessage
+        self,
+        message: AIMessage,
+        static_args_display: dict[str, dict[str, Any]] | None = None,
     ) -> list[UiPathConversationMessageEvent]:
         """Handle a full AIMessage (non-streaming)."""
         if message.id is None or message.id in self.seen_message_ids:
@@ -455,13 +471,41 @@ class UiPathChatMessagesMapper:
 
         events.append(self.map_to_content_part_end_event(message.id))
         if message.tool_calls:
-            events.extend(await self.map_current_message_to_start_tool_call_events())
+            events.extend(
+                await self.map_current_message_to_start_tool_call_events(
+                    static_args_display
+                )
+            )
         else:
             events.append(self.map_to_message_end_event(message.id))
 
         return events
 
-    async def map_current_message_to_start_tool_call_events(self):
+    def _apply_static_args_display(
+        self,
+        tool_call: ToolCall,
+        static_args_display: dict[str, dict[str, Any]] | None,
+    ) -> ToolCall:
+        """Apply static args (resolved after the model call) to a tool call for display."""
+        # Imported lazily: agent.tools imports the runtime.
+        from uipath_langchain.agent.tools.static_args import apply_static_args
+
+        static_values = (static_args_display or {}).get(tool_call["name"])
+        if not static_values or not isinstance(tool_call["args"], dict):
+            return tool_call
+        try:
+            args = apply_static_args(static_values, copy.deepcopy(tool_call["args"]))
+        except Exception as e:
+            logger.warning(
+                f"Could not apply static args to tool call {tool_call['id']}: {e}"
+            )
+            return tool_call
+        return cast(ToolCall, {**tool_call, "args": args})
+
+    async def map_current_message_to_start_tool_call_events(
+        self,
+        static_args_display: dict[str, dict[str, Any]] | None = None,
+    ):
         events: list[UiPathConversationMessageEvent] = []
         if (
             self.current_message
@@ -484,6 +528,9 @@ class UiPathChatMessagesMapper:
                     tool_call_id_to_message_id_map = {}
 
                 for tool_call in self.current_message.tool_calls:
+                    tool_call = self._apply_static_args_display(
+                        tool_call, static_args_display
+                    )
                     tool_call_id = tool_call["id"]
                     if tool_call_id is not None:
                         tool_call_id_to_message_id_map[tool_call_id] = (

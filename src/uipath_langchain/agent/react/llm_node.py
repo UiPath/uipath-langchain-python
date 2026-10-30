@@ -10,7 +10,7 @@ from langchain_core.messages import (
     BaseMessage,
     ToolCall,
 )
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig, ensure_config
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
@@ -22,6 +22,7 @@ from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.chat.handlers.base import ModelPayloadHandler
 from uipath_langchain.chat.thinking import thinking_rejects_forced_tool_choice
 
+from ..contracts.static_args import STATIC_ARGS_DISPLAY_METADATA_KEY
 from ..exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -68,10 +69,12 @@ def _filter_control_flow_tool_calls(
 
 
 async def _ainvoke(
-    llm: Runnable[Sequence[AnyMessage], BaseMessage], messages: Sequence[AnyMessage]
+    llm: Runnable[Sequence[AnyMessage], BaseMessage],
+    messages: Sequence[AnyMessage],
+    config: RunnableConfig | None = None,
 ) -> BaseMessage:
     try:
-        return await llm.ainvoke(messages)
+        return await llm.ainvoke(messages, config)
     except UiPathAPIError as e:
         # New LLM clients surface provider HTTP errors as a normalized UiPathAPIError directly.
         raise_for_provider_http_error(e)
@@ -191,7 +194,19 @@ class LLMNode(ABC, Generic[StateT]):
         )
         llm = call.model.bind_tools(tools, **binding_kwargs)
 
-        response = await _ainvoke(llm, call.messages)
+        # Static args are applied after the model call, but conversation events are
+        # built from the streamed chunks. Pass the display values along in the run
+        # metadata so the events show the args the tool is actually called with.
+        config: RunnableConfig | None = None
+        if display_static_values := self.static_args_handler.display_static_values:
+            # An explicit config replaces the inherited metadata, so merge into it.
+            config = {
+                "metadata": {
+                    **ensure_config().get("metadata", {}),
+                    STATIC_ARGS_DISPLAY_METADATA_KEY: display_static_values,
+                }
+            }
+        response = await _ainvoke(llm, call.messages, config)
         if not isinstance(response, AIMessage):
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
