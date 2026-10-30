@@ -1,17 +1,7 @@
 """Skill bundles for coded LangGraph agents.
 
-``UiPathSkills`` declares an agent's bound bundles, resolves them once per
-process and hands out the ``load_skill`` tool and the prompt section, or the
-middleware for an advanced (deepagents) agent. ``create_load_skill_tool`` and
-``skills_prompt_section`` are the building blocks for an already-resolved
-``uipath.platform.skills.SkillSet``; ``UIPATH_SKILLS_PROMPT`` is the
-advanced-agent one.
-
-The advanced-agent middleware (``create_skills_middleware``,
-``SkillLoadTraceMiddleware``, ``UiPathSkillsMiddleware``,
-``deepagents_sources``) lives in ``uipath_langchain.skills.middleware``. It
-imports deepagents, so it is not imported here and the ``load_skill`` path
-never loads deepagents.
+The deepagents middleware is in ``uipath_langchain.skills.middleware``, kept
+out of this package so ``load_skill`` agents never import deepagents.
 """
 
 from .load_skill_tool import create_load_skill_tool
