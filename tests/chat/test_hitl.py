@@ -7,7 +7,9 @@ from unittest.mock import patch
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (
+    AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
+    AgentToolObjectBuilderArgumentProperties,
     AgentToolStaticArgumentProperties,
 )
 
@@ -213,8 +215,8 @@ class TestSensitiveStaticArgsConfirmation:
             CONVERSATIONAL_APPROVED_TOOL_ARGS
         ] == {"query": "test", "api_key": "<hidden>", "host": "api.example.com"}
 
-    def test_static_path_missing_from_call_args_is_removed(self):
-        """A static path the server didn't set can't be filled in by the client."""
+    def test_static_path_not_applied_stays_dynamic(self):
+        """A static path missing from the call args was never pinned, so it isn't restored."""
         call, _ = self._confirm(
             {
                 "query": "test",
@@ -224,26 +226,23 @@ class TestSensitiveStaticArgsConfirmation:
             },
             argument_properties={
                 **MockToolWithArgumentProperties().argument_properties,
-                "$['region']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False, value=None
+                "$['region']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="$['missingInput']"
                 ),
             },
         )
 
-        assert call["args"] == {
-            "query": "test",
-            "api_key": "secret",
-            "host": "api.example.com",
-        }
+        assert call["args"]["region"] == "client-value"
+        assert call["args"]["api_key"] == "secret"
 
-    def test_wildcard_static_path_restores_the_whole_array(self):
-        """A [*] static path pins every item, so the client can't add items."""
+    def test_wildcard_static_path_pins_every_item(self):
+        """A [*] static path pins every item, including ones the client added."""
         call, _ = self._confirm(
             {
                 "query": "test",
                 "api_key": "<hidden>",
                 "host": "api.example.com",
-                "tags": ["pinned", "pinned", "extra"],
+                "tags": ["pinned", "edited", "extra"],
             },
             argument_properties={
                 **MockToolWithArgumentProperties().argument_properties,
@@ -254,7 +253,65 @@ class TestSensitiveStaticArgsConfirmation:
             original_extra={"tags": ["pinned"]},
         )
 
+        assert call["args"]["tags"] == ["pinned", "pinned", "pinned"]
+
+    def test_wildcard_array_dropped_by_the_client_is_restored(self):
+        call, _ = self._confirm(
+            {"query": "test", "api_key": "<hidden>", "host": "api.example.com"},
+            argument_properties={
+                **MockToolWithArgumentProperties().argument_properties,
+                "$['tags'][*]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="pinned"
+                ),
+            },
+            original_extra={"tags": ["pinned"]},
+        )
+
         assert call["args"]["tags"] == ["pinned"]
+
+    def test_nested_wildcard_keeps_each_array(self):
+        """Nested [*] paths keep each array's own length when nothing is edited."""
+        groups = [{"tags": ["pinned"]}, {"tags": ["pinned", "pinned"]}]
+        call, result = self._confirm(
+            {
+                "query": "test",
+                "api_key": "<hidden>",
+                "host": "api.example.com",
+                "groups": groups,
+            },
+            argument_properties={
+                **MockToolWithArgumentProperties().argument_properties,
+                "$['groups'][*]['tags'][*]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="pinned"
+                ),
+            },
+            original_extra={"groups": groups},
+        )
+
+        assert call["args"]["groups"] == groups
+        assert result.args_modified is False
+
+    def test_object_builder_keeps_edits_to_dynamic_children(self):
+        """An objectBuilder is only a marker: only its configured children are pinned."""
+        call, result = self._confirm(
+            {
+                "query": "test",
+                "api_key": "<hidden>",
+                "host": "api.example.com",
+                "state": {"message": "edited", "note": "edited"},
+            },
+            argument_properties={
+                **MockToolWithArgumentProperties().argument_properties,
+                "$['state']": AgentToolObjectBuilderArgumentProperties(),
+                "$['state']['message']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="Refund please"
+                ),
+            },
+            original_extra={"state": {"message": "Refund please", "note": "orig"}},
+        )
+
+        assert call["args"]["state"] == {"message": "Refund please", "note": "edited"}
+        assert result.args_modified is True
 
 
 class TestAnnotateResult:

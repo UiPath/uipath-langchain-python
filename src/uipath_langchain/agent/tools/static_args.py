@@ -55,6 +55,24 @@ class ToolStaticArgument(BaseModel):
 _INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
 
 
+def deduplicate_argument_properties(
+    properties: Mapping[str, AgentToolArgumentProperties],
+) -> Iterator[tuple[str, AgentToolArgumentProperties]]:
+    """Skips more specific argument properties. In effect, prioritizes parent paths over child paths.
+
+    An objectBuilder is only a marker and never shadows its children, which
+    carry their own argument properties."""
+
+    last_yielded: str | None = None
+    for json_path in sorted(properties.keys()):
+        if last_yielded is not None and json_path.startswith(last_yielded):
+            continue
+        if isinstance(properties[json_path], AgentToolObjectBuilderArgumentProperties):
+            continue
+        yield json_path, properties[json_path]
+        last_yielded = json_path
+
+
 def _resolve_argument_properties(
     argument_properties: Mapping[str, AgentToolArgumentProperties],
     agent_input: dict[str, Any],
@@ -162,25 +180,6 @@ def _resolve_argument_properties(
         return ToolStaticArgument(
             value=runtime_items, display_value=display_items, is_sensitive=False
         )
-
-    def deduplicate_argument_properties(
-        properties: Mapping[str, AgentToolArgumentProperties],
-    ) -> Iterator[tuple[str, AgentToolArgumentProperties]]:
-        """Skips more specific argument properties. In effect, prioritizes parent paths over child paths.
-
-        An objectBuilder is only a marker and never shadows its children, which
-        carry their own argument properties."""
-
-        last_yielded: str | None = None
-        for json_path in sorted(properties.keys()):
-            if last_yielded is not None and json_path.startswith(last_yielded):
-                continue
-            if isinstance(
-                properties[json_path], AgentToolObjectBuilderArgumentProperties
-            ):
-                continue
-            yield json_path, properties[json_path]
-            last_yielded = json_path
 
     static_args: dict[str, ToolStaticArgument] = {}
     for json_path, props in deduplicate_argument_properties(argument_properties):

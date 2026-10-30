@@ -176,24 +176,43 @@ def _restore_static_args(
     original_args: dict[str, Any],
     approved_args: dict[str, Any],
 ) -> dict[str, Any]:
-    """Restore static args from the server-side call args.
+    """Re-apply the static args, as applied to the model's call, to the approved args.
 
     Static args are pinned by the agent author, so approval must not change them.
     Sensitive ones are only shown masked, and the secret must never follow an
-    edited arg (e.g. to another host). A static path missing from the call args
-    is removed rather than taken from the client.
+    edited arg (e.g. to another host).
     """
+    # Imported lazily: agent.tools imports this module.
+    from uipath_langchain.agent.tools.static_args import (
+        apply_static_args,
+        deduplicate_argument_properties,
+    )
+
     argument_properties = getattr(tool, "argument_properties", None) or {}
     restored = copy.deepcopy(approved_args)
-    for json_path in argument_properties:
-        # A [*] path sets every item, so restore the whole array
-        restore_path = json_path[:-3] if json_path.endswith("[*]") else json_path
-        expr = parse(restore_path)
-        matches = expr.find(original_args)
-        if matches:
-            expr.update_or_create(restored, copy.deepcopy(matches[0].value))
+    for json_path, _ in deduplicate_argument_properties(argument_properties):
+        # Every match of a path got the same value, so any match recovers it.
+        # A path without a match wasn't applied, so it isn't pinned.
+        if json_path.endswith("[*]"):
+            array_expr = parse(json_path[:-3])
+            items = [
+                m.value[0]
+                for m in array_expr.find(original_args)
+                if isinstance(m.value, list) and m.value
+            ]
+            if not items:
+                continue
+            if not array_expr.find(restored):
+                # The client dropped the array, so there is nothing to pin into
+                array_expr.update_or_create(restored, [copy.deepcopy(items[0])])
+                continue
+            value = items[0]
         else:
-            expr.filter(lambda _: True, restored)
+            matches = parse(json_path).find(original_args)
+            if not matches:
+                continue
+            value = matches[0].value
+        restored = apply_static_args({json_path: copy.deepcopy(value)}, restored)
     return restored
 
 
