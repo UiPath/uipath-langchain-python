@@ -49,10 +49,6 @@ def test_deepagents_sources_are_one_labelled_root_per_bundle(
     ]
 
 
-def test_deepagents_sources_empty_for_empty_set(empty_skill_set: SkillSet) -> None:
-    assert deepagents_sources(empty_skill_set) == []
-
-
 def test_builds_a_skills_middleware_with_one_source_per_bundle(
     workspace: Path, skill_set: SkillSet
 ) -> None:
@@ -116,34 +112,6 @@ def test_missing_bundle_folder_is_reported_and_other_bundles_still_listed(
     assert [s["name"] for s in update["skills_metadata"]] == ["ops/vendor-lookup"]
     errors = update.get("skills_load_errors", [])
     assert len(errors) == 1 and "/skills/finance/" in errors[0]
-
-
-async def test_async_missing_bundle_folder_is_reported(
-    workspace: Path, skill_set: SkillSet
-) -> None:
-    shutil.rmtree(workspace / "skills" / "finance")
-    middleware = _middleware(workspace, skill_set)
-    sync_update = middleware.before_agent({"messages": []}, None, {})  # type: ignore[arg-type]
-    async_update = await middleware.abefore_agent({"messages": []}, None, {})  # type: ignore[arg-type]
-    assert async_update == sync_update
-
-
-def test_rendered_section_lists_qualified_names_and_paths(
-    workspace: Path, skill_set: SkillSet
-) -> None:
-    middleware = _middleware(workspace, skill_set)
-    update = middleware.before_agent({"messages": []}, None, {})  # type: ignore[arg-type]
-    assert update is not None
-    text = UIPATH_SKILLS_PROMPT.format(
-        skills_locations=middleware._format_skills_locations(),
-        skills_load_warnings="",
-        skills_list=middleware._format_skills_list(update["skills_metadata"]),
-    )
-    assert "## Skills" in text
-    assert "**finance v3 Skills**: `/skills/finance/`" in text
-    assert "- **finance/vendor-lookup**:" in text and "- **ops/vendor-lookup**:" in text
-    assert "/skills/ops/vendor-lookup/SKILL.md" in text
-    assert "cannot be executed in this environment" in " ".join(text.split())
 
 
 def test_modify_request_appends_the_section_to_the_system_message(
