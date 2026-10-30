@@ -14,7 +14,7 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from uipath.runtime.errors import UiPathErrorCategory
@@ -265,6 +265,137 @@ class TestWrapModelCall:
 
         with pytest.raises(ChatModelError):
             await middleware.awrap_model_call(_request(_gemini()), handler)
+
+
+class TestMissedOutputToolRetry:
+    """A structured-output turn with no tool call is retried once, then fails."""
+
+    @staticmethod
+    def _structured_request() -> ModelRequest[Any]:
+        return _request(
+            GenericFakeChatModel(messages=iter([])),
+            response_format=ToolStrategy({"title": "end", "type": "object"}),
+        )
+
+    @pytest.mark.parametrize(
+        "stalled",
+        [
+            AIMessage(content=""),
+            AIMessage(content="The answer is 42."),
+            AIMessage(content=[{"type": "reasoning", "reasoning": "thinking"}]),
+        ],
+        ids=["empty", "plain-text", "reasoning-only"],
+    )
+    def test_retries_once_and_returns_the_recovered_response(
+        self, stalled: AIMessage
+    ) -> None:
+        middleware = _PayloadHandlerMiddleware()
+        recovered = _response(AIMessage(content=""), structured={"result": "ok"})
+        seen: list[ModelRequest[Any]] = []
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            seen.append(request)
+            return _response(stalled) if len(seen) == 1 else recovered
+
+        response = middleware.wrap_model_call(self._structured_request(), handler)
+
+        assert response is recovered
+        assert len(seen) == 2
+        assert isinstance(seen[1].messages[-1], HumanMessage)
+        assert seen[0].messages == []
+
+    async def test_async_retries_once_and_returns_the_recovered_response(
+        self,
+    ) -> None:
+        middleware = _PayloadHandlerMiddleware()
+        recovered = _response(AIMessage(content=""), structured={"result": "ok"})
+        calls = 0
+
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            nonlocal calls
+            calls += 1
+            return _response(AIMessage(content="text")) if calls == 1 else recovered
+
+        response = await middleware.awrap_model_call(
+            self._structured_request(), handler
+        )
+
+        assert response is recovered
+        assert calls == 2
+
+    def test_second_miss_raises(self) -> None:
+        middleware = _PayloadHandlerMiddleware()
+        calls = 0
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            nonlocal calls
+            calls += 1
+            return _response(AIMessage(content="text"))
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            middleware.wrap_model_call(self._structured_request(), handler)
+
+        assert calls == 2
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.LLM_INVALID_RESPONSE
+        )
+
+    def test_stop_reason_is_checked_on_the_retry_response(self) -> None:
+        middleware = _PayloadHandlerMiddleware()
+        request = _request(
+            _gemini(), response_format=ToolStrategy({"title": "end", "type": "object"})
+        )
+        calls = 0
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return _response(AIMessage(content="text"))
+            return _response(
+                AIMessage(
+                    content="",
+                    response_metadata={"finish_reason": "MALFORMED_FUNCTION_CALL"},
+                )
+            )
+
+        with pytest.raises(ChatModelError):
+            middleware.wrap_model_call(request, handler)
+
+        assert calls == 2
+
+    def test_tool_call_turn_is_not_retried(self) -> None:
+        middleware = _PayloadHandlerMiddleware()
+        calls = 0
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            nonlocal calls
+            calls += 1
+            return _response(
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "echo", "args": {"text": "x"}, "id": "1"}],
+                )
+            )
+
+        middleware.wrap_model_call(self._structured_request(), handler)
+
+        assert calls == 1
+
+    def test_without_response_format_a_text_turn_is_final(self) -> None:
+        middleware = _PayloadHandlerMiddleware()
+        calls = 0
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            nonlocal calls
+            calls += 1
+            return _response(AIMessage(content="text"))
+
+        middleware.wrap_model_call(
+            _request(GenericFakeChatModel(messages=iter([]))), handler
+        )
+
+        assert calls == 1
 
 
 class TestSubagentWiring:
