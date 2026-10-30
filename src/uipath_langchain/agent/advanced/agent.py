@@ -210,7 +210,9 @@ def _max_iterations_middleware(
     return [_MaxIterationsMiddleware(max_iterations, initial_message_count_key)]
 
 
-_OUTPUT_TOOL_NUDGE = "Submit the final output now by calling the output tool."
+_OUTPUT_TOOL_NUDGE = (
+    "Call a tool to continue. Terminal tool calls must contain the final output."
+)
 
 
 # A subagent returns only a text report, so a reference it produces never reaches
