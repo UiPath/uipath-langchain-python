@@ -2,7 +2,7 @@
   "runtime": {
     "internalArguments": {
       "resourceOverwrites": {
-        "skillBundle.ops": { "versionMode": "pinned", "version": "1" }
+        "skillBundle.ops": { "name": "ops", "folderPath": "Shared/Skills", "versionMode": "pinned", "version": "1" }
       }
     }
   }

@@ -96,7 +96,7 @@ On Windows PowerShell:
 New-Item -ItemType Directory -Force __uipath; Copy-Item resource-overwrites.example.json __uipath/uipath.json
 ```
 
-It pins `ops` to version 1 instead of `latest`. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. A local folder holds one version only, so pinning a version it does not hold loads the folder anyway, with a warning. To point the binding at another bundle, replace the entry with `{ "name": "finance" }`: `ops` is then read from the `finance` folder, the agent still sees it as `ops` (`ops/invoice-triage`, `ops/vendor-lookup`), and its event has `skill.bundle.lookup_name` = `finance`. Delete `__uipath/uipath.json` to go back to the declared bindings.
+It pins `ops` to version 1 instead of `latest`. An override replaces the whole binding, so the entry repeats the bundle's `name` and `folderPath` along with `versionMode` and `version`; an incomplete entry is skipped with a warning. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. A local folder holds one version only, so pinning a version it does not hold loads the folder anyway, with a warning. To point the binding at another bundle, change the entry's `name` to `finance`: `ops` is then read from the `finance` folder, the agent still sees it as `ops` (`ops/invoice-triage`, `ops/vendor-lookup`), and its event has `skill.bundle.lookup_name` = `finance`. Delete `__uipath/uipath.json` to go back to the declared bindings.
 
 ## Switch the source
 
