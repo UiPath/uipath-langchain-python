@@ -22,6 +22,7 @@ from uipath.agent.models.agent import (
 from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.contracts.static_args import SENSITIVE_ARG_PLACEHOLDER
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -52,8 +53,6 @@ class ToolStaticArgument(BaseModel):
 
 
 _INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
-
-_SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
 
 
 def _resolve_argument_properties(
@@ -154,7 +153,7 @@ def _resolve_argument_properties(
             else:
                 runtime_items.append(resolved.value)
                 display_value = (
-                    _SENSITIVE_ITEM_PLACEHOLDER
+                    SENSITIVE_ARG_PLACEHOLDER
                     if resolved.is_sensitive
                     else resolved.display_value
                 )
@@ -361,7 +360,7 @@ class StaticArgsHandler:
                 self._display_static_values[tool.name] = (
                     sanitize_dict_for_serialization(
                         {
-                            path: _SENSITIVE_ITEM_PLACEHOLDER
+                            path: SENSITIVE_ARG_PLACEHOLDER
                             if sa.is_sensitive
                             else sa.display_value
                             for path, sa in static_args.items()

@@ -160,14 +160,46 @@ class TestSensitiveStaticArgsConfirmation:
         }
         assert result.args_modified is True
 
-    def test_user_edits_to_non_sensitive_args_are_kept(self):
-        """Only sensitive args are restored."""
-        call, _ = self._confirm(
-            {"query": "test", "api_key": "<hidden>", "host": "other.example.com"}
+    def test_edits_to_static_args_are_reverted(self):
+        """Static args are pinned, so the secret can't be redirected to another host."""
+        call, result = self._confirm(
+            {"query": "edited", "api_key": "<hidden>", "host": "evil.example.com"}
         )
 
-        assert call["args"]["host"] == "other.example.com"
-        assert call["args"]["api_key"] == "secret"
+        assert call["args"] == {
+            "query": "edited",
+            "api_key": "secret",
+            "host": "api.example.com",
+        }
+        assert result.args_modified is True
+
+    def test_approved_args_keep_sensitive_args_masked(self):
+        """approved_args go back to the model and client, so the secret stays masked."""
+        _, result = self._confirm(
+            {"query": "edited", "api_key": "<hidden>", "host": "api.example.com"}
+        )
+
+        assert result.approved_args == {
+            "query": "edited",
+            "api_key": "<hidden>",
+            "host": "api.example.com",
+        }
+
+    def test_cancelled_metadata_keeps_sensitive_args_masked(self):
+        """The cancelled message metadata doesn't carry the secret."""
+        tool = MockToolWithArgumentProperties(
+            metadata={"require_conversational_confirmation": True}
+        )
+        call = _make_call(
+            {"query": "test", "api_key": "secret", "host": "api.example.com"}
+        )
+        with patch("uipath_langchain.chat.hitl.request_approval", return_value=None):
+            result = request_conversational_tool_confirmation(call, tool)
+
+        assert result is not None and result.cancelled is not None
+        assert result.cancelled.response_metadata[
+            CONVERSATIONAL_APPROVED_TOOL_ARGS
+        ] == {"query": "test", "api_key": "<hidden>", "host": "api.example.com"}
 
 
 class TestAnnotateResult:
