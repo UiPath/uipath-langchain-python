@@ -122,12 +122,24 @@ class MockToolWithArgumentProperties(MockTool):
 class TestSensitiveStaticArgsConfirmation:
     """Sensitive static args are shown masked, so approval must not overwrite them."""
 
-    def _confirm(self, approved_input: dict[str, Any]) -> tuple[ToolCall, Any]:
+    def _confirm(
+        self,
+        approved_input: dict[str, Any],
+        argument_properties: dict[str, AgentToolArgumentProperties] | None = None,
+        original_extra: dict[str, Any] | None = None,
+    ) -> tuple[ToolCall, Any]:
         tool = MockToolWithArgumentProperties(
             metadata={"require_conversational_confirmation": True}
         )
+        if argument_properties is not None:
+            tool.argument_properties = argument_properties
         call = _make_call(
-            {"query": "test", "api_key": "secret", "host": "api.example.com"}
+            {
+                "query": "test",
+                "api_key": "secret",
+                "host": "api.example.com",
+                **(original_extra or {}),
+            }
         )
         with patch(
             "uipath_langchain.chat.hitl.request_approval",
@@ -200,6 +212,49 @@ class TestSensitiveStaticArgsConfirmation:
         assert result.cancelled.response_metadata[
             CONVERSATIONAL_APPROVED_TOOL_ARGS
         ] == {"query": "test", "api_key": "<hidden>", "host": "api.example.com"}
+
+    def test_static_path_missing_from_call_args_is_removed(self):
+        """A static path the server didn't set can't be filled in by the client."""
+        call, _ = self._confirm(
+            {
+                "query": "test",
+                "api_key": "<hidden>",
+                "host": "api.example.com",
+                "region": "client-value",
+            },
+            argument_properties={
+                **MockToolWithArgumentProperties().argument_properties,
+                "$['region']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value=None
+                ),
+            },
+        )
+
+        assert call["args"] == {
+            "query": "test",
+            "api_key": "secret",
+            "host": "api.example.com",
+        }
+
+    def test_wildcard_static_path_restores_the_whole_array(self):
+        """A [*] static path pins every item, so the client can't add items."""
+        call, _ = self._confirm(
+            {
+                "query": "test",
+                "api_key": "<hidden>",
+                "host": "api.example.com",
+                "tags": ["pinned", "pinned", "extra"],
+            },
+            argument_properties={
+                **MockToolWithArgumentProperties().argument_properties,
+                "$['tags'][*]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="pinned"
+                ),
+            },
+            original_extra={"tags": ["pinned"]},
+        )
+
+        assert call["args"]["tags"] == ["pinned"]
 
 
 class TestAnnotateResult:

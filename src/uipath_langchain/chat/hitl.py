@@ -180,14 +180,21 @@ def _restore_static_args(
 
     Static args are pinned by the agent author, so approval must not change them.
     Sensitive ones are only shown masked, and the secret must never follow an
-    edited arg (e.g. to another host).
+    edited arg (e.g. to another host). A static path missing from the call args
+    is removed rather than taken from the client.
     """
-
-    def original_value(json_path: str, props: Any) -> Any | None:
-        matches = parse(json_path).find(original_args)
-        return matches[0].value if matches else None
-
-    return _set_static_arg_paths(tool, approved_args, original_value)
+    argument_properties = getattr(tool, "argument_properties", None) or {}
+    restored = copy.deepcopy(approved_args)
+    for json_path in argument_properties:
+        # A [*] path sets every item, so restore the whole array
+        restore_path = json_path[:-3] if json_path.endswith("[*]") else json_path
+        expr = parse(restore_path)
+        matches = expr.find(original_args)
+        if matches:
+            expr.update_or_create(restored, copy.deepcopy(matches[0].value))
+        else:
+            expr.filter(lambda _: True, restored)
+    return restored
 
 
 def _mask_sensitive_static_args(tool: BaseTool, args: dict[str, Any]) -> dict[str, Any]:
