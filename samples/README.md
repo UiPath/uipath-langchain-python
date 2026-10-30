@@ -54,6 +54,9 @@ This sample demonstrates using the DeepAgents library to create an agent with ad
 ## [OAuth external apps agent](oauth-external-apps-agent)
 This sample shows how to build a LangGraph agent that connects to a remote UiPath MCP server using OAuth authentication through an external UiPath application for dynamic access token management.
 
+## [Skills agent](skills-agent)
+This sample demonstrates a coded LangGraph agent bound to two skill bundles: it lists their skills in the system prompt, loads a skill's instructions on demand with the `load_skill` tool, and reports which skills it used. It runs against the sample's own `skills/` folder while the Orchestrator Skills API is in preview.
+
 ## [Ticket classification](ticket-classification)
 This sample demonstrates automatic classification of support tickets into categories. It includes a human approval step via UiPath Action Center.
 
