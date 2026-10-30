@@ -6,6 +6,10 @@ from unittest.mock import patch
 
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
+from uipath.agent.models.agent import (
+    AgentToolArgumentProperties,
+    AgentToolStaticArgumentProperties,
+)
 
 from uipath_langchain.chat.hitl import (
     ARGS_MODIFIED_MESSAGE,
@@ -102,6 +106,68 @@ class TestCheckToolConfirmation:
         assert result.args_modified is True
         assert result.approved_args == {"query": "edited"}
         assert call["args"] == {"query": "edited"}
+
+
+class MockToolWithArgumentProperties(MockTool):
+    argument_properties: dict[str, AgentToolArgumentProperties] = {
+        "$['api_key']": AgentToolStaticArgumentProperties(
+            is_sensitive=True, value="secret"
+        ),
+        "$['host']": AgentToolStaticArgumentProperties(
+            is_sensitive=False, value="api.example.com"
+        ),
+    }
+
+
+class TestSensitiveStaticArgsConfirmation:
+    """Sensitive static args are shown masked, so approval must not overwrite them."""
+
+    def _confirm(self, approved_input: dict[str, Any]) -> tuple[ToolCall, Any]:
+        tool = MockToolWithArgumentProperties(
+            metadata={"require_conversational_confirmation": True}
+        )
+        call = _make_call(
+            {"query": "test", "api_key": "secret", "host": "api.example.com"}
+        )
+        with patch(
+            "uipath_langchain.chat.hitl.request_approval",
+            return_value=approved_input,
+        ):
+            result = request_conversational_tool_confirmation(call, tool)
+        return call, result
+
+    def test_masked_sensitive_arg_is_restored(self):
+        """The client echoes the masked input → the tool still gets the real secret."""
+        call, result = self._confirm(
+            {"query": "test", "api_key": "<hidden>", "host": "api.example.com"}
+        )
+
+        assert call["args"] == {
+            "query": "test",
+            "api_key": "secret",
+            "host": "api.example.com",
+        }
+        assert result.args_modified is False
+
+    def test_missing_sensitive_arg_is_restored(self):
+        """The client drops the sensitive arg → the tool still gets the real secret."""
+        call, result = self._confirm({"query": "edited", "host": "api.example.com"})
+
+        assert call["args"] == {
+            "query": "edited",
+            "api_key": "secret",
+            "host": "api.example.com",
+        }
+        assert result.args_modified is True
+
+    def test_user_edits_to_non_sensitive_args_are_kept(self):
+        """Only sensitive args are restored."""
+        call, _ = self._confirm(
+            {"query": "test", "api_key": "<hidden>", "host": "other.example.com"}
+        )
+
+        assert call["args"]["host"] == "other.example.com"
+        assert call["args"]["api_key"] == "secret"
 
 
 class TestAnnotateResult:

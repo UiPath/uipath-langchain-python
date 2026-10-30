@@ -1,9 +1,11 @@
+import copy
 import functools
 import inspect
 import json
 from inspect import Parameter
 from typing import Annotated, Any, Callable, NamedTuple
 
+from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId
 from langchain_core.tools import tool as langchain_tool
@@ -147,6 +149,27 @@ def request_approval(
     return confirmation.input if confirmation.input is not None else tool_args
 
 
+def _restore_sensitive_static_args(
+    tool: BaseTool,
+    original_args: dict[str, Any],
+    approved_args: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore sensitive static args, which the confirmation input only has masked."""
+    argument_properties = getattr(tool, "argument_properties", None) or {}
+    restored = approved_args
+    for json_path, props in argument_properties.items():
+        if not getattr(props, "is_sensitive", False):
+            continue
+        expr = parse(json_path)
+        matches = expr.find(original_args)
+        if not matches:
+            continue
+        if restored is approved_args:
+            restored = copy.deepcopy(approved_args)
+        expr.update_or_create(restored, matches[0].value)
+    return restored
+
+
 # for conversational low code agents
 def request_conversational_tool_confirmation(
     call: ToolCall, tool: BaseTool
@@ -169,6 +192,8 @@ def request_conversational_tool_confirmation(
             original_args
         )
         return ConfirmationResult(cancelled=cancelled_msg, args_modified=False)
+
+    approved_args = _restore_sensitive_static_args(tool, original_args, approved_args)
 
     # Mutate call args so the tool executes with the approved values
     call["args"] = approved_args
