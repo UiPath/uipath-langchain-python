@@ -366,6 +366,11 @@ def _tool_error_content(exc: Exception, request: ToolCallRequest) -> str | None:
     return str(exc)
 
 
+_OUTPUT_TOOL_NUDGE = (
+    "Call a tool to continue. Terminal tool calls must contain the final output."
+)
+
+
 # A subagent returns only a text report, so a reference it produces never reaches
 # the main agent -- the only agent that fills the typed output.
 class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
@@ -401,11 +406,46 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
     def _validate_response(
         self, request: ModelRequest[Any], response: ModelResponse[Any]
     ) -> None:
+        self._check_stop_reason(request, response)
+        self._reject_empty_answer(response)
+
+    def _check_stop_reason(
+        self, request: ModelRequest[Any], response: ModelResponse[Any]
+    ) -> None:
         handler = get_payload_handler(request.model)
         for message in response.result:
             if isinstance(message, AIMessage):
                 handler.check_stop_reason(message)
-        self._reject_empty_answer(response)
+
+    @staticmethod
+    def _missed_output_tool(
+        request: ModelRequest[Any], response: ModelResponse[Any]
+    ) -> bool:
+        """A structured-output turn that ended with no tool call, so no answer."""
+        if request.response_format is None or response.structured_response is not None:
+            return False
+        messages = [m for m in response.result if isinstance(m, AIMessage)]
+        return bool(messages) and not messages[-1].tool_calls
+
+    @staticmethod
+    def _retry_request(request: ModelRequest[Any]) -> ModelRequest[Any]:
+        # The stalled turn is not replayed: a reasoning-only turn can't be sent alone.
+        return request.override(
+            messages=[*request.messages, HumanMessage(content=_OUTPUT_TOOL_NUDGE)]
+        )
+
+    @staticmethod
+    def _missing_output_tool_error() -> AgentRuntimeError:
+        return AgentRuntimeError(
+            code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+            title="The model did not return a final answer.",
+            detail=(
+                "The model ended its turn without calling the output tool, even "
+                "after being asked to. If you are using a BYOM configuration, "
+                "verify your model deployment honors a forced tool choice."
+            ),
+            category=UiPathErrorCategory.SYSTEM,
+        )
 
     def _reject_empty_answer(self, response: ModelResponse[Any]) -> None:
         """Refuse a turn with no text and no tool calls, which ends the loop."""
@@ -438,7 +478,13 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
     ) -> ModelResponse[Any]:
         response = handler(self._prepare_request(request))
-        self._validate_response(request, response)
+        self._check_stop_reason(request, response)
+        if self._missed_output_tool(request, response):
+            response = handler(self._prepare_request(self._retry_request(request)))
+            self._check_stop_reason(request, response)
+            if self._missed_output_tool(request, response):
+                raise self._missing_output_tool_error()
+        self._reject_empty_answer(response)
         return response
 
     async def awrap_model_call(
@@ -447,7 +493,15 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
     ) -> ModelResponse[Any]:
         response = await handler(self._prepare_request(request))
-        self._validate_response(request, response)
+        self._check_stop_reason(request, response)
+        if self._missed_output_tool(request, response):
+            response = await handler(
+                self._prepare_request(self._retry_request(request))
+            )
+            self._check_stop_reason(request, response)
+            if self._missed_output_tool(request, response):
+                raise self._missing_output_tool_error()
+        self._reject_empty_answer(response)
         return response
 
 
