@@ -29,7 +29,7 @@ SKILLS = UiPathSkills(
 | --- | --- |
 | `await SKILLS.load()` | The resolved `SkillSet`. Runs once per process; later and concurrent calls share the result. Never raises for a bundle or platform error: those land in `SkillSet.failures`. |
 | `SKILLS.prompt_section()` | The `## Skills` system-prompt section plus how to use the tool; `""` before `load()` or when no bundle has a skill. |
-| `SKILLS.load_skill_tool()` | The `load_skill` tool. After `load()`: a tool whose `name` argument is an enum of the qualified `<bundle>/<skill>` names, or `None` when there are no skills. Before `load()`: a lazy tool that loads the set on its first call. |
+| `SKILLS.load_skill_tool()` | The `load_skill` tool, whose `name` argument is an enum of the qualified `<bundle>/<skill>` names, or `None` when there are no skills. Call it after `load()`. |
 | `SKILLS.advanced_middleware(backend)` | The middleware for an advanced (deepagents) agent; see [Advanced agents](#advanced-agents). |
 | `SKILLS.cleanup()` | Removes the set's temp folder and forgets the set. |
 
@@ -105,40 +105,10 @@ async def make_graph():
 
 - `uipath init` also calls the factory to build `entry-points.json`, so run `uipath auth` first: without credentials the bundles do not resolve, and the graph is built without the `tools` node. The chat model is built on the first agent step, not in the factory, so that `init` itself needs no LLM credentials.
 - When no bundle has a skill, `load_skill_tool()` returns `None`: the graph runs without the tool and without a `## Skills` section.
+- Build the graph in a factory, not at module level: `load_skill_tool()` raises before `load()`, since the tool lists the skill names the set resolved.
+- The set is resolved once per process. A job resumed in a new process resolves the bundles again, so a `latest` bundle may come back newer.
 
 The [skills-agent sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/skills-agent) is this graph with an output node that reports the skills the model loaded, plus a `skills/` folder, `bindings.json` and an override example to run it locally.
-
----
-
-## Module-Level Graph
-
-When the graph is a module-level `graph` instead of a factory, call `await SKILLS.load()` in the first node. Give `ToolNode` the lazy tool from `load_skill_tool()` at import time: it loads the set (or reuses the cached one) on its first call. In the node, bind the model to the tool `load_skill_tool()` returns after `load()`, which lists the skill names as an enum.
-
-```python
-from langgraph.graph import MessagesState
-
-tools = [SKILLS.load_skill_tool()]  # lazy: nothing is fetched at import
-
-
-async def agent(state: MessagesState):
-    await SKILLS.load()  # once per process; cached afterwards
-    load_skill = SKILLS.load_skill_tool()
-    llm = make_llm()  # the cached model from the factory example
-    model = llm.bind_tools([load_skill]) if load_skill is not None else llm
-    system = SystemMessage("\n\n".join(p for p in [BASE_PROMPT, SKILLS.prompt_section()] if p))
-    return {"messages": [await model.ainvoke([system, *state["messages"]])]}
-
-
-builder = StateGraph(MessagesState)
-builder.add_node("agent", agent)
-builder.add_node("tools", ToolNode(tools))
-builder.add_edge(START, "agent")
-builder.add_conditional_edges("agent", tools_condition)
-builder.add_edge("tools", "agent")
-graph = builder.compile()
-```
-
-The set is resolved once per process. A job resumed in a new process resolves the bundles again, so a `latest` bundle may come back newer.
 
 ---
 
