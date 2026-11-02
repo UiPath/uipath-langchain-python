@@ -189,9 +189,17 @@ def _create_validation_command(
         )
 
     if guardrail_result.result == GuardrailValidationResultType.VALIDATION_FAILED:
+        details = guardrail_result.reason
+        # The guardrail could not be evaluated (fail-closed); say so instead of
+        # reporting the provider error as a violation.
+        if guardrail_result.error_type is not None:
+            details = (
+                f"Guardrail could not be evaluated "
+                f"({guardrail_result.error_type.value}): {guardrail_result.reason}"
+            )
         inner_state = {
             "guardrail_validation_result": False,
-            "guardrail_validation_details": guardrail_result.reason,
+            "guardrail_validation_details": details,
             "guardrail_flagged_file_names": flagged_file_names,
             "guardrail_attachments": sent_attachments,
         }

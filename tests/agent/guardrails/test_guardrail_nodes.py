@@ -10,6 +10,7 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from uipath.core.guardrails import (
+    GuardrailValidationErrorType,
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
@@ -656,6 +657,42 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_flagged_file_names": None,
+                "guardrail_attachments": None,
+            }
+        }
+
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            GuardrailValidationErrorType.PROVIDER_ERROR,
+            GuardrailValidationErrorType.INTERNAL_ERROR,
+            GuardrailValidationErrorType.RATE_LIMIT_EXCEEDED,
+        ],
+    )
+    def test_create_validation_command_error_routes_to_failure_with_labelled_details(
+        self, error_type: GuardrailValidationErrorType
+    ):
+        """A guardrail that could not be evaluated still fails closed, with labelled details."""
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="`temperature` is deprecated for this model.",
+            error_type=error_type,
+        )
+        command = _create_validation_command(result, "success_node", "failure_node")
+
+        assert command.goto == "failure_node"
+        assert command.update == {
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": (
+                    f"Guardrail could not be evaluated ({error_type.value}): "
+                    "`temperature` is deprecated for this model."
+                ),
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
