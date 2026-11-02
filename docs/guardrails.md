@@ -80,6 +80,7 @@ All classes share these common parameters:
 - **`action`** — what to do on violation: `LogAction(...)`, `BlockAction(...)`, or `EscalateAction(...)` (escalate to a human — see [Escalation action](#escalation-action-human-in-the-loop)).
 - **`scopes`** (`list[GuardrailScope]`) — restrict which hooks are registered. Defaults shown in the table above. Use `GuardrailScope.AGENT`, `GuardrailScope.LLM`, `GuardrailScope.TOOL`.
 - **`enabled_for_evals`** (`bool`, default `True`) — set `False` to skip this guardrail when the agent runs in evaluation mode.
+- **`detection_scope`** (default `None`, sent to the Agents backend as the guardrail's `detectionScope` parameter, shown as **Detection scope** in the Agents designer) — what the validator evaluates: `DetectionScope.TEXT` the text only, `DetectionScope.FILES` the attached files only, `DetectionScope.BOTH` both. The strings `"Text"`, `"Files"` and `"Both"` are accepted too; any other value raises `ValueError`. `None` sends no `detectionScope` parameter, and the backend reads that as `Text` for every validator, so files are read only when a guardrail asks for them. `UiPathDeterministicGuardrailMiddleware` has no `detection_scope`: its rules run locally and see no files. Import `DetectionScope` from `uipath_langchain.guardrails`. See [Files (attachments)](#files-attachments).
 
 Additional parameters per class:
 
@@ -197,6 +198,86 @@ agent = create_agent(
     ],
 )
 ```
+
+### Files (attachments)
+
+Every built-in middleware class except `UiPathDeterministicGuardrailMiddleware` can forward references to the files the run holds; which files each hook sends is in the table below, and `detection_scope=Text` sends none. For `UiPathByoGuardrailMiddleware`, the BYO connector reads the files only when it declares document support. Only references are forwarded: `{id, fileName, mimeType}` for each file, at most 5 per evaluation. The Agents backend downloads each file by its Orchestrator id, decodes or extracts it, and evaluates it. File reading is gated by the tenant's guardrail file-support flags; where they are off, a guardrail configured for files degrades to text. `detection_scope` sets whether the validator evaluates the text, the files or both (see the common parameters above).
+
+```python
+from uipath_langchain.guardrails import DetectionScope
+
+agent = create_agent(
+    model=llm,
+    tools=[analyze_files],
+    middleware=[
+        *UiPathHarmfulContentMiddleware(
+            name="Harmful content in attached files",
+            scopes=[GuardrailScope.AGENT],
+            stage=GuardrailExecutionStage.PRE,
+            action=BlockAction(),
+            entities=[
+                HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2),
+            ],
+            detection_scope=DetectionScope.FILES,
+        ),
+    ],
+)
+```
+
+How a file becomes visible to a guardrail:
+
+| Source | What you do | What the guardrails find |
+|---|---|---|
+| Typed `Attachment` input (`file: Attachment` in the input schema) | Render it into the prompt with `render_attachments_block` (below) | The `<uip:attachments>` block in the HumanMessage. The model reads it and copies the object into tool arguments |
+| Conversational agents | Nothing | The attachments the runtime puts on each HumanMessage (`additional_kwargs["attachments"]` and the same block) |
+| Tool arguments | Nothing: the model copies `{"ID", "FullName", "MimeType"}` from the block | The ids in the arguments that the run already holds |
+| Tool results | Return `{"ID", "FullName", "MimeType"}` from the tool, as Create File does | The files the result returns. Later hooks treat them as held |
+| SDK-built multimodal blocks | Build them with `build_file_content_blocks_for` from a `FileInfo` that has an `attachment_id`, and keep them in the messages | The id each image or file block carries in `extras["uipath_attachment_id"]` (TIFF pages are not tagged) |
+| Author-built raw base64 blocks | — | Nothing. Raw bytes carry no attachment id, so they are not forwarded (known gap) |
+
+An advanced agent's `uipath__job_attachments` state is read too.
+
+`render_attachments_block` writes the same `<uip:attachments>[{"ID", "FullName", "MimeType"}]</uip:attachments>` text the conversational runtime writes:
+
+```python
+from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
+from uipath.platform.attachments import Attachment
+from uipath_langchain.guardrails import render_attachments_block
+
+
+class Input(BaseModel):
+    file: Attachment
+
+
+async def screen_cv(state: Input):
+    # `agent` is a create_agent(..., response_format=..., middleware=[...]) graph.
+    attachment = state.file.model_dump(mode="json", exclude_none=True)
+    prompt = (
+        "Summarise the CV in the attached file using the Analyze Files tool.\n"
+        f"{render_attachments_block([attachment])}"
+    )
+    result = await agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
+    return result["structured_response"]
+```
+
+Which files each hook forwards:
+
+| Hook | Forwards |
+|---|---|
+| `before_agent`, `before_model` | Every file the run holds |
+| `wrap_tool_call`, PRE | The files the tool arguments name, if the run holds them |
+| `wrap_tool_call`, POST | The files the tool result names: held ones, and new ones it describes with a name and a type |
+| `after_model` | The held files the model's message names, in its content or its tool calls |
+| `after_agent` | The held files the final message or the structured response names |
+
+Notes:
+
+- **An id the run never held is not forwarded.** Ids in tool arguments and in the model's or the agent's output are matched against the files the run holds, so an id a prompt-injected argument names is skipped instead of being sent for lookup. A file a tool result describes with its own name and type counts as that tool's output, and is held from then on.
+- **Text is evaluated with the files.** A message whose only text is the `<uip:attachments>` block is not empty: that text is sent with the files. A check that has files but no text at all, such as one on a message made only of file blocks, evaluates the placeholder `[no text content]` as its text.
+- **No file found, or none readable.** When the detection scope includes files (`Files` or `Both`, set by `detection_scope` or a `detectionScope` parameter) and a check finds no file, the request carries an empty attachment list: a `Files` guardrail then passes without a provider call and a `Both` guardrail still evaluates the text. When a payload or the state cannot be read, the request says nothing about files and the text is evaluated as before.
+- **A rejected reference never disables a guardrail.** When the validate API rejects the attachment references (HTTP 400), the check runs again without them and logs a warning. The check then degrades to text.
+- **Filters apply to text only.** An action that returns modified data, like the `RedactAction` in [Custom actions](#custom-actions), rewrites text; a verdict about a file cannot rewrite the file. For `Files`, use `BlockAction`, `LogAction` or `EscalateAction`.
 
 ### Deterministic middleware
 
@@ -406,7 +487,7 @@ class RedactAction(GuardrailAction):
 
 ## Decorator pattern
 
-Importing `uipath_langchain.guardrails` auto-registers a LangChain adapter that extends `@guardrail` to wrap LangChain/LangGraph objects in addition to plain Python callables. All validators, actions, execution stages, stacking, and `GuardrailExclude` work exactly as described in the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/) — use `uipath_langchain.guardrails` as the import path, which re-exports everything from the core SDK.
+Importing `uipath_langchain.guardrails` auto-registers a LangChain adapter that extends `@guardrail` to wrap LangChain/LangGraph objects in addition to plain Python callables. All validators, actions, execution stages, stacking, and `GuardrailExclude` work exactly as described in the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/) — use `uipath_langchain.guardrails` as the import path, which re-exports everything from the core SDK. `@guardrail` takes the same `detection_scope` as the middleware classes (`DetectionScope.TEXT` / `FILES` / `BOTH` or the strings; `None` is text only) — see [Files](#files).
 
 ```python
 from uipath_langchain.guardrails import guardrail, PIIValidator, BlockAction, ...
@@ -463,6 +544,8 @@ def analyze_text(text: str) -> str:
     """Count words in the provided text."""
     return f"Word count: {len(text.split())}"
 ```
+
+The guard runs on `invoke` and `ainvoke`, so an `async def` tool, or one built with `coroutine=`, is checked in an async run too. To guard a tool object a factory returns, call the decorator on it: `guardrail(validator=..., action=...)(create_analyze_file_tool(...))`.
 
 ### Agent factory
 
@@ -529,6 +612,23 @@ from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 async def my_node(state: Input) -> Output:
     ...
 ```
+
+### Files
+
+API-based validators forward file references from the decorated target, with the same reference format, limit of 5, `detection_scope` scopes and HTTP 400 text-only retry as the [middleware](#files-attachments). The LLM and graph targets evaluate the placeholder `[no text content]` when the messages hold files but no text. Where the files come from depends on the target:
+
+| Decorated target | PRE forwards | POST forwards |
+|---|---|---|
+| Plain or async function | `Attachment` arguments and `{"ID", "FullName", "MimeType"}` mappings in the arguments; `GuardrailExclude` parameters are not scanned | The same shapes in the return value |
+| Tool (`@tool`, `BaseTool`) | Mentions in the tool input that carry their own name and type | Mentions in the tool result that carry their own name and type |
+| LLM factory (`BaseChatModel`) | Every file the message list holds, read as the middleware reads it | The held files the response names |
+| Agent factory, `StateGraph`, compiled graph | Every file the input messages hold, plus attachments in the other input state keys | The held files the last message or `structured_response` names, plus attachments in the other output state keys, including an input key the graph echoes |
+
+Notes:
+
+- **Tool mentions are self-describing.** The tool wrapper sees no message history, so a mention is forwarded with the name and type it carries, without checking that the run holds it. Treat a decorated tool like any other tool that can read attachments by id; the middleware matches ids against the files the run holds.
+- **Graph targets need `messages`.** An input or an output without a `messages` key is not checked.
+- **Tools are guarded on `invoke` and `ainvoke`.** In an async run (`agent.ainvoke`), the tool node calls tools through `ainvoke`, so a tool with a coroutine (an `async def` tool, or one built with `coroutine=`, such as the Analyze Files tool from `create_analyze_file_tool`) and a `BaseTool` subclass are checked as well. A sync tool that `ainvoke` runs through `invoke` is checked once per stage. Calling `run` or `arun` directly skips the guard.
 
 ### Bring Your Own Guardrail (BYOG)
 
@@ -625,6 +725,7 @@ Use **middleware** when you want all guardrail policy in one place alongside a s
 - [`samples/joke-agent`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent) — middleware pattern
 - [`samples/joke-agent-decorator`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-decorator) — decorator pattern
 - [`samples/joke-agent-bring-your-own-guardrail`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-bring-your-own-guardrail) — Bring Your Own Guardrail, both patterns in one agent (middleware logging on the agent scope, decorator blocking on the LLM)
+- [`samples/cv-screener-agent`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/cv-screener-agent) — file guardrails, both patterns in one agent (decorators on the LLM and the Analyze Files tool, middleware on the agent), with a `PARITY_CHECK` switch that adds the other pattern of each guardrail
 
 ---
 
