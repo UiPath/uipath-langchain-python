@@ -10,7 +10,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
 from ..thinking import thinking_rejects_forced_tool_choice
-from .base import ModelPayloadHandler, is_byo_model
+from .base import ModelPayloadHandler
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,22 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Reduce the conversation history or use a model with larger context.",
     ),
 }
+
+
+def _is_byo_model(model: Any) -> bool:
+    if getattr(model, "byo_connection_id", None):
+        return True
+    settings = getattr(model, "client_settings", None)
+    if settings is None:
+        return False
+    try:
+        info = settings.get_model_info(model.model_name)
+    except Exception:
+        return True
+    subscription = info.get("modelSubscriptionType")
+    return info.get("byomDetails") is not None or (
+        bool(subscription) and subscription != "UiPathOwned"
+    )
 
 
 class BedrockInvokePayloadHandler(ModelPayloadHandler):
@@ -153,7 +169,7 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         model_id = (getattr(self.model, "model_id", None) or "").lower()
         if "anthropic" not in model_id and "amazon.nova" not in model_id:
             return {}
-        if is_byo_model(self.model):
+        if _is_byo_model(self.model):
             return {}
         return {"cache_control": {"type": "ephemeral"}}
 
