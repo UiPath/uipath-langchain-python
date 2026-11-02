@@ -888,3 +888,75 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
             blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
         content: list[Any] = [{"type": "text", "text": "Sum it"}, *blocks]
         return HumanMessage(content=content)
+
+
+class TestAttachmentTagsForPdfOnlyModels:
+    """The blocks built for a PDF-only model keep the attachment tags of main."""
+
+    @pytest.mark.parametrize(
+        "name,mime_type,data,block_type",
+        [
+            ("DownloadRedirectURL", "application/octet-stream", b"%PDF-1.4\n", "file"),
+            ("inv.pdf", 'application/pdf; name="inv.pdf"', b"%PDF-1.4\n", "file"),
+            ("photo.png", "image/png; charset=binary", b"\x89PNG", "image"),
+            ("notes", "text/plain", b"\x00\x01binary", "file"),
+            ("f.xlsx", "application/vnd.ms-excel", b"PK\x03\x04", "file"),
+        ],
+    )
+    async def test_file_and_image_blocks_are_tagged(
+        self, name: str, mime_type: str, data: bytes, block_type: str
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name=name,
+            mime_type=mime_type,
+            attachment_id=_ATTACHMENT_ID,
+        )
+        with patch(_DOWNLOAD, return_value=_b64(data)):
+            (block,) = await build_file_content_blocks_for(
+                file, pdf_only_documents=True
+            )
+
+        assert block["type"] == block_type
+        extras: Any = block.get("extras")
+        assert extras["uipath_attachment_id"] == _ATTACHMENT_ID
+        assert extras["uipath_file_name"] == name
+
+    async def test_text_document_is_untagged(self) -> None:
+        """Claude clients send it as is, and the provider rejects unknown fields."""
+        file = FileInfo(
+            url="https://blob/x",
+            name="Budget.csv",
+            mime_type="text/csv",
+            attachment_id=_ATTACHMENT_ID,
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"a,b\n")):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks == [_CSV_DOCUMENT]
+
+    async def test_tags_never_reach_the_anthropic_payload(self) -> None:
+        from langchain_anthropic.chat_models import _format_messages
+
+        content: list[Any] = [{"type": "text", "text": "Sum them"}]
+        for name, mime_type, data in [
+            ("Budget.csv", "text/csv", b"a,b\n"),
+            ("inv.pdf", "application/pdf", b"%PDF-1.4\n"),
+            ("photo.png", "image/png", b"\x89PNG"),
+        ]:
+            file = FileInfo(
+                url="https://blob/x",
+                name=name,
+                mime_type=mime_type,
+                attachment_id=_ATTACHMENT_ID,
+            )
+            with patch(_DOWNLOAD, return_value=_b64(data)):
+                content += await build_file_content_blocks_for(
+                    file, pdf_only_documents=True
+                )
+
+        _, formatted = _format_messages([HumanMessage(content=content)])
+
+        payload = json.dumps(formatted)
+        assert "uipath_" not in payload
+        assert _ATTACHMENT_ID not in payload
