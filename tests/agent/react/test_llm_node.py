@@ -1241,6 +1241,25 @@ class TestBedrockPromptCaching:
         assert _cache_point_count(client.converse.call_args.kwargs) == 3
 
     @pytest.mark.asyncio
+    async def test_other_providers_get_no_cache_control(self) -> None:
+        model: Any = _StubAzureChatOpenAI.model_construct()
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+        )
+
+        await create_llm_node(model, [self._tool()], prompt_caching=True)(
+            self._state(HumanMessage(content="q"))
+        )
+
+        assert "cache_control" not in model.bind_tools.call_args.kwargs
+
+    @pytest.mark.asyncio
     async def test_forced_extraction_call_has_no_cache_points(self) -> None:
         model, client = self._converse_model(
             additional_model_request_fields={
