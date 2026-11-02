@@ -74,19 +74,17 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 
 
 def _is_byo_model(model: Any) -> bool:
-    if getattr(model, "byo_connection_id", None):
-        return True
     settings = getattr(model, "client_settings", None)
     if settings is None:
         return False
     try:
-        info = settings.get_model_info(model.model_name)
+        info = settings.get_model_info(
+            model.model_name,
+            byo_connection_id=getattr(model, "byo_connection_id", None),
+        )
     except Exception:
         return True
-    subscription = info.get("modelSubscriptionType")
-    return info.get("byomDetails") is not None or (
-        bool(subscription) and subscription != "UiPathOwned"
-    )
+    return info.get("modelSubscriptionType") != "UiPathOwned"
 
 
 class BedrockInvokePayloadHandler(ModelPayloadHandler):

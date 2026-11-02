@@ -446,9 +446,8 @@ class TestBedrockConverseGetPromptCachingKwargs:
         "subscription, byom_details, expected",
         [
             ("UiPathOwned", None, _CACHE_CONTROL),
-            (None, None, _CACHE_CONTROL),
+            (None, None, {}),
             ("BYOMReplacedLikeForLike", None, {}),
-            (None, {"customerModel": None}, {}),
             ("BYOMAdded", {"customerModel": "arn:aws:bedrock:us-east-1:1:x/y"}, {}),
         ],
     )
