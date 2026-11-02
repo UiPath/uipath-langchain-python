@@ -22,7 +22,6 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
-from uipath.core.feature_flags import FeatureFlags
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -39,7 +38,6 @@ from uipath_langchain.agent.react.llm_node import (
 from uipath_langchain.agent.react.tools import create_flow_control_tools
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.chat.exceptions import ChatModelError
-from uipath_langchain.chat.handlers.bedrock import PROMPT_CACHING_FF
 
 
 class _StubAzureChatOpenAI(AzureChatOpenAI):
@@ -1183,13 +1181,6 @@ def _cache_point_count(request: dict[str, Any]) -> int:
 
 
 class TestBedrockPromptCaching:
-    @pytest.fixture(autouse=True)
-    def _enable_caching(self) -> Any:
-        FeatureFlags.reset_flags()
-        FeatureFlags.configure_flags({PROMPT_CACHING_FF: True})
-        yield
-        FeatureFlags.reset_flags()
-
     @staticmethod
     def _converse_model(**kwargs: Any) -> tuple[Any, Mock]:
         client = Mock()
@@ -1219,9 +1210,12 @@ class TestBedrockPromptCaching:
         )
 
     @pytest.mark.asyncio
-    async def test_turns_carry_cache_points(self) -> None:
+    @pytest.mark.parametrize("prompt_caching, expected", [(True, 3), (False, 0)])
+    async def test_turns_carry_cache_points_when_enabled(
+        self, prompt_caching: bool, expected: int
+    ) -> None:
         model, client = self._converse_model()
-        node = create_llm_node(model, [self._tool()])
+        node = create_llm_node(model, [self._tool()], prompt_caching=prompt_caching)
         messages: list[BaseMessage] = [HumanMessage(content="q")]
 
         for turn in range(2):
@@ -1232,7 +1226,19 @@ class TestBedrockPromptCaching:
             ]
 
         counts = [_cache_point_count(c.kwargs) for c in client.converse.call_args_list]
-        assert counts == [3, 3]
+        assert counts == [expected, expected]
+
+    @pytest.mark.asyncio
+    async def test_conversational_turn_carries_cache_points(self) -> None:
+        model, client = self._converse_model()
+        node = create_llm_node(
+            model, [self._tool()], is_conversational=True, prompt_caching=True
+        )
+        assert isinstance(node, ConversationalLLMNode)
+
+        await node(self._state(HumanMessage(content="hi")))
+
+        assert _cache_point_count(client.converse.call_args.kwargs) == 3
 
     @pytest.mark.asyncio
     async def test_forced_extraction_call_has_no_cache_points(self) -> None:
@@ -1243,7 +1249,7 @@ class TestBedrockPromptCaching:
             supports_tool_choice_values=("auto", "any", "tool"),
         )
 
-        await create_llm_node(model, [self._tool()])(
+        await create_llm_node(model, [self._tool()], prompt_caching=True)(
             self._state(HumanMessage(content="q"), AIMessage(content="an answer"))
         )
 
@@ -1261,7 +1267,7 @@ class TestBedrockPromptCaching:
         ]
         tools = [self._tool(), *create_flow_control_tools(_Output)]
 
-        node = create_llm_node(model, tools)
+        node = create_llm_node(model, tools, prompt_caching=True)
         assert isinstance(node, AutoToolChoiceLLMNode)
         await node(self._state(HumanMessage(content="q")))
 

@@ -127,7 +127,7 @@ class LLMCall(NamedTuple):
     messages: list[AnyMessage]
     handler: ModelPayloadHandler
     tool_choice: Literal["auto", "any"]
-    cache_prompt: bool
+    cacheable: bool = True
 
 
 class LLMNode(ABC, Generic[StateT]):
@@ -141,6 +141,7 @@ class LLMNode(ABC, Generic[StateT]):
         llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
         parallel_tool_calls: bool = True,
         strict_mode: bool = False,
+        prompt_caching: bool = False,
     ):
         self.model = model
         self.tools = list(tools) if tools else []
@@ -148,6 +149,7 @@ class LLMNode(ABC, Generic[StateT]):
         self.llm_messages_limit = llm_messages_limit
         self.parallel_tool_calls = parallel_tool_calls
         self.strict_mode = strict_mode
+        self.prompt_caching = prompt_caching
         self.payload_handler = get_payload_handler(model)
         self.static_args_handler = StaticArgsHandler()
 
@@ -190,7 +192,7 @@ class LLMNode(ABC, Generic[StateT]):
             parallel_tool_calls=self.parallel_tool_calls,
             strict_mode=self.strict_mode,
         )
-        if call.cache_prompt:
+        if self.prompt_caching and call.cacheable:
             binding_kwargs.update(call.handler.get_prompt_caching_kwargs())
         llm = call.model.bind_tools(tools, **binding_kwargs)
 
@@ -209,7 +211,7 @@ class LLMNode(ABC, Generic[StateT]):
 
     @abstractmethod
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
-        """Model, messages, handler, tool_choice and cache_prompt for this turn."""
+        """Model, messages, handler and tool_choice for this turn."""
 
 
 class ConversationalLLMNode(LLMNode[StateT]):
@@ -223,6 +225,7 @@ class ConversationalLLMNode(LLMNode[StateT]):
         llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
         parallel_tool_calls: bool = True,
         strict_mode: bool = False,
+        prompt_caching: bool = False,
         tool_choice: Literal["auto", "any"] = "auto",
     ):
         super().__init__(
@@ -232,17 +235,14 @@ class ConversationalLLMNode(LLMNode[StateT]):
             llm_messages_limit=llm_messages_limit,
             parallel_tool_calls=parallel_tool_calls,
             strict_mode=strict_mode,
+            prompt_caching=prompt_caching,
         )
         self.tool_choice: Literal["auto", "any"] = tool_choice
 
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
         # conversational need to be able to answer in text so we dont ForceToolChoice
         return LLMCall(
-            self.model,
-            messages,
-            self.payload_handler,
-            tool_choice=self.tool_choice,
-            cache_prompt=True,
+            self.model, messages, self.payload_handler, tool_choice=self.tool_choice
         )
 
 
@@ -263,15 +263,9 @@ class ForcedToolChoiceLLMNode(LLMNode[StateT]):
                 call_messages,
                 get_payload_handler(call_model),
                 tool_choice="any",
-                cache_prompt=False,
+                cacheable=False,
             )
-        return LLMCall(
-            self.model,
-            messages,
-            self.payload_handler,
-            tool_choice="any",
-            cache_prompt=True,
-        )
+        return LLMCall(self.model, messages, self.payload_handler, tool_choice="any")
 
 
 class AutoToolChoiceLLMNode(LLMNode[StateT]):
@@ -290,6 +284,7 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
         llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
         parallel_tool_calls: bool = True,
         strict_mode: bool = False,
+        prompt_caching: bool = False,
     ):
         super().__init__(
             model,
@@ -298,19 +293,14 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
             llm_messages_limit=llm_messages_limit,
             parallel_tool_calls=parallel_tool_calls,
             strict_mode=strict_mode,
+            prompt_caching=prompt_caching,
         )
         self.output_fields = output_fields(self.tools)
 
     def prepare_call(self, messages: list[AnyMessage]) -> LLMCall:
         if count_consecutive_tool_less_turns(messages) > 0:
             raise _no_finishing_tool_call_error()
-        return LLMCall(
-            self.model,
-            messages,
-            self.payload_handler,
-            tool_choice="auto",
-            cache_prompt=True,
-        )
+        return LLMCall(self.model, messages, self.payload_handler, tool_choice="auto")
 
     async def get_response(
         self, messages: list[AnyMessage], tools: Sequence[BaseTool]
@@ -326,7 +316,7 @@ class AutoToolChoiceLLMNode(LLMNode[StateT]):
             finish_messages,
             self.payload_handler,
             tool_choice="auto",
-            cache_prompt=False,
+            cacheable=False,
         )
         reply = await self._invoke_model(finish_call, finishing_tools)
         final = finishing_tool_call(reply, self.output_fields)
@@ -344,6 +334,7 @@ def create_llm_node(
     tool_choice: Literal["auto", "any"] = "auto",
     parallel_tool_calls: bool = True,
     strict_mode: bool = False,
+    prompt_caching: bool = False,
 ) -> LLMNode[AgentGraphState]:
     """Pick the LLM node for the agent and model.
 
@@ -361,6 +352,7 @@ def create_llm_node(
         tool_choice: Tool choice for the ConversationalLLMNode
         parallel_tool_calls: Allow parallel tool calls
         strict_mode: Validate tool call arguments
+        prompt_caching: Mark the prompt prefix for provider caching
     """
     if is_conversational or not tools:
         return ConversationalLLMNode(
@@ -370,6 +362,7 @@ def create_llm_node(
             llm_messages_limit=llm_messages_limit,
             parallel_tool_calls=parallel_tool_calls,
             strict_mode=strict_mode,
+            prompt_caching=prompt_caching,
             tool_choice=tool_choice,
         )
     if _should_skip_forced_tool_choice(model):
@@ -380,6 +373,7 @@ def create_llm_node(
             llm_messages_limit=llm_messages_limit,
             parallel_tool_calls=parallel_tool_calls,
             strict_mode=strict_mode,
+            prompt_caching=prompt_caching,
         )
     return ForcedToolChoiceLLMNode(
         model,
@@ -388,4 +382,5 @@ def create_llm_node(
         llm_messages_limit=llm_messages_limit,
         parallel_tool_calls=parallel_tool_calls,
         strict_mode=strict_mode,
+        prompt_caching=prompt_caching,
     )

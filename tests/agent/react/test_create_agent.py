@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from langchain_anthropic import ChatAnthropic
+from langchain_aws import ChatBedrockConverse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.messages.content import create_tool_call
@@ -413,3 +414,39 @@ class TestCreateAgentPicksTheLlmNode:
     @pytest.mark.asyncio
     async def test_other_models_are_forced(self) -> None:
         assert await self._tool_choice({}) == "any"
+
+
+class _StubChatBedrockConverse(ChatBedrockConverse):
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+
+
+class TestCreateAgentPromptCaching:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prompt_caching", [True, False])
+    async def test_config_reaches_the_llm_call(self, prompt_caching: bool) -> None:
+        model: Any = _StubChatBedrockConverse.model_construct(
+            model_id="anthropic.claude-sonnet-4-5-20250929-v1:0"
+        )
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(
+                        name="end_execution", args={"answer": "Lisbon"}, id="c1"
+                    )
+                ],
+            )
+        )
+        graph: Any = create_agent(
+            model,
+            [],
+            [SystemMessage(content="system")],
+            output_schema=_AnswerOutput,
+            config=AgentGraphConfig(prompt_caching=prompt_caching),
+        ).compile()
+
+        await graph.ainvoke({})
+
+        assert ("cache_control" in model.bind_tools.call_args.kwargs) is prompt_caching

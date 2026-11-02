@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
-from uipath.core.feature_flags import FeatureFlags
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
@@ -14,8 +13,6 @@ from ..thinking import thinking_rejects_forced_tool_choice
 from .base import ModelPayloadHandler, is_byo_model
 
 logger = logging.getLogger(__name__)
-
-PROMPT_CACHING_FF = "EnableBedrockPromptCaching"
 
 
 # --- Converse API constants ---
@@ -153,8 +150,6 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         return kwargs
 
     def get_prompt_caching_kwargs(self) -> dict[str, Any]:
-        if not FeatureFlags.is_flag_enabled(PROMPT_CACHING_FF, default=False):
-            return {}
         model_id = (getattr(self.model, "model_id", None) or "").lower()
         if "anthropic" not in model_id and "amazon.nova" not in model_id:
             return {}
