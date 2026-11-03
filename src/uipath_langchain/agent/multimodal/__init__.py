@@ -7,6 +7,7 @@ from .invoke import (
 )
 from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES, FileInfo
 from .utils import (
+    accepts_only_pdf_documents,
     download_file_base64,
     is_image,
     is_pdf,
@@ -19,6 +20,7 @@ __all__ = [
     "FileInfo",
     "IMAGE_MIME_TYPES",
     "TIFF_MIME_TYPES",
+    "accepts_only_pdf_documents",
     "build_file_content_blocks_for",
     "download_file_base64",
     "file_part_filename",
