@@ -1,5 +1,9 @@
 """Tests for the create-file internal tool."""
 
+import asyncio
+import io
+import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -7,8 +11,11 @@ import pytest
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool, ToolException
 from pydantic import BaseModel
+from pypdf import PdfReader
 from uipath.agent.models.agent import AgentInternalToolResourceConfig
 
+import uipath_langchain.agent.tools.internal_tools as internal_tools_package
+import uipath_langchain.agent.tools.internal_tools.create_file_tool as create_file_module
 from uipath_langchain.agent.attachments.mime_types import guess_mime_type
 from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
     CreateFileTool,
@@ -378,3 +385,327 @@ class TestBackendWithoutPathResolution:
         result = await call(tool, fileName="report.md", content="# Report")
 
         assert result["file"]["ID"] == ATTACHMENT_ID
+
+
+PDF_RENDERER_MODULE = "uipath_langchain.agent.tools.internal_tools.pdf_renderer"
+
+
+class Renderers:
+    def __init__(self) -> None:
+        self.processes: list[asyncio.subprocess.Process] = []
+        self.spawned = asyncio.Event()
+
+
+@pytest.fixture
+def renderers(monkeypatch: pytest.MonkeyPatch) -> Renderers:
+    seen = Renderers()
+    spawn = asyncio.create_subprocess_exec
+
+    async def spawn_and_record(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
+        process = await spawn(*args, **kwargs)
+        seen.processes.append(process)
+        seen.spawned.set()
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_and_record)
+    return seen
+
+
+def uploaded_pdf_text(upload: dict[str, Any]) -> str:
+    content = upload["content"]
+    assert isinstance(content, bytes)
+    assert content.startswith(b"%PDF-")
+    reader = PdfReader(io.BytesIO(content))
+    return "\n".join(page.extract_text() for page in reader.pages)
+
+
+class TestCreatePdf:
+    async def test_markdown_content_is_rendered_into_a_pdf(self, created, pdf_fonts):
+        tool = make_tool()
+
+        result = await call(
+            tool, fileName="report.pdf", content="# Quarterly report\n\nRevenue up."
+        )
+
+        assert result == {
+            "file": {
+                "ID": ATTACHMENT_ID,
+                "FullName": "report.pdf",
+                "MimeType": "application/pdf",
+            }
+        }
+        text = uploaded_pdf_text(created[0])
+        assert "Quarterly report" in text
+        assert "#" not in text
+        assert b"TestSans-Regular" in created[0]["content"]
+        assert created[0]["source_path"] is None
+
+    async def test_the_extension_is_matched_case_insensitively(
+        self, created, pdf_fonts
+    ):
+        tool = make_tool()
+
+        await call(tool, fileName="REPORT.PDF", content="Revenue up.")
+
+        assert "Revenue up." in uploaded_pdf_text(created[0])
+
+    async def test_only_the_last_extension_decides(self, created):
+        tool = make_tool()
+
+        await call(tool, fileName="report.pdf.md", content="# Report")
+
+        assert created[0]["content"] == "# Report"
+
+    async def test_characters_without_a_font_are_logged(
+        self, created, pdf_fonts, caplog
+    ):
+        tool = make_tool()
+
+        with caplog.at_level(logging.WARNING, logger="uipath"):
+            result = await call(tool, fileName="report.pdf", content="Thai ก, done 🚀")
+
+        assert "Thai" in uploaded_pdf_text(created[0])
+        assert result == {
+            "file": {
+                "ID": ATTACHMENT_ID,
+                "FullName": "report.pdf",
+                "MimeType": "application/pdf",
+            }
+        }
+        (record,) = [r for r in caplog.records if "report.pdf" in r.getMessage()]
+        assert record.name == "uipath"
+        assert "2 characters" in record.getMessage()
+        assert "'ก'" in record.getMessage()
+        assert "'🚀'" in record.getMessage()
+
+    async def test_logged_missing_characters_are_capped(
+        self, created, pdf_fonts, caplog
+    ):
+        uncovered = "".join(chr(0x10000 + i) for i in range(200))
+        tool = make_tool()
+
+        with caplog.at_level(logging.WARNING, logger="uipath"):
+            await call(tool, fileName="report.pdf", content=uncovered)
+
+        (record,) = [r for r in caplog.records if "report.pdf" in r.getMessage()]
+        assert "200 characters" in record.getMessage()
+        assert repr(chr(0x10000 + 49)) in record.getMessage()
+        assert repr(chr(0x10000 + 50)) not in record.getMessage()
+
+    async def test_content_over_the_size_limit_is_rejected(self, created, monkeypatch):
+        monkeypatch.setattr(create_file_module, "_MAX_PDF_MARKDOWN_CHARS", 10)
+        tool = make_tool()
+
+        with pytest.raises(ToolException, match="11 characters"):
+            await call(tool, fileName="report.pdf", content="x" * 11)
+
+        assert created == []
+
+    async def test_content_at_the_size_limit_is_rendered(
+        self, created, pdf_fonts, monkeypatch
+    ):
+        monkeypatch.setattr(create_file_module, "_MAX_PDF_MARKDOWN_CHARS", 10)
+        tool = make_tool()
+
+        await call(tool, fileName="report.pdf", content="x" * 10)
+
+        assert "x" * 10 in uploaded_pdf_text(created[0])
+
+    async def test_a_workspace_file_of_four_byte_characters_at_the_limit_is_rendered(
+        self, created, pdf_fonts, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(create_file_module, "_MAX_PDF_MARKDOWN_CHARS", 10)
+        (tmp_path / "report.md").write_text("𝐀" * 10, "utf-8")
+        tool = make_tool(FakeBackend(tmp_path))
+
+        await call(tool, fileName="report.pdf", filePath="/report.md")
+
+        assert created[0]["content"].startswith(b"%PDF-")
+
+    async def test_a_workspace_file_over_the_size_limit_is_rejected(
+        self, created, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(create_file_module, "_MAX_PDF_MARKDOWN_CHARS", 10)
+        (tmp_path / "report.md").write_text("x" * 11, "utf-8")
+        tool = make_tool(FakeBackend(tmp_path))
+
+        with pytest.raises(ToolException, match="11 characters"):
+            await call(tool, fileName="report.pdf", filePath="/report.md")
+
+        assert created == []
+
+    async def test_a_huge_workspace_file_is_rejected_before_it_is_read(
+        self, created, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(create_file_module, "_MAX_PDF_MARKDOWN_CHARS", 10)
+        (tmp_path / "dump.log").write_bytes(b"\xff" * 41)
+        tool = make_tool(FakeBackend(tmp_path))
+
+        with pytest.raises(ToolException, match="41 bytes"):
+            await call(tool, fileName="dump.pdf", filePath="/dump.log")
+
+        assert created == []
+
+    async def test_rendering_runs_outside_the_agent_process(
+        self, created, pdf_fonts, monkeypatch
+    ):
+        pdf_renderer = pytest.importorskip(PDF_RENDERER_MODULE)
+
+        def fail_in_this_process(_markdown: str) -> None:
+            raise AssertionError("rendered inside the agent process")
+
+        monkeypatch.setattr(pdf_renderer, "render_markdown_pdf", fail_in_this_process)
+        tool = make_tool()
+
+        await call(tool, fileName="report.pdf", content="Revenue up.")
+
+        assert "Revenue up." in uploaded_pdf_text(created[0])
+
+    async def test_a_render_that_takes_too_long_is_stopped(
+        self, created, pdf_fonts, monkeypatch, renderers
+    ):
+        monkeypatch.setattr(create_file_module, "_PDF_RENDER_TIMEOUT_SECONDS", 0.01)
+        tool = make_tool()
+
+        with pytest.raises(ToolException, match="took longer than 0.01 seconds"):
+            await call(tool, fileName="report.pdf", content="Revenue up.")
+
+        assert renderers.processes[0].returncode is not None
+        assert created == []
+
+    async def test_a_cancelled_render_stops_the_renderer(
+        self, created, pdf_fonts, renderers
+    ):
+        tool = make_tool()
+        task = asyncio.create_task(
+            call(tool, fileName="report.pdf", content="Revenue up.")
+        )
+        await asyncio.wait_for(renderers.spawned.wait(), timeout=10)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert renderers.processes[0].returncode is not None
+        assert created == []
+
+    async def test_a_renderer_that_cannot_start_is_reported_to_the_model(
+        self, created, pdf_fonts, monkeypatch, tmp_path, caplog
+    ):
+        monkeypatch.setattr(sys, "executable", str(tmp_path / "missing-python"))
+        tool = make_tool()
+
+        with caplog.at_level(logging.WARNING, logger="uipath"):
+            with pytest.raises(ToolException, match="could not be rendered"):
+                await call(tool, fileName="report.pdf", content="Revenue up.")
+
+        missing_python = str(tmp_path / "missing-python")
+        assert any(missing_python in r.getMessage() for r in caplog.records)
+        assert created == []
+
+    async def test_a_renderer_crash_is_logged_and_reported_to_the_model(
+        self, created, pdf_fonts, caplog
+    ):
+        (pdf_fonts / "LiberationSans-Regular.ttf").write_bytes(b"not a font")
+        tool = make_tool()
+
+        with caplog.at_level(logging.WARNING, logger="uipath"):
+            with pytest.raises(ToolException, match="could not be rendered"):
+                await call(tool, fileName="report.pdf", content="Revenue up.")
+
+        (record,) = [r for r in caplog.records if "exited with code" in r.getMessage()]
+        assert record.name == "uipath"
+        assert "TTLibError" in record.getMessage()
+        assert created == []
+
+    async def test_a_pdf_over_the_size_limit_is_rejected(
+        self, created, pdf_fonts, monkeypatch
+    ):
+        monkeypatch.setattr(create_file_module, "_MAX_PDF_BYTES", 100)
+        tool = make_tool()
+
+        with pytest.raises(ToolException, match="larger than 100 bytes"):
+            await call(tool, fileName="report.pdf", content="Revenue up.")
+
+        assert created == []
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="memory limits need POSIX")
+    async def test_a_render_that_runs_out_of_memory_is_rejected(
+        self, created, pdf_fonts, monkeypatch
+    ):
+        monkeypatch.setattr(
+            create_file_module, "_MAX_PDF_RENDER_MEMORY_BYTES", 128 * 1024 * 1024
+        )
+        tool = make_tool()
+
+        await call(tool, fileName="small.pdf", content="Revenue up.")
+        with pytest.raises(ToolException, match="more memory than 128 MB"):
+            await call(
+                tool, fileName="report.pdf", content="<http://a/" + "報" * 20000 + ">"
+            )
+
+        assert [upload["name"] for upload in created] == ["small.pdf"]
+
+    async def test_a_workspace_file_that_is_neither_pdf_nor_text_is_rejected(
+        self, created, tmp_path
+    ):
+        (tmp_path / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        tool = make_tool(FakeBackend(tmp_path))
+
+        with pytest.raises(ToolException, match="neither a PDF nor UTF-8 text"):
+            await call(tool, fileName="image.pdf", filePath="/image.png")
+
+        assert created == []
+
+    async def test_a_workspace_pdf_is_uploaded_unchanged(self, created, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "scan.pdf").write_bytes(b"%PDF-1.7\nexisting")
+        tool = make_tool(FakeBackend(workspace))
+
+        await call(tool, fileName="scan.pdf", filePath="/scan.pdf")
+
+        assert created[0]["source_path"] == str(workspace / "scan.pdf")
+        assert created[0]["content"] is None
+
+    async def test_a_text_file_that_mentions_the_pdf_header_is_rendered(
+        self, created, pdf_fonts, tmp_path
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "notes.pdf").write_text("Files start with %PDF-1.7.", "utf-8")
+        tool = make_tool(FakeBackend(workspace))
+
+        await call(tool, fileName="notes.pdf", filePath="/notes.pdf")
+
+        assert created[0]["source_path"] is None
+        assert "Files start with" in uploaded_pdf_text(created[0])
+
+    async def test_a_workspace_text_file_named_pdf_is_rendered(
+        self, created, pdf_fonts, tmp_path
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "report.md").write_text("# Summary\n\nAll good.", "utf-8")
+        tool = make_tool(FakeBackend(workspace))
+
+        await call(tool, fileName="report.pdf", filePath="/report.md")
+
+        assert "All good." in uploaded_pdf_text(created[0])
+        assert created[0]["source_path"] is None
+
+    async def test_without_the_pdf_extra_the_model_is_told_how_to_install_it(
+        self, created, monkeypatch
+    ):
+        monkeypatch.setitem(sys.modules, "reportlab", None)
+        for name in [*sys.modules]:
+            if name.startswith("reportlab."):
+                monkeypatch.setitem(sys.modules, name, None)
+        monkeypatch.delitem(sys.modules, PDF_RENDERER_MODULE, raising=False)
+        monkeypatch.delattr(internal_tools_package, "pdf_renderer", raising=False)
+        tool = make_tool()
+
+        with pytest.raises(ToolException, match=r"uipath-langchain\[pdf\]"):
+            await call(tool, fileName="report.pdf", content="Revenue up.")
+
+        assert created == []
