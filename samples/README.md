@@ -30,6 +30,9 @@ This sample shows how to use the unified `@guardrail` decorator to apply guardra
 ## [Joke agent (Bring Your Own Guardrail)](joke-agent-bring-your-own-guardrail)
 This sample guards a joke agent with a customer-managed validator (BYOG): your own guardrail vendor connected through Integration Service and referenced by validator name + connection id. It shows both flavors in one agent — `UiPathByoGuardrailMiddleware` logging on the agent scope, `ByoValidator` with the `@guardrail` decorator blocking on the LLM scope.
 
+## [CV screener agent](cv-screener-agent)
+This sample screens a job application with guardrails that read the attached and produced files. It ports a low-code agent from the Agents e2e suite and mixes both guardrail flavors in one agent: `@guardrail` on the LLM factory and the Analyze Files tool and middleware on the agent, with a `PARITY_CHECK` switch that adds the other flavor of each guardrail.
+
 ## [Multi agent supervisor, researcher, coder](multi-agent-supervisor-researcher-coder)
 This sample showcases a multi-agent system, involving a supervisor, a researcher, and a coder working in coordination to tackle complex tasks.
 
