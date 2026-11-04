@@ -23,6 +23,7 @@ from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
 )
+from .workspace_backend import UiPathWorkspaceBackend
 
 __all__ = [
     "MEMORY_DIR_NAME",
@@ -36,6 +37,7 @@ __all__ = [
     "ConversationalAdvancedAgentGraphState",
     "FilesystemBackend",
     "SubAgent",
+    "UiPathWorkspaceBackend",
     "build_code_interpreter_middleware",
     "create_advanced_agent",
     "create_advanced_agent_graph",

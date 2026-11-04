@@ -637,3 +637,45 @@ human_response = interrupt("Please review the draft and reply with your decision
 /// info
 The interrupt value can be any JSON-serializable object (string, dict, and so on), and the resume value is the payload delivered to the trigger's inbox. There is no status validation, so the agent resumes with exactly what the external caller provides.
 ///
+
+---
+
+## Keeping files across suspend and resume
+
+A suspended job can resume hours later on another machine, in a new folder. Files your agent wrote to disk before the suspend are not there anymore, unless they live in the **managed workspace**.
+
+When the agent runs as an Orchestrator job, the `uipath` CLI gives each run a workspace folder. When the job suspends, the CLI uploads the new and changed files as job attachments. When the job resumes, it downloads them into the new folder before the agent continues. In a conversational agent, the files are also kept from one message to the next.
+
+For deep agents, pass `UiPathWorkspaceBackend` as the file backend. The file tools (`ls`, `read_file`, `write_file`, `edit_file`) then work inside the managed workspace:
+
+```python
+from deepagents import create_deep_agent
+from uipath_langchain.agent.advanced import UiPathWorkspaceBackend
+
+graph = create_deep_agent(
+    model=llm,
+    tools=tools,
+    backend=UiPathWorkspaceBackend(),
+)
+```
+
+The backend looks up the workspace on every file operation, so it is safe to create it at import time, as above.
+
+Your own tools can write there too. Call `get_workspace_path()` while the agent is running, not at import time:
+
+```python
+from langchain_core.tools import tool
+from uipath.runtime import get_workspace_path
+
+
+@tool
+def save_report(text: str) -> str:
+    """Save the report so it is still there after the job resumes."""
+    path = get_workspace_path() / "report.md"
+    path.write_text(text)
+    return str(path)
+```
+
+/// info
+The workspace is persisted only in Orchestrator jobs. A local `uipath run` has no managed workspace: `UiPathWorkspaceBackend` falls back to a temporary folder and logs a warning naming it, and `get_workspace_path()` raises `MANAGED_WORKSPACE_UNAVAILABLE`.
+///

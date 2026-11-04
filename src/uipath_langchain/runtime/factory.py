@@ -249,6 +249,7 @@ class UiPathLangGraphRuntimeFactory:
         return UiPathRuntimeFactorySettings(
             agent_type=_AGENT_TYPE_CODED,
             agent_framework=_AGENT_FRAMEWORK,
+            managed_workspace=True,
         )
 
     async def get_storage(self) -> UiPathRuntimeStorageProtocol | None:
