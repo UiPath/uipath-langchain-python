@@ -7,8 +7,10 @@ import pytest
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
+from opentelemetry import trace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from uipath.platform.skills import SkillSet
+from opentelemetry.trace import StatusCode
+from uipath.platform.skills import SkillSet, _telemetry
 
 from uipath_langchain.skills.middleware import SkillLoadTraceMiddleware
 
@@ -101,7 +103,42 @@ async def test_other_reads_and_tools_emit_nothing(
     assert exporter.get_finished_spans() == ()
 
 
-async def test_failed_read_emits_nothing(
+async def test_the_tool_runs_inside_the_skill_load_span(
+    mw: SkillLoadTraceMiddleware, exporter: InMemorySpanExporter
+) -> None:
+    seen: list[trace.Span] = []
+
+    async def handler(_: ToolCallRequest) -> ToolMessage:
+        seen.append(trace.get_current_span())
+        with _telemetry._tracer.start_as_current_span("Tool call - read_file"):
+            pass
+        return ToolMessage(content="ok", tool_call_id="c1")
+
+    await mw.awrap_tool_call(_request("read_file", {"file_path": SKILL_MD}), handler)
+
+    child, parent = exporter.get_finished_spans()
+    assert parent.name == "Skill load - finance/vendor-lookup"
+    assert seen[0].get_span_context().span_id == parent.context.span_id
+    assert child.parent is not None
+    assert child.parent.span_id == parent.context.span_id
+
+
+async def test_other_tools_run_outside_any_skill_load_span(
+    mw: SkillLoadTraceMiddleware, exporter: InMemorySpanExporter
+) -> None:
+    seen: list[trace.Span] = []
+
+    async def handler(_: ToolCallRequest) -> ToolMessage:
+        seen.append(trace.get_current_span())
+        return ToolMessage(content="ok", tool_call_id="c1")
+
+    await mw.awrap_tool_call(_request("read_file", {"file_path": "/notes.md"}), handler)
+
+    assert seen == [trace.INVALID_SPAN]
+    assert exporter.get_finished_spans() == ()
+
+
+async def test_failed_read_leaves_an_error_span(
     mw: SkillLoadTraceMiddleware, exporter: InMemorySpanExporter
 ) -> None:
     async def handler(_: ToolCallRequest) -> ToolMessage:
@@ -109,7 +146,10 @@ async def test_failed_read_emits_nothing(
 
     await mw.awrap_tool_call(_request("read_file", {"file_path": SKILL_MD}), handler)
 
-    assert exporter.get_finished_spans() == ()
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code is StatusCode.ERROR
+    assert span.status.description == "read_file returned an error"
+    assert "skill.bytes" not in (span.attributes or {})
 
 
 def test_sync_path_emits_a_span(
@@ -137,7 +177,25 @@ async def test_command_results_are_passed_through_untouched(
     )
 
     assert result is command
-    assert exporter.get_finished_spans() == ()
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code is StatusCode.ERROR
+    assert span.status.description == "read_file returned no tool message"
+
+
+async def test_a_command_carrying_the_tool_message_counts_as_a_load(
+    mw: SkillLoadTraceMiddleware,
+    exporter: InMemorySpanExporter,
+) -> None:
+    async def handler(_: ToolCallRequest) -> Command[Any]:
+        return Command(
+            update={"messages": [ToolMessage(content="x" * 9, tool_call_id="c1")]}
+        )
+
+    await mw.awrap_tool_call(_request("read_file", {"file_path": SKILL_MD}), handler)
+
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code is StatusCode.UNSET
+    assert (span.attributes or {})["skill.bytes"] == 9
 
 
 async def test_list_content_is_measured_by_its_text(
@@ -178,7 +236,7 @@ def _break_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("telemetry down")
 
-    monkeypatch.setattr("uipath_langchain.skills.middleware.record_skill_loaded", boom)
+    monkeypatch.setattr("uipath_langchain.skills.middleware.skill_load_span", boom)
 
 
 @pytest.mark.usefixtures("exporter")
@@ -244,7 +302,7 @@ async def test_backslash_paths_are_normalized_like_the_tool(
     assert span.attributes["skill.bundle.name"] == "finance"
 
 
-async def test_tool_exceptions_propagate_without_a_span(
+async def test_tool_exceptions_propagate_and_are_recorded_on_the_span(
     mw: SkillLoadTraceMiddleware,
     exporter: InMemorySpanExporter,
 ) -> None:
@@ -256,4 +314,23 @@ async def test_tool_exceptions_propagate_without_a_span(
             _request("read_file", {"file_path": SKILL_MD}), handler
         )
 
-    assert exporter.get_finished_spans() == ()
+    (span,) = exporter.get_finished_spans()
+    assert span.status.status_code is StatusCode.ERROR
+    assert [event.name for event in span.events] == ["exception"]
+
+
+@pytest.mark.usefixtures("exporter")
+async def test_telemetry_failure_still_runs_the_tool_once(
+    mw: SkillLoadTraceMiddleware,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _break_telemetry(monkeypatch)
+    calls: list[ToolCallRequest] = []
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        calls.append(request)
+        return ToolMessage(content="ok", tool_call_id="c1")
+
+    await mw.awrap_tool_call(_request("read_file", {"file_path": SKILL_MD}), handler)
+
+    assert len(calls) == 1
