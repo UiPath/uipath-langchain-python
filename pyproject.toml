@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.18.55"
+version = "0.18.56"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -63,10 +63,16 @@ code-interpreter = [
 video = [
     "deepagents[video]>=0.7.11, <0.8.0",
 ]
+pdf = [
+    "reportlab>=5.1.0, <6.0.0",
+    "fonttools>=4.60.0, <5.0.0",
+    "markdown-it-py>=4.0.0, <5.0.0",
+]
 all = [
     "uipath-langchain-client[all]>=1.22.0, <1.23.0",
     "uipath-langchain[code-interpreter]",
     "uipath-langchain[video]",
+    "uipath-langchain[pdf]",
 ]
 
 [project.entry-points."uipath.middlewares"]
@@ -100,7 +106,9 @@ dev = [
     "rust-just>=1.39.0",
     "types-jsonschema>=4.23.0",
     "types-protobuf<7",
+    "types-reportlab>=5.0.0, <6.0.0",
     "packaging>=24.0",
+    "pypdf>=6.0.0, <7.0.0",
     # tests/agent/tools/test_mcp/real_server.py hosts real MCP servers over real
     # HTTP. Both arrive transitively via `mcp`, but the tests import them
     # directly, so they are declared here rather than relied on by accident.
