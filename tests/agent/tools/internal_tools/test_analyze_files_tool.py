@@ -385,10 +385,10 @@ class TestCreateAnalyzeFileTool:
         assert "'Budget.csv' (text/csv)" in detail
         assert "Convert the file to PDF" in detail
 
-    async def test_legacy_client_400_names_the_attached_file(
+    async def test_raw_provider_400_names_the_attached_file(
         self, resource_config, mock_llm
     ):
-        """Legacy clients raise the provider SDK's own error carrying the response."""
+        """Chat models outside uipath_langchain_client raise the provider SDK's own error carrying the response."""
         request = httpx.Request("POST", "http://llm-gateway/completions")
         response = httpx.Response(
             400, request=request, json={"error": {"message": "invalid document"}}

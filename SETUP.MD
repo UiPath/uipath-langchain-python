@@ -51,7 +51,7 @@ uv run pytest
 
 ### The change
 
-Add a new `get_execution_job_id` helper to `src/uipath_langchain/_utils/_environment.py`, immediately after the existing `get_default_timeout` function. The helper is the symmetric complement of the existing `get_execution_folder_path` — it reads the `UIPATH_JOB_KEY` env var at runtime:
+Add a new `get_execution_job_id` helper to `src/uipath_langchain/_utils/_environment.py`, immediately after the existing `get_execution_folder_path` function. The helper is its symmetric complement — it reads the `UIPATH_JOB_KEY` env var at runtime:
 
 ```python
 def get_execution_job_id() -> str | None:

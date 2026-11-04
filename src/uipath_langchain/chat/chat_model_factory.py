@@ -1,16 +1,5 @@
-"""Chat model factory with legacy/new implementation switching.
+"""Chat model factory backed by ``uipath_langchain_client``."""
 
-The ``EnabledNewLlmClients`` feature flag is sourced from ``uipath_agents`` and
-passed through as the ``use_new_llm_clients`` argument of :func:`get_chat_model`.
-
-- ``use_new_llm_clients=True`` (default): routes to the new
-  ``uipath_langchain_client`` factory.
-- ``use_new_llm_clients=False``: routes to the legacy in-repo clients under
-  :mod:`uipath_langchain.chat._legacy`, preserving behavior exactly as it was
-  before the ``uipath_langchain_client`` migration.
-"""
-
-import logging
 from collections.abc import Mapping
 from typing import Any, Final
 
@@ -37,8 +26,6 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupErrorCode,
 )
 from uipath_langchain.chat.attachment_baggage import trace_baggage
-
-logger = logging.getLogger(__name__)
 
 
 class _TraceContextHeadersCallback(BaseCallbackHandler):
@@ -73,8 +60,7 @@ _UNSET: Final[Any] = object()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 895.0
 DEFAULT_MAX_TOKENS: Final[int] = 1000
 DEFAULT_TEMPERATURE: Final[float] = 0.0
-# 5 total attempts (initial request + up to 4 retries) for parity with the
-# legacy in-repo retryers (BedrockRetryer / VertexRetryer) and uipath-llm-client defaults.
+# 5 total attempts (initial request + up to 4 retries), matching uipath-llm-client defaults.
 DEFAULT_MAX_RETRIES: Final[int] = 5
 
 
@@ -93,11 +79,10 @@ def get_chat_model(
     max_retries: int | None = DEFAULT_MAX_RETRIES,
     callbacks: Callbacks = _UNSET,
     agenthub_config: str | None = None,
-    use_new_llm_clients: bool = True,
     model_settings: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
-    """Create and configure a chat model, dispatching legacy vs new clients.
+    """Create and configure a chat model.
 
     Args:
         model: The model name (e.g., ``"gpt-4o"``, ``"claude-3-sonnet"``).
@@ -111,53 +96,26 @@ def get_chat_model(
             instead of the auto-detected one.
         temperature: Sampling temperature. Defaults to 0.0. Pass ``None`` to
             omit the parameter when the underlying client supports it.
-        max_tokens: Maximum output tokens. Defaults to 1000 to match the
-            historical default from ``UiPathRequestMixin``. Pass ``None`` to
+        max_tokens: Maximum output tokens. Defaults to 1000. Pass ``None`` to
             forward an explicit unset value (lets the underlying client apply
             its own default or use no limit).
         timeout: Request timeout in seconds. Defaults to 895 seconds.
-        max_retries: Maximum number of attempts (ignored when
-            use_new_llm_clients=False). Defaults to 5.
+        max_retries: Maximum number of attempts. Defaults to 5.
         callbacks: LangChain callbacks (handlers or a manager) attached to the
             returned chat model. Accepts ``list[BaseCallbackHandler]`` or a
             ``BaseCallbackManager``. Forwarded only when explicitly set.
-            Ignored by the legacy factory.
-        agenthub_config: AgentHub config header value. Required by the legacy
-            factory; forwarded to the new factory.
-        use_new_llm_clients: Routes to the new ``uipath_langchain_client``
-            factory when True (default). When False, routes to the legacy
-            in-repo clients.
-        **kwargs: Forwarded to the underlying factory. The legacy factory
-            accepts ``disable_streaming``; the new factory forwards extras as
-            model kwargs to the LangChain constructor.
+        agenthub_config: AgentHub config header value.
+        **kwargs: Forwarded to the underlying factory as model kwargs to the
+            LangChain constructor.
 
     Returns:
         A configured ``BaseChatModel`` instance.
     """
-    # Always inject trace context headers per-request via a dynamic-headers
-    # callback.  For the new path the UiPathHttpxClient reads the ContextVar
-    # set by the callback; for the legacy path the callback is a no-op but
-    # keeps the wiring consistent.
+    # Inject trace context headers per-request via a dynamic-headers callback;
+    # the UiPathHttpxClient reads the ContextVar set by the callback.
     callbacks = _ensure_trace_context_callback(callbacks)
 
     try:
-        if not use_new_llm_clients:
-            if model_settings:
-                logger.warning(
-                    "model_settings %s are not supported by the legacy LLM clients "
-                    "and will be ignored; the EnabledNewLlmClients feature flag must "
-                    "be on for them to apply.",
-                    sorted(model_settings),
-                )
-            return _legacy_chat_model(
-                model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                agenthub_config=agenthub_config,
-                byo_connection_id=byo_connection_id,
-                **kwargs,
-            )
-
         optional_kwargs = {
             k: v
             for k, v in {
@@ -213,29 +171,3 @@ def _ensure_trace_context_callback(callbacks: Callbacks) -> list[BaseCallbackHan
     if not any(isinstance(cb, _TraceContextHeadersCallback) for cb in cb_list):
         cb_list.append(_TraceContextHeadersCallback())
     return cb_list
-
-
-def _legacy_chat_model(
-    model: str,
-    *,
-    temperature: float | None,
-    max_tokens: int | None,
-    agenthub_config: str | None,
-    byo_connection_id: str | None,
-    **kwargs: Any,
-) -> BaseChatModel:
-    if agenthub_config is None:
-        raise ValueError("agenthub_config is required when use_new_llm_clients=False")
-
-    from uipath_langchain.chat._legacy.chat_model_factory import (
-        get_chat_model as _legacy_get_chat_model,
-    )
-
-    return _legacy_get_chat_model(
-        model,
-        temperature,
-        max_tokens,
-        agenthub_config,
-        byo_connection_id,
-        **kwargs,
-    )

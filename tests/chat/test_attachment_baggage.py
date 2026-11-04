@@ -4,9 +4,6 @@ import base64
 import json
 from unittest.mock import patch
 
-import httpx
-
-from uipath_langchain.chat._legacy.openai import _inject_trace_context_headers
 from uipath_langchain.chat.attachment_baggage import (
     llm_call_attachment_ids,
     trace_baggage,
@@ -62,18 +59,4 @@ class TestHeaderInjectionCarriesTheAttachmentIds:
 
         extra = build.call_args.kwargs["extra_baggage"]
         assert extra[0] == "source=agents"
-        assert _decode(extra[1]) == {"report-pdf": "id-1"}
-
-    def test_legacy_client_transport(self) -> None:
-        request = httpx.Request("POST", "https://example.com")
-        with (
-            patch(
-                "uipath_langchain.chat._legacy.openai.build_trace_context_headers",
-                return_value={},
-            ) as build,
-            llm_call_attachment_ids({"report-pdf": "id-1"}),
-        ):
-            _inject_trace_context_headers(request)
-
-        extra = build.call_args.kwargs["extra_baggage"]
         assert _decode(extra[1]) == {"report-pdf": "id-1"}

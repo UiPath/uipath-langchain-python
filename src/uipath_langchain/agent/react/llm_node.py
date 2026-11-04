@@ -79,7 +79,7 @@ async def _ainvoke(
         raise_for_llm_client_error(e)
         raise
     except Exception as e:
-        # Legacy in-repo clients (use_new_llm_clients=False) raise raw provider SDK exceptions.
+        # Other chat models raise raw provider SDK exceptions.
         # Normalize via as_uipath_error and apply the same mapping when the error is HTTP-shaped; non-HTTP errors propagate.
         uipath_error = as_uipath_error(e)
         if isinstance(uipath_error, UiPathAPIError):

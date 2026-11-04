@@ -422,8 +422,8 @@ class TestLLMNodeProviderErrorHandling:
         assert info.detail == "need AGU"
 
     @pytest.mark.asyncio
-    async def test_legacy_raw_provider_error_is_normalized_and_mapped(self):
-        # Legacy clients (use_new_llm_clients=False) raise raw provider exceptions
+    async def test_raw_provider_error_is_normalized_and_mapped(self):
+        # Chat models outside uipath_langchain_client raise raw provider exceptions
         # -> except Exception -> as_uipath_error normalizes -> mapped.
         raw = openai.PermissionDeniedError(
             "Forbidden",
@@ -476,7 +476,7 @@ class TestLLMNodeProviderErrorHandling:
         assert "65535" not in info.detail
 
     @pytest.mark.asyncio
-    async def test_legacy_400_maps_to_user(self):
+    async def test_raw_provider_400_maps_to_user(self):
         raw = openai.BadRequestError(
             "Bad Request",
             response=self._http_400(),

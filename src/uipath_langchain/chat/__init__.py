@@ -74,11 +74,11 @@ def __getattr__(name):
 
         return UiPathChatFireworks
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
-        from uipath_langchain.chat._legacy import supported_models
+        from . import supported_models
 
         return getattr(supported_models, name)
     if name in ("LLMProvider", "APIFlavor"):
-        from uipath_langchain.chat._legacy import types
+        from . import types
 
         return getattr(types, name)
 

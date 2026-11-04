@@ -62,10 +62,6 @@ def get_all_module_imports() -> list[str]:
     exclude = {
         "uipath_langchain.chat.bedrock",
         "uipath_langchain.chat.vertex",
-        "uipath_langchain.chat._legacy.bedrock",
-        "uipath_langchain.chat._legacy.vertex",
-        "uipath_langchain.chat._legacy.http_client.retryers.bedrock",
-        "uipath_langchain.chat._legacy.http_client.retryers.vertex",
     }
     return [m for m in modules if m not in exclude]
 

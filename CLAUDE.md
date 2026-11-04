@@ -53,7 +53,7 @@ uv build
 
 - **`_tracing/`** — OpenTelemetry instrumentation.
 
-- **`_utils/`** — Shared utilities: HTTP request mixin, settings, sleep policy, environment helpers.
+- **`_utils/`** — Shared utilities: environment, OpenTelemetry and pydantic helpers.
 
 - **`middlewares.py`** — Entry point registered as `uipath_langchain.middlewares:register_middleware`.
 
