@@ -10,7 +10,8 @@ filesystem at ``/skills/<bundle>/<skill>/``.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
 from deepagents.backends import BackendProtocol
@@ -31,11 +32,11 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from uipath.platform.skills import SkillSet
+from uipath.platform.skills import Skill, SkillBundle, SkillSet
 
 # Private SDK module on purpose: the skill span names and attributes are a
 # cross-runtime contract, so they come from the SDK's one implementation.
-from uipath.platform.skills._telemetry import record_skill_loaded
+from uipath.platform.skills._telemetry import SkillLoad, skill_load_span
 
 from .prompt import UIPATH_SKILLS_PROMPT
 
@@ -180,9 +181,12 @@ class SkillLoadTraceMiddleware(AgentMiddleware[AgentState[Any], Any]):
 
     deepagents has no load hook: a skill is "loaded" when ``read_file`` returns
     its ``SKILL.md``. Only the first page counts: ``read_file`` pages long
-    files and the model continues with ``offset``. This wraps every tool call,
-    so it stays cheap; tracing never raises and never alters the result, while
-    exceptions from the tool itself propagate as usual.
+    files and the model continues with ``offset``. Whether a call is a skill
+    read is decided from its arguments, so the span is open while the tool runs
+    and the tool call's span is its child; a read that fails leaves an error
+    span. This wraps every tool call, so it stays cheap; tracing never raises
+    and never alters the result, while exceptions from the tool itself
+    propagate as usual.
 
     Main agent only (``create_advanced_agent`` does not forward the caller's
     middleware to subagents); a subagent's read of a SKILL.md shows up only as
@@ -200,52 +204,102 @@ class SkillLoadTraceMiddleware(AgentMiddleware[AgentState[Any], Any]):
         self._skill_set = skill_set
         self._warned = False
 
-    def _record(
-        self, request: ToolCallRequest, result: ToolMessage | Command[Any]
-    ) -> None:
+    def _tracing_failed(self) -> None:
+        # Warn once so a broken exporter is visible without flooding the log.
+        logger.log(
+            logging.DEBUG if self._warned else logging.WARNING,
+            "Skill load tracing failed",
+            exc_info=True,
+        )
+        self._warned = True
+
+    def _skill_read(self, request: ToolCallRequest) -> tuple[SkillBundle, Skill] | None:
+        """The bound skill whose ``SKILL.md`` first page this call reads, if any."""
         try:
             call = request.tool_call
-            if (
-                call["name"] != _READ_FILE_TOOL
-                or not isinstance(result, ToolMessage)
-                or result.status == "error"
-            ):
-                return
+            if call["name"] != _READ_FILE_TOOL:
+                return None
             args = call.get("args")
             if not isinstance(args, dict):
-                return
+                return None
             offset = args.get("offset", 0)
             if isinstance(offset, int) and offset > 0:
-                return
+                return None
             path = args.get("file_path")
             if not path:
-                return
+                return None
             # Normalize as the read_file tool does (backslashes, "//", "./").
-            hit = self._skill_set.skill_at(validate_path(str(path)))
-            if hit is None:
+            return self._skill_set.skill_at(validate_path(str(path)))
+        except Exception:  # tracing must never affect the tool call
+            self._tracing_failed()
+            return None
+
+    @contextmanager
+    def _traced(self, request: ToolCallRequest) -> Iterator[SkillLoad | None]:
+        """Keep a ``Skill load`` span current around a read of a bound ``SKILL.md``.
+
+        Yields ``None`` for any other call, or when the span cannot be opened.
+        The tool's own exceptions propagate unchanged; tracing errors are logged.
+        """
+        hit = self._skill_read(request)
+        span: AbstractContextManager[SkillLoad] | None = None
+        load: SkillLoad | None = None
+        if hit is not None:
+            try:
+                span = skill_load_span(*hit, invoked_by="model")
+                load = span.__enter__()
+            except Exception:
+                span, load = None, None
+                self._tracing_failed()
+        try:
+            yield load
+        except BaseException as error:
+            if span is not None:
+                self._close(span, error)
+            raise
+        if span is not None:
+            self._close(span, None)
+
+    def _close(
+        self, span: AbstractContextManager[SkillLoad], error: BaseException | None
+    ) -> None:
+        try:
+            if error is None:
+                span.__exit__(None, None, None)
+            else:
+                span.__exit__(type(error), error, error.__traceback__)
+        except BaseException as exit_error:
+            if exit_error is error:  # the span re-raises the tool's exception
                 return
-            bundle, skill = hit
-            record_skill_loaded(
-                bundle,
-                skill,
-                size=len(result.text.encode("utf-8")),
-                invoked_by="model",
-            )
+            if not isinstance(exit_error, Exception):
+                raise
+            self._tracing_failed()
+
+    def _settle(
+        self, load: SkillLoad | None, result: ToolMessage | Command[Any]
+    ) -> None:
+        if load is None:
+            return
+        try:
+            message = _tool_message(result)
+            if message is None:
+                load.fail("read_file returned no tool message")
+            elif message.status == "error":
+                load.fail("read_file returned an error")
+            else:
+                load.loaded(len(message.text.encode("utf-8")))
         except Exception:  # tracing must never affect the tool result
-            # Warn once so a broken exporter is visible without flooding the log.
-            logger.log(
-                logging.DEBUG if self._warned else logging.WARNING,
-                "Skill load tracing failed",
-                exc_info=True,
-            )
-            self._warned = True
+            self._tracing_failed()
 
     def wrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
-        """Run the tool, then trace the call if it read a bound ``SKILL.md``.
+        """Run the tool, inside a ``Skill load`` span when it reads a bound ``SKILL.md``.
+
+        The span is current while the tool runs, so the tool call's own span
+        becomes its child.
 
         Args:
             request: The tool call.
@@ -254,8 +308,9 @@ class SkillLoadTraceMiddleware(AgentMiddleware[AgentState[Any], Any]):
         Returns:
             The handler's result, unchanged.
         """
-        result = handler(request)
-        self._record(request, result)
+        with self._traced(request) as load:
+            result = handler(request)
+            self._settle(load, result)
         return result
 
     async def awrap_tool_call(
@@ -264,6 +319,23 @@ class SkillLoadTraceMiddleware(AgentMiddleware[AgentState[Any], Any]):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
         """Async ``wrap_tool_call``."""
-        result = await handler(request)
-        self._record(request, result)
+        with self._traced(request) as load:
+            result = await handler(request)
+            self._settle(load, result)
         return result
+
+
+def _tool_message(result: ToolMessage | Command[Any]) -> ToolMessage | None:
+    """The tool's message: the result itself, or the first one a ``Command`` carries.
+
+    deepagents' ``read_file`` returns a ``Command`` for media files, and the
+    filesystem middleware for results it moves out of the conversation.
+    """
+    if isinstance(result, ToolMessage):
+        return result
+    update = result.update
+    messages = update.get("messages") if isinstance(update, dict) else None
+    for message in messages or []:
+        if isinstance(message, ToolMessage):
+            return message
+    return None
