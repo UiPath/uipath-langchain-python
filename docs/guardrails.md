@@ -201,7 +201,7 @@ agent = create_agent(
 
 ### Files (attachments)
 
-Every built-in middleware class except `UiPathDeterministicGuardrailMiddleware` can forward references to the files the run holds; which files each hook sends is in the table below, and `detection_scope=Text` sends none. For `UiPathByoGuardrailMiddleware`, the BYO connector reads the files only when it declares document support. Only references are forwarded: `{id, fileName, mimeType}` for each file, at most 5 per evaluation. The Agents backend downloads each file by its Orchestrator id, decodes or extracts it, and evaluates it. File reading is gated by the tenant's guardrail file-support flags; where they are off, a guardrail configured for files degrades to text. `detection_scope` sets whether the validator evaluates the text, the files or both (see the common parameters above).
+Every built-in middleware class except `UiPathDeterministicGuardrailMiddleware` can forward references to the files the run holds; which files each hook sends is in the table below, and `detection_scope=Text` sends none. `UiPathByoGuardrailMiddleware` accepts `detection_scope`, but BYO guardrails evaluate text only; the files are not read. Only references are forwarded: `{id, fileName, mimeType}` for each file, at most 5 per evaluation. The Agents backend downloads each file by its Orchestrator id, decodes or extracts it, and evaluates it. File reading is gated by the tenant's guardrail file-support flags; where they are off, a guardrail configured for files degrades to text. `detection_scope` sets whether the validator evaluates the text, the files or both (see the common parameters above).
 
 ```python
 from uipath_langchain.guardrails import DetectionScope
