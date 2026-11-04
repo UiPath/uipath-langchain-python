@@ -142,7 +142,7 @@ async def make_graph():
 - The middleware applies to the main agent only. Subagents do not see the skills list; the prompt tells the main agent to put a skill's `SKILL.md` path in the task it delegates.
 - `destination` is emptied on every load; see [Files on disk](../core/skills.md#files-on-disk).
 - `autonomous_skills_directive()` tells an agent that runs without a human in the loop to take a skill's defaults instead of asking, and to stop rather than run a step that needs approval or would delete or overwrite something. Leave it out for a conversational agent, which can ask the user.
-- The middleware records a `Skill load` span whenever the model reads a `SKILL.md` with `read_file`.
+- The middleware records a `Skill load` span whenever the model reads a `SKILL.md` with `read_file`. The span is current while the tool runs, so a tracer that follows the OpenTelemetry context nests the `read_file` tool call under it. A read that fails leaves the span with an error status.
 
 ---
 
