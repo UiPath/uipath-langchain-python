@@ -5,8 +5,8 @@ description = "LangGraph agent that loads skills from bound skill bundles"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.14.44",
-    "uipath-langchain[bedrock]>=0.18.51",
+    "uipath>=2.15.1",
+    "uipath-langchain[bedrock]>=0.19.1",
 ]
 
 [dependency-groups]
