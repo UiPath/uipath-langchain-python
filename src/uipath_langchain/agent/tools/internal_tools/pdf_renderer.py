@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 from fontTools import subset  # type: ignore[import-untyped]
@@ -133,7 +134,7 @@ _FRAME_PADDING = 6
 _LIST_INDENT = 0.6 * cm
 _QUOTE_INDENT = 0.6 * cm
 _HEADING_SIZES = {1: 18.0, 2: 15.0, 3: 13.0, 4: 11.5, 5: 11.0, 6: 10.5}
-_SAFE_LINK_SCHEMES = ("http://", "https://", "mailto:")
+_SAFE_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 _LIGHT_GREY = colors.HexColor("#f2f2f2")
 _DRAWN_NODE_TYPES = ("text", "code_inline", "fence", "code_block")
 _UNUSED_LAYOUT_TABLES = ["GSUB", "GPOS", "GDEF", "BASE"]
@@ -172,7 +173,6 @@ def render_markdown_pdf(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("output", type=Path)
     parser.add_argument("--font-dir", action="append", type=Path, default=[])
     parser.add_argument("--max-memory-bytes", type=int)
     parser.add_argument("--max-pdf-bytes", type=int)
@@ -190,8 +190,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise
     if args.max_pdf_bytes and len(rendered.content) > args.max_pdf_bytes:
         return EXIT_PDF_TOO_LARGE
-    args.output.write_bytes(rendered.content)
-    json.dump({"missing": rendered.missing}, sys.stdout)
+    header = json.dumps({"missing": rendered.missing}).encode("utf-8")
+    sys.stdout.buffer.write(header + b"\n" + rendered.content)
     return 0
 
 
@@ -541,7 +541,7 @@ class _Blocks:
             weight = weight._replace(italic=True)
         elif node.type == "link":
             target = str(node.attrs.get("href", ""))
-            href = target if target.startswith(_SAFE_LINK_SCHEMES) else None
+            href = target if urlsplit(target).scheme in _SAFE_LINK_SCHEMES else None
         return "".join(self._spans(child, weight, href) for child in node.children)
 
     @staticmethod

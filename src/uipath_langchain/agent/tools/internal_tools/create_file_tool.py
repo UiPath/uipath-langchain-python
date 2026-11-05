@@ -26,7 +26,6 @@ import asyncio
 import json
 import logging
 import sys
-import tempfile
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol, Sequence, runtime_checkable
@@ -38,7 +37,6 @@ from uipath.platform import UiPath
 from uipath.platform.common import UiPathConfig
 
 from uipath_langchain.agent.attachments.mime_types import guess_mime_type
-from uipath_langchain.agent.multimodal import is_pdf
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -134,49 +132,46 @@ async def _render_pdf(markdown: str) -> tuple[bytes, list[str]]:
         from . import pdf_renderer
     except ImportError as exc:
         raise ToolException(_MISSING_PDF_EXTRA) from exc
-    with tempfile.TemporaryDirectory() as folder:
-        output = Path(folder) / "document.pdf"
-        command = [
-            sys.executable,
-            "-P",
-            "-s",
-            pdf_renderer.__file__,
-            str(output),
-            "--max-memory-bytes",
-            str(_MAX_PDF_RENDER_MEMORY_BYTES),
-            "--max-pdf-bytes",
-            str(_MAX_PDF_BYTES),
-        ]
-        for font_dir in pdf_renderer.FONT_DIRS:
-            command += ["--font-dir", str(font_dir)]
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except OSError as exc:
-            logger.warning("PDF renderer %s could not start: %s", sys.executable, exc)
-            raise ToolException(_RENDER_FAILED) from exc
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(markdown.encode("utf-8")),
-                timeout=_PDF_RENDER_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            await _stop(process)
-            raise ToolException(
-                f"Rendering this PDF took longer than {_PDF_RENDER_TIMEOUT_SECONDS} "
-                "seconds, so it was stopped. Simplify the document (fewer table "
-                "rows, line breaks or links) or split it into several PDFs."
-            ) from None
-        except asyncio.CancelledError:
-            await _stop(process)
-            raise
-        if process.returncode != 0:
-            raise _render_failure(pdf_renderer, process.returncode, stderr)
-        return output.read_bytes(), json.loads(stdout)["missing"]
+    command = [
+        sys.executable,
+        "-P",
+        pdf_renderer.__file__,
+        "--max-memory-bytes",
+        str(_MAX_PDF_RENDER_MEMORY_BYTES),
+        "--max-pdf-bytes",
+        str(_MAX_PDF_BYTES),
+    ]
+    for font_dir in pdf_renderer.FONT_DIRS:
+        command += ["--font-dir", str(font_dir)]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        logger.warning("PDF renderer %s could not start: %s", sys.executable, exc)
+        raise ToolException(_RENDER_FAILED) from exc
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(markdown.encode("utf-8")),
+            timeout=_PDF_RENDER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        await _stop(process)
+        raise ToolException(
+            f"Rendering this PDF took longer than {_PDF_RENDER_TIMEOUT_SECONDS} "
+            "seconds, so it was stopped. Simplify the document (fewer table "
+            "rows, line breaks or links) or split it into several PDFs."
+        ) from None
+    except asyncio.CancelledError:
+        await _stop(process)
+        raise
+    if process.returncode != 0:
+        raise _render_failure(pdf_renderer, process.returncode, stderr)
+    header, _, pdf = stdout.partition(b"\n")
+    return pdf, json.loads(header)["missing"]
 
 
 def _render_failure(
@@ -320,7 +315,9 @@ def create_file_tool(
 
             body: str | bytes | None = content
             mime_type = guess_mime_type(attachment_name)
-            if is_pdf(mime_type) and not _is_pdf_file(source_path):
+            if Path(attachment_name).suffix.lower() == ".pdf" and not _is_pdf_file(
+                source_path
+            ):
                 pdf, missing = await _render_pdf(
                     _pdf_markdown(content, source_path, file_path)
                 )

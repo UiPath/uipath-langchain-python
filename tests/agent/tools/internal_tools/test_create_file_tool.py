@@ -1,6 +1,7 @@
 """Tests for the create-file internal tool."""
 
 import asyncio
+import gzip
 import io
 import logging
 import sys
@@ -666,6 +667,19 @@ class TestCreatePdf:
         await call(tool, fileName="scan.pdf", filePath="/scan.pdf")
 
         assert created[0]["source_path"] == str(workspace / "scan.pdf")
+        assert created[0]["content"] is None
+
+    async def test_a_compressed_workspace_pdf_is_uploaded_unchanged(
+        self, created, tmp_path
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "scan.pdf.gz").write_bytes(gzip.compress(b"%PDF-1.7\nexisting"))
+        tool = make_tool(FakeBackend(workspace))
+
+        await call(tool, fileName="scan.pdf.gz", filePath="/scan.pdf.gz")
+
+        assert created[0]["source_path"] == str(workspace / "scan.pdf.gz")
         assert created[0]["content"] is None
 
     async def test_a_text_file_that_mentions_the_pdf_header_is_rendered(

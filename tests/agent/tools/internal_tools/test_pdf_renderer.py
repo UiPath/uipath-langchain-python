@@ -199,6 +199,13 @@ class TestStructure:
         assert "See the docs and notes." in pdf_text(rendered.content)
         assert link_targets(rendered.content) == ["https://example.com/x"]
 
+    def test_web_link_schemes_match_in_any_case(self) -> None:
+        rendered = render_markdown_pdf(
+            "See [the docs](HTTPS://example.com/x) and [run](javascript:alert(1))."
+        )
+
+        assert link_targets(rendered.content) == ["HTTPS://example.com/x"]
+
     def test_an_image_is_replaced_by_its_alt_text(self) -> None:
         text = pdf_text(
             render_markdown_pdf(
