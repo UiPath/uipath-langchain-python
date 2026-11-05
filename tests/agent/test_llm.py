@@ -421,8 +421,8 @@ def test_user_category_is_not_wrapped_in_the_generic_prefix():
     assert info.detail.startswith("The model provider rejected the request")
 
 
-def test_legacy_raw_provider_error_is_normalized_and_mapped():
-    # Legacy clients (use_new_llm_clients=False) raise raw provider SDK exceptions,
+def test_raw_provider_error_is_normalized_and_mapped():
+    # Chat models outside uipath_langchain_client raise raw provider SDK exceptions,
     # not UiPathAPIError. as_uipath_error normalizes them so licensing still maps.
     import openai
     from uipath.llm_client.utils.exceptions import as_uipath_error
