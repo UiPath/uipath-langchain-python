@@ -51,6 +51,9 @@ This sample shows how to create an agent using LangGraph with multiple tool serv
 ## [Simple remote MCP](simple-remote-mcp)
 This sample demonstrates the creation of an agent using LangGraph, which connects to a remote MCP (Model Context Protocol) Server.
 
+## [DeepAgent workspace files](deepagent-workspace-files)
+This sample shows a DeepAgents agent whose files are real files on disk and survive a suspend and resume in an Orchestrator job, using `UiPathWorkspaceBackend`.
+
 ## [Simple DeepAgent](simple-deepagent)
 This sample demonstrates using the DeepAgents library to create an agent with advanced planning, sub-agent delegation, and web search capabilities.
 
