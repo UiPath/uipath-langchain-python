@@ -10,7 +10,10 @@ from openinference.instrumentation.langchain import (
     get_ancestor_spans,
     get_current_span,
 )
+from opentelemetry import context as context_api
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from uipath.core.adapters import EvaluatorProtocol
+from uipath.core.feature_flags import FeatureFlags
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
@@ -25,6 +28,7 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -34,6 +38,35 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 _AGENT_TYPE_CODED = "uipath_coded"
 _AGENT_FRAMEWORK = "langchain"
+
+
+def _skip_client_llm_spans(instrumentor: LangChainInstrumentor) -> None:
+    """Don't create client-side LLM spans when the LLM Gateway publishes "Model run".
+
+    The span kind is only set when an OpenInference span ends, so a span filter
+    can't drop it at start (live tracking would leave it stuck as "running").
+    Instead, suppress instrumentation while the LLM run's span would be created.
+    """
+    tracer = getattr(instrumentor, "_tracer", None)
+    if tracer is None or getattr(tracer, "_uipath_skip_llm", False):
+        return
+    original_start_trace = tracer._start_trace
+
+    def _start_trace(run: Any) -> None:
+        if run.run_type == "llm" and FeatureFlags.is_flag_enabled(
+            "EnableTraceContextHeaders"
+        ):
+            token = context_api.attach(
+                context_api.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True)
+            )
+            try:
+                return original_start_trace(run)
+            finally:
+                context_api.detach(token)
+        return original_start_trace(run)
+
+    tracer._start_trace = _start_trace
+    tracer._uipath_skip_llm = True
 
 
 class UiPathLangGraphRuntimeFactory:
@@ -64,7 +97,9 @@ class UiPathLangGraphRuntimeFactory:
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         _instrument_traceable_attributes()
-        LangChainInstrumentor().instrument()
+        instrumentor = LangChainInstrumentor()
+        instrumentor.instrument()
+        _skip_client_llm_spans(instrumentor)
         UiPathSpanUtils.register_current_span_provider(get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 
@@ -287,18 +322,20 @@ class UiPathLangGraphRuntimeFactory:
         storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
 
+        # Runtime callbacks are inherited by every chat model in the graph, so
+        # models built directly (e.g. ``UiPathChatAnthropicBedrock(...)``) also
+        # send the LLM Gateway trace-context headers, not only get_chat_model().
+        callbacks: list[BaseCallbackHandler] = [_TraceContextHeadersCallback()]
+
         evaluator: EvaluatorProtocol | None = kwargs.get("evaluator")
-        callbacks: list[BaseCallbackHandler] | None = (
-            [
+        if evaluator is not None:
+            callbacks.append(
                 GovernanceCallbackHandler(
                     evaluator=evaluator,
                     agent_name=entrypoint,
                     session_id=runtime_id,
                 )
-            ]
-            if evaluator is not None
-            else None
-        )
+            )
 
         base_runtime = UiPathLangGraphRuntime(
             graph=compiled_graph,
