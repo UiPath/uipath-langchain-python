@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 from langchain_core.callbacks import BaseCallbackHandler
-from uipath.core.feature_flags import FeatureFlags
 from uipath.llm_client.utils.headers import (
     get_dynamic_request_headers,
     set_dynamic_request_headers,
@@ -49,11 +48,9 @@ class TestTraceContextHeadersCallback:
     """The callback produces the expected headers from an active OTEL span."""
 
     def setup_method(self) -> None:
-        FeatureFlags.configure_flags({"EnableTraceContextHeaders": True})
         set_dynamic_request_headers({})
 
     def teardown_method(self) -> None:
-        FeatureFlags.reset_flags()
         set_dynamic_request_headers({})
 
     def test_returns_headers_with_active_span(self) -> None:
@@ -81,12 +78,6 @@ class TestTraceContextHeadersCallback:
         assert headers["x-uipath-traceparent-id"].startswith("00-")
         assert "x-uipath-tracebaggage" in headers
         assert "source=agents" in headers["x-uipath-tracebaggage"]
-
-    def test_returns_empty_when_flag_disabled(self) -> None:
-        FeatureFlags.configure_flags({"EnableTraceContextHeaders": False})
-        cb = _TraceContextHeadersCallback()
-        cb._merge_headers()
-        assert get_dynamic_request_headers() == {}
 
     def test_on_chat_model_start_delegates_to_merge_headers(self) -> None:
         cb = _TraceContextHeadersCallback()
