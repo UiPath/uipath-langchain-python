@@ -1,5 +1,6 @@
 """Chat model factory backed by ``uipath_langchain_client``."""
 
+import os
 from collections.abc import Mapping
 from typing import Any, Final
 
@@ -27,18 +28,38 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.chat.attachment_baggage import trace_baggage
 
+USE_CLIENT_LLM_SPANS_ENV = "UIPATH_USE_CLIENT_LLM_SPANS"
+
+
+def use_client_llm_spans() -> bool:
+    """Whether LLM calls are traced by client-side spans instead of the LLM Gateway.
+
+    Set ``UIPATH_USE_CLIENT_LLM_SPANS=true`` to keep the client-side LLM spans
+    and leave the LLM Gateway's spans (Model run, governance, guardrails) out
+    of the agent's trace. By default the Gateway's spans are used.
+    """
+    return os.environ.get(USE_CLIENT_LLM_SPANS_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
 
 class _TraceContextHeadersCallback(BaseCallbackHandler):
     """Inject W3C-style trace context headers into each LLM gateway request.
 
     Merges into the existing dynamic-headers ContextVar so that headers
     set by earlier callbacks (e.g. ``LicenseRefIdHeadersCallback``) are
-    preserved instead of overwritten.
+    preserved instead of overwritten. Sends nothing when
+    ``UIPATH_USE_CLIENT_LLM_SPANS`` is true, so the Gateway's spans don't
+    join the agent's trace.
     """
 
     run_inline: bool = True
 
     def _merge_headers(self) -> None:
+        if use_client_llm_spans():
+            return
         existing = get_dynamic_request_headers()
         existing.update(
             build_trace_context_headers(extra_baggage=trace_baggage("source=agents"))

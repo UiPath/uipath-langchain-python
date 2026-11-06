@@ -6,7 +6,9 @@ its governance / guardrail / "Model run" spans into a coded agent's trace:
 * every chat model in the graph sends the trace-context headers, including
   models constructed directly rather than through ``get_chat_model()``;
 * OpenInference no longer opens the client-side LLM span the Gateway's
-  "Model run" replaces.
+  "Model run" replaces;
+* with ``UIPATH_USE_CLIENT_LLM_SPANS`` true, it's the other way around: the
+  client-side LLM span is kept and no trace-context headers are sent.
 """
 
 import os
@@ -32,6 +34,7 @@ from uipath.llm_client.utils.headers import (
 )
 from uipath.runtime import UiPathRuntimeContext
 
+from uipath_langchain.chat.chat_model_factory import USE_CLIENT_LLM_SPANS_ENV
 from uipath_langchain.runtime.factory import (
     UiPathLangGraphRuntimeFactory,
     _skip_client_llm_spans,
@@ -125,7 +128,8 @@ def recorder() -> Iterator[_Recorder]:
 
 
 @pytest.fixture(autouse=True)
-def _reset() -> Iterator[None]:
+def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.delenv(USE_CLIENT_LLM_SPANS_ENV, raising=False)
     for recorded in (_seen_headers, _own_span, _current_span):
         recorded.clear()
     set_dynamic_request_headers({})
@@ -163,6 +167,20 @@ class TestTraceContextHeaders:
         assert len(_seen_headers) == 1
         assert _TRACE_HEADERS.items() <= _seen_headers[0].items()
 
+    async def test_client_llm_spans_env_sends_no_trace_headers(
+        self, factory: UiPathLangGraphRuntimeFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, "true")
+
+        with patch(
+            "uipath_langchain.chat.chat_model_factory.build_trace_context_headers",
+            return_value=dict(_TRACE_HEADERS),
+        ):
+            await _run(factory, _RecordingModel(responses=["ok"]))
+
+        assert len(_seen_headers) == 1
+        assert not _TRACE_HEADERS.keys() & _seen_headers[0].keys()
+
 
 class TestSkipClientLlmSpans:
     async def test_never_starts_client_llm_span(
@@ -199,6 +217,33 @@ class TestSkipClientLlmSpans:
         node = next(s for s in recorder.ended if s.name == "model")
         assert not node.status.is_ok
         assert "_FailingModel" not in recorder.started
+
+    @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes"])
+    async def test_client_llm_spans_env_keeps_client_llm_span(
+        self,
+        factory: UiPathLangGraphRuntimeFactory,
+        recorder: _Recorder,
+        monkeypatch: pytest.MonkeyPatch,
+        value: str,
+    ) -> None:
+        monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, value)
+        await _run(factory, _RecordingModel(responses=["ok"]))
+
+        assert "_RecordingModel" in recorder.started
+        assert "_RecordingModel" in [s.name for s in recorder.ended]
+
+    @pytest.mark.parametrize("value", ["false", "0", ""])
+    async def test_client_llm_spans_env_not_true_skips_client_llm_span(
+        self,
+        factory: UiPathLangGraphRuntimeFactory,
+        recorder: _Recorder,
+        monkeypatch: pytest.MonkeyPatch,
+        value: str,
+    ) -> None:
+        monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, value)
+        await _run(factory, _RecordingModel(responses=["ok"]))
+
+        assert "_RecordingModel" not in recorder.started
 
     def test_wrapping_is_idempotent(self, recorder: _Recorder) -> None:
         instrumentor = LangChainInstrumentor()

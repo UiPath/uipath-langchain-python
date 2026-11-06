@@ -27,7 +27,10 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
-from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
+from uipath_langchain.chat.chat_model_factory import (
+    _TraceContextHeadersCallback,
+    use_client_llm_spans,
+)
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -42,6 +45,9 @@ _AGENT_FRAMEWORK = "langchain"
 def _skip_client_llm_spans(instrumentor: LangChainInstrumentor) -> None:
     """Don't create client-side LLM spans: the LLM Gateway publishes "Model run".
 
+    Kept when ``UIPATH_USE_CLIENT_LLM_SPANS`` is true; the Gateway then gets no
+    trace-context headers, so only the client-side spans are in the trace.
+
     The span kind is only set when an OpenInference span ends, so a span filter
     can't drop it at start (live tracking would leave it stuck as "running").
     Instead, suppress instrumentation while the LLM run's span would be created.
@@ -52,7 +58,7 @@ def _skip_client_llm_spans(instrumentor: LangChainInstrumentor) -> None:
     original_start_trace = tracer._start_trace
 
     def _start_trace(run: Any) -> None:
-        if run.run_type == "llm":
+        if run.run_type == "llm" and not use_client_llm_spans():
             token = context_api.attach(
                 context_api.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True)
             )
