@@ -5,8 +5,8 @@ its governance / guardrail / "Model run" spans into a coded agent's trace:
 
 * every chat model in the graph sends the trace-context headers, including
   models constructed directly rather than through ``get_chat_model()``;
-* with ``EnableTraceContextHeaders`` on, OpenInference no longer opens the
-  client-side LLM span the Gateway's "Model run" replaces.
+* OpenInference no longer opens the client-side LLM span the Gateway's
+  "Model run" replaces.
 """
 
 import os
@@ -26,7 +26,6 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
-from uipath.core.feature_flags import FeatureFlags
 from uipath.llm_client.utils.headers import (
     get_dynamic_request_headers,
     set_dynamic_request_headers,
@@ -38,7 +37,6 @@ from uipath_langchain.runtime.factory import (
     _skip_client_llm_spans,
 )
 
-_FLAG = "EnableTraceContextHeaders"
 _TRACE_HEADERS = {
     "x-uipath-traceparent-id": "00-aabbccddeeff00112233445566778899-1122334455667788-01",
     "x-uipath-tracebaggage": "source=agents",
@@ -132,7 +130,6 @@ def _reset() -> Iterator[None]:
         recorded.clear()
     set_dynamic_request_headers({})
     yield
-    FeatureFlags.reset_flags()
     set_dynamic_request_headers({})
 
 
@@ -168,19 +165,9 @@ class TestTraceContextHeaders:
 
 
 class TestSkipClientLlmSpans:
-    async def test_flag_off_keeps_client_llm_span(
+    async def test_never_starts_client_llm_span(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        FeatureFlags.configure_flags({_FLAG: False})
-        await _run(factory, _RecordingModel(responses=["ok"]))
-
-        assert "_RecordingModel" in recorder.started
-        assert "_RecordingModel" in [s.name for s in recorder.ended]
-
-    async def test_flag_on_never_starts_client_llm_span(
-        self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
-    ) -> None:
-        FeatureFlags.configure_flags({_FLAG: True})
         await _run(factory, _RecordingModel(responses=["ok"]))
 
         # Not just dropped at export: never started, so live tracking can't
@@ -191,10 +178,9 @@ class TestSkipClientLlmSpans:
         assert "model" in recorder.started
         assert "LangGraph" in recorder.started
 
-    async def test_flag_on_keeps_parent_for_traceparent_and_governance(
+    async def test_keeps_parent_for_traceparent_and_governance(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        FeatureFlags.configure_flags({_FLAG: True})
         await _run(factory, _RecordingModel(responses=["ok"]))
 
         # The traceparent span (and governance's enclosing-span fallback) is
@@ -204,10 +190,9 @@ class TestSkipClientLlmSpans:
         # Governance's own-span lookup finds nothing and falls back.
         assert _own_span == [None]
 
-    async def test_flag_on_model_error_still_propagates(
+    async def test_model_error_still_propagates(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        FeatureFlags.configure_flags({_FLAG: True})
         with pytest.raises(RuntimeError, match="gateway said no"):
             await _run(factory, _FailingModel(responses=["unused"]))
 

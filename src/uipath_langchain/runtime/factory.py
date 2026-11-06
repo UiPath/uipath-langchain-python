@@ -13,7 +13,6 @@ from openinference.instrumentation.langchain import (
 from opentelemetry import context as context_api
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from uipath.core.adapters import EvaluatorProtocol
-from uipath.core.feature_flags import FeatureFlags
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
@@ -41,7 +40,7 @@ _AGENT_FRAMEWORK = "langchain"
 
 
 def _skip_client_llm_spans(instrumentor: LangChainInstrumentor) -> None:
-    """Don't create client-side LLM spans when the LLM Gateway publishes "Model run".
+    """Don't create client-side LLM spans: the LLM Gateway publishes "Model run".
 
     The span kind is only set when an OpenInference span ends, so a span filter
     can't drop it at start (live tracking would leave it stuck as "running").
@@ -53,9 +52,7 @@ def _skip_client_llm_spans(instrumentor: LangChainInstrumentor) -> None:
     original_start_trace = tracer._start_trace
 
     def _start_trace(run: Any) -> None:
-        if run.run_type == "llm" and FeatureFlags.is_flag_enabled(
-            "EnableTraceContextHeaders"
-        ):
+        if run.run_type == "llm":
             token = context_api.attach(
                 context_api.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True)
             )
