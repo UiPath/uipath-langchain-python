@@ -1,5 +1,7 @@
 """Tests for analyze_files_tool.py module."""
 
+import base64
+import hashlib
 import json
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
@@ -8,6 +10,11 @@ import httpx
 import openai
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages.content import (
+    ImageContentBlock,
+    create_file_block,
+    create_image_block,
+)
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +39,7 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     _is_pii_scope_for_files,
     _llm_call_attachment_ids,
     _resolve_job_attachment_arguments,
+    add_files_to_message,
     create_analyze_file_tool,
     resolve_attachments_to_file_infos,
 )
@@ -1681,6 +1689,22 @@ class TestAnalyzeFileToolPassesAttachmentsViaConfig:
         assert TAG_NOSTREAM in config_arg["tags"]
 
 
+_TASK = HumanMessage(content="task")
+
+
+def _image_part(data: bytes, attachment_id: str | None = None) -> ImageContentBlock:
+    block = create_image_block(
+        base64=base64.b64encode(data).decode(), mime_type="image/png"
+    )
+    if attachment_id:
+        block["extras"] = {"uipath_sent_attachment_id": attachment_id}
+    return block
+
+
+def _content_key(data: bytes) -> str:
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
 class TestLlmCallAttachmentIds:
     def test_maps_the_sent_filename_to_the_orchestrator_id(self) -> None:
         files = [
@@ -1700,7 +1724,7 @@ class TestLlmCallAttachmentIds:
             ),
         ]
 
-        assert _llm_call_attachment_ids(files) == {
+        assert _llm_call_attachment_ids(files, _TASK) == {
             "cv-harmful content-pdf": "id-original",
             "pii-masked-notes-txt": "id-masked",
         }
@@ -1727,7 +1751,7 @@ class TestLlmCallAttachmentIds:
             ),
         ]
 
-        assert _llm_call_attachment_ids(files) == {}
+        assert _llm_call_attachment_ids(files, _TASK) == {}
 
     def test_leaves_out_a_filename_two_attachments_are_sent_with(self) -> None:
         files = [
@@ -1757,7 +1781,7 @@ class TestLlmCallAttachmentIds:
             ),
         ]
 
-        assert _llm_call_attachment_ids(files) == {"notes-txt": "id-c"}
+        assert _llm_call_attachment_ids(files, _TASK) == {"notes-txt": "id-c"}
 
     def test_leaves_out_files_orchestrator_cannot_serve(self) -> None:
         files = [
@@ -1773,7 +1797,106 @@ class TestLlmCallAttachmentIds:
             ),
         ]
 
-        assert _llm_call_attachment_ids(files) == {}
+        assert _llm_call_attachment_ids(files, _TASK) == {}
+
+    def test_keys_each_image_part_by_the_sha256_of_its_bytes(self) -> None:
+        message = HumanMessage(
+            content_blocks=[
+                {"type": "text", "text": "task"},
+                _image_part(b"scan", "id-scan"),
+                _image_part(b"page 1", "id-fax"),
+                _image_part(b"page 2", "id-fax"),
+                _image_part(b"no attachment"),
+            ]
+        )
+
+        assert _llm_call_attachment_ids([], message) == {
+            _content_key(b"scan"): "id-scan",
+            _content_key(b"page 1"): "id-fax",
+            _content_key(b"page 2"): "id-fax",
+        }
+
+    def test_leaves_out_bytes_two_attachments_are_sent_with(self) -> None:
+        message = HumanMessage(
+            content_blocks=[
+                _image_part(b"same", "id-a"),
+                _image_part(b"same", "id-b"),
+                _image_part(b"other", "id-c"),
+            ]
+        )
+
+        assert _llm_call_attachment_ids([], message) == {_content_key(b"other"): "id-c"}
+
+    def test_lists_at_most_ten_image_parts(self) -> None:
+        message = HumanMessage(
+            content_blocks=[_image_part(bytes([i]), f"id-{i}") for i in range(12)]
+        )
+
+        assert list(_llm_call_attachment_ids([], message).values()) == [
+            f"id-{i}" for i in range(10)
+        ]
+
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.build_file_content_blocks_for"
+    )
+    async def test_names_the_attachment_each_sent_image_part_came_from(
+        self, mock_build
+    ) -> None:
+        blocks = {
+            "https://example.com/scan": [_image_part(b"scan")],
+            "https://example.com/fax": [_image_part(b"page 1"), _image_part(b"page 2")],
+            "https://example.com/badge-masked": [_image_part(b"masked badge")],
+            "https://example.com/local": [_image_part(b"local")],
+            "https://example.com/doc": [
+                create_file_block(
+                    base64=base64.b64encode(b"%PDF").decode(),
+                    mime_type="application/pdf",
+                    filename="doc-pdf",
+                )
+            ],
+        }
+        mock_build.side_effect = lambda file, **_: blocks[file.url]
+        files = [
+            FileInfo(
+                url="https://example.com/scan",
+                name="scan.png",
+                mime_type="image/png",
+                attachment_id="id-scan",
+            ),
+            FileInfo(
+                url="https://example.com/fax",
+                name="fax.tiff",
+                mime_type="image/tiff",
+                attachment_id="id-fax",
+            ),
+            FileInfo(
+                url="https://example.com/badge",
+                name="badge.png",
+                mime_type="image/png",
+                attachment_id="id-badge",
+                masked_attachment_url="https://example.com/badge-masked",
+                masked_attachment_id="id-badge-masked",
+            ),
+            FileInfo(
+                url="https://example.com/local", name="local.png", mime_type="image/png"
+            ),
+            FileInfo(
+                url="https://example.com/doc",
+                name="doc.pdf",
+                mime_type="application/pdf",
+                attachment_id="id-doc",
+            ),
+        ]
+
+        message = await add_files_to_message(HumanMessage(content="task"), files)
+
+        assert _llm_call_attachment_ids(files, message) == {
+            "doc-pdf": "id-doc",
+            _content_key(b"scan"): "id-scan",
+            _content_key(b"page 1"): "id-fax",
+            _content_key(b"page 2"): "id-fax",
+            _content_key(b"masked badge"): "id-badge-masked",
+        }
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
