@@ -5,7 +5,6 @@ import logging
 import mimetypes
 import uuid
 from collections.abc import Iterator
-from itertools import islice
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
@@ -81,6 +80,7 @@ logger = logging.getLogger("uipath")
 
 # The Orchestrator attachment an image part's bytes came from, which the part cannot name.
 _SENT_ATTACHMENT_ID_EXTRA = "uipath_sent_attachment_id"
+_CONTENT_KEY_PREFIX = "sha256:"
 # A TIFF is sent as one image part per page; the cap keeps the trace baggage header small.
 _MAX_CONTENT_KEYED_PARTS = 10
 
@@ -194,9 +194,13 @@ def _llm_call_attachment_ids(
         filename = file_part_filename(name, file.mime_type)
         if att_id and filename is not None:
             add(filename, att_id)
-    for key, att_id in islice(_image_part_keys(message), _MAX_CONTENT_KEYED_PARTS):
+    for key, att_id in _image_part_keys(message):
         add(key, att_id)
-    return {key: att_id for key, att_id in ids.items() if key not in ambiguous}
+    linked = {key: att_id for key, att_id in ids.items() if key not in ambiguous}
+    content_keys = [key for key in linked if key.startswith(_CONTENT_KEY_PREFIX)]
+    for key in content_keys[_MAX_CONTENT_KEYED_PARTS:]:
+        del linked[key]
+    return linked
 
 
 def _sent_attachment(file: FileInfo) -> tuple[str | None, str]:
@@ -219,7 +223,7 @@ def _image_part_keys(message: BaseMessage) -> Iterator[tuple[str, str]]:
         data = part.get("base64")
         if att_id and isinstance(data, str):
             digest = hashlib.sha256(base64.b64decode(data)).hexdigest()
-            yield f"sha256:{digest}", att_id
+            yield f"{_CONTENT_KEY_PREFIX}{digest}", att_id
 
 
 def _config_with_llm_call_attachments(
