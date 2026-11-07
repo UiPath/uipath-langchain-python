@@ -1768,6 +1768,19 @@ class TestLlmCallAttachmentIds:
             f"id-{i}" for i in range(10)
         ]
 
+    def test_leaves_out_bytes_a_part_past_the_cap_shares_with_another_attachment(
+        self,
+    ) -> None:
+        pages = [_image_part(bytes([i]), "id-fax") for i in range(10)]
+        message = HumanMessage(
+            content_blocks=[*pages, _image_part(bytes([0]), "id-scan")]
+        )
+
+        linked = _llm_call_attachment_ids([], message)
+
+        assert _content_key(bytes([0])) not in linked
+        assert len(linked) == 9
+
     @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.build_file_content_blocks_for"
     )
