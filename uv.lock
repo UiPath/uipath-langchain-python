@@ -4971,7 +4971,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.22.3,<1.23.0" },
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.22.3,<1.23.0" },
     { name = "uipath-llm-client", specifier = ">=1.22.3,<1.23.0" },
-    { name = "uipath-platform", specifier = ">=0.3.0,<0.4.0" },
+    { name = "uipath-platform", specifier = ">=0.3.2,<0.4.0" },
     { name = "uipath-runtime", specifier = ">=0.13.5,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpreter", "video", "all"]
@@ -5059,7 +5059,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.3.0"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -5070,9 +5070,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/40/ef/802ae139c5ab3357be839ec459db6fd4986c8748dccab8f9eb34b9131a73/uipath_platform-0.3.0.tar.gz", hash = "sha256:902e75fe7011530f901fae1bcd06856791f1c5944e94aec90db53bc6584d9738", size = 489768, upload-time = "2026-11-04T13:04:39.907Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/bf/93244ad08e046ff0ae6f0286045899f0bcafc5dd5f0cff1bfc4efd76cf4e/uipath_platform-0.3.2.tar.gz", hash = "sha256:d763bbbd53a3d71aca82dd99f07bc8fd096b403dccd4dbcbfc30944e41b0fa64", size = 489635, upload-time = "2026-11-09T12:20:20.105Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/06/a0dc5922e2b25c1c14fcbb12252b2f82e95a1070d7505cb47ba1962c9100/uipath_platform-0.3.0-py3-none-any.whl", hash = "sha256:a9ec3386b03645d19691a65f19946ef3bb56c0ae3e96564259f7e9f8567e2c18", size = 312482, upload-time = "2026-11-04T13:04:37.899Z" },
+    { url = "https://files.pythonhosted.org/packages/65/3d/8d84ede6aa14923a25c6b0a7c835469bc30e84a0bb69effefd040ba219fa/uipath_platform-0.3.2-py3-none-any.whl", hash = "sha256:f3a0e70352406e4aff937d2639bc29fdeb1a2535b92d5f0585be2b0edcc45380", size = 312480, upload-time = "2026-11-09T12:20:18.019Z" },
 ]
 
 [[package]]
