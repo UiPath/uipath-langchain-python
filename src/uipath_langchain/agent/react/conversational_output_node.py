@@ -16,12 +16,18 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.runnables.config import var_child_runnable_config
 from pydantic import BaseModel
 from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
 from uipath.agent.react.conversational_prompts import (
     get_generate_output_prompt,
+    strip_conversational_output_section,
 )
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
@@ -74,8 +80,39 @@ def create_conversational_output_extractor(
     )
     output_prompt = get_generate_output_prompt()
 
+    def without_output_section(
+        exchange_messages: Sequence[BaseMessage],
+    ) -> list[BaseMessage]:
+        """Drop the loop-only output-fields section from the system message.
+
+        It tells the agent it has no tool for these fields — true in the loop,
+        the opposite here. The system prompt also outranks the user message
+        carrying `output_prompt` by its own precedence hierarchy, so leaving it
+        in would point the model at the prohibition.
+
+        Only the first message is considered, because that is the only place
+        the section can be. The standard loop's init node puts the freshly
+        built system prompt at index 0 and drops any stale one from the
+        replayed history; the advanced loop keeps its prompt out of state
+        entirely, injecting it per model call, so there is no system message
+        here at all.
+        """
+        messages = list(exchange_messages)
+        if not messages:
+            return messages
+        first = messages[0]
+        if not isinstance(first, SystemMessage) or not isinstance(first.content, str):
+            return messages
+        stripped = strip_conversational_output_section(first.content)
+        if stripped != first.content:
+            messages[0] = first.model_copy(update={"content": stripped})
+        return messages
+
     async def extract(exchange_messages: Sequence[BaseMessage]) -> dict[str, Any]:
-        messages = [*exchange_messages, HumanMessage(content=output_prompt)]
+        messages = [
+            *without_output_section(exchange_messages),
+            HumanMessage(content=output_prompt),
+        ]
         config = config_without_streaming(var_child_runnable_config.get(None))
 
         try:
