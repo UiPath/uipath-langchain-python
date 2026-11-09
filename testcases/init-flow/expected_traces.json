@@ -12,19 +12,6 @@
       "attributes": {
         "openinference.span.kind": "CHAIN"
       }
-    },
-    {
-      "name": [
-        "UiPathChatAnthropicBedrock",
-        "UiPathChatBedrockConverse",
-        "UiPathChatBedrock",
-        "UiPathAzureChatOpenAI",
-        "UiPathChatGoogleGenerativeAI",
-        "UiPathChat"
-      ],
-      "attributes": {
-        "openinference.span.kind": "LLM"
-      }
     }
   ]
 }

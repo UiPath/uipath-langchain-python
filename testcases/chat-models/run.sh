@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Keep the client-side LLM span (not the LLM Gateway's spans):
+# expected_traces.json checks it.
+export UIPATH_USE_CLIENT_LLM_SPANS=true
+
 echo "Syncing dependencies..."
 uv sync
 

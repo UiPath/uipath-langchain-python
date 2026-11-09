@@ -8,17 +8,6 @@
       }
     },
     {
-      "name": [
-        "UiPathChat",
-        "UiPathAzureChatOpenAI",
-        "UiPathChatAnthropicBedrock",
-        "UiPathChatGoogleGenerativeAI"
-      ],
-      "attributes": {
-        "openinference.span.kind": "LLM"
-      }
-    },
-    {
       "name": "postprocess",
       "attributes": {
         "openinference.span.kind": "CHAIN"
