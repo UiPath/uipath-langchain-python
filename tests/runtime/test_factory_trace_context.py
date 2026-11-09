@@ -11,9 +11,8 @@ its governance / guardrail / "Model run" spans into a coded agent's trace:
   client-side LLM span is kept and no trace-context headers are sent.
 """
 
-import os
-import tempfile
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, TypedDict
 from unittest.mock import patch
 
@@ -105,12 +104,11 @@ def _graph(llm: FakeListChatModel) -> Any:
 
 
 @pytest.fixture
-def factory() -> Iterator[UiPathLangGraphRuntimeFactory]:
-    tmpdir = tempfile.mkdtemp()
+def factory(tmp_path: Path) -> UiPathLangGraphRuntimeFactory:
     ctx = UiPathRuntimeContext(
-        runtime_dir=tmpdir, state_file=os.path.join(tmpdir, "state.db")
+        runtime_dir=str(tmp_path), state_file=str(tmp_path / "state.db")
     )
-    yield UiPathLangGraphRuntimeFactory(ctx)
+    return UiPathLangGraphRuntimeFactory(ctx)
 
 
 @pytest.fixture
@@ -211,8 +209,9 @@ class TestSkipClientLlmSpans:
     async def test_model_error_still_propagates(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
+        llm = _FailingModel(responses=["unused"])
         with pytest.raises(RuntimeError, match="gateway said no"):
-            await _run(factory, _FailingModel(responses=["unused"]))
+            await _run(factory, llm)
 
         node = next(s for s in recorder.ended if s.name == "model")
         assert not node.status.is_ok
