@@ -1,14 +1,15 @@
 """Anthropic Chat Completions payload handler."""
 
 from collections.abc import Sequence
+from functools import cached_property
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
-from .base import ModelPayloadHandler
+from .base import ModelPayloadHandler, is_byo_model
 
 FAULTY_STOP_REASONS: set[str] = {
     "max_tokens",
@@ -35,6 +36,36 @@ STOP_REASON_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _with_cache_breakpoint(message: AnyMessage) -> AnyMessage:
+    content = message.content
+    if isinstance(content, str):
+        if not content.strip():
+            return message
+        blocks: list[Any] = [{"type": "text", "text": content}]
+    elif content and isinstance(content[-1], dict):
+        blocks = list(content)
+    else:
+        return message
+    blocks[-1] = {**blocks[-1], "cache_control": _CACHE_CONTROL}
+    return message.model_copy(update={"content": blocks})
+
+
+def _with_cache_breakpoints(messages: list[AnyMessage]) -> list[AnyMessage]:
+    marked = list(messages)
+    targets = {len(marked) - 1}
+    system = next(
+        (i for i, m in enumerate(marked) if isinstance(m, SystemMessage)), None
+    )
+    if system is not None:
+        targets.add(system)
+    for i in targets:
+        marked[i] = _with_cache_breakpoint(marked[i])
+    return marked
+
+
 class AnthropicPayloadHandler(ModelPayloadHandler):
     """Payload handler for Anthropic API."""
 
@@ -51,6 +82,17 @@ class AnthropicPayloadHandler(ModelPayloadHandler):
         if strict_mode is True:
             kwargs["strict"] = True
         return kwargs
+
+    @cached_property
+    def _caches_prompts(self) -> bool:
+        return not is_byo_model(self.model)
+
+    def apply_prompt_caching(
+        self, messages: list[AnyMessage]
+    ) -> tuple[list[AnyMessage], dict[str, Any]]:
+        if not messages or not self._caches_prompts:
+            return messages, {}
+        return _with_cache_breakpoints(messages), {}
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check Anthropic stop_reason and raise exception for faulty terminations.

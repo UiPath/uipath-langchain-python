@@ -4,8 +4,22 @@ from abc import ABC, abstractmethod
 from typing import Any, Literal, Sequence
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.tools import BaseTool
+
+
+def is_byo_model(model: Any) -> bool:
+    settings = getattr(model, "client_settings", None)
+    if settings is None:
+        return False
+    try:
+        info = settings.get_model_info(
+            model.model_name,
+            byo_connection_id=getattr(model, "byo_connection_id", None),
+        )
+    except Exception:
+        return True
+    return info.get("modelSubscriptionType") != "UiPathOwned"
 
 
 class ModelPayloadHandler(ABC):
@@ -26,8 +40,10 @@ class ModelPayloadHandler(ABC):
         strict_mode: bool | None = None,
     ) -> dict[str, Any]: ...
 
-    def get_prompt_caching_kwargs(self) -> dict[str, Any]:
-        return {}
+    def apply_prompt_caching(
+        self, messages: list[AnyMessage]
+    ) -> tuple[list[AnyMessage], dict[str, Any]]:
+        return messages, {}
 
     @abstractmethod
     def check_stop_reason(self, response: AIMessage) -> None:
