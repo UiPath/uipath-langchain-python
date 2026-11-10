@@ -2,15 +2,16 @@
 
 import logging
 from collections.abc import Sequence
+from functools import cached_property
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.tools import BaseTool
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
 from ..thinking import thinking_rejects_forced_tool_choice
-from .base import ModelPayloadHandler
+from .base import ModelPayloadHandler, is_byo_model
 
 logger = logging.getLogger(__name__)
 
@@ -71,20 +72,6 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Reduce the conversation history or use a model with larger context.",
     ),
 }
-
-
-def _is_byo_model(model: Any) -> bool:
-    settings = getattr(model, "client_settings", None)
-    if settings is None:
-        return False
-    try:
-        info = settings.get_model_info(
-            model.model_name,
-            byo_connection_id=getattr(model, "byo_connection_id", None),
-        )
-    except Exception:
-        return True
-    return info.get("modelSubscriptionType") != "UiPathOwned"
 
 
 class BedrockInvokePayloadHandler(ModelPayloadHandler):
@@ -163,13 +150,17 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
             kwargs["strict"] = True
         return kwargs
 
-    def get_prompt_caching_kwargs(self) -> dict[str, Any]:
+    @cached_property
+    def _caches_prompts(self) -> bool:
         model_id = (getattr(self.model, "model_id", None) or "").lower()
-        if "anthropic" not in model_id and "amazon.nova" not in model_id:
-            return {}
-        if _is_byo_model(self.model):
-            return {}
-        return {"cache_control": {"type": "ephemeral"}}
+        return "anthropic" in model_id and not is_byo_model(self.model)
+
+    def apply_prompt_caching(
+        self, messages: list[AnyMessage]
+    ) -> tuple[list[AnyMessage], dict[str, Any]]:
+        if not self._caches_prompts:
+            return messages, {}
+        return messages, {"cache_control": {"type": "ephemeral"}}
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check ``stopReason`` (camelCase) and raise for faulty terminations.
