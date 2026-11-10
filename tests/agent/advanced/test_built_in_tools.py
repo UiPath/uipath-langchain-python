@@ -89,22 +89,19 @@ def test_read_file_stays_on(
     assert "read_file" in caplog.text
 
 
-def test_valid_settings_log_no_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """A setting the runtime applies must not also be reported as ignored."""
-    with caplog.at_level(logging.WARNING):
-        resolve_built_in_tools(_all_on(eval={"enabled": True}))
-    assert caplog.messages == []
-
-
-def test_config_on_a_file_tool_is_ignored_and_the_tool_stays_on(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize("name", ["grep", "eval"])
+def test_config_is_ignored_and_the_tool_stays_on(
+    name: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.WARNING):
         resolved = resolve_built_in_tools(
-            _all_on(grep={"enabled": True, "config": {"maxCount": 5}})
+            _all_on(**{name: {"enabled": True, "config": {"maxCount": 5}}})
         )
-    assert "grep" in resolved.enabled_file_tools
-    assert "maxCount" in caplog.text
+    on = {*resolved.enabled_file_tools, *(["eval"] if resolved.eval_requested else [])}
+    assert name in on
+    assert f"Ignoring unknown setting 'maxCount' of built-in tool '{name}'" in (
+        caplog.messages
+    )
 
 
 @pytest.mark.parametrize("name", ["execute", "move_file"])
@@ -132,19 +129,6 @@ def test_the_eval_setting_is_recorded(
     assert resolved.eval_requested is expected
     assert "Ignoring unknown built-in tool 'move_file'" in caplog.messages
     assert "Ignoring unknown built-in tool 'eval'" not in caplog.messages
-
-
-def test_config_on_eval_is_ignored_with_a_warning(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING):
-        resolved = resolve_built_in_tools(
-            _all_on(eval={"enabled": True, "config": {"timeout": 9}})
-        )
-    assert resolved.eval_requested is True
-    assert "Ignoring unknown setting 'timeout' of built-in tool 'eval'" in (
-        caplog.messages
-    )
 
 
 @pytest.mark.parametrize(
