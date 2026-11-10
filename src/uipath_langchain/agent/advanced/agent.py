@@ -61,6 +61,11 @@ from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
+from .built_in_tools import (
+    DEFAULT_BUILT_IN_TOOLS,
+    ResolvedBuiltInTools,
+    build_file_tool_middleware,
+)
 from .job_attachments_middleware import (
     JOB_ATTACHMENTS_STATE_KEY,
     JobAttachmentsMiddleware,
@@ -571,6 +576,7 @@ def create_advanced_agent(
     max_iterations: int | None = None,
     initial_message_count_key: str | None = None,
     unforced_tool_choice: bool = False,
+    built_in_tools: ResolvedBuiltInTools | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
@@ -590,6 +596,11 @@ def create_advanced_agent(
     agent's structured-output calls unforced on models that reject a forced tool
     choice. It must stay after ``shared_middleware`` so that
     ``_PayloadHandlerMiddleware`` sees the original ``response_format``.
+
+    ``built_in_tools`` applies the agent's built-in tool settings (see
+    ``resolve_built_in_tools``) to the main agent and every subagent; ``None``
+    keeps deepagents' full tool set. A subagent spec's own ``permissions`` are
+    not applied to its file tools while ``built_in_tools`` is given.
     """
     tools = [
         tool.with_workspace(backend)
@@ -604,6 +615,10 @@ def create_advanced_agent(
         _PayloadHandlerMiddleware(),
         JobAttachmentsMiddleware(),
     ]
+    if built_in_tools is not None:
+        shared_middleware.append(
+            build_file_tool_middleware(built_in_tools, model, backend)
+        )
     main_budget, subagent_budget = _iteration_budget_middleware(
         max_iterations, initial_message_count_key
     )
@@ -627,6 +642,16 @@ def create_advanced_agent(
     )
 
 
+def _memory_sources(
+    backend: BackendProtocol | None, built_in_tools: ResolvedBuiltInTools | None
+) -> list[str]:
+    if not isinstance(backend, FilesystemBackend):
+        return []
+    if not (built_in_tools or DEFAULT_BUILT_IN_TOOLS).supports_memory:
+        return []
+    return [MEMORY_INDEX_VIRTUAL_PATH]
+
+
 def create_advanced_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
@@ -641,6 +666,7 @@ def create_advanced_agent_graph(
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
     unforced_tool_choice: bool = False,
+    built_in_tools: ResolvedBuiltInTools | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -658,10 +684,12 @@ def create_advanced_agent_graph(
     ``max_iterations`` caps the model calls the agent loop may make, subagent calls
     included; ``None`` leaves it uncapped. ``unforced_tool_choice`` is passed to
     ``create_advanced_agent``.
+
+    ``built_in_tools`` is passed to ``create_advanced_agent``. Without both
+    ``write_file`` and ``edit_file`` it also disables memory, which the model
+    writes with them.
     """
-    memory_sources = (
-        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
-    )
+    memory_sources = _memory_sources(backend, built_in_tools)
     runtime_prompt = _resolve_runtime_system_prompt(
         system_prompt, AdvancedAgentGraphState, input_schema
     )
@@ -680,6 +708,7 @@ def create_advanced_agent_graph(
         skills=skills,
         max_iterations=max_iterations,
         unforced_tool_choice=unforced_tool_choice,
+        built_in_tools=built_in_tools,
     )
 
     output_file_retries_key = get_unique_model_field_name(
@@ -795,6 +824,7 @@ def create_conversational_advanced_agent_graph(
     output_schema: type[BaseModel] | None = None,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    built_in_tools: ResolvedBuiltInTools | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -811,10 +841,12 @@ def create_conversational_advanced_agent_graph(
 
     ``max_iterations`` caps the model calls the agent loop may make per exchange,
     subagent calls included; ``None`` leaves it uncapped.
+
+    ``built_in_tools`` is passed to ``create_advanced_agent``. Without both
+    ``write_file`` and ``edit_file`` it also disables memory, which the model
+    writes with them.
     """
-    memory_sources = (
-        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
-    )
+    memory_sources = _memory_sources(backend, built_in_tools)
     runtime_prompt = _resolve_runtime_system_prompt(
         system_prompt, _ConversationalAdvancedAgentGraphInput, input_schema
     )
@@ -834,6 +866,7 @@ def create_conversational_advanced_agent_graph(
         skills=skills,
         max_iterations=max_iterations,
         initial_message_count_key=initial_message_count_key,
+        built_in_tools=built_in_tools,
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
