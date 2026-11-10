@@ -14,6 +14,7 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import BaseModel
+from uipath.agent.models.agent import AdvancedAgentBuiltInToolSettings
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
@@ -24,6 +25,10 @@ from uipath_langchain.agent.advanced.agent import (
     _with_subagent_spend,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
+)
+from uipath_langchain.agent.advanced.built_in_tools import (
+    ResolvedBuiltInTools,
+    resolve_built_in_tools,
 )
 from uipath_langchain.agent.exceptions import AgentRuntimeError
 
@@ -49,8 +54,15 @@ class _ToolCallingFakeModel(GenericFakeChatModel):
         return self
 
 
+_RUNAWAY_CALL_COUNT = 50
+
+
 def _ping_forever(calls: list[int]) -> Iterator[AIMessage]:
     while True:
+        if len(calls) >= _RUNAWAY_CALL_COUNT:
+            raise AssertionError(
+                f"{len(calls)} model calls: the iteration budget never stopped them"
+            )
         calls.append(len(calls) + 1)
         yield AIMessage(
             content="",
@@ -69,7 +81,11 @@ def _never_stops(calls: list[int]) -> _ToolCallingFakeModel:
     return _ToolCallingFakeModel(messages=_ping_forever(calls))
 
 
-def _autonomous_graph(model: BaseChatModel, max_iterations: int | None) -> Any:
+def _autonomous_graph(
+    model: BaseChatModel,
+    max_iterations: int | None,
+    built_in_tools: ResolvedBuiltInTools | None = None,
+) -> Any:
     return create_advanced_agent_graph(
         model=model,
         tools=[ping],
@@ -80,6 +96,7 @@ def _autonomous_graph(model: BaseChatModel, max_iterations: int | None) -> Any:
         output_schema=_Output,
         build_user_message=lambda args: args.get("task", ""),
         max_iterations=max_iterations,
+        built_in_tools=built_in_tools,
     ).compile()
 
 
@@ -157,9 +174,25 @@ def _delegates_then_never_stops(calls: list[int]) -> _ToolCallingFakeModel:
 
 
 @pytest.mark.asyncio
-async def test_subagent_calls_spend_the_turn_budget() -> None:
+@pytest.mark.parametrize(
+    "built_in_tools",
+    [
+        None,
+        resolve_built_in_tools(
+            {"read_file": AdvancedAgentBuiltInToolSettings(enabled=True)}
+        ),
+    ],
+    ids=["without_tool_settings", "with_tool_settings"],
+)
+async def test_subagent_calls_spend_the_turn_budget(
+    built_in_tools: ResolvedBuiltInTools | None,
+) -> None:
     calls: list[int] = []
-    graph = _autonomous_graph(_delegates_then_never_stops(calls), max_iterations=3)
+    graph = _autonomous_graph(
+        _delegates_then_never_stops(calls),
+        max_iterations=3,
+        built_in_tools=built_in_tools,
+    )
 
     with pytest.raises(AgentRuntimeError) as error:
         await graph.ainvoke({"task": "delegate"}, {"recursion_limit": 100})
