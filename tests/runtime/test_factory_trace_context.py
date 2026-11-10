@@ -250,11 +250,30 @@ class TestSkipClientLlmSpans:
         _skip_client_llm_spans(instrumentor)
         assert instrumentor._tracer._start_trace is wrapped  # type: ignore[union-attr]
 
-    def test_factory_setup_installs_the_skip(
+    def test_factory_setup_alone_keeps_client_llm_spans(self, tmp_path: Path) -> None:
+        # Low-code's AgentsRuntimeFactory inherits the factory setup but builds
+        # its runtime without _create_runtime_instance, so it must keep the span.
+        instrumentor = LangChainInstrumentor()
+        instrumentor.uninstrument()
+        try:
+            UiPathLangGraphRuntimeFactory(
+                UiPathRuntimeContext(
+                    runtime_dir=str(tmp_path), state_file=str(tmp_path / "state.db")
+                )
+            )
+            tracer = instrumentor._tracer
+            assert tracer is not None
+            assert not getattr(tracer, "_uipath_skip_llm", False)
+        finally:
+            instrumentor.uninstrument()
+
+    async def test_creating_a_coded_runtime_installs_the_skip(
         self, factory: UiPathLangGraphRuntimeFactory
     ) -> None:
         # Guards the private OpenInference hook we wrap: if an upgrade renames
         # it, this fails instead of client LLM spans silently coming back.
+        await _run(factory, _RecordingModel(responses=["ok"]))
+
         tracer = LangChainInstrumentor()._tracer
         assert tracer is not None
         assert callable(tracer._start_trace)

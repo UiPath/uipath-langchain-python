@@ -102,7 +102,6 @@ class UiPathLangGraphRuntimeFactory:
         _instrument_traceable_attributes()
         instrumentor = LangChainInstrumentor()
         instrumentor.instrument()
-        _skip_client_llm_spans(instrumentor)
         UiPathSpanUtils.register_current_span_provider(get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 
@@ -324,6 +323,13 @@ class UiPathLangGraphRuntimeFactory:
         memory = await self._get_memory()
         storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
+
+        # Coded agents only: the LLM Gateway records "Model run", so the
+        # client-side LLM span isn't created. Done here rather than in
+        # _setup_instrumentation because low-code's AgentsRuntimeFactory
+        # inherits that but builds its runtime without this method, and keeps
+        # its own LLM spans. Idempotent, so safe on every new runtime.
+        _skip_client_llm_spans(LangChainInstrumentor())
 
         # Runtime callbacks are inherited by every chat model in the graph, so
         # models built directly (e.g. ``UiPathChatAnthropicBedrock(...)``) also
