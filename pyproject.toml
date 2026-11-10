@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.19.5"
+version = "0.19.6"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -9,7 +9,7 @@ dependencies = [
     "uipath-core>=0.5.34, <0.6.0",
     "uipath-platform>=0.3.2, <0.4.0",
     "uipath-runtime>=0.13.5, <0.14.0",
-    "uipath-llm-client>=1.22.3, <1.23.0",
+    "uipath-llm-client>=1.23.0, <1.24.0",
     "langgraph>=1.2.11, <2.0.0",
     "langchain-core>=1.6.1, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.1.1, <4.0.0",
@@ -28,7 +28,7 @@ dependencies = [
     "pillow>=12.3.0, <14.0.0",
     "rdflib>=7.0.0, <8.0.0",
     "a2a-sdk>=1.1.2,<2.0.0",
-    "uipath-langchain-client[openai]>=1.22.3, <1.23.0",
+    "uipath-langchain-client[openai]>=1.23.0, <1.24.0",
 ]
 
 classifiers = [
@@ -45,17 +45,17 @@ maintainers = [
 
 [project.optional-dependencies]
 anthropic = [
-    "uipath-langchain-client[anthropic]>=1.22.3, <1.23.0",
+    "uipath-langchain-client[anthropic]>=1.23.0, <1.24.0",
 ]
 vertex = [
-    "uipath-langchain-client[google]>=1.22.3, <1.23.0",
+    "uipath-langchain-client[google]>=1.23.0, <1.24.0",
 ]
 bedrock = [
-    "uipath-langchain-client[bedrock]>=1.22.3, <1.23.0",
+    "uipath-langchain-client[bedrock]>=1.23.0, <1.24.0",
     "boto3-stubs>=1.41.4",
 ]
 fireworks = [
-    "uipath-langchain-client[fireworks]>=1.22.3, <1.23.0",
+    "uipath-langchain-client[fireworks]>=1.23.0, <1.24.0",
 ]
 code-interpreter = [
     "langchain-quickjs>=0.3.5, <0.4.0",
@@ -64,7 +64,7 @@ video = [
     "deepagents[video]>=0.7.11, <0.8.0",
 ]
 all = [
-    "uipath-langchain-client[all]>=1.22.3, <1.23.0",
+    "uipath-langchain-client[all]>=1.23.0, <1.24.0",
     "uipath-langchain[code-interpreter]",
     "uipath-langchain[video]",
 ]
