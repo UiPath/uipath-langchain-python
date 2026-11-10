@@ -1258,6 +1258,33 @@ class TestBedrockPromptCaching:
         )
 
         assert "cache_control" not in model.bind_tools.call_args.kwargs
+        sent = model.ainvoke.call_args.args[0]
+        assert "cache_control" not in json.dumps([m.content for m in sent])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prompt_caching, expected", [(True, 2), (False, 0)])
+    async def test_claude_turn_marks_system_and_last_message(
+        self, prompt_caching: bool, expected: int
+    ) -> None:
+        model: Any = _StubChatAnthropic.model_construct(model="claude-opus-5")
+        model.bind_tools = Mock(return_value=model)
+        model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content="",
+                tool_calls=[
+                    create_tool_call(name=END_EXECUTION_TOOL.name, args={}, id="c1")
+                ],
+            )
+        )
+
+        await create_llm_node(model, [self._tool()], prompt_caching=prompt_caching)(
+            self._state(HumanMessage(content="q"))
+        )
+
+        sent = model.ainvoke.call_args.args[0]
+        assert (
+            json.dumps([m.content for m in sent]).count('"cache_control"') == expected
+        )
 
     @pytest.mark.asyncio
     async def test_forced_extraction_call_has_no_cache_points(self) -> None:
