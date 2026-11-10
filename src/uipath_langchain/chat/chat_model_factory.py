@@ -29,6 +29,9 @@ from uipath_langchain.agent.exceptions import (
 from uipath_langchain.chat.attachment_baggage import trace_baggage
 
 USE_CLIENT_LLM_SPANS_ENV = "UIPATH_USE_CLIENT_LLM_SPANS"
+# The LLM Gateway links its spans to the caller's trace only when this header
+# is present (together with the baggage header).
+TRACEPARENT_HEADER = "x-uipath-traceparent-id"
 
 
 def use_client_llm_spans() -> bool:
@@ -36,7 +39,9 @@ def use_client_llm_spans() -> bool:
 
     Set ``UIPATH_USE_CLIENT_LLM_SPANS=true`` to keep the client-side LLM spans
     and leave the LLM Gateway's spans (Model run, governance, guardrails) out
-    of the agent's trace. By default the Gateway's spans are used.
+    of the agent's trace: the traceparent header is no longer sent, while the
+    baggage (folder, agent, job attribution) still is. By default the
+    Gateway's spans are used.
     """
     return os.environ.get(USE_CLIENT_LLM_SPANS_ENV, "").strip().lower() in (
         "1",
@@ -50,20 +55,20 @@ class _TraceContextHeadersCallback(BaseCallbackHandler):
 
     Merges into the existing dynamic-headers ContextVar so that headers
     set by earlier callbacks (e.g. ``LicenseRefIdHeadersCallback``) are
-    preserved instead of overwritten. Sends nothing when
-    ``UIPATH_USE_CLIENT_LLM_SPANS`` is true, so the Gateway's spans don't
-    join the agent's trace.
+    preserved instead of overwritten. When ``UIPATH_USE_CLIENT_LLM_SPANS``
+    is true, only the baggage is sent: without the traceparent, the Gateway's
+    spans don't join the agent's trace.
     """
 
     run_inline: bool = True
 
     def _merge_headers(self) -> None:
-        if use_client_llm_spans():
-            return
         existing = get_dynamic_request_headers()
         existing.update(
             build_trace_context_headers(extra_baggage=trace_baggage("source=agents"))
         )
+        if use_client_llm_spans():
+            existing.pop(TRACEPARENT_HEADER, None)
         set_dynamic_request_headers(existing)
 
     def on_chat_model_start(

@@ -8,7 +8,7 @@ its governance / guardrail / "Model run" spans into a coded agent's trace:
 * OpenInference no longer opens the client-side LLM span the Gateway's
   "Model run" replaces;
 * with ``UIPATH_USE_CLIENT_LLM_SPANS`` true, it's the other way around: the
-  client-side LLM span is kept and no trace-context headers are sent.
+  client-side LLM span is kept and the traceparent isn't sent (the baggage is).
 """
 
 from collections.abc import Iterator
@@ -165,7 +165,7 @@ class TestTraceContextHeaders:
         assert len(_seen_headers) == 1
         assert _TRACE_HEADERS.items() <= _seen_headers[0].items()
 
-    async def test_client_llm_spans_env_sends_no_trace_headers(
+    async def test_client_llm_spans_env_sends_baggage_but_no_traceparent(
         self, factory: UiPathLangGraphRuntimeFactory, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, "true")
@@ -177,7 +177,13 @@ class TestTraceContextHeaders:
             await _run(factory, _RecordingModel(responses=["ok"]))
 
         assert len(_seen_headers) == 1
-        assert not _TRACE_HEADERS.keys() & _seen_headers[0].keys()
+        # Without the traceparent the Gateway's spans stay out of the trace;
+        # the baggage still carries the folder / agent / job attribution.
+        assert "x-uipath-traceparent-id" not in _seen_headers[0]
+        assert (
+            _seen_headers[0]["x-uipath-tracebaggage"]
+            == _TRACE_HEADERS["x-uipath-tracebaggage"]
+        )
 
 
 class TestSkipClientLlmSpans:
