@@ -20,7 +20,11 @@ from langchain.agents.middleware import (
     ToolErrorMiddleware,
 )
 from langchain.agents.middleware.types import PrivateStateAttr
-from langchain.agents.structured_output import ResponseFormat
+from langchain.agents.structured_output import (
+    ResponseFormat,
+    StructuredOutputValidationError,
+)
+from langchain_core.exceptions import ModelRefusalError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -505,6 +509,41 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return response
 
 
+class _RefusalResponseMiddleware(AgentMiddleware[AgentState[Any], Any]):
+    """Return a refused main-agent turn as a response instead of ``ModelRefusalError``.
+
+    Keeps refusals on the provider checks of ``_PayloadHandlerMiddleware``.
+    """
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        try:
+            return handler(request)
+        except ModelRefusalError as error:
+            return _refused_response(error)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        try:
+            return await handler(request)
+        except ModelRefusalError as error:
+            return _refused_response(error)
+
+
+def _refused_response(error: ModelRefusalError) -> ModelResponse[Any]:
+    if isinstance(error.__context__, StructuredOutputValidationError):
+        raise error.__context__
+    if not isinstance(error.raw_message, AIMessage):
+        raise error
+    return ModelResponse(result=[error.raw_message])
+
+
 def _resolve_subagent_specs(
     subagents: Sequence[SubAgent | CompiledSubAgent],
     shared_tools: Sequence[BaseTool],
@@ -609,7 +648,12 @@ def create_advanced_agent(
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*main_budget, *middleware, *shared_middleware],
+        middleware=[
+            *main_budget,
+            *middleware,
+            *shared_middleware,
+            _RefusalResponseMiddleware(),
+        ],
         skills=list(skills) if skills else None,
     )
 

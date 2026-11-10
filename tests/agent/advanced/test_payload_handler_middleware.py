@@ -12,7 +12,12 @@ from langchain.agents.middleware import (
     ModelResponse,
     ToolErrorMiddleware,
 )
-from langchain.agents.structured_output import ToolStrategy
+from langchain.agents.structured_output import (
+    StructuredOutputValidationError,
+    ToolStrategy,
+)
+from langchain_anthropic import ChatAnthropic
+from langchain_core.exceptions import ModelRefusalError
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool, tool
@@ -21,6 +26,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
     _PayloadHandlerMiddleware,
+    _RefusalResponseMiddleware,
     _resolve_subagent_specs,
     create_advanced_agent,
 )
@@ -265,6 +271,88 @@ class TestWrapModelCall:
 
         with pytest.raises(ChatModelError):
             await middleware.awrap_model_call(_request(_gemini()), handler)
+
+
+def _refusal() -> AIMessage:
+    return AIMessage(
+        content=[{"type": "refusal", "refusal": "I can't help with that."}],
+        response_metadata={"stop_reason": "refusal"},
+    )
+
+
+def _refusing_handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+    raise ModelRefusalError(raw_message=_refusal())
+
+
+class _RefusingModel(GenericFakeChatModel):
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_RefusingModel":
+        return self
+
+
+class TestRefusals:
+    def test_anthropic_refusal_raises_our_chat_model_error(self) -> None:
+        request = _request(ChatAnthropic(model="claude-sonnet-4-5", api_key="dummy"))
+
+        with pytest.raises(ChatModelError) as exc_info:
+            _PayloadHandlerMiddleware().wrap_model_call(
+                request,
+                lambda r: _RefusalResponseMiddleware().wrap_model_call(
+                    r, _refusing_handler
+                ),
+            )
+
+        assert "refused" in exc_info.value.error_info.title.lower()
+
+    async def test_async_refusal_is_returned_as_the_response(self) -> None:
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            return _refusing_handler(request)
+
+        response = await _RefusalResponseMiddleware().awrap_model_call(
+            _request(GenericFakeChatModel(messages=iter([]))), handler
+        )
+
+        assert response.result == [_refusal()]
+
+    def test_structured_output_error_is_raised_unchanged(self) -> None:
+        source = StructuredOutputValidationError("out", ValueError("bad"), _refusal())
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            try:
+                raise source
+            except StructuredOutputValidationError:
+                raise ModelRefusalError(raw_message=_refusal()) from None
+
+        with pytest.raises(StructuredOutputValidationError) as exc_info:
+            _RefusalResponseMiddleware().wrap_model_call(
+                _request(GenericFakeChatModel(messages=iter([]))), handler
+            )
+
+        assert exc_info.value is source
+
+    async def test_main_agent_run_ends_on_the_refusal(self) -> None:
+        agent = create_advanced_agent(model=_RefusingModel(messages=iter([_refusal()])))
+
+        result = await agent.ainvoke({"messages": [HumanMessage(content="go")]})
+
+        assert result["messages"][-1].content_blocks[0]["type"] == "refusal"
+
+    def test_builder_keeps_upstream_refusals_on_subagents(self) -> None:
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent",
+            return_value=MagicMock(),
+        ) as mock_create:
+            create_advanced_agent(model=GenericFakeChatModel(messages=iter([])))
+
+        kwargs = mock_create.call_args.kwargs
+        refusal_middleware = [
+            m for m in kwargs["middleware"] if isinstance(m, _RefusalResponseMiddleware)
+        ]
+
+        assert len(refusal_middleware) == 1
+        assert not any(
+            isinstance(m, _RefusalResponseMiddleware)
+            for m in kwargs["subagents"][0]["middleware"]
+        )
 
 
 class TestMissedOutputToolRetry:

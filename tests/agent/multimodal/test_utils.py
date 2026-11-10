@@ -867,7 +867,7 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
     async def test_text_document_reaches_anthropic_unchanged(self) -> None:
         from langchain_anthropic.chat_models import _format_messages
 
-        _, formatted = _format_messages([await self._csv_message()])
+        _, formatted = _format_messages([await self._csv_message()], model=None)
 
         assert formatted[0]["content"][1] == _CSV_DOCUMENT
 
@@ -955,7 +955,7 @@ class TestAttachmentTagsForPdfOnlyModels:
                     file, pdf_only_documents=True
                 )
 
-        _, formatted = _format_messages([HumanMessage(content=content)])
+        _, formatted = _format_messages([HumanMessage(content=content)], model=None)
 
         payload = json.dumps(formatted)
         assert "uipath_" not in payload
