@@ -23,6 +23,7 @@ from uipath.runtime.base import UiPathDisposableProtocol
 
 from uipath_langchain._utils import get_execution_folder_path
 
+from .mcp_tasks import resolve_claimed_result, session_extension_kwargs
 from .protocol_strategy import (
     ProtocolMode,
     ProtocolStrategy,
@@ -300,8 +301,14 @@ class McpClient(UiPathDisposableProtocol):
                         )
                     )
                     read_stream, write_stream = streams
+                    # The Tasks extension is era-aware by construction: the SDK
+                    # advertises it and activates its claim only on protocol
+                    # versions that deliver claimed shapes, so legacy-era
+                    # connections keep their wire byte-for-byte.
                     self._session = await connection_stack.enter_async_context(
-                        ClientSession(read_stream, write_stream)
+                        ClientSession(
+                            read_stream, write_stream, **session_extension_kwargs()
+                        )
                     )
                     await self._initialize_session()
                 except BaseException as error:
@@ -547,6 +554,10 @@ class McpClient(UiPathDisposableProtocol):
     ) -> CallToolResult:
         """Call an MCP tool by name.
 
+        A server that answers with a durable task handle (the MCP Tasks
+        extension, modern era only) has its task polled to completion here, so
+        the caller always receives the final ``CallToolResult``.
+
         Args:
             name: The name of the tool to call.
             arguments: Optional arguments to pass to the tool.
@@ -554,10 +565,17 @@ class McpClient(UiPathDisposableProtocol):
         Returns:
             The tool call result.
         """
-        return await self._execute_with_retry(
-            lambda session: session.call_tool(name, arguments=arguments),
-            f"call_tool({name})",
-        )
+
+        async def call(session: ClientSession) -> CallToolResult:
+            # allow_claimed lets the claimed task shape reach us instead of
+            # raising; resolve_claimed_result finishes it (and passes an
+            # ordinary result straight through).
+            result = await session.call_tool(
+                name, arguments=arguments, allow_claimed=True
+            )
+            return await resolve_claimed_result(session, name, result)
+
+        return await self._execute_with_retry(call, f"call_tool({name})")
 
     async def dispose(self) -> None:
         """Dispose of the client and release all resources.

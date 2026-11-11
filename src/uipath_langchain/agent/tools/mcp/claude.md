@@ -23,6 +23,7 @@ streamable HTTP transport and provides a factory pattern for session ID tracking
 src/uipath_langchain/agent/tools/mcp/
 ├── __init__.py            # Public exports
 ├── mcp_client.py          # SessionInfoFactory, McpClient
+├── mcp_tasks.py           # MCP Tasks extension: claim + poll loop
 ├── mcp_tool.py            # Tool factory functions
 ├── protocol_strategy.py   # Per-era negotiation/recovery policy
 ├── session_tools.py       # MCP session -> LangChain tool conversion
@@ -307,6 +308,63 @@ session, and the handshake resumes it (or replaces it when the server rejects it
 modern request is self-contained, so any instance must be able to answer any
 request. Instance-local state is valid as a warm cache only; a server whose
 instances hold state no peer can rebuild should stay on `protocol_mode="legacy"`.
+
+---
+
+### mcp_tasks.py — The Tasks Extension (`io.modelcontextprotocol/tasks`)
+
+A `tools/call` the server answers with `resultType: "task"` is polled to
+completion inside `McpClient.call_tool`, so the caller always receives the
+final `CallToolResult` and agent definitions never see task semantics
+(PRODEV-2012).
+
+It is built on the SDK's **extension/claim** seam rather than a hand-rolled
+branch in the tool layer:
+
+| Piece | Role |
+|-------|------|
+| `McpTasksExtension` | `ClientExtension` declaring the identifier and its one claim; also usable directly with the high-level `Client(extensions=[...])` |
+| `McpTaskHandle` | The claimed `resultType: "task"` shape (flat, per ext-tasks) |
+| `McpTaskSnapshot` | One `tasks/get` answer; `result`/`error` appear on terminal states |
+| `_resolve_task` | The claim resolver: the poll loop |
+| `session_extension_kwargs()` | Translates the extension into the two mappings `ClientSession` takes |
+| `resolve_claimed_result()` | Finishes a claimed result; passes an ordinary one through |
+
+**Why two seams instead of one.** The high-level `mcp.Client` resolves claims
+for you; `McpClient` drives the low-level `ClientSession`, which *parses* a
+claimed shape but raises `UnexpectedClaimedResult` unless the caller opts in.
+So `call_tool` passes `allow_claimed=True` and calls `resolve_claimed_result`,
+which mirrors what `Client.call_tool` does — including re-validating the output
+schema on a non-`isError` result. Do not drop that revalidation: it is the only
+thing keeping the claimed path's contract identical to the direct one.
+
+**The era gate is free.** The SDK activates a claim (and advertises the
+extension that owns it) only on protocol versions that can carry claimed
+shapes. A legacy-era connection therefore neither advertises
+`io.modelcontextprotocol/tasks` nor can receive a task — no version check is
+written anywhere in this module, and
+`test_a_legacy_connection_never_advertises_the_extension` pins it.
+
+**Wire-shape caveat.** The models here mirror ext-tasks
+(`ttlMs`/`pollIntervalMs`), *not* the SDK's built-in `mcp.types.Task`, which
+still carries the superseded SEP-1686 names (`ttl`/`pollInterval`). Validating
+our wire against `mcp.types.Task` fails on the missing `ttl`. The SDK's
+`GetTaskRequest`/`GetTaskRequestParams` *are* reused — only the result models
+are local.
+
+**Rollout.** On by default. `UIPATH_MCP_TASKS_POLLING=false` is an emergency
+kill switch (serverless images bake their package version, so there is no
+per-tenant rollback), not a rollout gate — the real per-tenant control is
+AgentHub's server-side `McpTasks` flag. `UIPATH_MCP_TASKS_POLL_BUDGET_SECONDS`
+bounds one call's polling (default 840s, inside the 15-minute runtime window):
+a tool that used to fail fast on an HTTP timeout must not silently consume the
+whole run. On budget exhaustion the call raises `TimeoutError` and the task
+keeps running server-side.
+
+Terminal statuses map as: `completed` → the carried `CallToolResult`;
+`failed` → `MCPError` with the task's own error data; `cancelled` → `MCPError`;
+`input_required` → `MCPError`, because the tool layer has no interactive party
+and parking would burn the budget.
 
 ---
 
