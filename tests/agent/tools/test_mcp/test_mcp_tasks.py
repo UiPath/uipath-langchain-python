@@ -6,11 +6,12 @@ import pytest
 from mcp.client.extension import ClaimContext
 from mcp.shared.exceptions import MCPError
 from mcp.types import CallToolResult
+from uipath.core.feature_flags import FeatureFlags
 
 from uipath_langchain.agent.tools.mcp.mcp_tasks import (
     DEFAULT_POLL_BUDGET_SECONDS,
-    POLL_BUDGET_ENV_VAR,
-    TASKS_POLLING_ENV_VAR,
+    POLL_BUDGET_FLAG,
+    TASKS_POLLING_FLAG,
     McpTaskHandle,
     McpTasksExtension,
     McpTaskSnapshot,
@@ -18,6 +19,14 @@ from uipath_langchain.agent.tools.mcp.mcp_tasks import (
     task_poll_budget_seconds,
     tasks_polling_enabled,
 )
+
+
+@pytest.fixture(autouse=True)
+def clean_flags() -> Any:
+    """The flag registry is a process-wide singleton; isolate every test."""
+    FeatureFlags.reset_flags()
+    yield
+    FeatureFlags.reset_flags()
 
 
 class FakeSession:
@@ -60,35 +69,37 @@ def context(session: FakeSession) -> ClaimContext:
 # ── Flags ──────────────────────────────────────────────────
 
 
-def test_tasks_polling_is_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(TASKS_POLLING_ENV_VAR, raising=False)
+def test_tasks_polling_is_enabled_by_default() -> None:
     assert tasks_polling_enabled() is True
 
 
-@pytest.mark.parametrize("value", ["false", "FALSE", "0", "off", "No"])
-def test_tasks_polling_opt_out(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    monkeypatch.setenv(TASKS_POLLING_ENV_VAR, value)
+def test_tasks_polling_opt_out_via_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The injection path a host (SCP) uses: UIPATH_FEATURE_<flag>.
+    monkeypatch.setenv(f"UIPATH_FEATURE_{TASKS_POLLING_FLAG}", "false")
     assert tasks_polling_enabled() is False
 
 
-@pytest.mark.parametrize("value", ["true", "1", "on", "anything-else"])
-def test_tasks_polling_other_values_stay_enabled(
-    monkeypatch: pytest.MonkeyPatch, value: str
+def test_tasks_polling_opt_out_programmatically() -> None:
+    FeatureFlags.configure_flags({TASKS_POLLING_FLAG: False})
+    assert tasks_polling_enabled() is False
+
+
+def test_programmatic_configuration_wins_over_the_env_var(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(TASKS_POLLING_ENV_VAR, value)
+    monkeypatch.setenv(f"UIPATH_FEATURE_{TASKS_POLLING_FLAG}", "false")
+    FeatureFlags.configure_flags({TASKS_POLLING_FLAG: True})
     assert tasks_polling_enabled() is True
 
 
 @pytest.mark.parametrize("value", ["not-a-number", "-5", "0"])
-def test_poll_budget_falls_back_on_bad_values(
-    monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
-    monkeypatch.setenv(POLL_BUDGET_ENV_VAR, value)
+def test_poll_budget_falls_back_on_bad_values(value: str) -> None:
+    FeatureFlags.configure_flags({POLL_BUDGET_FLAG: value})
     assert task_poll_budget_seconds() == DEFAULT_POLL_BUDGET_SECONDS
 
 
-def test_poll_budget_reads_the_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(POLL_BUDGET_ENV_VAR, "120.5")
+def test_poll_budget_is_read_from_the_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(f"UIPATH_FEATURE_{POLL_BUDGET_FLAG}", "120.5")
     assert task_poll_budget_seconds() == 120.5
 
 
@@ -149,7 +160,7 @@ async def test_resolve_times_out_within_the_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A budget smaller than one poll interval must fail fast, before sleeping.
-    monkeypatch.setenv(POLL_BUDGET_ENV_VAR, "0.05")
+    monkeypatch.setenv(f"UIPATH_FEATURE_{POLL_BUDGET_FLAG}", "0.05")
     session = FakeSession([])
 
     with pytest.raises(TimeoutError, match="task-1"):

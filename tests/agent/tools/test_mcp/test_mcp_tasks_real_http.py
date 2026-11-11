@@ -15,8 +15,8 @@ import pytest
 from starlette.responses import Response
 
 from uipath_langchain.agent.tools.mcp.mcp_tasks import (
-    POLL_BUDGET_ENV_VAR,
-    TASKS_POLLING_ENV_VAR,
+    POLL_BUDGET_FLAG,
+    TASKS_POLLING_FLAG,
 )
 
 from .real_server import (
@@ -187,7 +187,7 @@ async def test_the_kill_switch_stops_the_client_declaring_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With the opt-out set, the extension is never constructed into the session."""
-    monkeypatch.setenv(TASKS_POLLING_ENV_VAR, "false")
+    monkeypatch.setenv(f"UIPATH_FEATURE_{TASKS_POLLING_FLAG}", "false")
     endpoint = PinnedVersionServer(MODERN_VERSION, modern_only=True)
     gateway = RecordingGateway(endpoint.build_app())
 
@@ -221,7 +221,7 @@ async def test_the_poll_budget_bounds_a_task_that_never_finishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A tool must not silently consume the agent's whole run window."""
-    monkeypatch.setenv(POLL_BUDGET_ENV_VAR, "0.3")
+    monkeypatch.setenv(f"UIPATH_FEATURE_{POLL_BUDGET_FLAG}", "0.3")
     endpoint = TaskServingServer(polls_before_done=1000, poll_interval_ms=100)
     gateway = RecordingGateway(endpoint.build_app())
 

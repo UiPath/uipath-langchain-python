@@ -14,14 +14,16 @@ field names (``ttl``/``pollInterval``).
 
 Rollout model: the real per-tenant rollout control is the server-side
 ``McpTasks`` feature flag in AgentHub — a declaring client against a tenant
-with the flag off gets plain synchronous behavior. The environment variables
-here are an emergency opt-out (kill switch), not a rollout gate, because
-serverless runtime images bake their package versions and cannot be rolled
-back per tenant.
+with the flag off gets plain synchronous behavior. The flags here are an
+emergency opt-out (kill switch), not a rollout gate, because serverless
+runtime images bake their package versions and cannot be rolled back per
+tenant. They go through the SDK's shared ``FeatureFlags`` registry, so they
+can be set programmatically by a host or injected as
+``UIPATH_FEATURE_<name>`` — the same path gitops already uses to reach a
+Python runtime (``EnablePythonGovernanceChecker``).
 """
 
 import logging
-import os
 import time
 from typing import Any, Literal
 
@@ -42,13 +44,17 @@ from mcp.types import (
     Result,
 )
 from pydantic import Field
+from uipath.core.feature_flags import FeatureFlags
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks"
 
-TASKS_POLLING_ENV_VAR = "UIPATH_MCP_TASKS_POLLING"
-POLL_BUDGET_ENV_VAR = "UIPATH_MCP_TASKS_POLL_BUDGET_SECONDS"
+#: Kill switch; set to ``false`` to restore the pre-Tasks behavior exactly.
+TASKS_POLLING_FLAG = "McpTasksPolling"
+
+#: Seconds one tool call may spend polling its task before giving up.
+POLL_BUDGET_FLAG = "McpTasksPollBudgetSeconds"
 
 # Leaves headroom inside the serverless runtime's 15-minute execution window:
 # a tool that used to fail fast on HTTP timeout must not silently consume the
@@ -58,37 +64,32 @@ DEFAULT_POLL_BUDGET_SECONDS = 840.0
 
 DEFAULT_POLL_INTERVAL_MS = 5000
 
-_FALSE_VALUES = {"false", "0", "off", "no"}
-
 
 def tasks_polling_enabled() -> bool:
     """Whether task-aware tool calls are enabled (default: enabled).
 
-    Reads ``UIPATH_MCP_TASKS_POLLING``; any of ``false``/``0``/``off``/``no``
-    (case-insensitive) disables the extension entirely, restoring the legacy
-    behavior byte-for-byte.
+    Set the ``McpTasksPolling`` flag to ``false`` — programmatically or via
+    ``UIPATH_FEATURE_McpTasksPolling`` — to disable the extension entirely,
+    restoring the pre-Tasks behavior byte-for-byte.
     """
-    value = os.environ.get(TASKS_POLLING_ENV_VAR)
-    if value is None:
-        return True
-    return value.strip().lower() not in _FALSE_VALUES
+    return FeatureFlags.is_flag_enabled(TASKS_POLLING_FLAG, default=True)
 
 
 def task_poll_budget_seconds() -> float:
     """The maximum seconds a single tool call may spend polling its task.
 
-    Reads ``UIPATH_MCP_TASKS_POLL_BUDGET_SECONDS``; falls back to
+    Reads the ``McpTasksPollBudgetSeconds`` flag, falling back to
     ``DEFAULT_POLL_BUDGET_SECONDS`` when unset, unparseable, or non-positive.
     """
-    value = os.environ.get(POLL_BUDGET_ENV_VAR)
+    value = FeatureFlags.get_flag(POLL_BUDGET_FLAG)
     if value is None:
         return DEFAULT_POLL_BUDGET_SECONDS
 
     try:
         parsed = float(value)
-    except ValueError:
+    except (TypeError, ValueError):
         logger.warning(
-            f"Ignoring unparseable {POLL_BUDGET_ENV_VAR}={value!r}; "
+            f"Ignoring unparseable {POLL_BUDGET_FLAG}={value!r}; "
             f"using the default of {DEFAULT_POLL_BUDGET_SECONDS}s"
         )
         return DEFAULT_POLL_BUDGET_SECONDS

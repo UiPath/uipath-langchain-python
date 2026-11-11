@@ -352,14 +352,24 @@ our wire against `mcp.types.Task` fails on the missing `ttl`. The SDK's
 `GetTaskRequest`/`GetTaskRequestParams` *are* reused — only the result models
 are local.
 
-**Rollout.** On by default. `UIPATH_MCP_TASKS_POLLING=false` is an emergency
-kill switch (serverless images bake their package version, so there is no
-per-tenant rollback), not a rollout gate — the real per-tenant control is
-AgentHub's server-side `McpTasks` flag. `UIPATH_MCP_TASKS_POLL_BUDGET_SECONDS`
-bounds one call's polling (default 840s, inside the 15-minute runtime window):
-a tool that used to fail fast on an HTTP timeout must not silently consume the
-whole run. On budget exhaustion the call raises `TimeoutError` and the task
-keeps running server-side.
+**Rollout.** On by default, with two toggles on the SDK's shared
+`uipath.core.feature_flags.FeatureFlags` registry — settable programmatically
+by a host or injected as `UIPATH_FEATURE_<name>`, which is the path a Python
+runtime already receives gitops-driven flags on (see
+`EnablePythonGovernanceChecker`):
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `McpTasksPolling` | `true` | Kill switch; `false` restores the pre-Tasks behavior exactly |
+| `McpTasksPollBudgetSeconds` | `840` | Bounds one call's polling, inside the serverless 15-minute window |
+
+`McpTasksPolling` is an **emergency opt-out, not a rollout gate** — serverless
+images bake their package version, so there is no per-tenant rollback. The real
+per-tenant control is AgentHub's server-side `McpTasks` flag: with it off the
+server never advertises the extension, so no task can arrive. The budget exists
+because a tool that used to fail fast on an HTTP timeout must not silently
+consume the agent's whole run; on exhaustion the call raises `TimeoutError` and
+the task keeps running server-side.
 
 Terminal statuses map as: `completed` → the carried `CallToolResult`;
 `failed` → `MCPError` with the task's own error data; `cancelled` → `MCPError`;
