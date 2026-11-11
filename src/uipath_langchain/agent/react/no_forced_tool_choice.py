@@ -7,6 +7,7 @@ Then one more call binds only those two tools and asks the model to call one.
 from collections.abc import Sequence
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolCall
 from langchain_core.tools import BaseTool
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
@@ -20,6 +21,12 @@ FINISH_REQUEST = (
     + RAISE_ERROR_TOOL.name
     + " if the task failed."
 )
+
+
+def should_skip_forced_tool_choice(model: BaseChatModel) -> bool:
+    """Whether discovery says the model rejects tool_choice "any" or a named tool."""
+    model_details = getattr(model, "model_details", None) or {}
+    return bool(model_details.get("shouldSkipForcedToolChoice", False))
 
 
 def output_fields(tools: Sequence[BaseTool]) -> list[str] | None:

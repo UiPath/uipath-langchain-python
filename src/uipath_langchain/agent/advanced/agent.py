@@ -66,6 +66,7 @@ from .job_attachments_middleware import (
     JobAttachmentsMiddleware,
     dump_attachments,
 )
+from .tool_choice import ToolChoiceMiddleware
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -442,7 +443,8 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
             detail=(
                 "The model ended its turn without calling the output tool, even "
                 "after being asked to. If you are using a BYOM configuration, "
-                "verify your model deployment honors a forced tool choice."
+                "verify your model deployment returns tool calls for the tools "
+                "it is given."
             ),
             category=UiPathErrorCategory.SYSTEM,
         )
@@ -582,6 +584,9 @@ def create_advanced_agent(
     ``None`` leaves it uncapped. ``initial_message_count_key`` names the state field
     holding the message count at the start of the turn, for agents whose input
     carries earlier turns.
+
+    ``ToolChoiceMiddleware`` must stay after ``shared_middleware`` so that
+    ``_PayloadHandlerMiddleware`` sees the original ``response_format``.
     """
     tools = [
         tool.with_workspace(backend)
@@ -609,7 +614,12 @@ def create_advanced_agent(
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*main_budget, *middleware, *shared_middleware],
+        middleware=[
+            *main_budget,
+            *middleware,
+            *shared_middleware,
+            ToolChoiceMiddleware(),
+        ],
         skills=list(skills) if skills else None,
     )
 
