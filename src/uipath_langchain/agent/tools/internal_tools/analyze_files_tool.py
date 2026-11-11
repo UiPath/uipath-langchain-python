@@ -1,7 +1,10 @@
+import base64
+import hashlib
 import json
 import logging
 import mimetypes
 import uuid
+from collections.abc import Iterator
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
@@ -74,6 +77,12 @@ from uipath_langchain.chat.helpers import (
 )
 
 logger = logging.getLogger("uipath")
+
+# The Orchestrator attachment an image part's bytes came from, which the part cannot name.
+_SENT_ATTACHMENT_ID_EXTRA = "uipath_sent_attachment_id"
+_CONTENT_KEY_PREFIX = "sha256:"
+# A TIFF is sent as one image part per page; the cap keeps the trace baggage header small.
+_MAX_CONTENT_KEYED_PARTS = 10
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -158,28 +167,63 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
     return json.dumps([att.model_dump(by_alias=True) for att in attachments])
 
 
-def _llm_call_attachment_ids(files: list[FileInfo]) -> dict[str, str]:
-    """Map the ``filename`` each file part is sent with to its Orchestrator attachment id.
+def _llm_call_attachment_ids(
+    files: list[FileInfo], message: BaseMessage
+) -> dict[str, str]:
+    """Map each file part of ``message`` to the Orchestrator attachment it was read from.
+
+    A part sent with a ``filename`` is keyed by it. An image part (an image, a TIFF
+    page) carries no filename, so it is keyed by ``sha256:`` and the hex digest of its
+    bytes, which the guardrails service computes from the inline file it is handed;
+    only the first :data:`_MAX_CONTENT_KEYED_PARTS` are listed.
 
     Covers the same file versions as :func:`_llm_call_attachments_payload`, but only
     ids Orchestrator can serve: a masked copy without a re-upload id, or a file that
-    did not come from Orchestrator, is left out. So are files sent without a filename
-    (images, TIFF pages), which nothing downstream could match, and a filename two
-    different attachments are sent with, which would link one of them to the other.
+    did not come from Orchestrator, is left out. So is a key two different attachments
+    are sent with, which would link one of them to the other.
     """
     ids: dict[str, str] = {}
     ambiguous: set[str] = set()
+
+    def add(key: str, att_id: str) -> None:
+        if ids.setdefault(key, att_id) != att_id:
+            ambiguous.add(key)
+
     for file in files:
-        if file.masked_attachment_url:
-            att_id, name = file.masked_attachment_id, masked_name_for(file.name)
-        else:
-            att_id, name = file.attachment_id, file.name
+        att_id, name = _sent_attachment(file)
         filename = file_part_filename(name, file.mime_type)
-        if not att_id or filename is None:
+        if att_id and filename is not None:
+            add(filename, att_id)
+    for key, att_id in _image_part_keys(message):
+        add(key, att_id)
+    linked = {key: att_id for key, att_id in ids.items() if key not in ambiguous}
+    content_keys = [key for key in linked if key.startswith(_CONTENT_KEY_PREFIX)]
+    for key in content_keys[_MAX_CONTENT_KEYED_PARTS:]:
+        del linked[key]
+    return linked
+
+
+def _sent_attachment(file: FileInfo) -> tuple[str | None, str]:
+    """The Orchestrator id and name of the file version the model is sent."""
+    if file.masked_attachment_url:
+        return file.masked_attachment_id, masked_name_for(file.name)
+    return file.attachment_id, file.name
+
+
+def _image_part_keys(message: BaseMessage) -> Iterator[tuple[str, str]]:
+    if not isinstance(message.content, list):
+        return
+    for part in message.content:
+        if not isinstance(part, dict) or part.get("type") != "image":
             continue
-        if ids.setdefault(filename, att_id) != att_id:
-            ambiguous.add(filename)
-    return {name: att_id for name, att_id in ids.items() if name not in ambiguous}
+        extras = part.get("extras")
+        att_id = (
+            extras.get(_SENT_ATTACHMENT_ID_EXTRA) if isinstance(extras, dict) else None
+        )
+        data = part.get("base64")
+        if att_id and isinstance(data, str):
+            digest = hashlib.sha256(base64.b64decode(data)).hexdigest()
+            yield f"{_CONTENT_KEY_PREFIX}{digest}", att_id
 
 
 def _config_with_llm_call_attachments(
@@ -397,7 +441,9 @@ def create_analyze_file_tool(
         ]
         all_pdf = bool(files) and all(is_pdf(mime_type) for mime_type in sent_types)
         try:
-            with llm_call_attachment_ids(_llm_call_attachment_ids(files)):
+            with llm_call_attachment_ids(
+                _llm_call_attachment_ids(files, human_message_with_files)
+            ):
                 result = await non_streaming_llm.ainvoke(messages, config=config)
         except UiPathAPIError as exc:
             raise_for_file_analysis_http_error(exc, attachment_names, all_pdf=all_pdf)
@@ -556,7 +602,8 @@ async def add_files_to_message(
             :func:`build_file_content_blocks_for`).
 
     Returns:
-        New message of the same type with file content blocks appended
+        New message of the same type with file content blocks appended. An image
+        part names, in its extras, the Orchestrator attachment its bytes came from.
     """
     if not files:
         return message
@@ -576,6 +623,12 @@ async def add_files_to_message(
         blocks = await build_file_content_blocks_for(
             llm_file, pdf_only_documents=pdf_only_documents
         )
+        sent_id, _ = _sent_attachment(file)
+        if sent_id:
+            for block in blocks:
+                if block.get("type") == "image":
+                    extras = cast(dict[str, Any], block).setdefault("extras", {})
+                    extras[_SENT_ATTACHMENT_ID_EXTRA] = sent_id
         file_content_blocks.extend(blocks)
     return append_content_blocks_to_message(
         message, cast(list[ContentBlock], file_content_blocks)
