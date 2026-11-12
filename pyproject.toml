@@ -191,8 +191,6 @@ url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
 
-# TEMPORARY: dev build of uipath-langchain-client 1.23.2 from
-# UiPath/uipath-llm-client-python (feat/skip-client-llm-spans), for
-# UIPATH_SKIP_CLIENT_LLM_SPANS_KEY. Switch back to PyPI before merging.
+# TEMPORARY: uipath-langchain-client dev build; switch back to PyPI before merging.
 [tool.uv.sources]
 uipath-langchain-client = { index = "testpypi" }

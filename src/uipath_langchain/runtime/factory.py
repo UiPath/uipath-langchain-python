@@ -66,8 +66,7 @@ class UiPathLangGraphRuntimeFactory:
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         _instrument_traceable_attributes()
-        instrumentor = LangChainInstrumentor()
-        instrumentor.instrument()
+        LangChainInstrumentor().instrument()
         UiPathSpanUtils.register_current_span_provider(get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 
@@ -290,9 +289,7 @@ class UiPathLangGraphRuntimeFactory:
         storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
 
-        # Runtime callbacks are inherited by every chat model in the graph, so
-        # models built directly (e.g. ``UiPathChatAnthropicBedrock(...)``) also
-        # send the LLM Gateway trace-context headers, not only get_chat_model().
+        # Inherited by every chat model in the graph, including ones built directly.
         callbacks: list[BaseCallbackHandler] = [_TraceContextHeadersCallback()]
 
         evaluator: EvaluatorProtocol | None = kwargs.get("evaluator")
@@ -311,11 +308,7 @@ class UiPathLangGraphRuntimeFactory:
             entrypoint=entrypoint,
             callbacks=callbacks,
             storage=storage,
-            # The LLM Gateway records "Model run" for each UiPath chat model
-            # call (the traceparent is sent by _TraceContextHeadersCallback),
-            # so they skip their client-side LLM span. Run metadata, so it
-            # covers only this graph run: low-code's AgentsRuntimeFactory
-            # builds its runtime without this method and keeps its spans.
+            # The LLM Gateway already traces UiPath chat model calls.
             metadata={UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True},
         )
 

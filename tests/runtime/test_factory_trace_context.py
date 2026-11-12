@@ -1,19 +1,4 @@
-"""Coded agents: LLM Gateway trace context and client-side LLM spans.
-
-Covers the two halves of the factory wiring that let the LLM Gateway publish
-its governance / guardrail / "Model run" spans into a coded agent's trace:
-
-* every chat model in the graph sends the trace-context headers, including
-  models constructed directly rather than through ``get_chat_model()``;
-* the coded runtime's graph run carries
-  ``uipath_langchain_client.UIPATH_SKIP_CLIENT_LLM_SPANS_KEY`` in its metadata,
-  so UiPath chat models (``UiPathBaseChatModel``) don't create the client-side
-  LLM span the Gateway's "Model run" replaces. Direct-provider models, which
-  nothing else traces, keep theirs.
-
-The Gateway fakes here are real ``UiPathBaseChatModel`` subclasses with canned
-replies, so they take the same path as the UiPath models.
-"""
+"""Coded agents: LLM Gateway trace-context headers and client-side LLM spans."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -55,15 +40,12 @@ class _State(TypedDict):
     text: str
 
 
-# Module-level: class attributes on a pydantic model would become per-instance fields.
 _seen_headers: list[dict[str, str]] = []
 _own_span: list[Any] = []
 _current_span: list[Any] = []
 
 
 class _RecordingModel(FakeListChatModel):
-    """Records, while generating, what the HTTP client and governance would see."""
-
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -84,7 +66,7 @@ class _FailingModel(FakeListChatModel):
 
 
 class _DirectModel(FakeListChatModel):
-    """A model that calls its provider directly: not a ``UiPathBaseChatModel``."""
+    pass
 
 
 _GATEWAY_API_CONFIG = UiPathAPIConfig(
@@ -95,8 +77,6 @@ _GATEWAY_API_CONFIG = UiPathAPIConfig(
 
 
 class _GatewayModel(UiPathBaseChatModel, _RecordingModel):
-    """An LLM Gateway model with canned replies."""
-
     api_config: UiPathAPIConfig = _GATEWAY_API_CONFIG
 
 
@@ -111,8 +91,6 @@ def _gateway_model(**kwargs: Any) -> _GatewayModel:
 
 
 class _Recorder(SpanProcessor):
-    """Captures span names at start (what live tracking sees) and at end."""
-
     def __init__(self) -> None:
         self.started: list[str] = []
         self.ended: list[ReadableSpan] = []
@@ -148,7 +126,6 @@ def factory(tmp_path: Path) -> UiPathLangGraphRuntimeFactory:
 
 @pytest.fixture
 def recorder() -> Iterator[_Recorder]:
-    """Re-instrument OpenInference against a local provider, as the factory does."""
     instrumentor = LangChainInstrumentor()
     instrumentor.uninstrument()
     provider = TracerProvider()
@@ -169,7 +146,6 @@ def _reset() -> Iterator[None]:
 
 
 async def _run(factory: UiPathLangGraphRuntimeFactory, *llms: FakeListChatModel) -> Any:
-    """Run the graph with exactly the config the coded runtime builds."""
     runtime = await factory._create_runtime_instance(
         compiled_graph=_graph(*llms), runtime_id="rt", entrypoint="agent"
     )
@@ -184,8 +160,6 @@ class TestTraceContextHeaders:
     async def test_directly_constructed_model_sends_trace_headers(
         self, factory: UiPathLangGraphRuntimeFactory
     ) -> None:
-        # Built directly (like ``UiPathChatAnthropicBedrock(...)``), not via
-        # get_chat_model(), so it has no callback of its own.
         llm = _RecordingModel(responses=["ok"])
         assert not llm.callbacks
 
@@ -205,18 +179,14 @@ class TestSkipClientLlmSpans:
     ) -> None:
         await _run(factory, _gateway_model(responses=["ok"]))
 
-        # Not just dropped at export: never started, so live tracking can't
-        # leave it behind as "running".
         assert "_GatewayModel" not in recorder.started
         assert "_GatewayModel" not in [s.name for s in recorder.ended]
-        # The rest of the graph is still traced.
         assert "model" in recorder.started
         assert "LangGraph" in recorder.started
 
     async def test_keeps_client_span_for_direct_provider_llm(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        # Not a Gateway model: no "Model run" replaces it, so the span stays.
         await _run(factory, _DirectModel(responses=["ok"]))
 
         assert "_DirectModel" in recorder.started
@@ -241,11 +211,8 @@ class TestSkipClientLlmSpans:
     ) -> None:
         await _run(factory, _gateway_model(responses=["ok"]))
 
-        # The traceparent span (and governance's enclosing-span fallback) is
-        # the graph node that made the call.
         assert _current_span[0] is not None
         assert _current_span[0].name == "model"
-        # Governance's own-span lookup finds nothing and falls back.
         assert _own_span == [None]
 
     async def test_direct_provider_llm_keeps_its_own_span_for_governance(
@@ -262,7 +229,6 @@ class TestSkipClientLlmSpans:
         llm = _FailingGatewayModel(
             model_name="gpt-4o", settings=agent_hub_dummy_settings, responses=["unused"]
         )
-        # Gateway models wrap provider errors in UiPathError.
         with pytest.raises(UiPathError, match="gateway said no"):
             await _run(factory, llm)
 
@@ -273,9 +239,7 @@ class TestSkipClientLlmSpans:
     async def test_runtime_built_without_the_factory_keeps_client_llm_spans(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        # Low-code's AgentsRuntimeFactory builds its runtime without
-        # _create_runtime_instance, so its run has no skip metadata and keeps
-        # the span, even in a process where a coded runtime was created.
+        # Like low-code's AgentsRuntimeFactory, which doesn't use _create_runtime_instance.
         await _run(factory, _gateway_model(responses=["ok"]))
         runtime = UiPathLangGraphRuntime(_graph(_gateway_model(responses=["ok"])))
 
