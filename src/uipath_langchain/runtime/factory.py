@@ -10,8 +10,6 @@ from openinference.instrumentation.langchain import (
     get_ancestor_spans,
     get_current_span,
 )
-from opentelemetry import context as context_api
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from uipath.core.adapters import EvaluatorProtocol
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
 from uipath.platform.resume_triggers import (
@@ -25,12 +23,10 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
 )
 from uipath.runtime.errors import UiPathErrorCategory
+from uipath_langchain_client import UIPATH_SKIP_CLIENT_LLM_SPANS_KEY
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
-from uipath_langchain.chat.chat_model_factory import (
-    _TraceContextHeadersCallback,
-    use_client_llm_spans,
-)
+from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -40,36 +36,6 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 _AGENT_TYPE_CODED = "uipath_coded"
 _AGENT_FRAMEWORK = "langchain"
-
-
-def _skip_client_llm_spans(instrumentor: LangChainInstrumentor) -> None:
-    """Don't create client-side LLM spans: the LLM Gateway publishes "Model run".
-
-    Kept when ``UIPATH_USE_CLIENT_LLM_SPANS`` is true; the Gateway then gets no
-    trace-context headers, so only the client-side spans are in the trace.
-
-    The span kind is only set when an OpenInference span ends, so a span filter
-    can't drop it at start (live tracking would leave it stuck as "running").
-    Instead, suppress instrumentation while the LLM run's span would be created.
-    """
-    tracer = getattr(instrumentor, "_tracer", None)
-    if tracer is None or getattr(tracer, "_uipath_skip_llm", False):
-        return
-    original_start_trace = tracer._start_trace
-
-    def _start_trace(run: Any) -> None:
-        if run.run_type == "llm" and not use_client_llm_spans():
-            token = context_api.attach(
-                context_api.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True)
-            )
-            try:
-                return original_start_trace(run)
-            finally:
-                context_api.detach(token)
-        return original_start_trace(run)
-
-    tracer._start_trace = _start_trace
-    tracer._uipath_skip_llm = True
 
 
 class UiPathLangGraphRuntimeFactory:
@@ -324,13 +290,6 @@ class UiPathLangGraphRuntimeFactory:
         storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
 
-        # Coded agents only: the LLM Gateway records "Model run", so the
-        # client-side LLM span isn't created. Done here rather than in
-        # _setup_instrumentation because low-code's AgentsRuntimeFactory
-        # inherits that but builds its runtime without this method, and keeps
-        # its own LLM spans. Idempotent, so safe on every new runtime.
-        _skip_client_llm_spans(LangChainInstrumentor())
-
         # Runtime callbacks are inherited by every chat model in the graph, so
         # models built directly (e.g. ``UiPathChatAnthropicBedrock(...)``) also
         # send the LLM Gateway trace-context headers, not only get_chat_model().
@@ -352,6 +311,12 @@ class UiPathLangGraphRuntimeFactory:
             entrypoint=entrypoint,
             callbacks=callbacks,
             storage=storage,
+            # The LLM Gateway records "Model run" for each UiPath chat model
+            # call (the traceparent is sent by _TraceContextHeadersCallback),
+            # so they skip their client-side LLM span. Run metadata, so it
+            # covers only this graph run: low-code's AgentsRuntimeFactory
+            # builds its runtime without this method and keeps its spans.
+            metadata={UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True},
         )
 
         return UiPathResumableRuntime(

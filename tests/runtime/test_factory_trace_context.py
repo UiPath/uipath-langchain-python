@@ -5,10 +5,14 @@ its governance / guardrail / "Model run" spans into a coded agent's trace:
 
 * every chat model in the graph sends the trace-context headers, including
   models constructed directly rather than through ``get_chat_model()``;
-* OpenInference no longer opens the client-side LLM span the Gateway's
-  "Model run" replaces;
-* with ``UIPATH_USE_CLIENT_LLM_SPANS`` true, it's the other way around: the
-  client-side LLM span is kept and the traceparent isn't sent (the baggage is).
+* the coded runtime's graph run carries
+  ``uipath_langchain_client.UIPATH_SKIP_CLIENT_LLM_SPANS_KEY`` in its metadata,
+  so UiPath chat models (``UiPathBaseChatModel``) don't create the client-side
+  LLM span the Gateway's "Model run" replaces. Direct-provider models, which
+  nothing else traces, keep theirs.
+
+The Gateway fakes here are real ``UiPathBaseChatModel`` subclasses with canned
+replies, so they take the same path as the UiPath models.
 """
 
 from collections.abc import Iterator
@@ -27,17 +31,19 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
+from uipath.llm_client.utils.exceptions import UiPathError
 from uipath.llm_client.utils.headers import (
     get_dynamic_request_headers,
     set_dynamic_request_headers,
 )
 from uipath.runtime import UiPathRuntimeContext
+from uipath_langchain_client import UIPATH_SKIP_CLIENT_LLM_SPANS_KEY
+from uipath_langchain_client.base_client import UiPathBaseChatModel
+from uipath_langchain_client.settings import ApiType, RoutingMode, UiPathAPIConfig
 
-from uipath_langchain.chat.chat_model_factory import USE_CLIENT_LLM_SPANS_ENV
-from uipath_langchain.runtime.factory import (
-    UiPathLangGraphRuntimeFactory,
-    _skip_client_llm_spans,
-)
+from tests.settings import agent_hub_dummy_settings
+from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
+from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 
 _TRACE_HEADERS = {
     "x-uipath-traceparent-id": "00-aabbccddeeff00112233445566778899-1122334455667788-01",
@@ -77,6 +83,33 @@ class _FailingModel(FakeListChatModel):
         raise RuntimeError("gateway said no")
 
 
+class _DirectModel(FakeListChatModel):
+    """A model that calls its provider directly: not a ``UiPathBaseChatModel``."""
+
+
+_GATEWAY_API_CONFIG = UiPathAPIConfig(
+    api_type=ApiType.COMPLETIONS,
+    routing_mode=RoutingMode.NORMALIZED,
+    freeze_base_url=True,
+)
+
+
+class _GatewayModel(UiPathBaseChatModel, _RecordingModel):
+    """An LLM Gateway model with canned replies."""
+
+    api_config: UiPathAPIConfig = _GATEWAY_API_CONFIG
+
+
+class _FailingGatewayModel(UiPathBaseChatModel, _FailingModel):
+    api_config: UiPathAPIConfig = _GATEWAY_API_CONFIG
+
+
+def _gateway_model(**kwargs: Any) -> _GatewayModel:
+    return _GatewayModel(
+        model_name="gpt-4o", settings=agent_hub_dummy_settings, **kwargs
+    )
+
+
 class _Recorder(SpanProcessor):
     """Captures span names at start (what live tracking sees) and at end."""
 
@@ -91,10 +124,12 @@ class _Recorder(SpanProcessor):
         self.ended.append(span)
 
 
-def _graph(llm: FakeListChatModel) -> Any:
+def _graph(*llms: FakeListChatModel) -> Any:
     async def model(state: _State) -> _State:
-        reply = await llm.ainvoke(state["text"])
-        return {"text": str(reply.content)}
+        text = state["text"]
+        for llm in llms:
+            text = str((await llm.ainvoke(text)).content)
+        return {"text": text}
 
     g = StateGraph(_State)
     g.add_node("model", model)
@@ -120,14 +155,12 @@ def recorder() -> Iterator[_Recorder]:
     rec = _Recorder()
     provider.add_span_processor(rec)
     instrumentor.instrument(tracer_provider=provider)
-    _skip_client_llm_spans(instrumentor)
     yield rec
     instrumentor.uninstrument()
 
 
 @pytest.fixture(autouse=True)
-def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.delenv(USE_CLIENT_LLM_SPANS_ENV, raising=False)
+def _reset() -> Iterator[None]:
     for recorded in (_seen_headers, _own_span, _current_span):
         recorded.clear()
     set_dynamic_request_headers({})
@@ -135,10 +168,10 @@ def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     set_dynamic_request_headers({})
 
 
-async def _run(factory: UiPathLangGraphRuntimeFactory, llm: FakeListChatModel) -> Any:
+async def _run(factory: UiPathLangGraphRuntimeFactory, *llms: FakeListChatModel) -> Any:
     """Run the graph with exactly the config the coded runtime builds."""
     runtime = await factory._create_runtime_instance(
-        compiled_graph=_graph(llm), runtime_id="rt", entrypoint="agent"
+        compiled_graph=_graph(*llms), runtime_id="rt", entrypoint="agent"
     )
     try:
         config = runtime.delegate._get_graph_config()  # type: ignore[attr-defined]
@@ -165,45 +198,48 @@ class TestTraceContextHeaders:
         assert len(_seen_headers) == 1
         assert _TRACE_HEADERS.items() <= _seen_headers[0].items()
 
-    async def test_client_llm_spans_env_sends_baggage_but_no_traceparent(
-        self, factory: UiPathLangGraphRuntimeFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, "true")
-
-        with patch(
-            "uipath_langchain.chat.chat_model_factory.build_trace_context_headers",
-            return_value=dict(_TRACE_HEADERS),
-        ):
-            await _run(factory, _RecordingModel(responses=["ok"]))
-
-        assert len(_seen_headers) == 1
-        # Without the traceparent the Gateway's spans stay out of the trace;
-        # the baggage still carries the folder / agent / job attribution.
-        assert "x-uipath-traceparent-id" not in _seen_headers[0]
-        assert (
-            _seen_headers[0]["x-uipath-tracebaggage"]
-            == _TRACE_HEADERS["x-uipath-tracebaggage"]
-        )
-
 
 class TestSkipClientLlmSpans:
-    async def test_never_starts_client_llm_span(
+    async def test_never_starts_client_span_for_gateway_llm(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        await _run(factory, _RecordingModel(responses=["ok"]))
+        await _run(factory, _gateway_model(responses=["ok"]))
 
         # Not just dropped at export: never started, so live tracking can't
         # leave it behind as "running".
-        assert "_RecordingModel" not in recorder.started
-        assert "_RecordingModel" not in [s.name for s in recorder.ended]
+        assert "_GatewayModel" not in recorder.started
+        assert "_GatewayModel" not in [s.name for s in recorder.ended]
         # The rest of the graph is still traced.
         assert "model" in recorder.started
         assert "LangGraph" in recorder.started
 
+    async def test_keeps_client_span_for_direct_provider_llm(
+        self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
+    ) -> None:
+        # Not a Gateway model: no "Model run" replaces it, so the span stays.
+        await _run(factory, _DirectModel(responses=["ok"]))
+
+        assert "_DirectModel" in recorder.started
+        llm_span = next(s for s in recorder.ended if s.name == "_DirectModel")
+        assert llm_span.attributes is not None
+        assert llm_span.attributes["openinference.span.kind"] == "LLM"
+
+    async def test_mixed_graph_skips_only_the_gateway_llm(
+        self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
+    ) -> None:
+        await _run(
+            factory,
+            _gateway_model(responses=["from gateway"]),
+            _DirectModel(responses=["from provider"]),
+        )
+
+        assert "_GatewayModel" not in recorder.started
+        assert "_DirectModel" in recorder.started
+
     async def test_keeps_parent_for_traceparent_and_governance(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        await _run(factory, _RecordingModel(responses=["ok"]))
+        await _run(factory, _gateway_model(responses=["ok"]))
 
         # The traceparent span (and governance's enclosing-span fallback) is
         # the graph node that made the call.
@@ -212,75 +248,50 @@ class TestSkipClientLlmSpans:
         # Governance's own-span lookup finds nothing and falls back.
         assert _own_span == [None]
 
+    async def test_direct_provider_llm_keeps_its_own_span_for_governance(
+        self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
+    ) -> None:
+        await _run(factory, _RecordingModel(responses=["ok"]))
+
+        assert _own_span[0] is not None
+        assert _own_span[0].name == "_RecordingModel"
+
     async def test_model_error_still_propagates(
         self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        llm = _FailingModel(responses=["unused"])
-        with pytest.raises(RuntimeError, match="gateway said no"):
+        llm = _FailingGatewayModel(
+            model_name="gpt-4o", settings=agent_hub_dummy_settings, responses=["unused"]
+        )
+        # Gateway models wrap provider errors in UiPathError.
+        with pytest.raises(UiPathError, match="gateway said no"):
             await _run(factory, llm)
 
         node = next(s for s in recorder.ended if s.name == "model")
         assert not node.status.is_ok
-        assert "_FailingModel" not in recorder.started
+        assert "_FailingGatewayModel" not in recorder.started
 
-    @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes"])
-    async def test_client_llm_spans_env_keeps_client_llm_span(
-        self,
-        factory: UiPathLangGraphRuntimeFactory,
-        recorder: _Recorder,
-        monkeypatch: pytest.MonkeyPatch,
-        value: str,
+    async def test_runtime_built_without_the_factory_keeps_client_llm_spans(
+        self, factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
     ) -> None:
-        monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, value)
-        await _run(factory, _RecordingModel(responses=["ok"]))
+        # Low-code's AgentsRuntimeFactory builds its runtime without
+        # _create_runtime_instance, so its run has no skip metadata and keeps
+        # the span, even in a process where a coded runtime was created.
+        await _run(factory, _gateway_model(responses=["ok"]))
+        runtime = UiPathLangGraphRuntime(_graph(_gateway_model(responses=["ok"])))
 
-        assert "_RecordingModel" in recorder.started
-        assert "_RecordingModel" in [s.name for s in recorder.ended]
+        await runtime.graph.ainvoke({"text": "hi"}, config=runtime._get_graph_config())
 
-    @pytest.mark.parametrize("value", ["false", "0", ""])
-    async def test_client_llm_spans_env_not_true_skips_client_llm_span(
-        self,
-        factory: UiPathLangGraphRuntimeFactory,
-        recorder: _Recorder,
-        monkeypatch: pytest.MonkeyPatch,
-        value: str,
-    ) -> None:
-        monkeypatch.setenv(USE_CLIENT_LLM_SPANS_ENV, value)
-        await _run(factory, _RecordingModel(responses=["ok"]))
+        assert recorder.started.count("_GatewayModel") == 1
 
-        assert "_RecordingModel" not in recorder.started
-
-    def test_wrapping_is_idempotent(self, recorder: _Recorder) -> None:
-        instrumentor = LangChainInstrumentor()
-        wrapped = instrumentor._tracer._start_trace  # type: ignore[union-attr]
-        _skip_client_llm_spans(instrumentor)
-        assert instrumentor._tracer._start_trace is wrapped  # type: ignore[union-attr]
-
-    def test_factory_setup_alone_keeps_client_llm_spans(self, tmp_path: Path) -> None:
-        # Low-code's AgentsRuntimeFactory inherits the factory setup but builds
-        # its runtime without _create_runtime_instance, so it must keep the span.
-        instrumentor = LangChainInstrumentor()
-        instrumentor.uninstrument()
-        try:
-            UiPathLangGraphRuntimeFactory(
-                UiPathRuntimeContext(
-                    runtime_dir=str(tmp_path), state_file=str(tmp_path / "state.db")
-                )
-            )
-            tracer = instrumentor._tracer
-            assert tracer is not None
-            assert not getattr(tracer, "_uipath_skip_llm", False)
-        finally:
-            instrumentor.uninstrument()
-
-    async def test_creating_a_coded_runtime_installs_the_skip(
+    async def test_coded_runtime_config_carries_the_skip_key(
         self, factory: UiPathLangGraphRuntimeFactory
     ) -> None:
-        # Guards the private OpenInference hook we wrap: if an upgrade renames
-        # it, this fails instead of client LLM spans silently coming back.
-        await _run(factory, _RecordingModel(responses=["ok"]))
+        runtime = await factory._create_runtime_instance(
+            compiled_graph=_graph(), runtime_id="rt", entrypoint="agent"
+        )
+        try:
+            config = runtime.delegate._get_graph_config()  # type: ignore[attr-defined]
+        finally:
+            await factory.dispose()
 
-        tracer = LangChainInstrumentor()._tracer
-        assert tracer is not None
-        assert callable(tracer._start_trace)
-        assert getattr(tracer, "_uipath_skip_llm", False) is True
+        assert config["metadata"] == {UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True}

@@ -79,40 +79,6 @@ class TestTraceContextHeadersCallback:
         assert "x-uipath-tracebaggage" in headers
         assert "source=agents" in headers["x-uipath-tracebaggage"]
 
-    def test_client_llm_spans_env_drops_only_the_traceparent(self) -> None:
-        mock_span = MagicMock()
-        ctx = MagicMock()
-        ctx.trace_id = 0xAABBCCDDEEFF00112233445566778899
-        ctx.span_id = 0x1122334455667788
-        mock_span.get_span_context.return_value = ctx
-        # A traceparent left over from an earlier call, and a header set by
-        # another callback, which must survive the merge.
-        set_dynamic_request_headers(
-            {"x-uipath-traceparent-id": "00-stale", "X-UiPath-License-RefId": "lic"}
-        )
-
-        cb = _TraceContextHeadersCallback()
-        with (
-            patch(
-                "uipath.core.tracing.span_utils.UiPathSpanUtils"
-                ".get_external_current_span",
-                return_value=mock_span,
-            ),
-            patch.dict(
-                "os.environ",
-                {
-                    "UIPATH_TRACE_ID": "aabbccddeeff00112233445566778899",
-                    "UIPATH_USE_CLIENT_LLM_SPANS": "true",
-                },
-            ),
-        ):
-            cb._merge_headers()
-
-        headers = get_dynamic_request_headers()
-        assert "x-uipath-traceparent-id" not in headers
-        assert "source=agents" in headers["x-uipath-tracebaggage"]
-        assert headers["X-UiPath-License-RefId"] == "lic"
-
     def test_on_chat_model_start_delegates_to_merge_headers(self) -> None:
         cb = _TraceContextHeadersCallback()
         with _patch_build_trace_context_headers(

@@ -4964,12 +4964,12 @@ requires-dist = [
     { name = "uipath-core", specifier = ">=0.5.34,<0.6.0" },
     { name = "uipath-langchain", extras = ["code-interpreter"], marker = "extra == 'all'" },
     { name = "uipath-langchain", extras = ["video"], marker = "extra == 'all'" },
-    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.23.0,<1.24.0" },
-    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.23.0,<1.24.0" },
-    { name = "uipath-langchain-client", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.23.0,<1.24.0" },
-    { name = "uipath-langchain-client", extras = ["fireworks"], marker = "extra == 'fireworks'", specifier = ">=1.23.0,<1.24.0" },
-    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.23.0,<1.24.0" },
-    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.23.0,<1.24.0" },
+    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.23.2.dev1001710000,<1.24.0", index = "https://test.pypi.org/simple/" },
+    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.23.2.dev1001710000,<1.24.0", index = "https://test.pypi.org/simple/" },
+    { name = "uipath-langchain-client", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.23.2.dev1001710000,<1.24.0", index = "https://test.pypi.org/simple/" },
+    { name = "uipath-langchain-client", extras = ["fireworks"], marker = "extra == 'fireworks'", specifier = ">=1.23.2.dev1001710000,<1.24.0", index = "https://test.pypi.org/simple/" },
+    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.23.2.dev1001710000,<1.24.0", index = "https://test.pypi.org/simple/" },
+    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.23.2.dev1001710000,<1.24.0", index = "https://test.pypi.org/simple/" },
     { name = "uipath-llm-client", specifier = ">=1.23.0,<1.24.0" },
     { name = "uipath-platform", specifier = ">=0.3.2,<0.4.0" },
     { name = "uipath-runtime", specifier = ">=0.13.5,<0.14.0" },
@@ -4999,15 +4999,15 @@ dev = [
 
 [[package]]
 name = "uipath-langchain-client"
-version = "1.23.0"
-source = { registry = "https://pypi.org/simple" }
+version = "1.23.2.dev1001710486"
+source = { registry = "https://test.pypi.org/simple/" }
 dependencies = [
     { name = "langchain" },
     { name = "uipath-llm-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/b6/eea4b94525307c68e941c378abf365e70a883763415074d33a8058cdb1a6/uipath_langchain_client-1.23.0.tar.gz", hash = "sha256:c0ece17c7421186951d9888d5f900c2bba7c2c2d55553361e6a795ed0516c69e", size = 46560, upload-time = "2026-11-10T11:16:22.489Z" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/ae/50/cd61111ef7a4e585630236a98c98af568ac9c077e33dd8b822e4683346ec/uipath_langchain_client-1.23.2.dev1001710486.tar.gz", hash = "sha256:fc7e150bacb07156cb7c30f338319e94f7f821f9323c18aca04cfdb0f7f484d9", size = 50634, upload-time = "2026-11-12T08:16:44.396Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/53/427cf336ba65911df38f122b29a24413e374f389c1c111d82c501ff4b518/uipath_langchain_client-1.23.0-py3-none-any.whl", hash = "sha256:70a3314aace174c16c89b2dba81f7f4e3a59625210ec2a1dfec3dc1ddf2bb517", size = 52598, upload-time = "2026-11-10T11:16:21.403Z" },
+    { url = "https://test-files.pythonhosted.org/packages/a1/ee/d1b13ca5272cce32d01b8ad9af5ee908f582752bf00a173c5c88e9c67a55/uipath_langchain_client-1.23.2.dev1001710486-py3-none-any.whl", hash = "sha256:69c8d28ac3505fcb927ae80b56eb3b33d10566b32c63f807232e2900c90fcdb4", size = 55885, upload-time = "2026-11-12T08:16:43.384Z" },
 ]
 
 [package.optional-dependencies]

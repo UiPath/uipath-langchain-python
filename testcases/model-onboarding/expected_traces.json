@@ -1,5 +1,5 @@
 {
-  "description": "Model-onboarding trace assertions. The probe ran, the file was uploaded as a real platform attachment and its blob fetched (proof the agent read it, not just described the file name), the generated ReAct agent executed, and an LLM span was emitted by a reachable client class.",
+  "description": "Model-onboarding trace assertions. The probe ran, the file was uploaded as a real platform attachment and its blob fetched (proof the agent read it, not just described the file name), and the generated ReAct agent executed. LLM calls go through the LLM Gateway, which publishes their Model run spans, so no client-side LLM span is expected.",
   "required_spans": [
     {
       "name": "probe_file_processing",
@@ -17,19 +17,6 @@
       "name": "agent",
       "attributes": {
         "openinference.span.kind": "AGENT"
-      }
-    },
-    {
-      "name": [
-        "UiPathAzureChatOpenAI",
-        "UiPathChatGoogleGenerativeAI",
-        "UiPathChatBedrockConverse",
-        "UiPathChatBedrock",
-        "UiPathChatAnthropicBedrock",
-        "UiPathChatAnthropic"
-      ],
-      "attributes": {
-        "openinference.span.kind": "LLM"
       }
     }
   ]

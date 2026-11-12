@@ -19,23 +19,6 @@
       }
     },
     {
-      "name": [
-        "UiPathChat"
-      ],
-      "parent_name": "model",
-      "attributes": {
-        "openinference.span.kind": "LLM",
-        "llm.provider": "uipath",
-        "llm.model_name": "*",
-        "llm.input_messages.0.message.role": "system",
-        "llm.input_messages.1.message.role": "user",
-        "llm.input_messages.1.message.content": "How is the weather today in New York?",
-        "llm.output_messages.0.message.role": "assistant",
-        "llm.output_messages.0.message.tool_calls.0.tool_call.function.name": "get_weather",
-        "session.id": "default"
-      }
-    },
-    {
       "name": "tools",
       "parent_name": "LangGraph",
       "attributes": {
@@ -59,20 +42,6 @@
       "count": 2,
       "attributes": {
         "openinference.span.kind": "CHAIN",
-        "session.id": "default"
-      }
-    },
-    {
-      "name": [
-        "UiPathChat"
-      ],
-      "parent_name": "model",
-      "count": 2,
-      "attributes": {
-        "openinference.span.kind": "LLM",
-        "llm.provider": "uipath",
-        "llm.model_name": "*",
-        "llm.output_messages.0.message.role": "assistant",
         "session.id": "default"
       }
     }
