@@ -161,6 +161,8 @@ def assert_gateway_traces(
         if fetched is not None:
             spans = fetched
             missing = _missing(spans, expectations, local_names)
+        elif has_max:
+            missing = ["max bounds (the last LLMOps fetch failed)"]
         if (not missing and not has_max) or time.monotonic() >= deadline:
             break
         if missing:
