@@ -148,6 +148,8 @@ def assert_gateway_traces(
     print(f"Checking LLM Gateway spans in LLMOps trace {trace_id}...")
 
     deadline = time.monotonic() + timeout
+    # Spans keep arriving, so an upper bound only holds on the last snapshot.
+    has_max = any("max" in e for e in expectations)
     spans: list[dict[str, Any]] = []
     missing = [str(e["name"]) for e in expectations]
     while True:
@@ -159,9 +161,12 @@ def assert_gateway_traces(
         if fetched is not None:
             spans = fetched
             missing = _missing(spans, expectations, local_names)
-        if not missing or time.monotonic() >= deadline:
+        if (not missing and not has_max) or time.monotonic() >= deadline:
             break
-        print("Not all Gateway spans are in LLMOps yet, retrying in 10s...")
+        if missing:
+            print("Not all Gateway spans are in LLMOps yet, retrying in 10s...")
+        else:
+            print("Waiting until the deadline to check the max bounds...")
         time.sleep(10)
 
     if missing:
