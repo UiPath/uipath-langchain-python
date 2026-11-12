@@ -8,6 +8,7 @@ import asyncio
 from typing import Any
 
 import pytest
+from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.agents.structured_output import ToolStrategy
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
@@ -17,6 +18,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
 from uipath_langchain.agent.advanced.agent import create_advanced_agent
+from uipath_langchain.agent.advanced.tool_choice import ToolChoiceMiddleware
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -73,9 +75,12 @@ def lookup(query: str) -> str:
     return query
 
 
-def _run(model: BaseChatModel) -> dict[str, Any]:
+def _run(model: BaseChatModel, **options: Any) -> dict[str, Any]:
     graph = create_advanced_agent(
-        model=model, tools=[lookup], response_format=ToolStrategy(OUTPUT_SCHEMA)
+        model=model,
+        tools=[lookup],
+        response_format=ToolStrategy(OUTPUT_SCHEMA),
+        **({"unforced_tool_choice": True} | options),
     )
     return asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "go"}]}))
 
@@ -179,6 +184,38 @@ class TestForcedModel:
 
         assert model.bindings[0]["tool_choice"] == "any"
         assert result["structured_response"] == {"answer": "42"}
+
+    def test_skip_forced_models_stay_forced_unless_the_caller_opts_in(self) -> None:
+        """The agents runtime turns this on per tenant with a feature flag."""
+        model = _model([_end("42")], skip_forced=True)
+        graph = create_advanced_agent(
+            model=model, tools=[lookup], response_format=ToolStrategy(OUTPUT_SCHEMA)
+        )
+
+        asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "go"}]}))
+
+        assert model.bindings[0]["tool_choice"] == "any"
+
+
+def test_the_sync_path_unforces_and_builds_the_structured_response() -> None:
+    seen: list[ModelRequest[Any]] = []
+
+    def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+        seen.append(request)
+        return ModelResponse(result=[_end("42")])
+
+    request = ModelRequest(
+        model=_model([], skip_forced=True),
+        messages=[],
+        tools=[lookup],
+        response_format=ToolStrategy(OUTPUT_SCHEMA),
+    )
+
+    response = ToolChoiceMiddleware().wrap_model_call(request, handler)
+
+    assert seen[0].response_format is None
+    assert seen[0].tool_choice == "auto"
+    assert response.structured_response == {"answer": "42"}
 
 
 class _AnthropicModel(ChatAnthropic):
