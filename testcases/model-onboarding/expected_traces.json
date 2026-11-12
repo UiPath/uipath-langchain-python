@@ -19,5 +19,25 @@
         "openinference.span.kind": "AGENT"
       }
     }
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "agent",
+      "min": 2,
+      "attributes": {
+        "model": "*"
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "Analyze_Files",
+      "min": 2,
+      "attributes": {
+        "model": "*"
+      }
+    }
   ]
 }

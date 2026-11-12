@@ -1,0 +1,25 @@
+[project]
+name = "gateway-and-direct-models"
+version = "0.0.1"
+description = "An LLM Gateway model and a direct-provider model in one graph"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "uipath-langchain[bedrock]",
+]
+requires-python = ">=3.11"
+
+[tool.uv]
+exclude-newer = "2 days"
+
+[tool.uv.exclude-newer-package]
+uipath = false
+uipath-core = false
+uipath-platform = false
+uipath-runtime = false
+uipath-dev = false
+uipath-langchain-client = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
+
+[tool.uv.sources]
+uipath-langchain = { path = "../../", editable = true }

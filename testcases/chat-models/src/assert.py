@@ -1,6 +1,7 @@
 import os
 import json
 from trace_assert import assert_traces
+from gateway_trace_assert import assert_gateway_traces
 
 print("Checking feature tests agent output...")
 
@@ -68,5 +69,6 @@ assert "Successful execution." in local_run_output, \
     f"Response does not contain 'Successful execution.'. Actual response: {local_run_output}"
 
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
+assert_gateway_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 print("All validations passed successfully!")

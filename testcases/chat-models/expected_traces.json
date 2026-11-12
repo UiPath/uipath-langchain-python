@@ -7,5 +7,133 @@
         "openinference.span.kind": "CHAIN"
       }
     }
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "run_all_tests",
+      "min": 8,
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "gpt-4o-2024-11-20",
+        "input": {
+          "contains": "Count from 1 to 5."
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "run_all_tests",
+      "min": 12,
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "input": {
+          "contains": "Count from 1 to 5."
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "run_all_tests",
+      "min": 4,
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "gemini-2.5-flash",
+        "input": {
+          "contains": "Count from 1 to 5."
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "run_all_tests",
+      "min": 2,
+      "attributes": {
+        "model": "gpt-4o-2024-11-20",
+        "input": {
+          "contains": "What's the weather in San Francisco? Also calculate 15 * 23."
+        },
+        "output": {
+          "contains": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "run_all_tests",
+      "min": 3,
+      "attributes": {
+        "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "input": {
+          "contains": "What's the weather in San Francisco? Also calculate 15 * 23."
+        },
+        "output": {
+          "contains": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "run_all_tests",
+      "min": 1,
+      "attributes": {
+        "model": "gemini-2.5-flash",
+        "input": {
+          "contains": "What's the weather in San Francisco? Also calculate 15 * 23."
+        },
+        "output": {
+          "contains": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "RunnableSequence",
+      "min": 2,
+      "attributes": {
+        "model": "gpt-4o-2024-11-20",
+        "input": {
+          "contains": "Tell me about John Smith, a 35 year old software engineer living in New York."
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "RunnableSequence",
+      "min": 3,
+      "attributes": {
+        "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "input": {
+          "contains": "Tell me about John Smith, a 35 year old software engineer living in New York."
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "RunnableSequence",
+      "min": 1,
+      "attributes": {
+        "model": "gemini-2.5-flash",
+        "input": {
+          "contains": "Tell me about John Smith, a 35 year old software engineer living in New York."
+        }
+      }
+    }
   ]
 }

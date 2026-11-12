@@ -37,17 +37,38 @@ def get_attributes(span: dict[str, Any]) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
 
+def text_of(value: Any) -> str:
+    """The text of a value, with JSON strings decoded."""
+    if isinstance(value, dict):
+        return "\n".join(text_of(v) for v in value.values())
+    if isinstance(value, list):
+        return "\n".join(text_of(v) for v in value)
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            return value
+        if isinstance(decoded, (dict, list)):
+            return json.dumps(decoded, ensure_ascii=False) + "\n" + text_of(decoded)
+    return str(value)
+
 def matches_value(expected_value: Any, actual_value: Any) -> bool:
     """
     Check if an actual value matches the expected value.
     Supports:
     - List of possible values: ["value1", "value2"]
     - Wildcard: "*" (any value accepted)
+    - Substrings: {"contains": "text"} or {"contains": ["text1", "text2"]}
     - Exact match: "value"
     """
     # Wildcard - accept any value
     if expected_value == "*":
         return True
+    # Substrings
+    if isinstance(expected_value, dict) and "contains" in expected_value:
+        needles = expected_value["contains"]
+        text = text_of(actual_value)
+        return all(n in text for n in ([needles] if isinstance(needles, str) else needles))
     # List of possible values
     if isinstance(expected_value, list):
         return actual_value in expected_value

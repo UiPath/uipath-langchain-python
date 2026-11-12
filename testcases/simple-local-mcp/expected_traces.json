@@ -45,5 +45,35 @@
         "session.id": "default"
       }
     }
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "min": 2,
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "gpt-4o-2024-11-20",
+        "input": {
+          "contains": [
+            "You are a helpful assistant that provides weather information.",
+            "How is the weather today in New York?"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "attributes": {
+        "output": {
+          "contains": "name=get_weather"
+        }
+      }
+    }
   ]
 }

@@ -1,6 +1,7 @@
 import os
 import json
 from trace_assert import assert_traces
+from gateway_trace_assert import assert_gateway_traces
 
 print("Checking init-flow output...")
 
@@ -73,5 +74,6 @@ with open(".uipath/traces.jsonl", 'r', encoding='utf-8') as f:
 
 # Simple trace assertions - just check that expected spans exist
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
+assert_gateway_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 print("Required fields validation passed")

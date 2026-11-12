@@ -13,5 +13,21 @@
         "openinference.span.kind": "CHAIN"
       }
     }
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "generate_report",
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "input": {
+          "contains": "uipath"
+        }
+      }
+    }
   ]
 }

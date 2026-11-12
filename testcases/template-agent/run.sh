@@ -24,7 +24,9 @@ uv run uipath run agent --file input.json
 
 echo "Running agent again with empty UIPATH_JOB_KEY..."
 export UIPATH_JOB_KEY=""
+source ../common/gateway_trace_env.sh
 uv run uipath run agent --trace-file .uipath/traces.jsonl --file input.json >> local_run_output.log
+unset UIPATH_FOLDER_KEY UIPATH_TRACE_ID
 
 echo "Running evaluation..."
 uv run uipath eval --no-report --output-file eval_output.json

@@ -1,6 +1,7 @@
 import os
 import json
 from trace_assert import assert_traces
+from gateway_trace_assert import assert_gateway_traces
 
 print("Checking simple local MCP agent output...")
 
@@ -46,5 +47,6 @@ assert "Successful execution." in local_run_output, f"Response does not contain 
 
 # Simple trace assertions - just check that expected spans exist
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
+assert_gateway_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 print("Required fields validation passed")
