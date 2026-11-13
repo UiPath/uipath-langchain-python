@@ -18,6 +18,7 @@ from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
     GuardrailAttachment,
+    GuardrailGovernanceContext,
     GuardrailScope,
     GuardrailTerminationMode,
 )
@@ -85,6 +86,7 @@ async def _evaluate_builtin_guardrail(
     text: str,
     attachments: list[GuardrailAttachment] | None = None,
     termination_mode: GuardrailTerminationMode | None = None,
+    governance: GuardrailGovernanceContext | None = None,
 ) -> tuple[GuardrailValidationResult, list[GuardrailAttachment] | None]:
     """Evaluate built-in validator guardrail.
 
@@ -94,12 +96,17 @@ async def _evaluate_builtin_guardrail(
         attachments: Resolved attachment references the validator may inspect.
         termination_mode: When the service may stop scanning; ``FAIL_FAST`` stops
             at the first violation.
+        governance: The governance decision the check runs under, stamped by the
+            service on the evaluation span; sent only when known.
 
     Returns:
         The guardrail evaluation result and the attachments the verdict was based on
         (``None`` after a text-only retry).
     """
     uipath = UiPath()
+    governance_kwargs: dict[str, Any] = (
+        {"governance": governance} if governance is not None else {}
+    )
     try:
         result = await asyncio.to_thread(
             uipath.guardrails.evaluate_guardrail,
@@ -107,6 +114,7 @@ async def _evaluate_builtin_guardrail(
             guardrail,
             attachments=attachments,
             termination_mode=termination_mode,
+            **governance_kwargs,
         )
         return result, attachments
     except EnrichedException as exc:
@@ -125,6 +133,7 @@ async def _evaluate_builtin_guardrail(
             guardrail,
             attachments=None,
             termination_mode=termination_mode,
+            **governance_kwargs,
         )
         return result, None
 
@@ -154,9 +163,10 @@ def _create_validation_command(
 ) -> Command[Any]:
     """Create command based on validation result.
 
-    ``guardrail_flagged_file_names`` and ``guardrail_attachments`` (the files sent, as
-    plain dicts so the checkpoint stays msgpack-safe) are written on every outcome so
-    that a value from an earlier guardrail never survives the inner-state merge.
+    ``guardrail_flagged_file_names``, ``guardrail_attachments`` (the files sent, as
+    plain dicts so the checkpoint stays msgpack-safe) and
+    ``guardrail_validation_error_type`` are written on every outcome so that a value
+    from an earlier guardrail never survives the inner-state merge.
 
     Args:
         guardrail_result: The guardrail evaluation result.
@@ -178,6 +188,7 @@ def _create_validation_command(
         inner_state: dict[str, Any] = {
             "guardrail_validation_result": True,
             "guardrail_validation_details": guardrail_result.reason,
+            "guardrail_validation_error_type": None,
             "guardrail_flagged_file_names": flagged_file_names,
             "guardrail_attachments": sent_attachments,
         }
@@ -200,6 +211,11 @@ def _create_validation_command(
         inner_state = {
             "guardrail_validation_result": False,
             "guardrail_validation_details": details,
+            "guardrail_validation_error_type": (
+                guardrail_result.error_type.value
+                if guardrail_result.error_type is not None
+                else None
+            ),
             "guardrail_flagged_file_names": flagged_file_names,
             "guardrail_attachments": sent_attachments,
         }
@@ -267,6 +283,7 @@ def _create_guardrail_node(
     tool_type: str | None = None,
     termination_mode: GuardrailTerminationMode | None = None,
     attachment_source: AttachmentSource | None = None,
+    governance: GuardrailGovernanceContext | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
@@ -275,7 +292,8 @@ def _create_guardrail_node(
     - goto failure_node on validation fail
 
     ``attachment_source`` picks the files a built-in guardrail inspects; see
-    :func:`_resolve_attachments`.
+    :func:`_resolve_attachments`. ``governance`` is sent with a built-in check so the
+    service stamps the decision on its evaluation span.
     """
     raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}"
     node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
@@ -330,7 +348,7 @@ def _create_guardrail_node(
                 )
 
                 result, attachments = await _evaluate_builtin_guardrail(
-                    guardrail, payload, attachments, termination_mode
+                    guardrail, payload, attachments, termination_mode, governance
                 )
             else:
                 # Provide specific error message for DeterministicGuardrails with wrong scope
@@ -376,6 +394,7 @@ def create_llm_guardrail_node(
     failure_node: str,
     *,
     termination_mode: GuardrailTerminationMode | None = None,
+    governance: GuardrailGovernanceContext | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -404,6 +423,7 @@ def create_llm_guardrail_node(
             if execution_stage == ExecutionStage.POST_EXECUTION
             else None
         ),
+        governance=governance,
     )
 
 
@@ -414,6 +434,7 @@ def create_agent_init_guardrail_node(
     failure_node: str,
     *,
     termination_mode: GuardrailTerminationMode | None = None,
+    governance: GuardrailGovernanceContext | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -428,6 +449,7 @@ def create_agent_init_guardrail_node(
         success_node,
         failure_node,
         termination_mode=termination_mode,
+        governance=governance,
     )
 
 
@@ -438,6 +460,7 @@ def create_agent_terminate_guardrail_node(
     failure_node: str,
     *,
     termination_mode: GuardrailTerminationMode | None = None,
+    governance: GuardrailGovernanceContext | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         return str(state.inner_state.agent_result)
@@ -454,6 +477,7 @@ def create_agent_terminate_guardrail_node(
         failure_node,
         termination_mode=termination_mode,
         attachment_source=_agent_result,
+        governance=governance,
     )
 
 
@@ -472,6 +496,7 @@ def create_tool_guardrail_node(
     tool_name: str,
     tool_type: str | None = None,
     termination_mode: GuardrailTerminationMode | None = None,
+    governance: GuardrailGovernanceContext | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Create a guardrail node for TOOL scope guardrails.
 
@@ -483,6 +508,7 @@ def create_tool_guardrail_node(
         tool_name: Name of the tool to extract arguments from.
         tool_type: Optional type of the tool (e.g., "process", "escalation", "mcp").
         termination_mode: When the guardrail service may stop scanning.
+        governance: The governance decision a built-in check runs under.
 
     Returns:
         A tuple of (node_name, node_function) for the guardrail evaluation node.
