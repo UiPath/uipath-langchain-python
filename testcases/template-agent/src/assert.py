@@ -1,6 +1,7 @@
 import os
 import json
 from trace_assert import assert_traces
+from gateway_trace_assert import assert_gateway_traces
 
 print("Checking template agent output...")
 
@@ -35,6 +36,7 @@ assert "Successful execution." in local_run_output, \
 
 # Check traces
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
+assert_gateway_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 # Check evaluation output
 eval_output_file = "eval_output.json"

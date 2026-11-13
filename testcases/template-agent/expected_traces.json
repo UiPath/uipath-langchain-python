@@ -13,5 +13,55 @@
         "openinference.span.kind": "CHAIN"
       }
     }
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "min": 3,
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "input": {
+          "contains": "What's the weather like in London?"
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "attributes": {
+        "output": {
+          "contains": "name=get_current_time"
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "attributes": {
+        "output": {
+          "contains": [
+            "name=get_weather",
+            "\"city\": \"London\""
+          ]
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "attributes": {
+        "output": {
+          "contains": "\"response\""
+        }
+      }
+    }
   ]
 }

@@ -32,5 +32,35 @@
         "tool.name": "duckduckgo_results_json"
       }
     }
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "min": 2,
+      "attributes": {
+        "productDisplayName": "Coded Agents",
+        "feature": "llm-call",
+        "operationCode": "AgentHub.LLM",
+        "model": "gpt-4o-2024-11-20",
+        "input": {
+          "contains": [
+            "You are an advanced AI assistant specializing in corporate research and outreach strategy development.",
+            "comprehensive analysis and outreach strategy for the company: uipath"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "attributes": {
+        "output": {
+          "contains": "name=duckduckgo_results_json"
+        }
+      }
+    }
   ]
 }

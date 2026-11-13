@@ -2,6 +2,7 @@ import json
 import os
 
 from trace_assert import assert_traces
+from gateway_trace_assert import assert_gateway_traces
 
 print("Checking model-onboarding agent output...")
 
@@ -40,6 +41,7 @@ print(f"  Summary:\n{result_summary}")
 # Trace assertions run BEFORE the success gate: a failing run is exactly when
 # the spans (and the trace dump they print) are most useful for diagnosis.
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
+assert_gateway_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 # The second (empty UIPATH_JOB_KEY) local run appends to this log.
 with open("local_run_output.log", "r", encoding="utf-8") as f:
