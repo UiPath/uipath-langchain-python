@@ -39,6 +39,7 @@ from .no_forced_tool_choice import (
     finish_without_forcing,
     finishing_tool_call,
     output_fields,
+    should_skip_forced_tool_choice,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_tool_less_turns
@@ -85,11 +86,6 @@ async def _ainvoke(
         if isinstance(uipath_error, UiPathAPIError):
             raise_for_provider_http_error(uipath_error)
         raise
-
-
-def _should_skip_forced_tool_choice(model: BaseChatModel) -> bool:
-    model_details = getattr(model, "model_details", None) or {}
-    return bool(model_details.get("shouldSkipForcedToolChoice", False))
 
 
 def _no_finishing_tool_call_error() -> AgentRuntimeError:
@@ -367,7 +363,7 @@ def create_llm_node(
             tool_choice=tool_choice,
             prompt_caching=prompt_caching,
         )
-    if _should_skip_forced_tool_choice(model):
+    if should_skip_forced_tool_choice(model):
         return AutoToolChoiceLLMNode(
             model,
             tools,
