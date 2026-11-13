@@ -23,8 +23,10 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
 )
 from uipath.runtime.errors import UiPathErrorCategory
+from uipath_langchain_client import UIPATH_SKIP_CLIENT_LLM_SPANS_KEY
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -287,18 +289,18 @@ class UiPathLangGraphRuntimeFactory:
         storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
 
+        # Inherited by every chat model in the graph, including ones built directly.
+        callbacks: list[BaseCallbackHandler] = [_TraceContextHeadersCallback()]
+
         evaluator: EvaluatorProtocol | None = kwargs.get("evaluator")
-        callbacks: list[BaseCallbackHandler] | None = (
-            [
+        if evaluator is not None:
+            callbacks.append(
                 GovernanceCallbackHandler(
                     evaluator=evaluator,
                     agent_name=entrypoint,
                     session_id=runtime_id,
                 )
-            ]
-            if evaluator is not None
-            else None
-        )
+            )
 
         base_runtime = UiPathLangGraphRuntime(
             graph=compiled_graph,
@@ -306,6 +308,8 @@ class UiPathLangGraphRuntimeFactory:
             entrypoint=entrypoint,
             callbacks=callbacks,
             storage=storage,
+            # The LLM Gateway already traces UiPath chat model calls.
+            metadata={UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True},
         )
 
         return UiPathResumableRuntime(

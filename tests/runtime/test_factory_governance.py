@@ -12,12 +12,21 @@ from langgraph.graph import END, START, StateGraph
 from uipath.core.adapters import EvaluatorProtocol
 from uipath.runtime import UiPathRuntimeContext
 
+from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 
 
 class _State(TypedDict):
     v: int
+
+
+def _governance_handlers(runtime: Any) -> list[GovernanceCallbackHandler]:
+    return [
+        cb
+        for cb in runtime.delegate.callbacks
+        if isinstance(cb, GovernanceCallbackHandler)
+    ]
 
 
 def _build_graph() -> StateGraph[Any, Any, Any]:
@@ -50,7 +59,7 @@ class TestEvaluatorWiring:
     previous adapter / register-on-import path is gone.
     """
 
-    async def test_no_evaluator_means_no_callbacks(
+    async def test_no_evaluator_means_only_trace_context_callback(
         self, factory: UiPathLangGraphRuntimeFactory
     ) -> None:
         compiled = _build_graph().compile()
@@ -61,7 +70,9 @@ class TestEvaluatorWiring:
             entrypoint="ep",
         )
         # The resumable runtime wraps the langgraph runtime as ``delegate``.
-        assert runtime.delegate.callbacks == []  # type: ignore[attr-defined]
+        callbacks = runtime.delegate.callbacks  # type: ignore[attr-defined]
+        assert len(callbacks) == 1
+        assert isinstance(callbacks[0], _TraceContextHeadersCallback)
         await factory.dispose()
 
     async def test_evaluator_attaches_governance_handler(
@@ -77,9 +88,10 @@ class TestEvaluatorWiring:
             evaluator=evaluator,
         )
         callbacks = runtime.delegate.callbacks  # type: ignore[attr-defined]
-        assert len(callbacks) == 1
-        handler = callbacks[0]
-        assert isinstance(handler, GovernanceCallbackHandler)
+        assert any(isinstance(cb, _TraceContextHeadersCallback) for cb in callbacks)
+        handlers = _governance_handlers(runtime)
+        assert len(handlers) == 1
+        handler = handlers[0]
         # Identity / session_id / agent_name come from the factory args.
         assert handler._evaluator is evaluator
         assert handler._agent_name == "ep"
@@ -107,8 +119,8 @@ class TestEvaluatorWiring:
             entrypoint="ep",
             evaluator=evaluator,
         )
-        h1 = first.delegate.callbacks[0]  # type: ignore[attr-defined]
-        h2 = second.delegate.callbacks[0]  # type: ignore[attr-defined]
+        h1 = _governance_handlers(first)[0]
+        h2 = _governance_handlers(second)[0]
         assert h1 is not h2
         assert h1._session_id == "rt-a"
         assert h2._session_id == "rt-b"

@@ -8,14 +8,6 @@
       }
     },
     {
-      "name": "UiPathChat",
-      "attributes": {
-        "openinference.span.kind": "LLM",
-        "llm.provider": "uipath",
-        "llm.model_name": "*"
-      }
-    },
-    {
       "name": "PydanticOutputParser",
       "attributes": {
         "openinference.span.kind": "CHAIN"
