@@ -41,13 +41,20 @@ class FakeGuardrails:
         self.call_count = 0
 
     def evaluate_guardrail(
-        self, text, guardrail, *, attachments=None, termination_mode=None
+        self,
+        text,
+        guardrail,
+        *,
+        attachments=None,
+        termination_mode=None,
+        governance=None,
     ):
         self.call_count += 1
         self.last_text = text
         self.last_guardrail = guardrail
         self.last_attachments = attachments
         self.last_termination_mode = termination_mode
+        self.last_governance = governance
         return self._result
 
 
@@ -121,6 +128,7 @@ class TestLlmGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -162,6 +170,7 @@ class TestLlmGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -208,6 +217,7 @@ class TestAgentInitGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -253,6 +263,7 @@ class TestAgentInitGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -303,6 +314,7 @@ class TestAgentTerminateGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -351,6 +363,7 @@ class TestAgentTerminateGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -406,6 +419,7 @@ class TestToolGuardrailNodes:
                 "inner_state": {
                     "guardrail_validation_result": True,
                     "guardrail_validation_details": "",
+                    "guardrail_validation_error_type": None,
                     "guardrail_flagged_file_names": None,
                     "guardrail_attachments": None,
                 }
@@ -421,6 +435,7 @@ class TestToolGuardrailNodes:
                 "inner_state": {
                     "guardrail_validation_result": True,
                     "guardrail_validation_details": "",
+                    "guardrail_validation_error_type": None,
                     "guardrail_flagged_file_names": None,
                     "guardrail_attachments": None,
                 }
@@ -482,6 +497,7 @@ class TestToolGuardrailNodes:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -635,6 +651,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -657,6 +674,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -693,6 +711,7 @@ class TestGuardrailHelperFunctions:
                     f"Guardrail could not be evaluated ({error_type.value}): "
                     "`temperature` is deprecated for this model."
                 ),
+                "guardrail_validation_error_type": error_type.value,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
             }
@@ -716,6 +735,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": True,
                 "guardrail_validation_details": "validation passed",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
                 "guardrail_span_id": "span-123",
@@ -740,6 +760,7 @@ class TestGuardrailHelperFunctions:
             "inner_state": {
                 "guardrail_validation_result": False,
                 "guardrail_validation_details": "policy_violation",
+                "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
                 "guardrail_span_id": "span-456",
@@ -1758,7 +1779,13 @@ class TestGuardrailNodeAttachments:
 
         class FailingGuardrails:
             def evaluate_guardrail(
-                self, text, guardrail, *, attachments=None, termination_mode=None
+                self,
+                text,
+                guardrail,
+                *,
+                attachments=None,
+                termination_mode=None,
+                governance=None,
             ):
                 calls.append(attachments)
                 raise rejection
@@ -1795,7 +1822,13 @@ class TestGuardrailNodeAttachments:
 
         class FlakyGuardrails:
             def evaluate_guardrail(
-                self, text, guardrail, *, attachments=None, termination_mode=None
+                self,
+                text,
+                guardrail,
+                *,
+                attachments=None,
+                termination_mode=None,
+                governance=None,
             ):
                 calls.append(attachments)
                 if attachments:
@@ -1844,7 +1877,13 @@ class TestGuardrailNodeAttachments:
 
         class FailingGuardrails:
             def evaluate_guardrail(
-                self, text, guardrail, *, attachments=None, termination_mode=None
+                self,
+                text,
+                guardrail,
+                *,
+                attachments=None,
+                termination_mode=None,
+                governance=None,
             ):
                 raise rejection
 
@@ -2400,7 +2439,13 @@ class TestGuardrailTerminationModeForwarding:
 
         class FlakyGuardrails:
             def evaluate_guardrail(
-                self, text, guardrail, *, attachments=None, termination_mode=None
+                self,
+                text,
+                guardrail,
+                *,
+                attachments=None,
+                termination_mode=None,
+                governance=None,
             ):
                 calls.append((attachments, termination_mode))
                 if attachments:
@@ -2453,6 +2498,7 @@ class TestGuardrailTerminationModeForwarding:
             failure_node,
             *,
             termination_mode=None,
+            governance=None,
         ):
             seen.append((guardrail.name, termination_mode))
             return f"eval_{guardrail.name}", (lambda s: s)

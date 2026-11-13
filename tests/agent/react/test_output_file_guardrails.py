@@ -73,7 +73,13 @@ class _RecordingGuardrails:
         self.attachments: list[list[GuardrailAttachment] | None] = []
 
     def evaluate_guardrail(
-        self, text, guardrail, *, attachments=None, termination_mode=None
+        self,
+        text,
+        guardrail,
+        *,
+        attachments=None,
+        termination_mode=None,
+        governance=None,
     ):
         self.attachments.append(attachments)
         return GuardrailValidationResult(
