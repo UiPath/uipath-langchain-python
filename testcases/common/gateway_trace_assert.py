@@ -52,16 +52,6 @@ class _NoAccess(Exception):
     pass
 
 
-def _skip(reason: str) -> None:
-    message = f"LLM Gateway span check skipped: {reason}"
-    # Shown as a warning annotation on the GitHub Actions run.
-    print(
-        f"::warning::{message}"
-        if os.environ.get("GITHUB_ACTIONS") == "true"
-        else message
-    )
-
-
 def _fetch(trace_id: str) -> list[dict[str, Any]] | None:
     """The trace's spans, or None on an error worth retrying."""
     url = os.environ["UIPATH_URL"].rstrip("/") + SPANS_PATH.format(trace_id=trace_id)
@@ -137,8 +127,10 @@ def assert_gateway_traces(
     if not expectations:
         return
     if not Path(trace_id_file).is_file():
-        _skip(f"no {trace_id_file}")
-        return
+        raise AssertionError(
+            f"LLM Gateway span check not set up: no {trace_id_file} "
+            "(source gateway_trace_env.sh before the traced run)"
+        )
 
     _load_dotenv()
     trace_id = Path(trace_id_file).read_text(encoding="utf-8").strip()
@@ -156,8 +148,7 @@ def assert_gateway_traces(
         try:
             fetched = _fetch(trace_id)
         except _NoAccess as exc:
-            _skip(f"no access to LLMOps ({exc})")
-            return
+            raise AssertionError(f"No access to LLMOps: {exc}") from exc
         if fetched is not None:
             spans = fetched
             missing = _missing(spans, expectations, local_names)

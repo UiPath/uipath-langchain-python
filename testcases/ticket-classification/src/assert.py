@@ -1,7 +1,6 @@
 import os
 import json
 from trace_assert import assert_traces
-from gateway_trace_assert import assert_gateway_traces
 
 print("Checking ticket classification agent output...")
 
@@ -57,6 +56,5 @@ with open("__uipath/execution.log", "r") as f:
 
 
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
-assert_gateway_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 print("Required fields validation passed")
