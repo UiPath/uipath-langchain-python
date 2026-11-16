@@ -5,9 +5,15 @@ guardrail decision says where it ran (``hook``), what the evaluator decided
 (``evaluator_result``), what was done (``action_applied``) and whether it was
 enforced (``mode``). Agent-defined guardrails have no AI Trust Layer policy, so
 their ``policy_id`` and ``policy_name`` are empty.
+
+A built-in check sends its hook, mode and action on a violation with the
+request (:class:`GuardrailCheckContext`); the guardrail service stamps them
+on the evaluation span it publishes.
 """
 
-from uipath.platform.guardrails import GuardrailGovernanceContext, GuardrailScope
+from dataclasses import dataclass
+
+from uipath.platform.guardrails import GuardrailScope
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
@@ -63,20 +69,29 @@ def governance_decision(action_type: str | None) -> tuple[str, str] | None:
     return _DECISIONS.get(action_type)
 
 
-def governance_context(
+@dataclass(frozen=True)
+class GuardrailCheckContext:
+    """Where a built-in check guards and what the agent does on a violation.
+
+    The fields are the keyword arguments of ``evaluate_guardrail``.
+    """
+
+    hook: str
+    mode: str
+    action_on_violation: str
+
+
+def guardrail_check_context(
     scope: GuardrailScope | None,
     execution_stage: ExecutionStage | None,
     action_type: str | None,
-) -> GuardrailGovernanceContext | None:
-    """The decision a check runs under, or ``None`` for an unknown hook or action."""
+) -> GuardrailCheckContext | None:
+    """The context a check runs with, or ``None`` for an unknown hook or action."""
     hook = governance_hook(scope, execution_stage)
     decision = governance_decision(action_type)
     if hook is None or decision is None:
         return None
     action_on_violation, mode = decision
-    return GuardrailGovernanceContext(
-        hook=hook,
-        mode=mode,
-        version=GOVERNANCE_VERSION,
-        action_on_violation=action_on_violation,
+    return GuardrailCheckContext(
+        hook=hook, mode=mode, action_on_violation=action_on_violation
     )

@@ -79,7 +79,9 @@ class _RecordingGuardrails:
         *,
         attachments=None,
         termination_mode=None,
-        governance=None,
+        hook=None,
+        mode=None,
+        action_on_violation=None,
     ):
         self.attachments.append(attachments)
         return GuardrailValidationResult(

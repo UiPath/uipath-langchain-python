@@ -9,7 +9,6 @@ from uipath.core.guardrails import DeterministicGuardrail
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
-    GuardrailGovernanceContext,
     GuardrailScope,
     GuardrailTerminationMode,
 )
@@ -19,7 +18,10 @@ from uipath_langchain.agent.guardrails.actions.base_action import (
     GuardrailActionNode,
     GuardrailActionNodes,
 )
-from uipath_langchain.agent.guardrails.governance import governance_context
+from uipath_langchain.agent.guardrails.governance import (
+    GuardrailCheckContext,
+    guardrail_check_context,
+)
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
     create_agent_init_guardrail_node,
     create_agent_terminate_guardrail_node,
@@ -46,7 +48,7 @@ class GuardrailNodeFactory(Protocol):
         failure_node: str,
         *,
         termination_mode: GuardrailTerminationMode | None = None,
-        governance: GuardrailGovernanceContext | None = None,
+        check_context: GuardrailCheckContext | None = None,
     ) -> GuardrailActionNode: ...
 
 
@@ -204,7 +206,9 @@ def _build_guardrail_node_chain(
         next_node,
         first_fail_node_name,
         termination_mode=action.termination_mode,
-        governance=governance_context(scope, execution_stage, action.action_type),
+        check_context=guardrail_check_context(
+            scope, execution_stage, action.action_type
+        ),
     )
 
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}

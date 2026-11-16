@@ -11,14 +11,14 @@ from uipath.core.guardrails import (
 )
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
-    GuardrailGovernanceContext,
     GuardrailScope,
 )
 
 from uipath_langchain.agent.guardrails.governance import (
-    governance_context,
+    GuardrailCheckContext,
     governance_decision,
     governance_hook,
+    guardrail_check_context,
 )
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
     create_agent_init_guardrail_node,
@@ -65,30 +65,35 @@ class TestGovernanceMapping:
     def test_each_action_maps_to_its_decision(self, action_type, decision):
         assert governance_decision(action_type) == decision
 
-    def test_context_carries_the_hook_mode_version_and_action(self):
-        assert governance_context(
+    def test_context_carries_the_hook_mode_and_action(self):
+        assert guardrail_check_context(
             GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION, "Log"
-        ) == GuardrailGovernanceContext(
-            hook="AFTER_TOOL", mode="SIMULATE", version="1", action_on_violation="AUDIT"
+        ) == GuardrailCheckContext(
+            hook="AFTER_TOOL", mode="SIMULATE", action_on_violation="AUDIT"
         )
 
     def test_no_context_for_an_unknown_action(self):
         assert (
-            governance_context(GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION, "X")
+            guardrail_check_context(
+                GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION, "X"
+            )
             is None
         )
 
 
-class _StrictGuardrails:
-    """Takes ``governance`` only when the node has one, like an older SDK would."""
+_CHECK_KEYS = {"hook", "mode", "action_on_violation"}
 
-    def __init__(self, accepts_governance: bool):
+
+class _StrictGuardrails:
+    """Takes the check context only when the node has one, like an older SDK would."""
+
+    def __init__(self, accepts_check_context: bool):
         self.calls: list[dict[str, Any]] = []
-        self._accepts_governance = accepts_governance
+        self._accepts_check_context = accepts_check_context
 
     def evaluate_guardrail(self, text, guardrail, **kwargs):
-        if "governance" in kwargs and not self._accepts_governance:
-            raise TypeError("unexpected keyword argument 'governance'")
+        if _CHECK_KEYS & kwargs.keys() and not self._accepts_check_context:
+            raise TypeError("unexpected keyword argument 'hook'")
         self.calls.append(kwargs)
         return GuardrailValidationResult(
             result=GuardrailValidationResultType.PASSED, reason="ok"
@@ -111,31 +116,34 @@ def _built_in() -> BuiltInValidatorGuardrail:
     return guardrail
 
 
-class TestGovernanceForwarding:
+class TestCheckContextForwarding:
     @pytest.mark.asyncio
-    async def test_node_sends_its_governance_context(self, monkeypatch):
-        guardrails = _StrictGuardrails(accepts_governance=True)
+    async def test_node_sends_its_check_context(self, monkeypatch):
+        guardrails = _StrictGuardrails(accepts_check_context=True)
         _patch(monkeypatch, guardrails)
-        governance = GuardrailGovernanceContext(
-            hook="BEFORE_AGENT", mode="ENFORCE", version="1", action_on_violation="DENY"
+        check_context = GuardrailCheckContext(
+            hook="BEFORE_AGENT", mode="ENFORCE", action_on_violation="DENY"
         )
         _, node = create_agent_init_guardrail_node(
             _built_in(),
             ExecutionStage.PRE_EXECUTION,
             "ok",
             "nope",
-            governance=governance,
+            check_context=check_context,
         )
 
         await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
 
-        assert guardrails.calls[0]["governance"] == governance
+        call = guardrails.calls[0]
+        assert (call["hook"], call["mode"], call["action_on_violation"]) == (
+            "BEFORE_AGENT",
+            "ENFORCE",
+            "DENY",
+        )
 
     @pytest.mark.asyncio
-    async def test_node_without_a_context_sends_no_governance_keyword(
-        self, monkeypatch
-    ):
-        guardrails = _StrictGuardrails(accepts_governance=False)
+    async def test_node_without_a_context_sends_no_check_keywords(self, monkeypatch):
+        guardrails = _StrictGuardrails(accepts_check_context=False)
         _patch(monkeypatch, guardrails)
         _, node = create_agent_init_guardrail_node(
             _built_in(), ExecutionStage.PRE_EXECUTION, "ok", "nope"
@@ -143,7 +151,7 @@ class TestGovernanceForwarding:
 
         await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
 
-        assert "governance" not in guardrails.calls[0]
+        assert _CHECK_KEYS.isdisjoint(guardrails.calls[0])
 
     def test_subgraph_gives_each_node_its_actions_context(self):
         from tests.agent.guardrails.test_guardrail_utils import FakeStateGraph
@@ -163,9 +171,9 @@ class TestGovernanceForwarding:
             failure_node,
             *,
             termination_mode=None,
-            governance=None,
+            check_context=None,
         ):
-            seen[guardrail.name] = governance
+            seen[guardrail.name] = check_context
             return f"eval_{guardrail.name}", (lambda s: s)
 
         guardrails = []
@@ -188,9 +196,9 @@ class TestGovernanceForwarding:
             "inner",
         )
 
-        def context(mode: str, action: str) -> GuardrailGovernanceContext:
-            return GuardrailGovernanceContext(
-                hook="TOOL_CALL", mode=mode, version="1", action_on_violation=action
+        def context(mode: str, action: str) -> GuardrailCheckContext:
+            return GuardrailCheckContext(
+                hook="TOOL_CALL", mode=mode, action_on_violation=action
             )
 
         assert seen == {
