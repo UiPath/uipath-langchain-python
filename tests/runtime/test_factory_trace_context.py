@@ -118,6 +118,18 @@ def _graph(*llms: FakeListChatModel) -> Any:
 
 @pytest.fixture
 def factory(tmp_path: Path) -> UiPathLangGraphRuntimeFactory:
+    """A factory for a run inside a UiPath job."""
+    ctx = UiPathRuntimeContext(
+        runtime_dir=str(tmp_path),
+        state_file=str(tmp_path / "state.db"),
+        job_id="job-1",
+    )
+    return UiPathLangGraphRuntimeFactory(ctx)
+
+
+@pytest.fixture
+def local_factory(tmp_path: Path) -> UiPathLangGraphRuntimeFactory:
+    """A factory for a local run (`uipath dev`, `uipath run`): no job id."""
     ctx = UiPathRuntimeContext(
         runtime_dir=str(tmp_path), state_file=str(tmp_path / "state.db")
     )
@@ -259,3 +271,24 @@ class TestSkipClientLlmSpans:
             await factory.dispose()
 
         assert config["metadata"] == {UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True}
+
+    async def test_local_run_keeps_client_span_for_gateway_llm(
+        self, local_factory: UiPathLangGraphRuntimeFactory, recorder: _Recorder
+    ) -> None:
+        # `uipath dev` shows only local spans, never the Gateway's "Model run".
+        await _run(local_factory, _gateway_model(responses=["ok"]))
+
+        assert "_GatewayModel" in recorder.started
+
+    async def test_local_runtime_config_has_no_skip_key(
+        self, local_factory: UiPathLangGraphRuntimeFactory
+    ) -> None:
+        runtime = await local_factory._create_runtime_instance(
+            compiled_graph=_graph(), runtime_id="rt", entrypoint="agent"
+        )
+        try:
+            config = runtime.delegate._get_graph_config()  # type: ignore[attr-defined]
+        finally:
+            await local_factory.dispose()
+
+        assert UIPATH_SKIP_CLIENT_LLM_SPANS_KEY not in config.get("metadata", {})
