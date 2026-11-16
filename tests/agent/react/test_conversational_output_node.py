@@ -28,7 +28,9 @@ def _make_state(messages: list[Any]) -> AgentGraphState:
     )
 
 
-def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
+def _make_mock_model(
+    *, skip_forced: bool = False
+) -> tuple[MagicMock, MagicMock, MagicMock]:
     """Return a chat model whose
     `model_copy(...).bind_tools(...).ainvoke(...)` chain records the messages
     and returns a canned AIMessage with the set_conversational_output tool
@@ -37,6 +39,10 @@ def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
     The TAG_NOSTREAM tag is supplied at call time via the `config=` kwarg
     (mirroring the analyze-files-tool pattern), so `bind_tools` returns the
     runnable that's invoked directly.
+
+    `skip_forced` sets the discovery flag marking a model that rejects a forced
+    tool choice. It is set explicitly either way: on a bare MagicMock the
+    lookup returns a truthy mock and silently reads as true.
 
     Returns (model, non_streaming, bound).
     """
@@ -58,6 +64,7 @@ def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
     non_streaming.bind_tools = MagicMock(return_value=bound)
 
     model = MagicMock()
+    model.model_details = {"shouldSkipForcedToolChoice": True} if skip_forced else {}
     model.model_copy = MagicMock(return_value=non_streaming)
     return model, non_streaming, bound
 
@@ -115,6 +122,24 @@ class TestCreateConversationalOutputNode:
         tools_arg = non_streaming.bind_tools.call_args.args[0]
         assert len(tools_arg) == 1
         assert tools_arg[0].name == SET_CONVERSATIONAL_OUTPUT_TOOL.name
+
+    @pytest.mark.asyncio
+    async def test_forces_tool_choice_by_default(self):
+        model, non_streaming, _bound = _make_mock_model()
+        create_conversational_output_node(model, _OutputSchema)
+
+        tool_choice = non_streaming.bind_tools.call_args.kwargs.get("tool_choice")
+        assert tool_choice == "any"
+
+    @pytest.mark.asyncio
+    async def test_unforces_tool_choice_when_the_model_rejects_forcing(self):
+        """Opus 5.5 and Sonnet 5.5 answer a forced tool choice with a 400, so
+        discovery flags them and the extraction call goes out on "auto"."""
+        model, non_streaming, _bound = _make_mock_model(skip_forced=True)
+        create_conversational_output_node(model, _OutputSchema)
+
+        tool_choice = non_streaming.bind_tools.call_args.kwargs.get("tool_choice")
+        assert tool_choice == "auto"
 
     @pytest.mark.asyncio
     async def test_ainvoke_config_includes_tag_nostream(self):
