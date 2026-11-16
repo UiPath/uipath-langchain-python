@@ -308,8 +308,12 @@ class UiPathLangGraphRuntimeFactory:
             entrypoint=entrypoint,
             callbacks=callbacks,
             storage=storage,
-            # The LLM Gateway already traces UiPath chat model calls.
-            metadata={UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True},
+            # Jobs get the Gateway's "Model run" span; local runs don't.
+            metadata=(
+                {UIPATH_SKIP_CLIENT_LLM_SPANS_KEY: True}
+                if self.context.job_id
+                else None
+            ),
         )
 
         return UiPathResumableRuntime(
