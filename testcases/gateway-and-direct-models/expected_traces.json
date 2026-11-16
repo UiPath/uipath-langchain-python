@@ -1,5 +1,5 @@
 {
-  "description": "A Gateway model (no client-side LLM span; the Gateway's Model run joins the trace) and a direct-provider model (keeps its client-side LLM span) in one graph. Model run's input and output are only saved when the tenant's AI Trust Layer policy allows it, so they are not checked.",
+  "description": "A Gateway model (no client-side LLM span; the Gateway's Model run joins the trace) and a direct-provider model (keeps its client-side LLM span) in one graph. Model run's input and output (saved only when the tenant's AI Trust Layer policy allows it) and productDisplayName (not set by every environment's Gateway) are not checked.",
   "required_spans": [
     {
       "name": "model",
@@ -39,7 +39,6 @@
       "min": 3,
       "attributes": {
         "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
-        "productDisplayName": "Coded Agents",
         "feature": "llm-call"
       }
     },
