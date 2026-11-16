@@ -45,7 +45,24 @@ def _normalize(span: dict[str, Any]) -> dict[str, Any]:
         "SpanType": span.get("SpanType"),
         "attributes": attributes,
         "parent": _span_id(span.get("ParentId")),
+        "permission": span.get("PermissionStatus"),
     }
+
+
+_PERMISSIONS = {0: "Allow", 1: "PartialBlock", 2: "Block"}
+
+
+def _describe(spans: list[dict[str, Any]], local_names: dict[str, str]) -> None:
+    """Print each span's shape for diagnosis: names and keys only, never values."""
+    print("LLMOps spans (name | permission | parent | attribute keys; empty ones marked -):")
+    for s in sorted(spans, key=lambda s: str(s["name"])):
+        parent = local_names.get(s["parent"]) or ("(none)" if not s["parent"] else "(not local)")
+        permission = _PERMISSIONS.get(s["permission"], str(s["permission"]))
+        keys = ", ".join(
+            k if s["attributes"][k] not in (None, "", [], {}) else f"-{k}"
+            for k in sorted(s["attributes"])
+        )
+        print(f"  {s['name']} | {permission} | {parent} | {keys or '(no attributes)'}")
 
 
 class _NoAccess(Exception):
@@ -163,6 +180,7 @@ def assert_gateway_traces(
         time.sleep(10)
 
     if missing:
+        _describe(spans, local_names)
         names = sorted({str(s["name"]) for s in spans})
         raise AssertionError(
             f"LLM Gateway span checks failed: {', '.join(missing)}. "
