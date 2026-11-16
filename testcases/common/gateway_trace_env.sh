@@ -7,7 +7,7 @@
 
 rm -f .uipath/gateway_trace_id
 mkdir -p .uipath
-GATEWAY_TRACE_ID=$(uv run python -c "import uuid; print(uuid.uuid4().hex)" | tail -n 1) || true
+GATEWAY_TRACE_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex)") || true
 
 if [[ "${GATEWAY_FOLDER_KEY:-}" =~ ^[0-9a-fA-F-]{36}$ && "$GATEWAY_TRACE_ID" =~ ^[0-9a-f]{32}$ ]]; then
     # Never print the folder key; on GitHub Actions, mask it in case anything does.

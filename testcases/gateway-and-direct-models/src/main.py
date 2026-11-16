@@ -123,7 +123,7 @@ async def postprocess(state: StateModel) -> OutputModel:
     )
 
 
-builder = StateGraph(StateModel, input=InputModel, output=OutputModel)
+builder = StateGraph(StateModel, input_schema=InputModel, output_schema=OutputModel)
 builder.add_node("prepare", prepare)
 builder.add_node("react_agent", react_agent)
 builder.add_node("direct_model", direct_model)
