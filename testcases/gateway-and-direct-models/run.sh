@@ -5,9 +5,9 @@ echo "Syncing dependencies..."
 uv sync
 
 echo "Authenticating with UiPath..."
-# OR.Folders.Read resolves the folder key; Traces.Api reads the Gateway spans from LLMOps.
+# Traces.Api reads the Gateway spans from LLMOps. The folder key comes from GATEWAY_FOLDER_KEY.
 uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL" \
-    --scope "OR.Execution OR.Folders.Read Traces.Api"
+    --scope "OR.Execution Traces.Api"
 
 echo "Initializing the project..."
 uv run uipath init
