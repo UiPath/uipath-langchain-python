@@ -1,0 +1,425 @@
+"""Long-running A2A calls: send once, then poll on Orchestrator timer wake-ups.
+
+The graph tests run the tool node under a checkpointer and resume it the way the
+runtime does after a Timer trigger fires (``{"resumeTime": ...}``), to check the
+replay is deterministic: the message is sent once, and each run polls at most once.
+"""
+
+import json
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from typing import Any, TypedDict
+
+import pytest
+from a2a.types import (
+    Artifact,
+    GetTaskRequest,
+    Message,
+    Part,
+    Role,
+    SendMessageRequest,
+    StreamResponse,
+    Task,
+    TaskState,
+    TaskStatus,
+)
+from a2a.utils.errors import A2AError, InternalError, TaskNotFoundError
+from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command
+from uipath.agent.models.agent import (
+    AgentA2aResourceConfig,
+    AgentConversationalAgentToolProperties,
+    AgentConversationalAgentToolResourceConfig,
+    AgentToolType,
+)
+from uipath.platform.common import WaitUntil
+
+import uipath_langchain.agent.tools.a2a.long_running as long_running
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.a2a.a2a_tool import create_a2a_tools_and_clients
+from uipath_langchain.agent.tools.a2a.conversational_agent_tool import (
+    create_conversational_agent_tools_and_clients,
+)
+from uipath_langchain.agent.tools.a2a.long_running import (
+    A2aPollSettings,
+    send_and_wait,
+)
+from uipath_langchain.agent.tools.tool_node import create_tool_node
+
+START_TIME = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+
+NO_INLINE_WAIT = A2aPollSettings(
+    initial_inline_wait=timedelta(0),
+    poll_intervals=(timedelta(minutes=5), timedelta(minutes=10)),
+    max_wait=timedelta(hours=1),
+)
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = START_TIME
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, delta: timedelta) -> None:
+        self.now += delta
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    clock = _Clock()
+    monkeypatch.setattr(long_running, "_utcnow", clock)
+
+    async def _no_sleep(seconds: float) -> None:
+        clock.advance(timedelta(seconds=seconds))
+
+    monkeypatch.setattr(long_running, "asyncio", SimpleNamespace(sleep=_no_sleep))
+    return clock
+
+
+def _task(state: TaskState, *, text: str = "", task_id: str = "task-1") -> Task:
+    task = Task(id=task_id, context_id="ctx-1", status=TaskStatus(state=state))
+    if text:
+        task.artifacts.append(Artifact(artifact_id="a-1", parts=[Part(text=text)]))
+    return task
+
+
+def _working() -> Task:
+    return _task(TaskState.TASK_STATE_WORKING)
+
+
+def _completed(text: str = "report ready") -> Task:
+    return _task(TaskState.TASK_STATE_COMPLETED, text=text)
+
+
+class _ScriptedClient:
+    """A2A client whose send returns one reply and whose polls follow a script."""
+
+    def __init__(
+        self, reply: Task | Message | Exception, polls: list[Task | Exception]
+    ) -> None:
+        self._reply = reply
+        self._polls = list(polls)
+        self.sent: list[SendMessageRequest] = []
+        self.polled: list[str] = []
+
+    async def send_message(self, request: SendMessageRequest):
+        self.sent.append(request)
+        if isinstance(self._reply, Exception):
+            raise self._reply
+        if isinstance(self._reply, Message):
+            yield StreamResponse(message=self._reply)
+        else:
+            yield StreamResponse(task=self._reply)
+
+    async def get_task(self, request: GetTaskRequest) -> Task:
+        self.polled.append(request.id)
+        if not self._polls:
+            raise AssertionError("polled more often than scripted")
+        result = self._polls.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def _message() -> Message:
+    return Message(role=Role.ROLE_USER, parts=[Part(text="build the report")])
+
+
+# --- send_and_wait outside a graph -------------------------------------------
+
+
+async def test_send_asks_the_agent_to_return_immediately(clock: _Clock) -> None:
+    client = _ScriptedClient(_completed(), [])
+
+    await send_and_wait(client, _message(), NO_INLINE_WAIT)  # type: ignore[arg-type]
+
+    assert client.sent[0].configuration.return_immediately is True
+
+
+async def test_message_reply_returns_without_polling(clock: _Clock) -> None:
+    reply = Message(role=Role.ROLE_AGENT, parts=[Part(text="hi")], context_id="c")
+    client = _ScriptedClient(reply, [])
+
+    outcome = await send_and_wait(client, _message(), NO_INLINE_WAIT)  # type: ignore[arg-type]
+
+    assert isinstance(outcome.reply, Message)
+    assert outcome.timed_out is False
+    assert client.polled == []
+
+
+async def test_inline_wait_returns_a_task_that_settles_in_the_job(
+    clock: _Clock,
+) -> None:
+    settings = A2aPollSettings(
+        initial_inline_wait=timedelta(seconds=30),
+        inline_poll_interval=timedelta(seconds=10),
+    )
+    client = _ScriptedClient(_working(), [_working(), _completed()])
+
+    outcome = await send_and_wait(client, _message(), settings)  # type: ignore[arg-type]
+
+    assert isinstance(outcome.reply, Task)
+    assert outcome.reply.status.state == TaskState.TASK_STATE_COMPLETED
+    assert client.polled == ["task-1", "task-1"]
+
+
+async def test_inline_wait_stops_at_its_limit(clock: _Clock) -> None:
+    settings = A2aPollSettings(
+        initial_inline_wait=timedelta(seconds=20),
+        inline_poll_interval=timedelta(seconds=10),
+    )
+    client = _ScriptedClient(_working(), [_working(), _working()])
+
+    outcome = await send_and_wait(client, _message(), settings)  # type: ignore[arg-type]
+
+    # Outside a graph the call cannot suspend: the task is reported as running.
+    assert outcome.timed_out is True
+    assert client.polled == ["task-1", "task-1"]
+
+
+async def test_send_error_keeps_its_a2a_type(clock: _Clock) -> None:
+    client = _ScriptedClient(TaskNotFoundError("gone"), [])
+
+    with pytest.raises(TaskNotFoundError, match="gone"):
+        await send_and_wait(client, _message(), NO_INLINE_WAIT)  # type: ignore[arg-type]
+
+
+async def test_other_send_errors_become_a2a_errors(clock: _Clock) -> None:
+    client = _ScriptedClient(ConnectionError("refused"), [])
+
+    with pytest.raises(A2AError, match="refused"):
+        await send_and_wait(client, _message(), NO_INLINE_WAIT)  # type: ignore[arg-type]
+
+
+def test_poll_interval_grows_then_repeats() -> None:
+    settings = A2aPollSettings()
+    assert [settings.poll_interval(i).total_seconds() / 60 for i in range(6)] == [
+        5,
+        10,
+        15,
+        30,
+        30,
+        30,
+    ]
+
+
+# --- send_and_wait in a graph: suspend and replay ------------------------------
+
+
+class _State(TypedDict):
+    result: Any
+
+
+def _graph(client: _ScriptedClient, settings: A2aPollSettings) -> Any:
+    async def node(state: _State) -> dict[str, Any]:
+        try:
+            outcome = await send_and_wait(client, _message(), settings)  # type: ignore[arg-type]
+        except A2AError as e:
+            return {"result": {"error": type(e).__name__, "message": str(e)}}
+        reply = outcome.reply
+        assert isinstance(reply, Task)
+        return {
+            "result": {
+                "state": TaskState.Name(reply.status.state),
+                "timed_out": outcome.timed_out,
+            }
+        }
+
+    builder = StateGraph(_State)
+    builder.add_node("call", node)
+    builder.add_edge(START, "call")
+    builder.add_edge("call", END)
+    return builder.compile(checkpointer=MemorySaver())
+
+
+def _wait_until(result: dict[str, Any]) -> tuple[str, WaitUntil]:
+    interrupts = result["__interrupt__"]
+    assert len(interrupts) == 1
+    value = interrupts[0].value
+    assert isinstance(value, WaitUntil)
+    return interrupts[0].id, value
+
+
+def _timer_fired(pending: tuple[str, WaitUntil]) -> Command[Any]:
+    """Resume as the runtime does when the Timer trigger fires: by interrupt id."""
+    interrupt_id, wait = pending
+    return Command(resume={interrupt_id: {"resumeTime": wait.resume_time.isoformat()}})
+
+
+async def test_running_task_suspends_until_the_timer_then_returns(
+    clock: _Clock,
+) -> None:
+    client = _ScriptedClient(_working(), [_working(), _working(), _completed()])
+    graph = _graph(client, NO_INLINE_WAIT)
+    config: Any = {"configurable": {"thread_id": "t1"}}
+
+    first = await graph.ainvoke({"result": None}, config)
+    wait = _wait_until(first)
+    assert wait[1].resume_time == START_TIME + timedelta(minutes=5)
+
+    clock.advance(timedelta(minutes=5))
+    second = await graph.ainvoke(_timer_fired(wait), config)
+    wait = _wait_until(second)
+    assert wait[1].resume_time == clock.now + timedelta(minutes=10)
+
+    clock.advance(timedelta(minutes=10))
+    final = await graph.ainvoke(_timer_fired(wait), config)
+
+    assert final["result"] == {"state": "TASK_STATE_COMPLETED", "timed_out": False}
+    # Sent once across three runs; each run polled exactly once.
+    assert len(client.sent) == 1
+    assert client.polled == ["task-1", "task-1", "task-1"]
+
+
+async def test_lost_task_fails_cleanly(clock: _Clock) -> None:
+    client = _ScriptedClient(_working(), [_working(), TaskNotFoundError("expired")])
+    graph = _graph(client, NO_INLINE_WAIT)
+    config: Any = {"configurable": {"thread_id": "t2"}}
+
+    wait = _wait_until(await graph.ainvoke({"result": None}, config))
+    final = await graph.ainvoke(_timer_fired(wait), config)
+
+    assert final["result"] == {"error": "TaskNotFoundError", "message": "expired"}
+    assert len(client.sent) == 1
+
+
+async def test_failed_poll_is_retried_on_the_next_wake_up(clock: _Clock) -> None:
+    client = _ScriptedClient(_working(), [InternalError("502"), _completed()])
+    graph = _graph(client, NO_INLINE_WAIT)
+    config: Any = {"configurable": {"thread_id": "t3"}}
+
+    wait = _wait_until(await graph.ainvoke({"result": None}, config))
+    final = await graph.ainvoke(_timer_fired(wait), config)
+
+    assert final["result"] == {"state": "TASK_STATE_COMPLETED", "timed_out": False}
+
+
+async def test_task_still_running_at_max_wait_is_reported(clock: _Clock) -> None:
+    settings = A2aPollSettings(
+        initial_inline_wait=timedelta(0),
+        poll_intervals=(timedelta(minutes=40),),
+        max_wait=timedelta(hours=1),
+    )
+    client = _ScriptedClient(_working(), [_working(), _working()])
+    graph = _graph(client, settings)
+    config: Any = {"configurable": {"thread_id": "t4"}}
+
+    wait = _wait_until(await graph.ainvoke({"result": None}, config))
+    clock.advance(timedelta(minutes=40))
+    wait = _wait_until(await graph.ainvoke(_timer_fired(wait), config))
+    # The last wait is cut to the deadline.
+    assert wait[1].resume_time == START_TIME + timedelta(hours=1)
+
+    clock.advance(timedelta(minutes=20))
+    final = await graph.ainvoke(_timer_fired(wait), config)
+
+    assert final["result"] == {"state": "TASK_STATE_WORKING", "timed_out": True}
+
+
+# --- the A2A tool in the tool node --------------------------------------------
+
+
+def _a2a_resource() -> AgentA2aResourceConfig:
+    return AgentA2aResourceConfig(
+        id="resource-id",
+        name="Report Agent",
+        description="Builds reports",
+        slug="report-agent",
+        folder_path="Shared",
+        cached_agent_card={
+            "url": "https://example.com/a2a",
+            "name": "Report Agent",
+            "version": "1.0.0",
+            "capabilities": {},
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/plain"],
+        },
+    )
+
+
+async def test_a2a_tool_resumes_and_answers_with_the_finished_task(
+    monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    monkeypatch.setattr(long_running, "DEFAULT_POLL_SETTINGS", NO_INLINE_WAIT)
+    client = _ScriptedClient(_working(), [_working(), _completed("Q3 report")])
+    tools, clients = create_a2a_tools_and_clients([_a2a_resource()])
+    tool = tools[0]
+
+    async def _get() -> _ScriptedClient:
+        return client
+
+    monkeypatch.setattr(clients[0], "get", _get)
+
+    builder = StateGraph(AgentGraphState)
+    builder.add_node("tool", create_tool_node(tools)[tool.name])
+    builder.add_edge(START, "tool")
+    builder.add_edge("tool", END)
+    graph = builder.compile(checkpointer=MemorySaver())
+    config: Any = {"configurable": {"thread_id": "t5"}}
+    call = {"name": tool.name, "args": {"message": "build it"}, "id": "call-1"}
+
+    first = await graph.ainvoke(
+        AgentGraphState(messages=[AIMessage(content="", tool_calls=[call])]), config
+    )
+    wait = _wait_until(first)
+    clock.advance(timedelta(minutes=5))
+    final = await graph.ainvoke(_timer_fired(wait), config)
+
+    reply = json.loads(final["messages"][-1].content)
+    assert reply == {"agent_response": "Q3 report", "task_state": "completed"}
+    assert len(client.sent) == 1
+    stored = final["inner_state"].tools_storage[tool.name]
+    assert stored == {"task_id": None, "context_id": "ctx-1"}
+
+
+async def test_conversational_tool_suspends_instead_of_reporting_a_failure(
+    monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    """The suspend passes through the tool's request-error handling."""
+    monkeypatch.setattr(long_running, "DEFAULT_POLL_SETTINGS", NO_INLINE_WAIT)
+    client = _ScriptedClient(_working(), [_working(), _completed("ticket closed")])
+    resource = AgentConversationalAgentToolResourceConfig(
+        id="conv-id",
+        name="Support Agent",
+        description="Answers support questions",
+        type=AgentToolType.CONVERSATIONAL_AGENT,
+        input_schema={
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        },
+        properties=AgentConversationalAgentToolProperties(
+            process_name="My Conversational Agent", folder_path="Shared"
+        ),
+    )
+    tools, clients = create_conversational_agent_tools_and_clients(
+        [resource], is_conversational=False
+    )
+    tool = tools[0]
+
+    async def _get() -> _ScriptedClient:
+        return client
+
+    monkeypatch.setattr(clients[0], "get", _get)
+
+    builder = StateGraph(AgentGraphState)
+    builder.add_node("tool", create_tool_node(tools)[tool.name])
+    builder.add_edge(START, "tool")
+    builder.add_edge("tool", END)
+    graph = builder.compile(checkpointer=MemorySaver())
+    config: Any = {"configurable": {"thread_id": "t6"}}
+    call = {"name": tool.name, "args": {"message": "close it"}, "id": "call-1"}
+
+    first = await graph.ainvoke(
+        AgentGraphState(messages=[AIMessage(content="", tool_calls=[call])]), config
+    )
+    final = await graph.ainvoke(_timer_fired(_wait_until(first)), config)
+
+    reply = json.loads(final["messages"][-1].content)
+    assert reply["agent_response"] == "ticket closed"
+    assert reply["task_state"] == "completed"
+    assert len(client.sent) == 1

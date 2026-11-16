@@ -25,6 +25,15 @@ _TOOLS_DIR = Path(__file__).parents[3] / "src" / "uipath_langchain" / "agent" / 
 
 _Function = ast.FunctionDef | ast.AsyncFunctionDef
 
+# Shared helpers that suspend the run but build no tool, mapped to the factories
+# whose tools reach them. The helper cannot stamp a tool, so its callers must.
+_SUSPENDING_HELPERS: dict[str, tuple[str, ...]] = {
+    "long_running.py::send_and_wait": (
+        "a2a_tool.py::_create_a2a_tool",
+        "conversational_agent_tool.py::_create_conversational_agent_tool",
+    ),
+}
+
 
 def _decorator_names(fn: _Function) -> set[str]:
     names = set()
@@ -77,6 +86,16 @@ def _stamps(fn: _Function) -> bool:
     return False
 
 
+def _top_level_functions() -> dict[str, _Function]:
+    functions = {}
+    for path in sorted(_TOOLS_DIR.rglob("*.py")):
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in module.body:
+            if isinstance(fn, _Function):
+                functions[f"{path.name}::{fn.name}"] = fn
+    return functions
+
+
 def _suspending_factories() -> list[tuple[str, _Function]]:
     """Every top-level factory under the tools package that suspends the run.
 
@@ -84,12 +103,11 @@ def _suspending_factories() -> list[tuple[str, _Function]]:
     builders next to a non-suspending one, so a module-wide answer would let a
     third suspending builder pass on a sibling's stamp.
     """
-    found = []
-    for path in sorted(_TOOLS_DIR.rglob("*.py")):
-        module = ast.parse(path.read_text(encoding="utf-8"))
-        for fn in module.body:
-            if isinstance(fn, _Function) and _suspends(fn):
-                found.append((f"{path.name}::{fn.name}", fn))
+    found = [
+        (name, fn)
+        for name, fn in _top_level_functions().items()
+        if _suspends(fn) and name not in _SUSPENDING_HELPERS
+    ]
     assert found, f"no suspending tool factories found under {_TOOLS_DIR}"
     return found
 
@@ -105,4 +123,25 @@ def test_suspending_factory_stamps_the_flag(factory: str, node: _Function) -> No
         f"{factory} suspends the run but does not set {SUSPENDS_RUN!r} in its "
         f"tool metadata. Add `SUSPENDS_RUN: True` to the tool's metadata dict, "
         f"or the tool becomes callable from the code interpreter's tools namespace."
+    )
+
+
+@pytest.mark.parametrize("helper", sorted(_SUSPENDING_HELPERS))
+def test_suspending_helper_is_registered_with_its_callers(helper: str) -> None:
+    """A listed helper exists and still suspends, so the list cannot go stale."""
+    functions = _top_level_functions()
+    assert helper in functions, f"{helper} no longer exists"
+    assert _suspends(functions[helper]), f"{helper} no longer suspends the run"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    sorted({caller for callers in _SUSPENDING_HELPERS.values() for caller in callers}),
+)
+def test_factory_using_a_suspending_helper_stamps_the_flag(factory: str) -> None:
+    """A factory whose tool calls a suspending helper stamps ``SUSPENDS_RUN``."""
+    functions = _top_level_functions()
+    assert factory in functions, f"{factory} no longer exists"
+    assert _stamps(functions[factory]), (
+        f"{factory} reaches a suspending helper but does not set {SUSPENDS_RUN!r}"
     )
