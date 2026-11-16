@@ -9,6 +9,8 @@ GATEWAY_FOLDER_KEY=$(uv run python ../common/resolve_folder_key.py "$GATEWAY_FOL
 GATEWAY_TRACE_ID=$(uv run python -c "import uuid; print(uuid.uuid4().hex)" | tail -n 1) || true
 
 if [[ "$GATEWAY_FOLDER_KEY" =~ ^[0-9a-fA-F-]{36}$ && "$GATEWAY_TRACE_ID" =~ ^[0-9a-f]{32}$ ]]; then
+    # Never print the folder key; on GitHub Actions, mask it in case anything does.
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then echo "::add-mask::$GATEWAY_FOLDER_KEY"; fi
     export UIPATH_FOLDER_KEY="$GATEWAY_FOLDER_KEY"
     export UIPATH_TRACE_ID="$GATEWAY_TRACE_ID"
     mkdir -p .uipath
