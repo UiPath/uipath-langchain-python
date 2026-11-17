@@ -11,7 +11,10 @@ On resume the node replays. Every step done earlier returns its saved value
 without running its body: the send is never repeated, and only the poll after
 the last saved one calls the remote agent. Each step yields exactly one
 ``interrupt()`` call on every run (one send, then one per poll), so the indexes
-stay in step with LangGraph's interrupt counter. Step bodies never raise for the
+stay in step with LangGraph's interrupt counter. This relies on the runtime
+resuming by interrupt id (``Command(resume={interrupt_id: value})``), as the
+UiPath runtime does: a plain ``Command(resume=value)`` re-runs the woken poll
+once more before saving it. Step bodies never raise for the
 same reason: a failure is saved as a payload and raised after the step returns.
 """
 
@@ -22,7 +25,9 @@ from logging import getLogger
 from typing import Any
 
 import a2a.utils.errors as a2a_errors
+import httpx
 from a2a.client import Client
+from a2a.client.errors import A2AClientError, A2AClientTimeoutError
 from a2a.types import (
     GetTaskRequest,
     Message,
@@ -128,6 +133,26 @@ def _can_suspend() -> bool:
     return configurable.get(CONFIG_KEY_SCRATCHPAD) is not None
 
 
+def _is_transient(error: Exception) -> bool:
+    """Whether a failed poll may succeed if retried on the next wake-up.
+
+    Network errors, timeouts, 5xx, 408 and 429 are transient. An a2a protocol
+    error, or any other HTTP status (401, 403, 404...), will fail the same way
+    on every poll.
+    """
+    if not isinstance(error, a2a_errors.A2AError):
+        return True
+    if isinstance(error, (A2AClientTimeoutError, a2a_errors.InternalError)):
+        return True
+    if type(error) is not A2AClientError:
+        return False
+    cause = error.__cause__
+    if isinstance(cause, httpx.HTTPStatusError):
+        status = cause.response.status_code
+        return status >= 500 or status in (408, 429)
+    return isinstance(cause, httpx.RequestError)
+
+
 def _reply_payload(
     reply: Task | Message, *, started_at: datetime | None = None
 ) -> dict[str, Any]:
@@ -211,9 +236,11 @@ async def send_and_wait(
     timed out instead.
 
     Raises:
-        A2AError: The send failed, or the remote agent no longer has the task.
-            The a2a subclass (``TaskNotFoundError``, ``InvalidRequestError``...)
-            is kept across replays.
+        A2AError: The send failed, or a poll failed in a way a retry would not
+            fix (task not found, a protocol error, 401/403...). Network errors,
+            timeouts, 5xx, 408 and 429 are retried on the next wake-up. The a2a
+            subclass (``TaskNotFoundError``, ``InvalidRequestError``...) is kept
+            across replays.
     """
     settings = settings or DEFAULT_POLL_SETTINGS
 
@@ -251,10 +278,13 @@ async def send_and_wait(
         now = _utcnow()
         try:
             task: Task | None = await client.get_task(GetTaskRequest(id=task_id))
-        except a2a_errors.TaskNotFoundError as e:
-            return _Saved(_error_payload(e))
-        except Exception:
-            logger.warning("A2A poll of task %s failed", task_id, exc_info=True)
+        except Exception as e:
+            if not _is_transient(e):
+                logger.warning("A2A poll of task %s failed", task_id, exc_info=True)
+                return _Saved(_error_payload(e))
+            logger.warning(
+                "A2A poll of task %s failed; retrying", task_id, exc_info=True
+            )
             task = None
         if task is not None and not is_waiting(task):
             return _Saved(_reply_payload(task))

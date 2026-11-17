@@ -11,7 +11,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, TypedDict
 
+import httpx
 import pytest
+from a2a.client.errors import A2AClientError, A2AClientTimeoutError
 from a2a.types import (
     Artifact,
     GetTaskRequest,
@@ -24,7 +26,13 @@ from a2a.types import (
     TaskState,
     TaskStatus,
 )
-from a2a.utils.errors import A2AError, InternalError, TaskNotFoundError
+from a2a.utils.errors import (
+    A2AError,
+    InternalError,
+    InvalidRequestError,
+    TaskNotFoundError,
+    UnsupportedOperationError,
+)
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -280,22 +288,65 @@ async def test_running_task_suspends_until_the_timer_then_returns(
     assert len(sends) == 1
 
 
-async def test_lost_task_fails_cleanly(clock: _Clock) -> None:
-    client = _ScriptedClient(_working(), [_working(), TaskNotFoundError("expired")])
+def _http_error(status: int) -> A2AClientError:
+    """What the JSON-RPC transport raises for an HTTP error status."""
+    request = httpx.Request("POST", "https://agent.test/")
+    cause = httpx.HTTPStatusError(
+        "error", request=request, response=httpx.Response(status, request=request)
+    )
+    error = A2AClientError(f"HTTP Error: {status}")
+    error.__cause__ = cause
+    return error
+
+
+def _network_error() -> A2AClientError:
+    error = A2AClientError("Network communication error")
+    error.__cause__ = httpx.ConnectError("refused")
+    return error
+
+
+@pytest.mark.parametrize(
+    ("error", "error_type"),
+    [
+        (TaskNotFoundError("expired"), "TaskNotFoundError"),
+        (InvalidRequestError("bad request"), "InvalidRequestError"),
+        (UnsupportedOperationError("no tasks/get"), "UnsupportedOperationError"),
+        (_http_error(401), "A2AError"),
+        (_http_error(403), "A2AError"),
+        (_http_error(404), "A2AError"),
+    ],
+)
+async def test_poll_error_a_retry_cannot_fix_fails_the_call(
+    clock: _Clock, error: Exception, error_type: str
+) -> None:
+    client = _ScriptedClient(_working(), [_working(), error])
     graph = _graph(client, NO_INLINE_WAIT)
-    config: Any = {"configurable": {"thread_id": "t2"}}
+    config: Any = {"configurable": {"thread_id": "fatal"}}
 
     wait = _wait_until(await graph.ainvoke({"result": None}, config))
     final = await graph.ainvoke(_timer_fired(wait), config)
 
-    assert final["result"] == {"error": "TaskNotFoundError", "message": "expired"}
+    assert final["result"] == {"error": error_type, "message": str(error)}
     assert len(client.sent) == 1
 
 
-async def test_failed_poll_is_retried_on_the_next_wake_up(clock: _Clock) -> None:
-    client = _ScriptedClient(_working(), [InternalError("502"), _completed()])
+@pytest.mark.parametrize(
+    "error",
+    [
+        InternalError("internal"),
+        A2AClientTimeoutError("timed out"),
+        _network_error(),
+        _http_error(502),
+        _http_error(429),
+        RuntimeError("unexpected"),
+    ],
+)
+async def test_transient_poll_error_is_retried_on_the_next_wake_up(
+    clock: _Clock, error: Exception
+) -> None:
+    client = _ScriptedClient(_working(), [error, _completed()])
     graph = _graph(client, NO_INLINE_WAIT)
-    config: Any = {"configurable": {"thread_id": "t3"}}
+    config: Any = {"configurable": {"thread_id": "transient"}}
 
     wait = _wait_until(await graph.ainvoke({"result": None}, config))
     final = await graph.ainvoke(_timer_fired(wait), config)
