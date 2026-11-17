@@ -18,17 +18,16 @@ from uipath_langchain.agent.guardrails.actions.base_action import (
     GuardrailActionNode,
     GuardrailActionNodes,
 )
-from uipath_langchain.agent.guardrails.governance import (
-    GuardrailCheckContext,
-    guardrail_check_context,
-)
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
     create_agent_init_guardrail_node,
     create_agent_terminate_guardrail_node,
     create_llm_guardrail_node,
     create_tool_guardrail_node,
 )
-from uipath_langchain.agent.guardrails.types import ExecutionStage
+from uipath_langchain.agent.guardrails.types import (
+    ExecutionStage,
+    GuardrailEnforcementContext,
+)
 from uipath_langchain.agent.react.types import (
     AgentGraphState,
     AgentGuardrailsGraphState,
@@ -48,7 +47,7 @@ class GuardrailNodeFactory(Protocol):
         failure_node: str,
         *,
         termination_mode: GuardrailTerminationMode | None = None,
-        check_context: GuardrailCheckContext | None = None,
+        enforcement_context: GuardrailEnforcementContext | None = None,
     ) -> GuardrailActionNode: ...
 
 
@@ -206,8 +205,10 @@ def _build_guardrail_node_chain(
         next_node,
         first_fail_node_name,
         termination_mode=action.termination_mode,
-        check_context=guardrail_check_context(
-            scope, execution_stage, action.action_type
+        enforcement_context=GuardrailEnforcementContext(
+            scope=scope,
+            execution_stage=execution_stage,
+            action_type=action.action_type,
         ),
     )
 

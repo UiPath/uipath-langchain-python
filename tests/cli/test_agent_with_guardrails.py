@@ -287,7 +287,14 @@ graph = create_agent(
                 sent_modes: dict[str, Any] = {}
 
                 def mock_evaluate_guardrail(
-                    text, guardrail, *, attachments=None, termination_mode=None
+                    text,
+                    guardrail,
+                    *,
+                    attachments=None,
+                    termination_mode=None,
+                    scope=None,
+                    execution_stage=None,
+                    action_type=None,
                 ):
                     """Mock guardrail evaluation that detects PII."""
                     sent_modes[guardrail.name] = termination_mode
@@ -436,7 +443,14 @@ graph = create_agent(
 
                 # Mock the guardrails service - prompt injection guardrail should fail
                 def mock_evaluate_guardrail(
-                    text, guardrail, *, attachments=None, termination_mode=None
+                    text,
+                    guardrail,
+                    *,
+                    attachments=None,
+                    termination_mode=None,
+                    scope=None,
+                    execution_stage=None,
+                    action_type=None,
                 ):
                     """Mock guardrail evaluation - prompt injection fails, others pass."""
                     # Prompt injection guardrail should detect and block
@@ -882,7 +896,14 @@ graph = create_agent(
 
                 # Mock the guardrails service - PII guardrail at tool level should detect email
                 def mock_evaluate_guardrail(
-                    text, guardrail, *, attachments=None, termination_mode=None
+                    text,
+                    guardrail,
+                    *,
+                    attachments=None,
+                    termination_mode=None,
+                    scope=None,
+                    execution_stage=None,
+                    action_type=None,
                 ):
                     """Mock guardrail evaluation that detects PII in tool input."""
                     # Tool-level PII guardrail should detect email addresses
@@ -1045,7 +1066,14 @@ graph = create_agent(
 
                 # Mock the guardrails service - PII guardrail at LLM level should detect PII
                 def mock_evaluate_guardrail(
-                    text, guardrail, *, attachments=None, termination_mode=None
+                    text,
+                    guardrail,
+                    *,
+                    attachments=None,
+                    termination_mode=None,
+                    scope=None,
+                    execution_stage=None,
+                    action_type=None,
                 ):
                     """Mock guardrail evaluation that detects PII in LLM output."""
                     # LLM-level PII escalation guardrail should detect email addresses
@@ -1284,7 +1312,14 @@ graph = create_agent(
 
                 # Mock the guardrails service - PII guardrail at LLM level should detect PII
                 def mock_evaluate_guardrail(
-                    text, guardrail, *, attachments=None, termination_mode=None
+                    text,
+                    guardrail,
+                    *,
+                    attachments=None,
+                    termination_mode=None,
+                    scope=None,
+                    execution_stage=None,
+                    action_type=None,
                 ):
                     """Mock guardrail evaluation that detects PII in LLM output."""
                     # LLM-level PII escalation guardrail should detect email addresses

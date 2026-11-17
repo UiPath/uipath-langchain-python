@@ -47,9 +47,9 @@ class FakeGuardrails:
         *,
         attachments=None,
         termination_mode=None,
-        hook=None,
-        mode=None,
-        action_on_violation=None,
+        scope=None,
+        execution_stage=None,
+        action_type=None,
     ):
         self.call_count += 1
         self.last_text = text
@@ -1786,9 +1786,9 @@ class TestGuardrailNodeAttachments:
                 *,
                 attachments=None,
                 termination_mode=None,
-                hook=None,
-                mode=None,
-                action_on_violation=None,
+                scope=None,
+                execution_stage=None,
+                action_type=None,
             ):
                 calls.append(attachments)
                 raise rejection
@@ -1831,9 +1831,9 @@ class TestGuardrailNodeAttachments:
                 *,
                 attachments=None,
                 termination_mode=None,
-                hook=None,
-                mode=None,
-                action_on_violation=None,
+                scope=None,
+                execution_stage=None,
+                action_type=None,
             ):
                 calls.append(attachments)
                 if attachments:
@@ -1888,9 +1888,9 @@ class TestGuardrailNodeAttachments:
                 *,
                 attachments=None,
                 termination_mode=None,
-                hook=None,
-                mode=None,
-                action_on_violation=None,
+                scope=None,
+                execution_stage=None,
+                action_type=None,
             ):
                 raise rejection
 
@@ -2452,9 +2452,9 @@ class TestGuardrailTerminationModeForwarding:
                 *,
                 attachments=None,
                 termination_mode=None,
-                hook=None,
-                mode=None,
-                action_on_violation=None,
+                scope=None,
+                execution_stage=None,
+                action_type=None,
             ):
                 calls.append((attachments, termination_mode))
                 if attachments:
@@ -2507,7 +2507,7 @@ class TestGuardrailTerminationModeForwarding:
             failure_node,
             *,
             termination_mode=None,
-            check_context=None,
+            enforcement_context=None,
         ):
             seen.append((guardrail.name, termination_mode))
             return f"eval_{guardrail.name}", (lambda s: s)
