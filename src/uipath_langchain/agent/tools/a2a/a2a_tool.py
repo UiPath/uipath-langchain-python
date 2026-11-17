@@ -335,13 +335,6 @@ async def _send_a2a_message(
     Returns:
         Tuple of (response_text, task_state, new_task_id, new_context_id).
     """
-    if task_id or context_id:
-        logger.info(
-            "A2A continue task=%s context=%s to %s", task_id, context_id, agent_label
-        )
-    else:
-        logger.info("A2A new message to %s", agent_label)
-
     a2a_message = new_text_message(
         message,
         role=Role.ROLE_USER,

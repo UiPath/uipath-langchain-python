@@ -285,7 +285,6 @@ _ConversationSend = Callable[
 
 async def _send_message(
     client: Client,
-    agent_label: str,
     *,
     message: str,
     task_id: str | None,
@@ -303,13 +302,6 @@ async def _send_message(
     Returns:
         Tuple of (response_text, task_state, new_task_id, new_context_id).
     """
-    if task_id or context_id:
-        logger.info(
-            "A2A continue task=%s context=%s to %s", task_id, context_id, agent_label
-        )
-    else:
-        logger.info("A2A new message to %s", agent_label)
-
     a2a_message = new_text_message(
         message,
         role=Role.ROLE_USER,
@@ -854,7 +846,6 @@ def _create_conversational_agent_tool(
 ) -> BaseTool:
     """Create the LangChain tool for one conversational agent."""
     display_name = agent_card.name or config.name
-    agent_label = config.properties.process_name or config.name
     metadata = {
         "tool_type": "a2a",
         "display_name": display_name,
@@ -899,7 +890,6 @@ def _create_conversational_agent_tool(
                 client = await a2a_client.get()
                 text, state, new_task_id, new_context_id = await _send_message(
                     client,
-                    agent_label,
                     message=message,
                     task_id=task_id,
                     context_id=context_id,

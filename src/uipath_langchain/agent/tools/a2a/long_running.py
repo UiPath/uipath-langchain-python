@@ -220,6 +220,11 @@ async def send_and_wait(
     @durable_interrupt
     async def send() -> _Saved:
         started_at = _utcnow()
+        logger.info(
+            "A2A send: task=%s context=%s",
+            message.task_id or "new",
+            message.context_id or "new",
+        )
         try:
             reply = await _send_nonblocking(client, message)
             if isinstance(reply, Task):

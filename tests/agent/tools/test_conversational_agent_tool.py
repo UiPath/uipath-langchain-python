@@ -1526,7 +1526,6 @@ async def test_send_message_raises_request_errors() -> None:
     with pytest.raises(A2AError, match="boom"):
         await _send_message(
             cast(Client, _RaisingA2aClient()),
-            "support-agent",
             message="ping",
             task_id=None,
             context_id=None,
@@ -1538,7 +1537,6 @@ async def test_send_message_reports_a_plain_reply_as_input_required() -> None:
 
     result = await _send_message(
         cast(Client, client),
-        "support-agent",
         message="ping",
         task_id=None,
         context_id=None,
@@ -1554,7 +1552,6 @@ async def test_send_message_returns_the_state_and_ids_of_a_task_reply() -> None:
 
     result = await _send_message(
         cast(Client, client),
-        "support-agent",
         message="ping",
         task_id="t0",
         context_id="c1",

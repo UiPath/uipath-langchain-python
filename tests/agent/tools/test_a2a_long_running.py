@@ -6,6 +6,7 @@ replay is deterministic: the message is sent once, and each run polls at most on
 """
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, TypedDict
@@ -251,8 +252,9 @@ def _timer_fired(pending: tuple[str, WaitUntil]) -> Command[Any]:
 
 
 async def test_running_task_suspends_until_the_timer_then_returns(
-    clock: _Clock,
+    clock: _Clock, caplog: pytest.LogCaptureFixture
 ) -> None:
+    caplog.set_level(logging.INFO, logger=long_running.__name__)
     client = _ScriptedClient(_working(), [_working(), _working(), _completed()])
     graph = _graph(client, NO_INLINE_WAIT)
     config: Any = {"configurable": {"thread_id": "t1"}}
@@ -273,6 +275,9 @@ async def test_running_task_suspends_until_the_timer_then_returns(
     # Sent once across three runs; each run polled exactly once.
     assert len(client.sent) == 1
     assert client.polled == ["task-1", "task-1", "task-1"]
+    # Resumed runs replay the send from the checkpoint, so it is not logged again.
+    sends = [r for r in caplog.records if r.getMessage().startswith("A2A send")]
+    assert len(sends) == 1
 
 
 async def test_lost_task_fails_cleanly(clock: _Clock) -> None:
