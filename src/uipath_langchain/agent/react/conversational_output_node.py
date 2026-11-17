@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
 from uipath.agent.react.conversational_prompts import (
     get_generate_output_prompt,
-    strip_conversational_output_section,
+    strip_conversational_output_hint_section,
 )
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
@@ -103,7 +103,7 @@ def create_conversational_output_extractor(
         first = messages[0]
         if not isinstance(first, SystemMessage) or not isinstance(first.content, str):
             return messages
-        stripped = strip_conversational_output_section(first.content)
+        stripped = strip_conversational_output_hint_section(first.content)
         if stripped != first.content:
             messages[0] = first.model_copy(update={"content": stripped})
         return messages
