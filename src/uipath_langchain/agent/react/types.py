@@ -38,6 +38,7 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
 
     guardrail_validation_result: Optional[bool] = None
     guardrail_validation_details: Optional[str] = None
+    guardrail_validation_error_type: Optional[str] = None
     guardrail_span_id: Optional[str] = None
     guardrail_flagged_file_names: Optional[list[str]] = None
     guardrail_attachments: Optional[list[dict[str, str]]] = None
