@@ -2,7 +2,8 @@
 
 > **CLAUDE: UPDATE THIS DOCUMENT**
 >
-> When you modify `test_mcp_client.py`, `test_mcp_client_real_http.py` or `test_mcp_tool.py`, you MUST update this document to reflect:
+> When you modify `test_mcp_client.py`, `test_mcp_client_real_http.py`,
+> `test_streamable_http_redirects.py` or `test_mcp_tool.py`, you MUST update this document to reflect:
 > - New test cases (add to Test File Structure and create explanation section)
 > - Changes to MockStreamResponse (update Handled MCP Methods table and examples)
 > - New mocking patterns (add to Common Patterns section)
@@ -30,6 +31,11 @@ uvicorn servers on loopback ports. A recording ASGI wrapper stores each request
 and can answer chosen (method, path) pairs with a 307 redirect. Use it to test
 redirect handling for POST, GET stream and DELETE, same-origin and cross-origin.
 
+`test_streamable_http_redirects.py` drives the public `streamable_http_client`
+through an `httpx.MockTransport`. Use it for redirect cases that a real server
+cannot produce easily: HTTPS to HTTP downgrade, resumption GET and reconnection
+GET.
+
 ## Test File Structure
 
 ```
@@ -43,6 +49,14 @@ tests/agent/tools/test_mcp/
 │       ├── test_same_origin_redirect_is_followed
 │       ├── test_same_origin_get_stream_redirect_is_followed
 │       └── test_same_origin_delete_redirect_is_followed
+│
+├── test_streamable_http_redirects.py  # Transport redirects through httpx.MockTransport
+│   └── TestStreamableHttpRedirects (class)
+│       ├── test_https_to_http_redirect_is_not_followed
+│       ├── test_resumption_follows_same_origin_redirect
+│       ├── test_resumption_cross_origin_redirect_is_not_followed
+│       ├── test_reconnection_follows_same_origin_redirect
+│       └── test_reconnection_cross_origin_redirect_is_not_followed
 │
 ├── test_mcp_client.py         # McpClient session tests (7 tests)
 │   └── TestMcpClient (class)
@@ -629,6 +643,7 @@ def _build_response(self):
 |------|---------|
 | `test_mcp_client.py` | McpClient session tests (7 tests) |
 | `test_mcp_client_real_http.py` | Real-HTTP transport and redirect tests (7 tests) |
+| `test_streamable_http_redirects.py` | Downgrade, resumption and reconnection redirect tests (5 tests) |
 | `test_mcp_tool.py` | Tool factory tests (17 tests) |
 | `src/.../mcp/mcp_client.py` | McpClient implementation |
 | `src/.../mcp/mcp_tool.py` | Tool factory implementation |

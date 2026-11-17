@@ -136,7 +136,9 @@ class _ServerThread:
         self.thread: threading.Thread | None = None
 
     def start(self, app: Any, lifespan: Literal["on", "off"] = "on") -> None:
-        config = uvicorn.Config(app, log_level="warning", lifespan=lifespan)
+        config = uvicorn.Config(
+            app, log_level="warning", lifespan=lifespan, timeout_graceful_shutdown=2
+        )
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(
             target=self.server.run, kwargs={"sockets": [self.sock]}, daemon=True
