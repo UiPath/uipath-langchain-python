@@ -478,6 +478,11 @@ class TestMcpToolInvocation:
             async def __aexit__(self, *args: Any, **kwargs: Any):
                 pass
 
+            next_request = None
+
+            async def aclose(self) -> None:
+                pass
+
             async def aread(self) -> bytes:
                 """Return the response content."""
                 return self._content
@@ -492,15 +497,24 @@ class TestMcpToolInvocation:
     def create_mock_http_client(self, mock_stream_response_class: type) -> MagicMock:
         """Create a mock HTTP client that uses the given stream response class."""
         mock_client = MagicMock()
-        mock_client.stream = lambda method, url, **kwargs: mock_stream_response_class(
-            method, url, **kwargs
-        )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
-        # Mock the delete method for session termination (returns 204 No Content)
+        mock_client.max_redirects = 20
+        mock_client.build_request = lambda method, url, **kwargs: (method, url, kwargs)
+
         mock_delete_response = MagicMock()
         mock_delete_response.status_code = 204
-        mock_client.delete = AsyncMock(return_value=mock_delete_response)
+        mock_delete_response.next_request = None
+        mock_delete_response.aread = AsyncMock(return_value=b"")
+        mock_delete_response.aclose = AsyncMock()
+
+        async def send(request: Any, **kwargs: Any) -> Any:
+            method, url, request_kwargs = request
+            if method == "DELETE":
+                return mock_delete_response
+            return mock_stream_response_class(method, url, **request_kwargs)
+
+        mock_client.send = send
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
         return mock_client
 
     @pytest.mark.asyncio
