@@ -80,37 +80,26 @@ def create_conversational_output_extractor(
     )
     output_prompt = get_generate_output_prompt()
 
-    def without_output_section(
+    def without_output_hint_section(
         exchange_messages: Sequence[BaseMessage],
-    ) -> list[BaseMessage]:
-        """Drop the loop-only output-fields section from the system message.
-
-        It tells the agent it has no tool for these fields — true in the loop,
-        the opposite here. The system prompt also outranks the user message
-        carrying `output_prompt` by its own precedence hierarchy, so leaving it
-        in would point the model at the prohibition.
-
-        Only the first message is considered, because that is the only place
-        the section can be. The standard loop's init node puts the freshly
-        built system prompt at index 0 and drops any stale one from the
-        replayed history; the advanced loop keeps its prompt out of state
-        entirely, injecting it per model call, so there is no system message
-        here at all.
-        """
-        messages = list(exchange_messages)
-        if not messages:
-            return messages
-        first = messages[0]
+    ) -> Sequence[BaseMessage]:
+        """Drop the output-fields section from the system message, which is only relevant for the central conversational loop."""
+        if not exchange_messages:
+            return exchange_messages
+        first = exchange_messages[0]
         if not isinstance(first, SystemMessage) or not isinstance(first.content, str):
-            return messages
+            return exchange_messages
         stripped = strip_conversational_output_hint_section(first.content)
-        if stripped != first.content:
-            messages[0] = first.model_copy(update={"content": stripped})
-        return messages
+        if stripped == first.content:
+            return exchange_messages
+        return [
+            first.model_copy(update={"content": stripped}),
+            *exchange_messages[1:],
+        ]
 
     async def extract(exchange_messages: Sequence[BaseMessage]) -> dict[str, Any]:
         messages = [
-            *without_output_section(exchange_messages),
+            *without_output_hint_section(exchange_messages),
             HumanMessage(content=output_prompt),
         ]
         config = config_without_streaming(var_child_runnable_config.get(None))
