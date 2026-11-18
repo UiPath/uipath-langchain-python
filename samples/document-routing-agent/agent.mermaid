@@ -1,0 +1,24 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	prepare_document(prepare_document)
+	analyze_content(analyze_content)
+	calculate_routing_scores(calculate_routing_scores)
+	determine_routing(determine_routing)
+	calculate_priority(calculate_priority)
+	finalize_routing(finalize_routing)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> prepare_document;
+	analyze_content --> calculate_routing_scores;
+	calculate_priority --> finalize_routing;
+	calculate_routing_scores --> determine_routing;
+	determine_routing --> calculate_priority;
+	prepare_document --> analyze_content;
+	finalize_routing --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
