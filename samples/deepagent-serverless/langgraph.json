@@ -1,0 +1,6 @@
+{
+  "graphs": {
+    "agent": "./src/deepagent_serverless/graph.py:deep_agent",
+    "sandbox": "./src/deepagent_serverless/sandbox.py:graph"
+  }
+}
