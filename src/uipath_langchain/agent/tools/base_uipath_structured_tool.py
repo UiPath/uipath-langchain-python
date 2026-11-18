@@ -1,4 +1,5 @@
-from inspect import signature
+from collections.abc import Callable, Mapping
+from inspect import Parameter, signature
 from typing import Any
 
 from langchain_core.callbacks import (
@@ -16,6 +17,10 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
+
+
+def _signature_parameters(func: Callable[..., Any]) -> Mapping[str, Parameter]:
+    return signature(func).parameters
 
 
 class BaseUiPathStructuredTool(StructuredTool):
@@ -53,7 +58,7 @@ class BaseUiPathStructuredTool(StructuredTool):
             The result of the tool execution
         """
         if __obj_internal_self__.func:
-            if run_manager and signature(__obj_internal_self__.func).parameters.get(
+            if run_manager and _signature_parameters(__obj_internal_self__.func).get(
                 "callbacks"
             ):
                 kwargs["callbacks"] = run_manager.get_child()
@@ -82,9 +87,9 @@ class BaseUiPathStructuredTool(StructuredTool):
             The result of the tool execution
         """
         if __obj_internal_self__.coroutine:
-            if run_manager and signature(
+            if run_manager and _signature_parameters(
                 __obj_internal_self__.coroutine
-            ).parameters.get("callbacks"):
+            ).get("callbacks"):
                 kwargs["callbacks"] = run_manager.get_child()
             if config_param := _get_runnable_config_param(
                 __obj_internal_self__.coroutine

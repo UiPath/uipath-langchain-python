@@ -10,7 +10,11 @@ Requires the ``code-interpreter`` extra, which CI installs via
 """
 
 import asyncio
+import inspect
+import os
+import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any, Sequence, cast, get_args
 
@@ -26,6 +30,7 @@ from uipath_langchain.agent.advanced import (
     PTC_FILESYSTEM_TOOLS,
     PersistenceMode,
     build_code_interpreter_middleware,
+    code_interpreter,
     create_advanced_agent,
     ptc_tool_names,
     subagent_dispatch_is_replay_safe,
@@ -276,22 +281,115 @@ def test_factory_returns_one_middleware() -> None:
     assert len(build_code_interpreter_middleware([_tool("read_invoice")])) == 1
 
 
-def test_factory_closes_the_repl_registry_at_exit(
+def test_c18_factory_registers_no_exit_hook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The REPL registry is closed from ``atexit``, not left to ``__del__``.
-
-    Upstream closes QuickJS contexts from ``__del__`` by blocking on its daemon
-    worker thread. At interpreter finalization that thread is gone and the wait
-    never returns, so a process that built this middleware cannot exit. Asserted
-    on the ``atexit`` registration because the hang itself only shows at exit.
-    """
+    """Upstream shuts its REPL registry down cleanly, so no exit cleanup is ours."""
     registered: list[Any] = []
     monkeypatch.setattr("atexit.register", registered.append)
 
-    middleware = build_code_interpreter_middleware([_tool("read_invoice")])[0]
+    middleware = build_code_interpreter_middleware([_tool("read_invoice")])
 
-    assert registered == [cast(Any, middleware)._registry.close]
+    assert len(middleware) == 1
+    assert registered == []
+
+
+def test_c18_module_carries_no_exit_workaround() -> None:
+    assert not hasattr(code_interpreter, "_close_at_exit")
+    assert "atexit" not in inspect.getsource(code_interpreter)
+
+
+# A whole process: build the graph, run one ``eval``, then let the interpreter
+# finalize on its own. A REPL left to ``__del__`` at finalization hangs the exit.
+_ONE_EVAL_THEN_EXIT = """
+import asyncio, sys
+from typing import Any, Sequence
+from deepagents.backends import FilesystemBackend
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
+from uipath_langchain.agent.advanced import (
+    build_code_interpreter_middleware,
+    create_advanced_agent,
+)
+
+
+class _Model(GenericFakeChatModel):
+    model_name: str = "test-model-code-interpreter-exit"
+
+    def _get_ls_params(self, stop=None, **kwargs: Any) -> Any:
+        return {"ls_provider": "openai", "ls_model_name": self.model_name}
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "_Model":
+        return self
+
+
+graph = create_advanced_agent(
+    model=_Model(messages=iter([
+        AIMessage(content="", tool_calls=[
+            {"name": "eval", "args": {"code": "10 * 32"}, "id": "c1"}
+        ]),
+        AIMessage(content="done"),
+    ])),
+    backend=FilesystemBackend(root_dir=sys.argv[1], virtual_mode=True),
+    middleware=build_code_interpreter_middleware([]),
+)
+result = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "go"}]}))
+tool_messages = [m.content for m in result["messages"] if m.type == "tool"]
+print("RESULT:" + str(tool_messages[0] if tool_messages else "none"))
+"""
+
+
+def _isolated_env(root: Path) -> dict[str, str]:
+    home, cache = root / "home", root / "cache"
+    home.mkdir()
+    cache.mkdir()
+    return {
+        **os.environ,
+        "HOME": str(home),
+        "XDG_CACHE_HOME": str(cache),
+        "PYTHONWARNINGS": "ignore",
+    }
+
+
+def test_c9_a_process_that_ran_eval_exits_on_its_own(tmp_path: Path) -> None:
+    script = tmp_path / "one_eval.py"
+    script.write_text(textwrap.dedent(_ONE_EVAL_THEN_EXIT), encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    proc = subprocess.run(
+        [sys.executable, str(script), str(workspace)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_isolated_env(tmp_path),
+    )
+
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "RESULT:" in proc.stdout, proc.stdout[-2000:]
+    assert "<result>320</result>" in proc.stdout
+
+
+def test_c19_a_process_that_built_the_middleware_exits_on_its_own(
+    tmp_path: Path,
+) -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from uipath_langchain.agent.advanced import"
+            " build_code_interpreter_middleware;"
+            " build_code_interpreter_middleware([])",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_isolated_env(tmp_path),
+    )
+
+    assert proc.returncode == 0, proc.stderr[-2000:]
 
 
 def test_factory_warms_the_interpreter_before_building_the_repl(
@@ -397,6 +495,33 @@ def test_mode_is_forwarded_to_the_middleware() -> None:
     # is what the model actually reads, rather than a private attribute.
     assert "Persistent state is enabled:" in _eval_description()
     assert "within a single turn" in _eval_description(mode="turn")
+
+
+class _PromptRecordingModel(_ScriptedModel):
+    """Records the system prompt of every model call."""
+
+    prompts: list[str] = []
+
+    def _generate(self, messages: Any, *args: Any, **kwargs: Any) -> Any:
+        self.prompts.append(str(messages[0].content))
+        return super()._generate(messages, *args, **kwargs)
+
+
+def test_c10_timeout_is_forwarded_to_the_middleware() -> None:
+    """Asserted on the interpreter prompt the model reads, like the mode above."""
+    model = _PromptRecordingModel(
+        messages=iter([AIMessage(content="done")]), prompts=[]
+    )
+    graph = create_advanced_agent(
+        model=model,
+        middleware=build_code_interpreter_middleware(
+            [_tool("read_invoice")], timeout=7.5
+        ),
+    )
+
+    asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "go"}]}))
+
+    assert "Timeout: 7.5s per call" in model.prompts[0]
 
 
 # --------------------------------------------------------------------------

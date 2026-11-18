@@ -1,8 +1,11 @@
 """Tests for BaseUiPathStructuredTool to ensure it stays in sync with StructuredTool."""
 
 from types import CodeType
+from typing import Any
 
 import pytest
+from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory
@@ -138,6 +141,70 @@ def test_function_with_self_parameter():
     assert result == "test:42"
 
 
+class _ValueArgs(BaseModel):
+    value: int
+
+
+def test_function_receives_callbacks_when_it_declares_them():
+    def my_function(value: int, callbacks: Any = None) -> bool:
+        return isinstance(callbacks, CallbackManager)
+
+    tool = BaseUiPathStructuredTool(
+        func=my_function,
+        name="callbacks_tool",
+        description="Tool taking callbacks",
+        args_schema=_ValueArgs,
+    )
+
+    assert tool.invoke({"value": 1}) is True
+
+
+@pytest.mark.asyncio
+async def test_coroutine_receives_callbacks_when_it_declares_them():
+    async def my_coroutine(value: int, callbacks: Any = None) -> bool:
+        return isinstance(callbacks, AsyncCallbackManager)
+
+    tool = BaseUiPathStructuredTool(
+        coroutine=my_coroutine,
+        name="callbacks_tool_async",
+        description="Async tool taking callbacks",
+        args_schema=_ValueArgs,
+    )
+
+    assert await tool.ainvoke({"value": 1}) is True
+
+
+def test_function_receives_the_runnable_config():
+    def my_function(value: int, config: RunnableConfig) -> Any:
+        return config["metadata"]["run"]
+
+    tool = BaseUiPathStructuredTool(
+        func=my_function,
+        name="config_tool",
+        description="Tool taking the config",
+        args_schema=_ValueArgs,
+    )
+
+    assert tool.invoke({"value": 1}, config={"metadata": {"run": "r-1"}}) == "r-1"
+
+
+@pytest.mark.asyncio
+async def test_coroutine_receives_the_runnable_config():
+    async def my_coroutine(value: int, config: RunnableConfig) -> Any:
+        return config["metadata"]["run"]
+
+    tool = BaseUiPathStructuredTool(
+        coroutine=my_coroutine,
+        name="config_tool_async",
+        description="Async tool taking the config",
+        args_schema=_ValueArgs,
+    )
+
+    result = await tool.ainvoke({"value": 1}, config={"metadata": {"run": "r-2"}})
+
+    assert result == "r-2"
+
+
 async def _noop_coroutine(**kwargs: object) -> dict[str, object]:
     return kwargs
 
@@ -228,8 +295,8 @@ async def test_coroutine_with_self_parameter():
         args_schema=Args,
     )
 
-    result = await tool.ainvoke({"self": "async_test", "value": 99})
-    assert result == "async_test:99"
+    result = await tool.ainvoke({"self": "test", "value": 42})
+    assert result == "test:42"
 
 
 @pytest.mark.asyncio
