@@ -86,11 +86,13 @@ class _Graph:
         name: str,
         parent: Span | None = None,
         attributes: dict[str, Any] | None = None,
+        start_time: int | None = None,
     ) -> Iterator[Span]:
         span = self._tracer.start_span(
             name,
             context=trace.set_span_in_context(parent or self.span),
             attributes=attributes,
+            start_time=start_time,
         )
         previous, self.current = self.current, span
         try:
@@ -183,6 +185,28 @@ class TestStages:
         assert container.parent.span_id == graph.span.get_span_context().span_id
         assert _children(spans, container) == ["Log", "Log"]
         assert container.end_time == model_start
+
+    async def test_a_container_never_ends_before_its_last_check(
+        self, graph: _Graph
+    ) -> None:
+        pii = _pii()
+        hook = _hook(pii, "_before_model")
+
+        with (
+            patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
+            graph.node(f"{hook.name}.before_model"),
+        ):
+            await hook.abefore_model(_STATE, MagicMock())
+        # A coarse clock stamps the next node's start before the check ended.
+        with graph.node("model", start_time=time.time_ns() - 10_000_000):
+            pass
+        spans = graph.finish()
+
+        [container] = _named(spans, "LLM input guardrail check")
+        [log] = _named(spans, "Log")
+        assert container.end_time is not None
+        assert log.end_time is not None
+        assert container.end_time >= log.end_time
 
     async def test_the_container_carries_the_execution_id(self, graph: _Graph) -> None:
         pii = _pii()

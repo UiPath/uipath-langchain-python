@@ -2,6 +2,7 @@
 stage containers that group a stage's checks across separate middleware nodes."""
 
 import threading
+import time
 import weakref
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -153,6 +154,7 @@ class _GroupingState:
         )  # trace manager -> its closer
         self.guardrail_nodes: dict[str, str] = {}  # node name -> stage span type
         self.containers: dict[tuple[int, str], Span] = {}  # (parent id, type)
+        self.last_check_end: dict[int, int] = {}  # container span id -> ns
         self.lock = threading.Lock()
 
 
@@ -196,6 +198,8 @@ def guardrail_stage(
         raise
     finally:
         _current_container.reset(token)
+        with _state.lock:
+            _state.last_check_end[container.get_span_context().span_id] = time.time_ns()
 
 
 def _shared_container(
@@ -283,8 +287,14 @@ class GuardrailStageCloser(SpanProcessor):
         with _state.lock:
             done = [key for key in _state.containers if matches(key)]
             spans = [_state.containers.pop(key) for key in done]
-        for span in spans:
-            span.end(end_time=end_time)
+            last_ends = [
+                _state.last_check_end.pop(span.get_span_context().span_id, 0)
+                for span in spans
+            ]
+        for span, last_end in zip(spans, last_ends, strict=True):
+            # Never before its last check: coarse clocks (Windows before Python
+            # 3.13) can stamp the next sibling's start a tick earlier.
+            span.end(end_time=max(end_time, last_end) if end_time else None)
 
 
 def is_exported(span: ReadableSpan) -> bool:
