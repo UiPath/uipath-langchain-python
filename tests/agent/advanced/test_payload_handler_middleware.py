@@ -12,21 +12,29 @@ from langchain.agents.middleware import (
     ModelResponse,
     ToolErrorMiddleware,
 )
-from langchain.agents.structured_output import ToolStrategy
+from langchain.agents.structured_output import (
+    StructuredOutputValidationError,
+    ToolStrategy,
+)
+from langchain_anthropic import ChatAnthropic
+from langchain_core.exceptions import ModelRefusalError
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
     _PayloadHandlerMiddleware,
+    _RefusalResponseMiddleware,
     _resolve_subagent_specs,
     create_advanced_agent,
 )
 from uipath_langchain.agent.advanced.job_attachments_middleware import (
     JobAttachmentsMiddleware,
 )
+from uipath_langchain.agent.advanced.tool_choice import ToolChoiceMiddleware
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -265,6 +273,353 @@ class TestWrapModelCall:
 
         with pytest.raises(ChatModelError):
             await middleware.awrap_model_call(_request(_gemini()), handler)
+
+
+_REFUSAL_TEXT = "I refuse to help with that."
+
+
+def _refusal() -> AIMessage:
+    return AIMessage(
+        content=[{"type": "refusal", "refusal": _REFUSAL_TEXT}],
+        response_metadata={"stop_reason": "refusal"},
+    )
+
+
+def _fake_request() -> ModelRequest[Any]:
+    return _request(GenericFakeChatModel(messages=iter([])))
+
+
+def _refusing_handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+    raise ModelRefusalError(raw_message=_refusal())
+
+
+class _ScriptedModel(GenericFakeChatModel):
+    """Replays a fixed script and accepts any tool binding."""
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_ScriptedModel":
+        return self
+
+
+class _RefusingAnthropic(ChatAnthropic):
+    """A real ChatAnthropic whose provider call answers with a refusal, offline."""
+
+    model_details: dict[str, Any] = {}
+    calls: list[Any] = []
+
+    def _generate(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        self.calls.append(messages)
+        return ChatResult(generations=[ChatGeneration(message=_refusal())])
+
+    async def _agenerate(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        return self._generate(messages, stop=stop, **kwargs)
+
+
+class TestRefusalResponseMiddleware:
+    def test_c3_c20_sync_refusal_returns_the_refused_message(self) -> None:
+        refused = _refusal()
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            raise ModelRefusalError(raw_message=refused)
+
+        response = _RefusalResponseMiddleware().wrap_model_call(
+            _fake_request(), handler
+        )
+
+        assert len(response.result) == 1
+        assert response.result[0] is refused
+
+    async def test_c3_c20_async_refusal_returns_the_refused_message(self) -> None:
+        refused = _refusal()
+
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            raise ModelRefusalError(raw_message=refused)
+
+        response = await _RefusalResponseMiddleware().awrap_model_call(
+            _fake_request(), handler
+        )
+
+        assert len(response.result) == 1
+        assert response.result[0] is refused
+
+    def test_c3_sync_successful_response_passes_through_unchanged(self) -> None:
+        answered = _response(AIMessage(content="done"))
+
+        response = _RefusalResponseMiddleware().wrap_model_call(
+            _fake_request(), lambda request: answered
+        )
+
+        assert response is answered
+
+    async def test_c3_async_successful_response_passes_through_unchanged(
+        self,
+    ) -> None:
+        answered = _response(AIMessage(content="done"))
+
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            return answered
+
+        response = await _RefusalResponseMiddleware().awrap_model_call(
+            _fake_request(), handler
+        )
+
+        assert response is answered
+
+    def test_c4_c22_sync_structured_output_error_is_raised_unchanged(self) -> None:
+        source = StructuredOutputValidationError("out", ValueError("bad"), _refusal())
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            try:
+                raise source
+            except StructuredOutputValidationError:
+                raise ModelRefusalError(raw_message=_refusal()) from None
+
+        with pytest.raises(StructuredOutputValidationError) as exc_info:
+            _RefusalResponseMiddleware().wrap_model_call(_fake_request(), handler)
+
+        assert exc_info.value is source
+
+    async def test_c4_c22_async_structured_output_error_is_raised_unchanged(
+        self,
+    ) -> None:
+        source = StructuredOutputValidationError("out", ValueError("bad"), _refusal())
+
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            try:
+                raise source
+            except StructuredOutputValidationError:
+                raise ModelRefusalError(raw_message=_refusal()) from None
+
+        with pytest.raises(StructuredOutputValidationError) as exc_info:
+            await _RefusalResponseMiddleware().awrap_model_call(
+                _fake_request(), handler
+            )
+
+        assert exc_info.value is source
+
+    def test_c4_c23_sync_refusal_without_a_message_propagates(self) -> None:
+        refusal = ModelRefusalError(raw_message=None)
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            raise refusal
+
+        with pytest.raises(ModelRefusalError) as exc_info:
+            _RefusalResponseMiddleware().wrap_model_call(_fake_request(), handler)
+
+        assert exc_info.value is refusal
+
+    async def test_c4_c23_async_refusal_without_a_message_propagates(self) -> None:
+        refusal = ModelRefusalError(raw_message=None)
+
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            raise refusal
+
+        with pytest.raises(ModelRefusalError) as exc_info:
+            await _RefusalResponseMiddleware().awrap_model_call(
+                _fake_request(), handler
+            )
+
+        assert exc_info.value is refusal
+
+    def test_c4_sync_unrelated_errors_propagate(self) -> None:
+        failure = ValueError("provider down")
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            raise failure
+
+        with pytest.raises(ValueError) as exc_info:
+            _RefusalResponseMiddleware().wrap_model_call(_fake_request(), handler)
+
+        assert exc_info.value is failure
+
+    async def test_c4_async_unrelated_errors_propagate(self) -> None:
+        failure = ValueError("provider down")
+
+        async def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            raise failure
+
+        with pytest.raises(ValueError) as exc_info:
+            await _RefusalResponseMiddleware().awrap_model_call(
+                _fake_request(), handler
+            )
+
+        assert exc_info.value is failure
+
+
+class TestRefusals:
+    def test_c21_anthropic_refusal_raises_our_chat_model_error(self) -> None:
+        request = _request(ChatAnthropic(model="claude-sonnet-4-5", api_key="dummy"))
+
+        with pytest.raises(ChatModelError) as exc_info:
+            _PayloadHandlerMiddleware().wrap_model_call(
+                request,
+                lambda r: _RefusalResponseMiddleware().wrap_model_call(
+                    r, _refusing_handler
+                ),
+            )
+
+        assert "refused" in exc_info.value.error_info.title.lower()
+
+    @pytest.mark.parametrize("unforced_tool_choice", [False, True])
+    @pytest.mark.parametrize(
+        "response_format",
+        [None, ToolStrategy({"title": "end", "type": "object"})],
+        ids=["plain", "structured"],
+    )
+    async def test_c5_anthropic_main_agent_refusal_fails_the_run_as_a_user_error(
+        self, unforced_tool_choice: bool, response_format: Any
+    ) -> None:
+        """The provider refusal wins over the missing-output-tool retry."""
+        model = _RefusingAnthropic(
+            model="claude-opus-5-5",
+            api_key="unused",
+            model_details={"shouldSkipForcedToolChoice": True},
+            calls=[],
+        )
+        agent = create_advanced_agent(
+            model=model,
+            response_format=response_format,
+            unforced_tool_choice=unforced_tool_choice,
+        )
+
+        with pytest.raises(ChatModelError) as exc_info:
+            await agent.ainvoke({"messages": [HumanMessage(content="go")]})
+
+        assert exc_info.value.error_info.code == "CHAT_MODEL.UNSUCCESSFUL_STOP_REASON"
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+        assert len(model.calls) == 1
+
+    async def test_c6_c24_main_agent_run_ends_on_the_refusal(self) -> None:
+        agent = create_advanced_agent(model=_ScriptedModel(messages=iter([_refusal()])))
+
+        result = await agent.ainvoke({"messages": [HumanMessage(content="go")]})
+
+        assert result["messages"][-1].content_blocks[0]["type"] == "refusal"
+
+    async def test_c7_a_subagent_refusal_reaches_the_parent_as_the_task_result(
+        self,
+    ) -> None:
+        worker: Any = {
+            "name": "worker",
+            "description": "does work",
+            "system_prompt": "work",
+            "model": _ScriptedModel(messages=iter([_refusal()])),
+        }
+        parent = _ScriptedModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "task",
+                                "args": {
+                                    "description": "go",
+                                    "subagent_type": "worker",
+                                },
+                                "id": "dispatch-1",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="the worker declined"),
+                ]
+            )
+        )
+        agent = create_advanced_agent(model=parent, subagents=[worker])
+
+        result = await agent.ainvoke({"messages": [HumanMessage(content="go")]})
+
+        (task_result,) = [
+            m
+            for m in result["messages"]
+            if isinstance(m, ToolMessage) and m.tool_call_id == "dispatch-1"
+        ]
+        assert "refuse" in str(task_result.content).lower()
+        assert result["messages"][-1].content == "the worker declined"
+
+
+class TestRefusalWiring:
+    @staticmethod
+    def _deep_agent_kwargs(**options: Any) -> Any:
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent",
+            return_value=MagicMock(),
+        ) as mock_create:
+            create_advanced_agent(
+                model=GenericFakeChatModel(messages=iter([])), **options
+            )
+        return mock_create.call_args.kwargs
+
+    def test_c25_adapter_is_the_last_main_agent_middleware(self) -> None:
+        middleware = self._deep_agent_kwargs()["middleware"]
+
+        assert isinstance(middleware[-1], _RefusalResponseMiddleware)
+        assert sum(isinstance(m, _RefusalResponseMiddleware) for m in middleware) == 1
+
+    def test_c25_adapter_follows_the_tool_choice_middleware(self) -> None:
+        middleware = self._deep_agent_kwargs(unforced_tool_choice=True)["middleware"]
+        payload = next(
+            i
+            for i, m in enumerate(middleware)
+            if isinstance(m, _PayloadHandlerMiddleware)
+        )
+
+        assert isinstance(middleware[-2], ToolChoiceMiddleware)
+        assert isinstance(middleware[-1], _RefusalResponseMiddleware)
+        assert payload < len(middleware) - 2
+
+    def test_c25_adapter_follows_caller_middleware(self) -> None:
+        caller = JobAttachmentsMiddleware()
+
+        middleware = self._deep_agent_kwargs(middleware=[caller])["middleware"]
+
+        assert middleware.index(caller) < len(middleware) - 1
+        assert isinstance(middleware[-1], _RefusalResponseMiddleware)
+
+    def test_c7_c25_general_purpose_subagent_keeps_upstream_refusals(self) -> None:
+        (general_purpose,) = self._deep_agent_kwargs()["subagents"]
+
+        assert not any(
+            isinstance(m, _RefusalResponseMiddleware)
+            for m in general_purpose["middleware"]
+        )
+
+    def test_c7_declared_subagent_keeps_upstream_refusals(self) -> None:
+        worker: Any = {"name": "worker", "description": "d", "system_prompt": "p"}
+
+        specs = self._deep_agent_kwargs(subagents=[worker])["subagents"]
+
+        declared = next(s for s in specs if s["name"] == "worker")
+        assert not any(
+            isinstance(m, _RefusalResponseMiddleware) for m in declared["middleware"]
+        )
+
+    def test_c7_compiled_subagent_spec_is_passed_through_unchanged(self) -> None:
+        compiled: Any = {
+            "name": "compiled",
+            "description": "d",
+            "runnable": MagicMock(),
+        }
+        original = dict(compiled)
+
+        specs = self._deep_agent_kwargs(subagents=[compiled])["subagents"]
+
+        passed = next(s for s in specs if s["name"] == "compiled")
+        assert passed == original
+
+    def test_c7_resolved_specs_never_carry_the_adapter(self) -> None:
+        worker: Any = {"name": "worker", "description": "d", "system_prompt": "p"}
+
+        specs = _specs([worker], [_PayloadHandlerMiddleware()])
+
+        assert not any(
+            isinstance(m, _RefusalResponseMiddleware)
+            for spec in specs
+            for m in spec["middleware"]
+        )
 
 
 class TestMissedOutputToolRetry:

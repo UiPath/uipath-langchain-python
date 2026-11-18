@@ -723,6 +723,43 @@ _CSV_DOCUMENT = {
 }
 
 
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+
+
+async def _anthropic_payload(
+    httpx_mock: HTTPXMock, message: HumanMessage
+) -> dict[str, Any]:
+    """The request body ChatAnthropic sends for ``message``, over a mocked transport."""
+    from langchain_anthropic import ChatAnthropic
+
+    httpx_mock.add_response(
+        url=_ANTHROPIC_URL,
+        method="POST",
+        json={
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-4-5",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+    )
+    model = ChatAnthropic(
+        model="claude-sonnet-4-5",
+        api_key="dummy",
+        base_url="https://api.anthropic.com",
+        max_retries=0,
+    )
+
+    await model.ainvoke([message])
+
+    request = httpx_mock.get_request(url=_ANTHROPIC_URL)
+    assert request is not None
+    return json.loads(request.content)
+
+
 class TestBuildFileContentBlocksForPdfOnlyModels:
     async def test_csv_becomes_a_text_document(self) -> None:
         file = FileInfo(url="https://blob/x", name="Budget.csv", mime_type="text/csv")
@@ -864,12 +901,12 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-    async def test_text_document_reaches_anthropic_unchanged(self) -> None:
-        from langchain_anthropic.chat_models import _format_messages
+    async def test_text_document_reaches_anthropic_unchanged(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        payload = await _anthropic_payload(httpx_mock, await self._csv_message())
 
-        _, formatted = _format_messages([await self._csv_message()])
-
-        assert formatted[0]["content"][1] == _CSV_DOCUMENT
+        assert payload["messages"][0]["content"][1] == _CSV_DOCUMENT
 
     async def test_text_document_reaches_vertex_anthropic_unchanged(self) -> None:
         from langchain_google_vertexai._anthropic_utils import (
@@ -935,9 +972,9 @@ class TestAttachmentTagsForPdfOnlyModels:
 
         assert blocks == [_CSV_DOCUMENT]
 
-    async def test_tags_never_reach_the_anthropic_payload(self) -> None:
-        from langchain_anthropic.chat_models import _format_messages
-
+    async def test_tags_never_reach_the_anthropic_payload(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
         content: list[Any] = [{"type": "text", "text": "Sum them"}]
         for name, mime_type, data in [
             ("Budget.csv", "text/csv", b"a,b\n"),
@@ -955,8 +992,9 @@ class TestAttachmentTagsForPdfOnlyModels:
                     file, pdf_only_documents=True
                 )
 
-        _, formatted = _format_messages([HumanMessage(content=content)])
+        sent = await _anthropic_payload(httpx_mock, HumanMessage(content=content))
 
-        payload = json.dumps(formatted)
+        assert len(sent["messages"][0]["content"]) == 4
+        payload = json.dumps(sent)
         assert "uipath_" not in payload
         assert _ATTACHMENT_ID not in payload

@@ -135,6 +135,7 @@ class TestSkipForcedModel:
         result = _run(model)
 
         assert result["structured_response"] == {"answer": "42"}
+        assert len(model.calls) == 2
         assert [b["tool_choice"] for b in model.bindings] == ["auto", "auto"]
         assert isinstance(model.calls[1][-1], HumanMessage)
 
