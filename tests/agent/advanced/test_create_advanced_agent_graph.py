@@ -15,6 +15,7 @@ from uipath_langchain.agent.advanced.agent import (
     _RuntimeSystemPromptMiddleware,
     create_advanced_agent_graph,
 )
+from uipath_langchain.agent.advanced.tool_choice import ToolChoiceMiddleware
 from uipath_langchain.agent.advanced.types import AdvancedAgentGraphState
 from uipath_langchain.agent.advanced.utils import create_state_with_input
 
@@ -95,6 +96,19 @@ def test_callable_system_prompt_enables_runtime_middleware() -> None:
     runtime_middleware = _runtime_prompt_middleware(call_kwargs["middleware"])
     assert runtime_middleware is not None
     assert runtime_middleware.state_key == "uipath__system_prompt"
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_unforced_tool_choice_reaches_the_main_agent(enabled: bool) -> None:
+    """The agents runtime sets this from a feature flag on the wrapper graph."""
+    with patch(
+        "uipath_langchain.agent.advanced.agent._create_deep_agent",
+        return_value=MagicMock(),
+    ) as mock_create:
+        _build(unforced_tool_choice=enabled)
+
+    middleware = mock_create.call_args.kwargs["middleware"]
+    assert any(isinstance(m, ToolChoiceMiddleware) for m in middleware) is enabled
 
 
 def test_static_system_prompt_skips_runtime_middleware() -> None:

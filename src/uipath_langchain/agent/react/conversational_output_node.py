@@ -41,6 +41,7 @@ from ..exceptions.llm import (
     raise_for_provider_http_error,
 )
 from ..tools.utils import config_without_streaming
+from .no_forced_tool_choice import should_skip_forced_tool_choice
 from .tools.tools import create_set_conversational_output_tool
 from .types import AgentGraphState
 
@@ -72,7 +73,8 @@ def create_conversational_output_extractor(
     payload_handler = get_payload_handler(non_streaming_model)
     binding_kwargs = payload_handler.get_tool_binding_kwargs(
         tools=[set_conversational_output_tool],
-        tool_choice="any",
+        # Rely on auto for certain models that do not support forced tool choice
+        tool_choice="auto" if should_skip_forced_tool_choice(model) else "any",
         parallel_tool_calls=False,
     )
     llm = non_streaming_model.bind_tools(

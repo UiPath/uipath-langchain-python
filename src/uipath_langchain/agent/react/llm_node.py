@@ -39,6 +39,7 @@ from .no_forced_tool_choice import (
     finish_without_forcing,
     finishing_tool_call,
     output_fields,
+    should_skip_forced_tool_choice,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_tool_less_turns
@@ -85,11 +86,6 @@ async def _ainvoke(
         if isinstance(uipath_error, UiPathAPIError):
             raise_for_provider_http_error(uipath_error)
         raise
-
-
-def _should_skip_forced_tool_choice(model: BaseChatModel) -> bool:
-    model_details = getattr(model, "model_details", None) or {}
-    return bool(model_details.get("shouldSkipForcedToolChoice", False))
 
 
 def _no_finishing_tool_call_error() -> AgentRuntimeError:
@@ -149,10 +145,8 @@ class LLMNode(ABC, Generic[StateT]):
         self.llm_messages_limit = llm_messages_limit
         self.parallel_tool_calls = parallel_tool_calls
         self.strict_mode = strict_mode
+        self.prompt_caching = prompt_caching
         self.payload_handler = get_payload_handler(model)
-        self.prompt_caching_kwargs = (
-            self.payload_handler.get_prompt_caching_kwargs() if prompt_caching else {}
-        )
         self.static_args_handler = StaticArgsHandler()
 
     async def __call__(self, state: StateT) -> dict[str, list[AIMessage]]:
@@ -194,11 +188,13 @@ class LLMNode(ABC, Generic[StateT]):
             parallel_tool_calls=self.parallel_tool_calls,
             strict_mode=self.strict_mode,
         )
-        if call.cacheable:
-            binding_kwargs.update(self.prompt_caching_kwargs)
+        messages = call.messages
+        if self.prompt_caching and call.cacheable:
+            messages, caching_kwargs = call.handler.apply_prompt_caching(messages)
+            binding_kwargs.update(caching_kwargs)
         llm = call.model.bind_tools(tools, **binding_kwargs)
 
-        response = await _ainvoke(llm, call.messages)
+        response = await _ainvoke(llm, messages)
         if not isinstance(response, AIMessage):
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
@@ -367,7 +363,7 @@ def create_llm_node(
             tool_choice=tool_choice,
             prompt_caching=prompt_caching,
         )
-    if _should_skip_forced_tool_choice(model):
+    if should_skip_forced_tool_choice(model):
         return AutoToolChoiceLLMNode(
             model,
             tools,

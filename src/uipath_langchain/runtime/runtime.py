@@ -93,6 +93,7 @@ class UiPathLangGraphRuntime:
         entrypoint: str | None = None,
         callbacks: list[BaseCallbackHandler] | None = None,
         storage: UiPathRuntimeStorageProtocol | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         """
         Initialize the runtime.
@@ -101,11 +102,15 @@ class UiPathLangGraphRuntime:
             graph: The CompiledStateGraph to execute
             runtime_id: Unique identifier for this runtime instance
             entrypoint: Optional entrypoint name (for schema generation)
+            callbacks: Callbacks for the graph run, inherited by every run in it
+            storage: Storage for chat message mapping
+            metadata: Metadata for the graph run, inherited by every run in it
         """
         self.graph: CompiledStateGraph[Any, Any, Any, Any] = graph
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
+        self.metadata: dict[str, Any] = metadata or {}
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self.chat.tools_requiring_confirmation = self._get_tool_confirmation_info()
         self.chat.client_side_tools = self._get_client_side_tools()
@@ -370,6 +375,8 @@ class UiPathLangGraphRuntime:
             "configurable": {"thread_id": self.runtime_id},
             "callbacks": self.callbacks,
         }
+        if self.metadata:
+            graph_config["metadata"] = dict(self.metadata)
 
         # Add optional config from environment
         recursion_limit = os.environ.get("LANGCHAIN_RECURSION_LIMIT")

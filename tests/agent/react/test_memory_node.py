@@ -1,5 +1,6 @@
 """Tests for memory recall node and memory integration in create_agent."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -12,7 +13,7 @@ from langgraph.graph import StateGraph
 from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
 from uipath.platform.errors import EnrichedException
-from uipath.platform.memory import FieldMatching, SearchMode
+from uipath.platform.memory import FieldMatching, MemorySearchResponse, SearchMode
 
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.react.agent import create_agent
@@ -326,6 +327,53 @@ class TestMemoryRecallNode:
 
         result = await node(_make_state())
         assert result == {}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.react.memory_node._get_tracer")
+    @patch("uipath_langchain.agent.react.memory_node.UiPath")
+    async def test_fewshot_span_response_carries_field_semantic_score(
+        self, mock_uipath_cls: MagicMock, get_tracer: MagicMock
+    ) -> None:
+        tracer = _FakeTracer()
+        get_tracer.return_value = (tracer, otel_trace)
+        response = MemorySearchResponse.model_validate(
+            {
+                "results": [
+                    {
+                        "memoryItemId": "item-1",
+                        "score": 0.016,
+                        "semanticScore": 0.82,
+                        "weightedScore": 0.016,
+                        "fields": [
+                            {
+                                "keyPath": ["agent-input", "topic"],
+                                "value": "python",
+                                "weight": 1.0,
+                                "score": 0.016,
+                                "semanticScore": 0.82,
+                                "weightedScore": 0.016,
+                            }
+                        ],
+                    }
+                ],
+                "metadata": {},
+                "systemPromptInjection": "\n\nBased on past runs...",
+            }
+        )
+        mock_uipath_cls.return_value.memory.search_async = AsyncMock(
+            return_value=response
+        )
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
+        node = create_memory_recall_node(config, input_schema=_TopicInput)
+
+        await node(_make_state(topic="python"))
+
+        fewshot = next(s for s in tracer.spans if s.name == "Apply dynamic few shot")
+        response_attr = fewshot.attributes["response"]
+        assert isinstance(response_attr, str)
+        field = json.loads(response_attr)["results"][0]["fields"][0]
+        assert field["semanticScore"] == 0.82
+        assert field["score"] == 0.016
 
 
 class TestCreateAgentWithMemory:

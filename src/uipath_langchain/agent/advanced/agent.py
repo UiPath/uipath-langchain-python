@@ -66,6 +66,7 @@ from .job_attachments_middleware import (
     JobAttachmentsMiddleware,
     dump_attachments,
 )
+from .tool_choice import ToolChoiceMiddleware
 from .types import (
     AdvancedAgentGraphState,
     ConversationalAdvancedAgentGraphState,
@@ -442,7 +443,8 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
             detail=(
                 "The model ended its turn without calling the output tool, even "
                 "after being asked to. If you are using a BYOM configuration, "
-                "verify your model deployment honors a forced tool choice."
+                "verify your model deployment returns tool calls for the tools "
+                "it is given."
             ),
             category=UiPathErrorCategory.SYSTEM,
         )
@@ -568,6 +570,7 @@ def create_advanced_agent(
     skills: Sequence[str] | None = None,
     max_iterations: int | None = None,
     initial_message_count_key: str | None = None,
+    unforced_tool_choice: bool = False,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
@@ -582,6 +585,11 @@ def create_advanced_agent(
     ``None`` leaves it uncapped. ``initial_message_count_key`` names the state field
     holding the message count at the start of the turn, for agents whose input
     carries earlier turns.
+
+    ``unforced_tool_choice`` adds ``ToolChoiceMiddleware``, which sends the main
+    agent's structured-output calls unforced on models that reject a forced tool
+    choice. It must stay after ``shared_middleware`` so that
+    ``_PayloadHandlerMiddleware`` sees the original ``response_format``.
     """
     tools = [
         tool.with_workspace(backend)
@@ -609,7 +617,12 @@ def create_advanced_agent(
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
-        middleware=[*main_budget, *middleware, *shared_middleware],
+        middleware=[
+            *main_budget,
+            *middleware,
+            *shared_middleware,
+            *([ToolChoiceMiddleware()] if unforced_tool_choice else []),
+        ],
         skills=list(skills) if skills else None,
     )
 
@@ -627,6 +640,7 @@ def create_advanced_agent_graph(
     output_files_enabled: bool = False,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    unforced_tool_choice: bool = False,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -642,7 +656,8 @@ def create_advanced_agent_graph(
     back for another turn instead of emitting an output it cannot honor.
 
     ``max_iterations`` caps the model calls the agent loop may make, subagent calls
-    included; ``None`` leaves it uncapped.
+    included; ``None`` leaves it uncapped. ``unforced_tool_choice`` is passed to
+    ``create_advanced_agent``.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -664,6 +679,7 @@ def create_advanced_agent_graph(
         middleware=[*runtime_prompt.middleware, *middleware],
         skills=skills,
         max_iterations=max_iterations,
+        unforced_tool_choice=unforced_tool_choice,
     )
 
     output_file_retries_key = get_unique_model_field_name(

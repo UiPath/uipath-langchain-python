@@ -421,26 +421,24 @@ class TestThinkingRejectsForcedToolChoice:
 
 
 # ---------------------------------------------------------------------------
-# BedrockConversePayloadHandler — get_prompt_caching_kwargs
+# BedrockConversePayloadHandler — apply_prompt_caching
 # ---------------------------------------------------------------------------
 
 
-class TestBedrockConverseGetPromptCachingKwargs:
+class TestBedrockConversePromptCaching:
     _CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
 
     @pytest.mark.parametrize(
         "model_id, expected",
         [
             ("us.anthropic.claude-sonnet-4-5-20250929-v1:0", _CACHE_CONTROL),
-            ("amazon.nova-pro-v1:0", _CACHE_CONTROL),
+            ("amazon.nova-pro-v1:0", {}),
             ("meta.llama3-1-70b-instruct-v1:0", {}),
         ],
     )
-    def test_marks_only_claude_and_nova(
-        self, model_id: str, expected: dict[str, Any]
-    ) -> None:
+    def test_marks_only_claude(self, model_id: str, expected: dict[str, Any]) -> None:
         handler = BedrockConversePayloadHandler(make_converse_model(model_id))  # type: ignore[arg-type]
-        assert handler.get_prompt_caching_kwargs() == expected
+        assert handler.apply_prompt_caching([])[1] == expected
 
     @pytest.mark.parametrize(
         "subscription, byom_details, expected",
@@ -457,7 +455,7 @@ class TestBedrockConverseGetPromptCachingKwargs:
         with discovered(discovery_entry(subscription, byom_details)):
             model = get_chat_model(_CLAUDE, client_settings=agent_hub_dummy_settings)
             handler = BedrockConversePayloadHandler(model)
-            assert handler.get_prompt_caching_kwargs() == expected
+            assert handler.apply_prompt_caching([])[1] == expected
 
     def test_byo_connection_gets_nothing_next_to_a_uipath_owned_entry(self) -> None:
         connection_id = "6f1d2c3b-0000-0000-0000-000000000001"
@@ -471,7 +469,7 @@ class TestBedrockConverseGetPromptCachingKwargs:
                 client_settings=agent_hub_dummy_settings,
             )
             handler = BedrockConversePayloadHandler(model)
-            assert handler.get_prompt_caching_kwargs() == {}
+            assert handler.apply_prompt_caching([])[1] == {}
 
     def test_failed_discovery_lookup_gets_nothing(self) -> None:
         with discovered(discovery_entry("UiPathOwned")):
@@ -482,4 +480,4 @@ class TestBedrockConverseGetPromptCachingKwargs:
             side_effect=RuntimeError("discovery unavailable"),
         ):
             handler = BedrockConversePayloadHandler(model)
-            assert handler.get_prompt_caching_kwargs() == {}
+            assert handler.apply_prompt_caching([])[1] == {}
