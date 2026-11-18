@@ -22,8 +22,9 @@ ONTOLOGY_RUNTIME_SQL_RULES = """\
 - Return at most 200 rows: add LIMIT (<= 200). The runtime rejects larger limits.
 - To page, use OFFSET together with ORDER BY on a stable column. Ask for the next
   page only when the question needs more rows than one page holds.
-- Use named parameters (:name) for literal values when a value comes from the
-  question; otherwise plain literals are fine.
+- Write values inline as SQL literals. Quote strings with single quotes and
+  double any single quote inside a value (O'Brien -> 'O''Brien').
+  Do not use :name placeholders; the tool does not bind parameters.
 - If the runtime rejects a statement, read its message, fix the statement and
   try again. Do not repeat a statement the runtime already rejected.
 """
