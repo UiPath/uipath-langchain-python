@@ -135,8 +135,9 @@ class TestGuardrailActionSpan:
     def test_suspending_escalation_ends_the_span_without_error(
         self, recorded_spans: InMemorySpanExporter
     ) -> None:
+        escalation = _Recording(raise_exc=GraphInterrupt())
         with pytest.raises(GraphInterrupt):
-            _check(_Recording(raise_exc=GraphInterrupt()), _FAILED)
+            _check(escalation, _FAILED)
 
         [span] = _action_spans(recorded_spans)
         assert span.status.status_code != StatusCode.ERROR

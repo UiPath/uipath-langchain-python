@@ -269,9 +269,9 @@ class GuardrailStageCloser(SpanProcessor):
     def shutdown(self) -> None:
         """Called when its trace manager shuts down: unregister, end what's open."""
         with _state.lock:
-            for manager, closer in list(_state.closers.items()):
-                if closer is self:
-                    del _state.closers[manager]
+            owners = [m for m, closer in _state.closers.items() if closer is self]
+            for manager in owners:
+                del _state.closers[manager]
             _state.enabled = bool(_state.closers)
         if not _state.enabled:
             self._close(lambda key: True, end_time=None)

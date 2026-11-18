@@ -1,6 +1,7 @@
 """Separate guardrail middlewares share one container span per stage."""
 
 import asyncio
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -316,7 +317,8 @@ class TestTools:
         [container] = _named(spans, "Tool output guardrail check")
         [tools] = _named(spans, "tools")
         [tool_span] = _named(spans, "get_weather")
-        assert container.start_time is not None and tool_span.end_time is not None
+        assert container.start_time is not None
+        assert tool_span.end_time is not None
         assert container.start_time >= tool_span.end_time
         assert container.end_time == tools.end_time
 
@@ -492,6 +494,40 @@ class TestRealAgent:
         assert len(_named(spans, "Tool output guardrail check")) == 2
         for container in _named(spans, "LLM input guardrail check"):
             assert _children(spans, container) == ["Log", "Log"]
+
+    async def test_overlapping_checks_on_parallel_tool_calls_stay_in_their_container(
+        self, exporter: InMemorySpanExporter, instrumented: None
+    ) -> None:
+        def slow_check(*args: Any, **kwargs: Any) -> GuardrailValidationResult:
+            time.sleep(0.05)  # long enough for the calls' checks to overlap
+            return _FAILED
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin, "_evaluate_guardrail", slow_check
+        ):
+            await self._agent(parallel_calls=3).ainvoke(
+                {"messages": [HumanMessage("a@b.com weather")]}
+            )
+        spans = list(exporter.get_finished_spans())
+
+        # Each tool call runs in its own tools span, so each has its own container,
+        # and every check ends inside it.
+        containers = _named(spans, "Tool input guardrail check")
+        assert len(containers) == 3
+        assert len({c.parent.span_id for c in containers if c.parent}) == 3
+        for container in containers:
+            children = [
+                s
+                for s in spans
+                if s.parent and s.parent.span_id == container.context.span_id
+            ]
+            assert children
+            assert all(
+                c.end_time is not None
+                and container.end_time is not None
+                and c.end_time <= container.end_time
+                for c in children
+            )
 
     async def test_concurrent_runs_keep_their_own_containers(
         self, exporter: InMemorySpanExporter, instrumented: None
