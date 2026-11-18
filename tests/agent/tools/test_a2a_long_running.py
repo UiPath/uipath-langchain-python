@@ -284,7 +284,7 @@ async def test_running_task_suspends_until_the_timer_then_returns(
     assert len(client.sent) == 1
     assert client.polled == ["task-1", "task-1", "task-1"]
     # Resumed runs replay the send from the checkpoint, so it is not logged again.
-    sends = [r for r in caplog.records if r.getMessage().startswith("A2A send")]
+    sends = [r for r in caplog.records if r.getMessage().startswith("A2A send:")]
     assert len(sends) == 1
 
 

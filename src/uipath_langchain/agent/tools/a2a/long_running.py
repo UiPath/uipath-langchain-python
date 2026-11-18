@@ -153,6 +153,21 @@ def _is_transient(error: Exception) -> bool:
     return isinstance(cause, httpx.RequestError)
 
 
+def _log_reply(event: str, reply: Task | Message, started_at: datetime) -> None:
+    elapsed = (_utcnow() - started_at).total_seconds()
+    if isinstance(reply, Task):
+        logger.info(
+            "%s in %.1fs: task=%s context=%s state=%s",
+            event,
+            elapsed,
+            reply.id,
+            reply.context_id,
+            TaskState.Name(reply.status.state),
+        )
+    else:
+        logger.info("%s in %.1fs: message context=%s", event, elapsed, reply.context_id)
+
+
 def _reply_payload(
     reply: Task | Message, *, started_at: datetime | None = None
 ) -> dict[str, Any]:
@@ -254,6 +269,7 @@ async def send_and_wait(
         )
         try:
             reply = await _send_nonblocking(client, message)
+            _log_reply("A2A send returned", reply, started_at)
             if isinstance(reply, Task):
                 reply = await _wait_inline(client, reply, settings)
         except Exception as e:
@@ -286,6 +302,8 @@ async def send_and_wait(
                 "A2A poll of task %s failed; retrying", task_id, exc_info=True
             )
             task = None
+        if task is not None:
+            _log_reply("A2A poll returned", task, now)
         if task is not None and not is_waiting(task):
             return _Saved(_reply_payload(task))
         if now >= deadline:
