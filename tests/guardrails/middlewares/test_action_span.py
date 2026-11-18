@@ -2,11 +2,12 @@
 
 from collections.abc import Iterator
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.errors import GraphInterrupt
+from langgraph.prebuilt.tool_node import ToolCallRequest
 from opentelemetry import trace
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -26,9 +27,12 @@ from uipath.platform.guardrails.decorators import (
 )
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError
-from uipath_langchain.guardrails import GuardrailAction
+from uipath_langchain.guardrails import GuardrailAction, GuardrailExecutionStage
 from uipath_langchain.guardrails.enums import PIIDetectionEntityType
-from uipath_langchain.guardrails.middlewares import UiPathPIIDetectionMiddleware
+from uipath_langchain.guardrails.middlewares import (
+    UiPathDeterministicGuardrailMiddleware,
+    UiPathPIIDetectionMiddleware,
+)
 from uipath_langchain.guardrails.middlewares._spans import action_name
 from uipath_langchain.guardrails.models import PIIDetectionEntity
 
@@ -149,6 +153,36 @@ class TestGuardrailActionSpan:
 
         [span] = _action_spans(recorded_spans)
         assert "guardrailSpanId" not in (span.attributes or {})
+
+
+async def test_deterministic_rules_record_their_action_too(
+    recorded_spans: InMemorySpanExporter,
+) -> None:
+    rule = UiPathDeterministicGuardrailMiddleware(
+        tools=["get_weather"],
+        rules=[lambda args: args.get("city") == "London"],
+        action=LogAction(),
+        stage=GuardrailExecutionStage.PRE,
+        name="London Rule",
+    )
+    [wrapper] = list(rule)
+    request = ToolCallRequest(
+        tool_call={"id": "tc1", "name": "get_weather", "args": {"city": "London"}},
+        tool=MagicMock(),
+        state={},
+        runtime=MagicMock(),
+    )
+
+    async def tool(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="sunny", tool_call_id="tc1")
+
+    await wrapper.awrap_tool_call(request, tool)
+
+    [span] = _action_spans(recorded_spans)
+    attributes = dict(span.attributes or {})
+    assert attributes["guardrailName"] == "London Rule"
+    assert attributes["action"] == "Log"
+    assert attributes["reason"] == "Rule 1 detected violation"
 
 
 @pytest.mark.parametrize(
