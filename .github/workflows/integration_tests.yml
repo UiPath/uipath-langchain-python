@@ -69,6 +69,8 @@ jobs:
         CLIENT_ID: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_ID || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_ID || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_ID }}
         CLIENT_SECRET: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_SECRET || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_SECRET || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_SECRET }}
         BASE_URL: ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
+        # Key of the folder the LLM Gateway publishes its spans to; only the Gateway testcase gets it.
+        GATEWAY_FOLDER_KEY: ${{ matrix.testcase == 'gateway-and-direct-models' && (matrix.environment == 'alpha' && secrets.ALPHA_GATEWAY_FOLDER_KEY || matrix.environment == 'staging' && secrets.STAGING_GATEWAY_FOLDER_KEY || matrix.environment == 'cloud' && secrets.CLOUD_GATEWAY_FOLDER_KEY) || '' }}
       working-directory: testcases/${{ matrix.testcase }}
       run: |
         echo "Running testcase: ${{ matrix.testcase }}"

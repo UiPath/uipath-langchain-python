@@ -1,0 +1,54 @@
+{
+  "description": "A Gateway model (no client-side LLM span; the Gateway's Model run joins the trace) and a direct-provider model (keeps its client-side LLM span) in one graph. Model run's input and output (saved only when the tenant's AI Trust Layer policy allows it) and productDisplayName (not set by every environment's Gateway) are not checked.",
+  "required_spans": [
+    {
+      "name": "model",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": "get_weather",
+      "attributes": {
+        "openinference.span.kind": "TOOL"
+      }
+    },
+    {
+      "name": "direct_model",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": "FakeDirectProviderChatModel",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "fake-direct-provider-1",
+        "llm.output_messages.0.message.role": "assistant"
+      }
+    }
+  ],
+  "forbidden_span_names": [
+    "UiPathChatAnthropicBedrock"
+  ],
+  "required_gateway_spans": [
+    {
+      "name": "Model run",
+      "span_type": "completion",
+      "parent_name": "model",
+      "min": 2,
+      "attributes": {
+        "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "feature": "llm-call"
+      }
+    },
+    {
+      "name": "Model run",
+      "parent_name": [
+        "direct_model",
+        "FakeDirectProviderChatModel"
+      ],
+      "max": 0
+    }
+  ]
+}
