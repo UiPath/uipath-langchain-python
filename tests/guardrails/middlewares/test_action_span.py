@@ -126,7 +126,7 @@ class TestGuardrailActionSpan:
         assert attributes["action"] == "Log"
         assert attributes["severityLevel"] == "Error"
         assert attributes["reason"] == "PII detected"
-        assert span.status.status_code != StatusCode.ERROR
+        assert span.status.status_code == StatusCode.OK
 
     def test_passed_result_records_no_action_span(
         self, recorded_spans: InMemorySpanExporter
@@ -143,7 +143,7 @@ class TestGuardrailActionSpan:
             _check(escalation, _FAILED)
 
         [span] = _action_spans(recorded_spans)
-        assert span.status.status_code != StatusCode.ERROR
+        assert span.status.status_code == StatusCode.OK
 
     def test_missing_service_span_id_is_omitted(
         self, recorded_spans: InMemorySpanExporter

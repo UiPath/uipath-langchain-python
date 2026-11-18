@@ -31,17 +31,19 @@ def _new_span(name: str, span_type: str, **attributes: Any) -> Span:
 
 @contextmanager
 def _active(span: Span) -> Generator[Span]:
-    """Make ``span`` current and end it; errors (not interrupts) mark it failed."""
+    """Make ``span`` current and end it: OK, or ERROR on a failure (not interrupts)."""
     with trace.use_span(
         span, end_on_exit=True, record_exception=False, set_status_on_exception=False
     ):
         try:
             yield span
         except GraphBubbleUp:
+            span.set_status(StatusCode.OK)
             raise
         except Exception as exc:
             span.set_status(StatusCode.ERROR, _error_text(exc))
             raise
+        span.set_status(StatusCode.OK)
 
 
 def _error_text(exc: BaseException) -> str:
