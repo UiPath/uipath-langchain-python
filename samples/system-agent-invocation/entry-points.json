@@ -1,0 +1,85 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "3f503540-0374-44aa-be6d-7b0c4731c10a",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "system_agent_name": {
+                        "title": "System Agent Name",
+                        "type": "string"
+                    },
+                    "entrypoint": {
+                        "title": "Entrypoint",
+                        "type": "string"
+                    },
+                    "system_agent_input": {
+                        "additionalProperties": true,
+                        "type": "object"
+                    },
+                    "folder_path": {
+                        "title": "Folder Path",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "system_agent_name",
+                    "entrypoint",
+                    "folder_path"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "sys_agent_response": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "sys_agent_response"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "generate_report",
+                        "name": "generate_report",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "generate_report",
+                        "label": null
+                    },
+                    {
+                        "source": "generate_report",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}
