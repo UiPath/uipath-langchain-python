@@ -225,9 +225,8 @@ class TestOnlyTheFirstMessageIsConsidered:
     """The section can only be in the system message at index 0.
 
     The standard loop's init node puts the freshly built prompt there and drops
-    any stale one from the replayed history; the advanced loop keeps its prompt
-    out of state entirely. Narrowing to index 0 rather than scanning keeps the
-    rewrite off every other message in the exchange.
+    any stale one from the replayed history; the advanced wrapper prepends its
+    own prompt at index 0 before calling the extractor.
     """
 
     @pytest.mark.asyncio
@@ -249,9 +248,9 @@ class TestOnlyTheFirstMessageIsConsidered:
         assert sent[2] is stray
 
     @pytest.mark.asyncio
-    async def test_advanced_shape_has_no_system_message_at_all(self):
-        """state.messages for an advanced conversational turn starts with the
-        user's message; the rewrite must simply not apply."""
+    async def test_a_history_with_no_system_message_is_tolerated(self):
+        """A caller may hand over a bare transcript -- an advanced agent whose
+        system prompt resolved to nothing, say. The rewrite must not apply."""
         model, _non_streaming, bound = _make_mock_model()
         extract = create_conversational_output_extractor(model, _OutputSchema)
         history = [HumanMessage("hi"), AIMessage(content="done")]
