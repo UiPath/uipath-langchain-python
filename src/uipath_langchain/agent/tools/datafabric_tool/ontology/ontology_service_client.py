@@ -38,19 +38,10 @@ class OntologyDetailsLike(Protocol):
     state: str | None
 
 
-class OntologyArtifactLike(Protocol):
-    """One manifest entry from ``GET /ontology/{id}/artifact``."""
-
-    file_name: str
-    type: str
-    media_type: str
-    size_bytes: int
-    checksum: str
-
-
 class OntologyArtifactContentLike(Protocol):
     """One downloaded artifact, checksum-verified by the client."""
 
+    file_name: str
     content: bytes
     media_type: str
     etag: str | None
@@ -84,15 +75,8 @@ class OntologyServiceClient(Protocol):
 
     async def get_async(self, ontology_id: str) -> OntologyDetailsLike: ...
 
-    async def list_artifacts_async(
-        self, ontology_id: str, artifact_type: str | None = None
-    ) -> Sequence[OntologyArtifactLike]: ...
-
-    async def get_artifact_async(
-        self,
-        ontology_id: str,
-        file_name: str,
-        expected: OntologyArtifactLike | None = None,
+    async def get_artifact_by_type_async(
+        self, ontology_id: str, artifact_type: str
     ) -> OntologyArtifactContentLike: ...
 
     async def get_graph_async(self, ontology_id: str) -> dict[str, Any]: ...
@@ -102,8 +86,6 @@ class OntologyServiceClient(Protocol):
         ontology_id: str,
         statement: str,
         params: dict[str, Any] | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
     ) -> SqlResultLike: ...
 
 
@@ -114,9 +96,9 @@ def validate_ontology_id(ontology_id: str | None) -> str:
             code=AgentRuntimeErrorCode.ONTOLOGY_INVALID_REFERENCE,
             title="The ontology context has no usable ontology id",
             detail=(
-                "The Ontology service path addresses an ontology by the id the "
-                "picker saved (letters, digits, '_' and '-'). Re-add the ontology "
-                "to this agent, or switch OntologyContextSource back to 'datafabric'."
+                "The Ontology service addresses an ontology by the id the picker "
+                "saved (letters, digits, '_' and '-'). Remove the ontology from "
+                "this agent's context and add it again."
             ),
             category=UiPathErrorCategory.DEPLOYMENT,
         )
@@ -132,8 +114,8 @@ def resolve_ontology_client(sdk: Any) -> OntologyServiceClient:
             title="The Ontology service client is not available",
             detail=(
                 "The installed uipath-platform exposes no Ontology service client "
-                "(UiPath().ontology). Upgrade uipath-platform, or set the "
-                "OntologyContextSource flag back to 'datafabric'."
+                "(UiPath().ontology). Upgrade uipath-platform to a version that "
+                "includes it."
             ),
             category=UiPathErrorCategory.DEPLOYMENT,
         )

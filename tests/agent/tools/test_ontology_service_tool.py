@@ -89,6 +89,15 @@ class _FakeOntologyClient:
             etag='"c1"',
         )
 
+    async def get_artifact_by_type_async(self, ontology_id, artifact_type):
+        self.calls.append(("by_type", artifact_type))
+        return SimpleNamespace(
+            file_name="nxorders.ofn",
+            content=b"Ontology(<urn:nxorders>)",
+            media_type="text/owl-functional",
+            etag='"c1"',
+        )
+
     async def get_graph_async(self, ontology_id):
         self.calls.append(("graph", ontology_id))
         return {"objects": [{"name": "SalesOrder", "domain": "Sales"}]}
@@ -215,7 +224,7 @@ async def test_unset_source_grounds_on_schema_files(monkeypatch):
     assert await handler._ensure_graph() is sentinel
     assert await handler._ensure_graph() is sentinel  # cached
 
-    assert client.calls[:2] == [("get", ONTOLOGY_ID), ("list", "schema")]
+    assert client.calls[:2] == [("get", ONTOLOGY_ID), ("by_type", "schema")]
     assert captured["execute_sql_tool"].name == "execute_sql"
     prompt = captured["system_prompt"]
     assert "You help with sales." in prompt
@@ -235,7 +244,7 @@ async def test_graph_source_grounds_on_the_graph(monkeypatch):
     assert await _handler()._ensure_graph() is sentinel
 
     assert ("graph", ONTOLOGY_ID) in client.calls
-    assert all(kind != "list" for kind, _ in client.calls)
+    assert all(kind not in ("list", "by_type") for kind, _ in client.calls)
     assert "- SalesOrder" in captured["system_prompt"]
 
 

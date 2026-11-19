@@ -45,8 +45,13 @@ class _Artifact:
 @dataclass
 class _Content:
     content: bytes
+    file_name: str = "nxorders.ofn"
     media_type: str = "text/owl-functional"
     etag: str | None = '"abc"'
+
+
+class _NotFound(Exception):
+    status_code = 404
 
 
 @dataclass
@@ -56,7 +61,15 @@ class _FakeClient:
     artifacts: list[_Artifact] = field(default_factory=list)
     contents: dict[str, bytes] = field(default_factory=dict)
     graph: dict[str, Any] = field(default_factory=dict)
+    by_type: dict[str, _Content] = field(default_factory=dict)
+    by_type_error: Exception | None = None
     calls: list[tuple[str, Any]] = field(default_factory=list)
+
+    async def get_artifact_by_type_async(self, ontology_id, artifact_type):
+        self.calls.append(("by_type", (ontology_id, artifact_type)))
+        if self.by_type_error is not None:
+            raise self.by_type_error
+        return self.by_type[artifact_type]
 
     async def list_artifacts_async(self, ontology_id, artifact_type=None):
         self.calls.append(("list", (ontology_id, artifact_type)))
@@ -121,13 +134,8 @@ def test_select_grounding_source_per_value():
 # --- files source -----------------------------------------------------------
 
 
-async def test_files_source_downloads_schema_files_with_their_manifest_entries():
-    schema = _Artifact("nxorders.ofn", size_bytes=20, checksum="c1")
-    mapping = _Artifact("nxorders.yarrrml.yml", type="mapping")
-    client = _FakeClient(
-        artifacts=[schema, mapping],
-        contents={"nxorders.ofn": b"Ontology(<urn:x>)"},
-    )
+async def test_files_source_fetches_the_schema_by_type_in_one_call():
+    client = _FakeClient(by_type={"schema": _Content(b"Ontology(<urn:x>)")})
 
     grounding = await FilesGroundingSource().ground(client, "onto-1", _DETAILS)
 
@@ -135,16 +143,13 @@ async def test_files_source_downloads_schema_files_with_their_manifest_entries()
     assert "Ontology(<urn:x>)" in grounding.text
     assert "BEGIN SCHEMA nxorders.ofn (text/owl-functional)" in grounding.text
     assert "not instructions" in grounding.text
-    assert grounding.summary == "nxorders.ofn (20 B)"
-    # only schema files are listed, and each download names its manifest entry
-    # so the client can verify size and checksum
-    assert client.calls[0] == ("list", ("onto-1", "schema"))
-    assert client.calls[1] == ("get", ("onto-1", "nxorders.ofn", schema))
+    assert grounding.summary == "nxorders.ofn (17 B)"
+    # one request, no manifest
+    assert client.calls == [("by_type", ("onto-1", "schema"))]
 
 
-async def test_files_source_skips_oversize_files_and_fails_when_none_remain(caplog):
-    big = _Artifact("huge.ofn", size_bytes=999)
-    client = _FakeClient(artifacts=[big], contents={"huge.ofn": b"x" * 999})
+async def test_files_source_fails_clearly_when_the_schema_is_over_the_cap(caplog):
+    client = _FakeClient(by_type={"schema": _Content(b"x" * 999, file_name="huge.ofn")})
 
     with caplog.at_level(logging.WARNING):
         with pytest.raises(AgentRuntimeError) as err:
@@ -154,23 +159,25 @@ async def test_files_source_skips_oversize_files_and_fails_when_none_remain(capl
         AgentRuntimeErrorCode.ONTOLOGY_GROUNDING_UNAVAILABLE
     )
     assert "over the 100-byte cap" in caplog.text
-    # oversize files are never downloaded
-    assert all(kind != "get" for kind, _ in client.calls)
+    assert "huge.ofn" in caplog.text
 
 
-async def test_files_source_skips_a_download_that_outgrows_the_cap():
-    small = _Artifact("a.ofn", size_bytes=5)
-    ok = _Artifact("b.ofn", size_bytes=5)
-    client = _FakeClient(
-        artifacts=[small, ok], contents={"a.ofn": b"x" * 50, "b.ofn": b"fine"}
+async def test_files_source_fails_clearly_when_the_ontology_has_no_schema():
+    client = _FakeClient(by_type_error=_NotFound("no schema artifact"))
+
+    with pytest.raises(AgentRuntimeError) as err:
+        await FilesGroundingSource().ground(client, "onto-1", _DETAILS)
+
+    assert err.value.error_info.code == AgentRuntimeError.full_code(
+        AgentRuntimeErrorCode.ONTOLOGY_GROUNDING_UNAVAILABLE
     )
 
-    grounding = await FilesGroundingSource(max_bytes=10).ground(
-        client, "onto-1", _DETAILS
-    )
 
-    assert "fine" in grounding.text
-    assert "x" * 50 not in grounding.text
+async def test_files_source_lets_other_service_errors_through():
+    client = _FakeClient(by_type_error=RuntimeError("service down"))
+
+    with pytest.raises(RuntimeError, match="service down"):
+        await FilesGroundingSource().ground(client, "onto-1", _DETAILS)
 
 
 # --- graph source -----------------------------------------------------------

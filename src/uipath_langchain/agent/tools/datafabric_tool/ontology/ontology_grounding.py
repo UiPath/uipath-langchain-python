@@ -4,8 +4,8 @@ The inner SQL model is grounded on a text block describing the ontology's
 business objects, properties and relationships. Two sources produce that block,
 selected by the ``OntologyContextSource`` feature flag:
 
-* ``files`` (default): the ontology's ``schema`` artifacts (OWL functional
-  syntax), downloaded from the Ontology service and placed in the prompt verbatim.
+* ``files`` (default): the ontology's schema file (OWL functional syntax),
+  downloaded by type from the Ontology service and placed in the prompt verbatim.
 * ``graph``: ``GET /ontology/{id}/graph`` rendered compactly — objects with
   labels, synonyms and descriptions, relationships with direction, cardinality
   and join columns.
@@ -107,7 +107,7 @@ def fence_data_block(title: str, body: str) -> str:
 
 
 class FilesGroundingSource:
-    """Ground on the ontology's ``schema`` artifacts, as uploaded."""
+    """Ground on the ontology's schema file, as uploaded, fetched by type in one call."""
 
     kind = OntologySource.FILES.value
     artifact_type = "schema"
@@ -122,54 +122,47 @@ class FilesGroundingSource:
         details: OntologyDetailsLike,
     ) -> Grounding:
         label = ontology_label(details, ontology_id)
-        artifacts = await client.list_artifacts_async(
-            ontology_id, artifact_type=self.artifact_type
+        try:
+            schema = await client.get_artifact_by_type_async(
+                ontology_id, self.artifact_type
+            )
+        except Exception as e:
+            if getattr(e, "status_code", None) == 404:
+                raise self._unavailable(label, "lists no schema artifact") from e
+            raise
+        if len(schema.content) > self._max_bytes:
+            logger.warning(
+                "Ontology %s: schema file %s is %d bytes, over the %d-byte cap.",
+                ontology_id,
+                schema.file_name,
+                len(schema.content),
+                self._max_bytes,
+            )
+            raise self._unavailable(
+                label,
+                f"has a schema of {len(schema.content)} bytes, over the "
+                f"{self._max_bytes}-byte cap",
+            )
+        text = schema.content.decode("utf-8", errors="replace")
+        block = fence_data_block(
+            f"SCHEMA {schema.file_name} ({schema.media_type})", text
         )
-        blocks: list[str] = []
-        used: list[str] = []
-        for artifact in artifacts:
-            if artifact.size_bytes > self._max_bytes:
-                logger.warning(
-                    "Ontology %s: schema file %s is %d bytes, over the %d-byte cap; "
-                    "skipped.",
-                    ontology_id,
-                    artifact.file_name,
-                    artifact.size_bytes,
-                    self._max_bytes,
-                )
-                continue
-            downloaded = await client.get_artifact_async(
-                ontology_id, artifact.file_name, expected=artifact
-            )
-            if len(downloaded.content) > self._max_bytes:
-                logger.warning(
-                    "Ontology %s: schema file %s downloaded %d bytes, over the cap; "
-                    "skipped.",
-                    ontology_id,
-                    artifact.file_name,
-                    len(downloaded.content),
-                )
-                continue
-            text = downloaded.content.decode("utf-8", errors="replace")
-            media = downloaded.media_type or artifact.media_type
-            blocks.append(
-                fence_data_block(f"SCHEMA {artifact.file_name} ({media})", text)
-            )
-            used.append(f"{artifact.file_name} ({artifact.size_bytes} B)")
-
-        if not blocks:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.ONTOLOGY_GROUNDING_UNAVAILABLE,
-                title=f"Ontology '{label}' has no schema to ground on",
-                detail=(
-                    f"Ontology '{label}' lists no schema artifact under "
-                    f"{self._max_bytes} bytes, so the tool cannot describe its "
-                    "business objects to the model. Check the ontology's files."
-                ),
-                category=UiPathErrorCategory.DEPLOYMENT,
-            )
         return Grounding(
-            kind=self.kind, text="\n\n".join(blocks), summary=", ".join(used)
+            kind=self.kind,
+            text=block,
+            summary=f"{schema.file_name} ({len(schema.content)} B)",
+        )
+
+    @staticmethod
+    def _unavailable(label: str, why: str) -> AgentRuntimeError:
+        return AgentRuntimeError(
+            code=AgentRuntimeErrorCode.ONTOLOGY_GROUNDING_UNAVAILABLE,
+            title=f"Ontology '{label}' has no schema to ground on",
+            detail=(
+                f"Ontology '{label}' {why}, so the tool cannot describe its business "
+                "objects to the model. Check the ontology's files."
+            ),
+            category=UiPathErrorCategory.DEPLOYMENT,
         )
 
 
