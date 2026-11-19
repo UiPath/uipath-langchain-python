@@ -23,13 +23,13 @@ from a2a.types import (
     AgentInterface,
     Message,
     Role,
-    SendMessageRequest,
     Task,
     TaskState,
 )
 from google.protobuf.json_format import ParseDict
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
@@ -38,6 +38,7 @@ from uipath.agent.models.agent import AgentA2aResourceConfig
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 
 from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import SUSPENDS_RUN
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -47,6 +48,12 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+
+from .long_running import (
+    A2aCallOutcome,
+    A2aPollSettings,
+    send_and_wait,
+)
 
 logger = getLogger(__name__)
 
@@ -274,6 +281,42 @@ def _is_protocol_version(value: Any, major: int, minor: int) -> bool:
     return int(parts[0]) == major and int(parts[1]) == minor
 
 
+def _read_outcome(
+    outcome: A2aCallOutcome,
+    *,
+    task_id: str | None,
+    context_id: str | None,
+    message_state: str,
+) -> tuple[str, str, str | None, str | None]:
+    """Map a call outcome to (response_text, task_state, new_task_id, new_context_id).
+
+    A plain message reply gets ``message_state``. A task still running when the
+    wait ended says so, with the task id, so the model can tell it apart from a
+    reply.
+    """
+    reply = outcome.reply
+    text = _extract_text(reply)
+    if isinstance(reply, Message):
+        return (
+            text or "No response received.",
+            message_state,
+            task_id,
+            reply.context_id or context_id,
+        )
+    state = (
+        _task_state_name(reply.status.state) if reply.HasField("status") else "unknown"
+    )
+    if outcome.timed_out:
+        note = f"The remote agent is still working on task {reply.id}."
+        text = f"{note} Latest status: {text}" if text else note
+    return (
+        text or "No response received.",
+        state,
+        reply.id or task_id,
+        reply.context_id or context_id,
+    )
+
+
 async def _send_a2a_message(
     client: Client,
     agent_label: str,
@@ -281,19 +324,17 @@ async def _send_a2a_message(
     message: str,
     task_id: str | None,
     context_id: str | None,
+    poll_settings: A2aPollSettings | None = None,
 ) -> tuple[str, str, str | None, str | None]:
     """Send a message to a remote A2A agent and return the response.
+
+    A task the agent is still working on is waited for, suspending the run
+    between polls (see ``long_running``). The suspend propagates as
+    ``GraphInterrupt``; any other failure is returned as an ``error`` result.
 
     Returns:
         Tuple of (response_text, task_state, new_task_id, new_context_id).
     """
-    if task_id or context_id:
-        logger.info(
-            "A2A continue task=%s context=%s to %s", task_id, context_id, agent_label
-        )
-    else:
-        logger.info("A2A new message to %s", agent_label)
-
     a2a_message = new_text_message(
         message,
         role=Role.ROLE_USER,
@@ -302,33 +343,16 @@ async def _send_a2a_message(
     )
 
     try:
-        text = ""
-        state = "unknown"
-        new_task_id = task_id
-        new_context_id = context_id
-
-        async for response in client.send_message(
-            SendMessageRequest(message=a2a_message)
-        ):
-            if response.HasField("message"):
-                text = _extract_text(response.message)
-                new_context_id = response.message.context_id or new_context_id
-                state = "completed"
-                break
-            if response.HasField("task"):
-                task = response.task
-                text = _extract_text(task)
-                new_task_id = task.id or new_task_id
-                new_context_id = task.context_id or new_context_id
-                if task.HasField("status"):
-                    state = _task_state_name(task.status.state)
-                break
-
-        return (text or "No response received.", state, new_task_id, new_context_id)
-
+        outcome = await send_and_wait(client, a2a_message, poll_settings)
+    except GraphBubbleUp:
+        raise
     except Exception as e:
         logger.exception("A2A request to %s failed", agent_label)
         return (f"Error: {e}", "error", task_id, context_id)
+
+    return _read_outcome(
+        outcome, task_id=task_id, context_id=context_id, message_state="completed"
+    )
 
 
 def _create_a2a_tool(
@@ -350,6 +374,8 @@ def _create_a2a_tool(
         "display_name": display_name,
         "slug": config.slug,
         "resource_name": config.name,
+        # A task that outlives the in-job wait suspends the run on a timer.
+        SUSPENDS_RUN: True,
     }
 
     async def _invoke(
@@ -366,7 +392,12 @@ def _create_a2a_tool(
         """
         parent_ctx = UiPathSpanUtils.get_parent_context()
         tracer = otel_trace.get_tracer(__name__)
-        with tracer.start_as_current_span(display_name, context=parent_ctx) as span:
+        with tracer.start_as_current_span(
+            display_name,
+            context=parent_ctx,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             # "openinference.span.kind" drives the SpanType shown in the UI;
             # "toolCall" is the recognized type for a tool invocation.
             span.set_attribute("openinference.span.kind", "toolCall")
@@ -377,14 +408,28 @@ def _create_a2a_tool(
             span.set_attribute("input", message)
             span.set_attribute("input.value", message)
 
-            client = await a2a_client.get()
-            text, response_state, new_task_id, new_context_id = await _send_a2a_message(
-                client,
-                agent_label,
-                message=message,
-                task_id=task_id,
-                context_id=context_id,
-            )
+            try:
+                client = await a2a_client.get()
+                (
+                    text,
+                    response_state,
+                    new_task_id,
+                    new_context_id,
+                ) = await _send_a2a_message(
+                    client,
+                    agent_label,
+                    message=message,
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+            except GraphBubbleUp:
+                # The run suspends until the next poll; that run gets its own span.
+                span.set_attribute("task_state", "suspended")
+                raise
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(otel_trace.StatusCode.ERROR, str(e))
+                raise
 
             span.set_attribute("output", text)
             span.set_attribute("output.value", text)

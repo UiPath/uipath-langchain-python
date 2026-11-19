@@ -115,6 +115,7 @@ def test_tool_is_named_after_the_resource_and_titled_by_the_card() -> None:
         "display_name": "Remote Agent",
         "slug": "remote-agent-slug",
         "resource_name": "Research Briefing",
+        "suspends_run": True,
     }
 
 
