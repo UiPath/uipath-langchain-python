@@ -1,12 +1,12 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
     "python_full_version == '3.14.*'",
     "python_full_version == '3.13.*'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+    "python_full_version < '3.12' or (python_full_version == '3.12.*' and sys_platform != 'emscripten')",
 ]
 
 [options]
@@ -14,14 +14,14 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
-uipath-runtime = false
-uipath = false
-uipath-platform = false
-uipath-langchain = false
-uipath-llm-client = false
 jsonschema-pydantic-converter = false
-uipath-langchain-client = false
+uipath = false
 uipath-core = false
+uipath-langchain = false
+uipath-langchain-client = false
+uipath-llm-client = false
+uipath-platform = false
+uipath-runtime = false
 
 [[package]]
 name = "a2a-sdk"
@@ -3817,11 +3817,11 @@ crypto = [
 
 [[package]]
 name = "pyparsing"
-version = "3.3.2"
+version = "3.3.3"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/11/b213bebff182584360cb8d17c72c1677fec5c5c228de439e63bcf8ab1c8f/pyparsing-3.3.3.tar.gz", hash = "sha256:928ae7e20211f3b6f3915a72f06a0cfd29ab9d24279dd6346b6b1a7146397d36", size = 1050487, upload-time = "2026-09-20T20:59:05.609Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+    { url = "https://files.pythonhosted.org/packages/38/bb/d215ee7c73b61497b28a5503f9f53523f294fcc936762b7caf90e0c1c2b5/pyparsing-3.3.3-py3-none-any.whl", hash = "sha256:ece8c00a69cf01b45d0b1dedabb469c90d8caf996d4fda40f147627a122849a4", size = 126420, upload-time = "2026-09-20T20:59:04.025Z" },
 ]
 
 [[package]]
@@ -4861,7 +4861,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.20.2"
+version = "0.20.4"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4971,7 +4971,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.23.2,<1.24.0" },
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.23.2,<1.24.0" },
     { name = "uipath-llm-client", specifier = ">=1.23.0,<1.24.0" },
-    { name = "uipath-platform", specifier = ">=0.3.10,<0.4.0" },
+    { name = "uipath-platform", specifier = ">=0.3.11,<0.4.0" },
     { name = "uipath-runtime", specifier = ">=0.13.5,<0.14.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "code-interpreter", "video", "all"]
@@ -5059,7 +5059,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.3.10"
+version = "0.3.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -5070,9 +5070,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/0c/e40df777e6b1b0155252c285bdb0759da389b480d935986867e24d3b0378/uipath_platform-0.3.10.tar.gz", hash = "sha256:be3f8f9e9a093f6cc4e2eaa588e2d796d33f534a63b81ca8894af5fbca89d6d7", size = 499187, upload-time = "2026-11-17T15:25:57.347Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/c1/d43da71645d56018f1f0c2a5eb323e6db0705e307b0b01f2e73f80b5ebcb/uipath_platform-0.3.11.tar.gz", hash = "sha256:cc4c77e42af59b1c4c11b7902ad29e7754c0cc0236191ba39e1aabaaf7736615", size = 509107, upload-time = "2026-11-19T09:13:35.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/bb/9f7a10f666dc852bd48fcc778bfed3cd0beba254e88c0e8f5150934b817b/uipath_platform-0.3.10-py3-none-any.whl", hash = "sha256:27cb824501191aa6d6dd18e05dd21ff8d90e5fbe9858d1f40e166d58f12c4289", size = 317072, upload-time = "2026-11-17T15:25:55.447Z" },
+    { url = "https://files.pythonhosted.org/packages/49/3b/9f8932871ed5f5966db6f2de3b2c2bc0a33be4539df02e2caddf112dee93/uipath_platform-0.3.11-py3-none-any.whl", hash = "sha256:526dab44ef1184a95d8bdd7e8598276f6fc0036debaabec6da306ea43b183a98", size = 325204, upload-time = "2026-11-19T09:13:33.89Z" },
 ]
 
 [[package]]

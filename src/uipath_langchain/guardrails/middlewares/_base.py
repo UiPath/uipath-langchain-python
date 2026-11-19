@@ -55,6 +55,7 @@ from ._attachments import (
     registry_references,
     tool_result_references,
 )
+from ._spans import guardrail_action_span
 from ._utils import (
     convert_block_exception,
     create_modified_tool_request,
@@ -362,7 +363,10 @@ class BuiltInGuardrailMiddlewareMixin:
             )
         )
         try:
-            return self.action.handle_validation_result(result, input_data, self._name)
+            with guardrail_action_span(self._name, self.action, result):
+                return self.action.handle_validation_result(
+                    result, input_data, self._name
+                )
         finally:
             _action_context.reset(token)
 
