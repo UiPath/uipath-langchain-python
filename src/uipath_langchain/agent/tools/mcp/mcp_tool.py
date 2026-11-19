@@ -17,6 +17,8 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -280,7 +282,22 @@ async def create_mcp_tools(
 
     if isinstance(discovery_mode, DynamicToolsConfig):
         logger.info(f"Fetching tools from MCP server '{config.slug}' via list_tools")
-        result = await mcpClient.list_tools()
+        try:
+            result = await mcpClient.list_tools()
+        except MCPError as e:
+            # The MCP client reduces an HTTP error from the server to a generic
+            # message, so say which server could not be reached.
+            raise AgentStartupError(
+                code=AgentStartupErrorCode.HTTP_ERROR,
+                title=f"Could not load tools from MCP server '{config.slug}'",
+                detail=(
+                    f"The agent could not list the tools of MCP server "
+                    f"'{config.slug}' at startup: {e}. Check that the server is "
+                    "running and that the agent has access to it."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+                should_wrap=False,
+            ) from e
         server_tools = result.tools
         logger.info(
             f"MCP server '{config.slug}' returned {len(server_tools)} tools: "
