@@ -19,8 +19,13 @@ from uipath.platform.documents import (
     ExtractionResponseIXP,
     ValidateExtractionAction,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentStartupError
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+)
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
 from uipath_langchain.agent.tools.ixp_escalation_tool import create_ixp_escalation_tool
 
@@ -446,6 +451,64 @@ class TestIxpEscalationToolExecution:
         assert isinstance(validation_arg, WaitDocumentExtractionValidation)
         assert validation_arg.extraction_validation.operation_id == "test-op-id"
         assert validation_arg.task_url == "https://example.com/actions_/tasks/123"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    async def test_missing_storage_bucket_is_a_deployment_error(
+        self,
+        mock_uipath_cls,
+        escalation_resource,
+        mock_extraction_response,
+    ):
+        """A missing bucket is the agent's configuration, not an unexpected error (MST-18256)."""
+        sdk_error = RuntimeError(
+            "Operation failed with status: Failed, error: "
+            "{'message': 'Orchestrator bucket does not exist.', 'severity': 'Error', "
+            "'code': '[OrchestratorBucketNotFoundError]'}"
+        )
+        mock_client = MagicMock()
+        mock_client.documents.create_validate_extraction_action_async = AsyncMock(
+            side_effect=sdk_error
+        )
+        mock_uipath_cls.return_value = mock_client
+
+        tool = create_ixp_escalation_tool(escalation_resource)
+        assert tool.metadata is not None
+        tool.metadata["extraction_result"] = mock_extraction_response
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({})
+
+        info = exc_info.value.error_info
+        assert info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.STORAGE_BUCKET_NOT_FOUND
+        )
+        assert info.category == UiPathErrorCategory.DEPLOYMENT
+        assert info.title == "Storage bucket 'invoices-bucket' was not found"
+        assert "validate_invoice" in info.detail
+        assert exc_info.value.__cause__ is sdk_error
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    async def test_other_validation_failures_are_not_relabelled(
+        self,
+        mock_uipath_cls,
+        escalation_resource,
+        mock_extraction_response,
+    ):
+        """Only the bucket-not-found code is mapped; anything else passes through."""
+        mock_client = MagicMock()
+        mock_client.documents.create_validate_extraction_action_async = AsyncMock(
+            side_effect=RuntimeError("Operation failed with status: Failed, error: x")
+        )
+        mock_uipath_cls.return_value = mock_client
+
+        tool = create_ixp_escalation_tool(escalation_resource)
+        assert tool.metadata is not None
+        tool.metadata["extraction_result"] = mock_extraction_response
+
+        with pytest.raises(RuntimeError, match="error: x"):
+            await tool.ainvoke({})
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
