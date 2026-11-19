@@ -13,6 +13,7 @@ from uipath.platform.guardrails.decorators import LoggingSeverityLevel
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
 GUARDRAIL_ACTION = "guardrailAction"
+GUARDRAIL_EVALUATION = "guardrailEvaluation"
 
 
 def _new_span(name: str, span_type: str, **attributes: Any) -> Span:
@@ -52,6 +53,12 @@ def _error_text(exc: BaseException) -> str:
     return str(exc)
 
 
+def span_guid(span: Span) -> str:
+    """Span id in the GUID form LLMOps uses."""
+    span_id = format(span.get_span_context().span_id, "016x")
+    return f"00000000-0000-0000-{span_id[:4]}-{span_id[4:]}"
+
+
 def action_name(action: Any) -> str:
     """``BlockAction`` -> ``Block``."""
     name = type(action).__name__
@@ -79,3 +86,26 @@ def guardrail_action_span(
     )
     with _active(span):
         yield span
+
+
+@contextmanager
+def guardrail_evaluation_span(
+    guardrail_name: str, description: str | None = None
+) -> Generator[Span]:
+    """Record a client-side check; set its outcome with ``set_validation_result``."""
+    span = _new_span(
+        guardrail_name,
+        GUARDRAIL_EVALUATION,
+        guardrailName=guardrail_name,
+        guardrailDescription=description,
+        guardrailType="custom",
+    )
+    with _active(span):
+        yield span
+
+
+def set_validation_result(span: Span, result: GuardrailValidationResult) -> None:
+    """Record ``result`` the way the Guardrails Service does."""
+    span.set_attribute("validationResult", result.result.name)
+    if result.reason:
+        span.set_attribute("details", [result.reason])
