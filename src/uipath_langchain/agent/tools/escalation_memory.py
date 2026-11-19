@@ -27,6 +27,7 @@ from uipath_langchain._utils import (
     set_span_attribute,
 )
 
+from ..memory_field_settings import field_settings_for_weight
 from .utils import SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
 
 logger = logging.getLogger(__name__)
@@ -668,7 +669,9 @@ def _build_search_fields(
             continue
         settings = FieldSettings()
         if field_settings_lookup is not None:
-            settings = FieldSettings(weight=field_settings_lookup[name].weight)
+            settings = field_settings_for_weight(
+                name, field_settings_lookup[name].weight
+            )
         fields.append(
             SearchField(
                 key_path=["escalation-input", name],

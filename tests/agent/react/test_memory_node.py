@@ -171,6 +171,30 @@ class TestBuildSearchFields:
     def test_empty_input(self) -> None:
         assert _build_search_fields({}) == []
 
+    def test_out_of_range_weight_names_the_field(self):
+        """A weight above 1 used to surface as a bare FieldSettings error (MST-18256)."""
+        from uipath.runtime.errors import UiPathErrorCategory
+
+        from uipath_langchain.agent.exceptions import (
+            AgentRuntimeError,
+            AgentRuntimeErrorCode,
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            _build_search_fields({"topic": "python"}, field_weights={"topic": 2.0})
+
+        info = exc_info.value.error_info
+        assert info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.INVALID_MEMORY_FIELD_WEIGHT
+        )
+        assert info.category == UiPathErrorCategory.DEPLOYMENT
+        assert info.title == "Invalid memory weight for field 'topic'"
+        assert "2.0" in info.detail
+
+    def test_weight_at_the_limit_is_accepted(self):
+        fields = _build_search_fields({"topic": "python"}, field_weights={"topic": 1.0})
+        assert fields[0].settings.weight == 1.0
+
 
 class TestMemoryRecallNode:
     @pytest.mark.asyncio
