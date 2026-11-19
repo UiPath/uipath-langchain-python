@@ -25,6 +25,21 @@ MessageItem = Union[
 class TestReplaceToolCalls:
     """Test cases for replace_tool_calls function."""
 
+    def test_tool_call_without_arguments_does_not_fail_validation(self):
+        """args=None used to fail AIMessage validation and fault the agent (MST-18256)."""
+        original_message = AIMessage(
+            content_blocks=[create_tool_call(name="ping", args={}, id="call_1")],
+            tool_calls=[ToolCall(name="ping", args={}, id="call_1")],
+        )
+        no_args: Any = None
+
+        result = replace_tool_calls(
+            original_message, [ToolCall(name="ping", args=no_args, id="call_1")]
+        )
+
+        assert result.tool_calls[0]["args"] == {}
+        assert result.tool_calls[0]["name"] == "ping"
+
     def test_replace_tool_calls_basic(self):
         """Test basic tool call replacement."""
         original_tool_calls = [
