@@ -187,6 +187,23 @@ async def test_files_source_lets_other_service_errors_through():
         await FilesGroundingSource().ground(client, "onto-1", _DETAILS)
 
 
+async def test_graph_source_falls_back_to_the_schema_when_the_graph_has_no_property_names(
+    caplog,
+):
+    client = _FakeClient(
+        graph={"objects": [{"name": "SalesOrder", "propertyCount": 7}]},
+        by_type={"schema": _Content(b"Ontology(<urn:x>)")},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        grounding = await GraphGroundingSource().ground(client, "onto-1", _DETAILS)
+
+    assert grounding.kind == "files"
+    assert "Ontology(<urn:x>)" in grounding.text
+    assert "no property names" in caplog.text
+    assert [kind for kind, _ in client.calls] == ["graph", "by_type"]
+
+
 # --- graph source -----------------------------------------------------------
 
 

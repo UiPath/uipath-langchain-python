@@ -58,7 +58,7 @@ class SqlResultLike(Protocol):
     """``POST /ontology/{id}/sql`` as the client returns it.
 
     ``rows`` are dicts keyed by column name; ``column_names`` flattens ``columns``.
-    ``row_count`` is the service's count, which can exceed ``len(rows)``.
+    ``row_count`` is the number of rows in this answer, not of all matches.
     """
 
     columns: Sequence[SqlColumnLike]

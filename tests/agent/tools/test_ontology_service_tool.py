@@ -304,7 +304,7 @@ async def test_executor_returns_records_from_dict_rows():
 
     assert out["records"] == [{"id": 1, "total": 10.5}, {"id": 2, "total": 3.0}]
     assert out["total_count"] == 2 and out["row_count"] == 2
-    assert "truncated" not in out and "error" not in out
+    assert "may_have_more" not in out and "error" not in out
     # the statement travels as a body argument, untouched, with no limit/offset
     # arguments: the model writes those clauses into the statement itself
     assert client.calls == [
@@ -315,12 +315,35 @@ async def test_executor_returns_records_from_dict_rows():
     ]
 
 
-async def test_executor_marks_truncated_results():
-    client = _FakeOntologyClient(sql_result=_SqlResult(["id"], [{"id": 1}], 250))
+@pytest.mark.parametrize("page", [50, 200])
+async def test_executor_flags_a_full_page_as_possibly_incomplete(page):
+    rows = [{"id": i} for i in range(page)]
+    client = _FakeOntologyClient(sql_result=_SqlResult(["id"], rows, page))
     out = await OntologyServiceQueryExecutor(client, "onto-1", "Orders")(
         "SELECT id FROM SalesOrder"
     )
-    assert out["truncated"] is True and out["row_count"] == 250
+    assert out["may_have_more"] is True
+    assert "OFFSET" in out["note"]
+
+
+async def test_executor_leaves_a_short_page_unflagged():
+    rows = [{"id": i} for i in range(49)]
+    client = _FakeOntologyClient(sql_result=_SqlResult(["id"], rows, 49))
+    out = await OntologyServiceQueryExecutor(client, "onto-1", "Orders")(
+        "SELECT id FROM SalesOrder"
+    )
+    assert "may_have_more" not in out
+
+
+@pytest.mark.parametrize("has_more", [True, False])
+async def test_executor_prefers_the_services_own_has_more(has_more):
+    result = _SqlResult(["id"], [{"id": i} for i in range(50)], 50)
+    result.hasMore = has_more  # type: ignore[attr-defined]
+    client = _FakeOntologyClient(sql_result=result)
+    out = await OntologyServiceQueryExecutor(client, "onto-1", "Orders")(
+        "SELECT id FROM SalesOrder"
+    )
+    assert out.get("may_have_more", False) is has_more
 
 
 async def test_executor_feeds_a_rejected_statement_back_as_an_error():

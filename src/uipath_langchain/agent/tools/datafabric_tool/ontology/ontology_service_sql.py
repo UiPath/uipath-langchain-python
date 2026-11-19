@@ -24,6 +24,10 @@ from ...datafabric_query_tool import DataFabricQueryTool
 from ..models import DataFabricExecuteSqlInput
 from .ontology_service_client import OntologyServiceClient
 
+# The service's default page (no LIMIT) and its LIMIT cap. A page of exactly one of
+# these sizes may have been cut short; until the service reports it, say so.
+SERVICE_PAGE_SIZES = (50, 200)
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,14 +61,14 @@ class OntologyServiceQueryExecutor:
             }
 
         records = [dict(row) for row in result.rows]
-        truncated = result.row_count > len(records)
+        may_have_more = _may_have_more(result, len(records))
         logger.info(
             "Ontology %s SQL ok in %d ms: %d rows returned, row_count %d%s",
             self._ontology_id,
             int((time.perf_counter() - started) * 1000),
             len(records),
             result.row_count,
-            " (truncated)" if truncated else "",
+            " (page full, may have more)" if may_have_more else "",
         )
         out: dict[str, Any] = {
             "records": records,
@@ -72,9 +76,23 @@ class OntologyServiceQueryExecutor:
             "row_count": result.row_count,
             "sql_query": sql_query,
         }
-        if truncated:
-            out["truncated"] = True
+        if may_have_more:
+            out["may_have_more"] = True
+            out["note"] = (
+                "This page is full, so more rows may match. If the question needs "
+                "them, read the next page with ORDER BY and OFFSET."
+            )
         return out
+
+
+def _may_have_more(result: Any, returned: int) -> bool:
+    """The service's own ``hasMore`` when it sends one, else a full page."""
+    reported = getattr(result, "has_more", None)
+    if reported is None:
+        reported = getattr(result, "hasMore", None)
+    if reported is not None:
+        return bool(reported)
+    return returned in SERVICE_PAGE_SIZES
 
 
 def create_service_execute_sql_tool(

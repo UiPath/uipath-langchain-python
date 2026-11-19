@@ -181,8 +181,18 @@ class GraphGroundingSource:
         details: OntologyDetailsLike,
     ) -> Grounding:
         graph = await client.get_graph_async(ontology_id)
-        rendered = render_graph(graph)
         objects = graph.get("objects") or []
+        if _lacks_properties(objects):
+            # The listing carries property counts, not names; without names the model
+            # would guess columns, so ground on the schema file instead.
+            logger.warning(
+                "Ontology %s: graph has no property names; grounding on the schema file.",
+                ontology_id,
+            )
+            return await FilesGroundingSource(self._max_bytes).ground(
+                client, ontology_id, details
+            )
+        rendered = render_graph(graph)
         relationships = graph.get("relationships") or []
         if len(rendered.encode("utf-8")) > self._max_bytes:
             rendered = _cut_at(rendered, self._max_bytes)
@@ -199,6 +209,14 @@ class GraphGroundingSource:
             text=text,
             summary=f"{len(objects)} objects, {len(relationships)} relationships",
         )
+
+
+def _lacks_properties(objects: list[Any]) -> bool:
+    """True when the graph counts properties but names none (the plain listing)."""
+    listed = [o for o in objects if isinstance(o, Mapping)]
+    counted = any((o.get("propertyCount") or 0) > 0 for o in listed)
+    named = any(o.get("properties") for o in listed)
+    return counted and not named
 
 
 def render_graph(graph: Mapping[str, Any]) -> str:
