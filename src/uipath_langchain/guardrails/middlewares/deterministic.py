@@ -21,6 +21,7 @@ from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
+from ._spans import guardrail_action_span
 from ._utils import (
     convert_block_exception,
     create_modified_tool_request,
@@ -385,6 +386,7 @@ class UiPathDeterministicGuardrailMiddleware:
         self, result: GuardrailValidationResult, input_data: str | dict[str, Any]
     ) -> str | dict[str, Any] | None:
         """Handle guardrail validation result."""
-        if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
+        if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
+            return None
+        with guardrail_action_span(self._name, self.action, result):
             return self.action.handle_validation_result(result, input_data, self._name)
-        return None
