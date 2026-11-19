@@ -122,6 +122,32 @@ class TestCreateConversationalOutputNode:
         assert "messages" not in result
 
     @pytest.mark.asyncio
+    async def test_stripping_does_not_write_back_into_graph_state(self):
+        """The node hands `state.messages` to the extractor directly, so a
+        strip that edited the system message in place would leave graph state
+        holding a prompt stripped of its output-fields section -- the loop
+        would silently lose it. Only the call's copy may be rewritten.
+        """
+        model, _non_streaming, bound = _make_mock_model()
+        node = create_conversational_output_node(model, _OutputSchema)
+        section_bearing = get_chat_system_prompt(
+            model="claude-3-sonnet",
+            system_message="builder prompt",
+            agent_name="Agent",
+            output_schema=build_conversational_output_args_schema(_OutputSchema),
+        )
+        state = _make_state(
+            [SystemMessage(content=section_bearing), HumanMessage(content="hi")]
+        )
+
+        await node(state)
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert "STRUCTURED OUTPUT FOR THIS TURN" not in sent[0].content
+        assert "builder prompt" in sent[0].content
+        assert state.messages[0].content == section_bearing
+
+    @pytest.mark.asyncio
     async def test_binds_only_set_conversational_output_tool(self):
         model, non_streaming, _bound = _make_mock_model()
         create_conversational_output_node(model, _OutputSchema)
