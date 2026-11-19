@@ -1,15 +1,14 @@
-"""Inner LangGraph sub-graph for the Data Fabric **ontology** tool.
+"""Inner LangGraph sub-graph for the ontology tool.
 
-A duplicate of the entity tool's ``datafabric_subgraph`` that is *prompt-agnostic*:
-it accepts a ready-made ``system_prompt`` string rather than building one from
-entities/resource_description internally. This lets the ontology tool ground the
-inner LLM on the OWL + R2RML (assembled by ``ontology_prompt_builder``) without
-modifying the shared entity-tool sub-graph.
+A self-contained ReAct loop that turns a natural-language question into SQL over
+the ontology's business objects, runs it through the ``execute_sql`` tool bound to
+the Ontology service, retries on a rejected statement and short-circuits straight
+to END on a successful execution so the outer agent receives the raw rows.
 
-Behaviourally identical to the entity sub-graph: a self-contained ReAct loop that
-translates natural-language questions into SQL, executes them via ``execute_sql``,
-retries on errors, and short-circuits straight to END on a successful execution so
-the outer agent receives the raw tool result.
+The sub-graph is prompt-agnostic: the caller passes the ready system prompt (see
+:mod:`ontology_service_prompt`) and the ``execute_sql`` tool (see
+:mod:`ontology_service_sql`). It shares nothing with the entity-set tool's
+``datafabric_subgraph`` beyond the pattern.
 """
 
 import asyncio
@@ -30,77 +29,40 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
-from uipath.platform.entities import EntitiesService, Entity
-
-from ...datafabric_query_tool import DataFabricQueryTool
-from ..models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
 
 
-class DataFabricSubgraphState(BaseModel):
-    """State for the inner Data Fabric ReAct sub-graph."""
+class OntologySubgraphState(BaseModel):
+    """State for the inner ontology ReAct sub-graph."""
 
     messages: Annotated[list[AnyMessage], add_messages] = []
     iteration_count: int = 0
     last_tool_success: bool = False
 
 
-class QueryExecutor:
-    """Executes SQL queries against Data Fabric."""
+class OntologyGraph:
+    """Inner ReAct sub-graph: the model writes SQL, ``execute_sql`` runs it.
 
-    def __init__(self, entities_service: EntitiesService) -> None:
-        self._entities = entities_service
-
-    async def __call__(self, sql_query: str) -> dict[str, Any]:
-        logger.debug("execute_sql called with SQL: %s", sql_query)
-        try:
-            records = await self._entities.query_entity_records_async(
-                sql_query=sql_query,
-                resolve_choice_sets=True,
-            )
-            return {
-                "records": records,
-                "total_count": len(records),
-                "sql_query": sql_query,
-            }
-        except Exception as e:
-            logger.error("SQL query failed: %s", e)
-            return {
-                "records": [],
-                "total_count": 0,
-                "error": str(e),
-                "sql_query": sql_query,
-            }
-
-
-class DataFabricGraph:
-    """Inner ReAct sub-graph for Data Fabric SQL execution (ontology tool).
-
-    Each graph node is a method. The graph is compiled during __init__
-    and available via the ``compiled`` property. Unlike the entity tool's
-    sub-graph, the system prompt is supplied ready-made by the caller.
+    Each graph node is a method. The graph is compiled during ``__init__`` and is
+    available as ``compiled_graph``.
     """
 
     def __init__(
         self,
         llm: BaseChatModel,
-        entities: list[Entity],
-        entities_service: EntitiesService,
         system_prompt: str,
+        execute_sql_tool: BaseTool,
         max_iterations: int = 25,
     ) -> None:
         self._max_iterations = max_iterations
-        self._execute_sql_tool = self._create_execute_sql_tool(
-            entities_service, entities
-        )
+        self._execute_sql_tool = execute_sql_tool
         self._system_message = SystemMessage(content=system_prompt)
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
-            [self._execute_sql_tool]
+            [execute_sql_tool]
         )
 
-        # Build and compile the graph
-        graph = StateGraph(DataFabricSubgraphState)
+        graph = StateGraph(OntologySubgraphState)
         graph.add_node("inner_llm", self.llm_node)
         graph.add_node("inner_tool", self.tool_node)
         graph.add_node("termination", self.termination_node)
@@ -112,13 +74,13 @@ class DataFabricGraph:
         graph.add_edge("termination", END)
         self.compiled_graph: CompiledStateGraph[Any] = graph.compile()
 
-    async def llm_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
+    async def llm_node(self, state: OntologySubgraphState) -> dict[str, Any]:
         """Invoke the inner LLM with the current message history."""
         messages = [self._system_message] + list(state.messages)
         response = await self._inner_llm.ainvoke(messages)
         return {"messages": [response]}
 
-    async def tool_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
+    async def tool_node(self, state: OntologySubgraphState) -> dict[str, Any]:
         """Execute all tool calls from the last AIMessage concurrently."""
         last = state.messages[-1]
         if not isinstance(last, AIMessage) or not last.tool_calls:
@@ -161,7 +123,7 @@ class DataFabricGraph:
             succeeded,
         )
 
-    async def termination_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
+    async def termination_node(self, state: OntologySubgraphState) -> dict[str, Any]:
         """Produce a clear message when max iterations is reached."""
         return {
             "messages": [
@@ -175,7 +137,7 @@ class DataFabricGraph:
             ]
         }
 
-    def router(self, state: DataFabricSubgraphState) -> str:
+    def router(self, state: OntologySubgraphState) -> str:
         """Route from ``inner_llm`` to tool, termination, or END."""
         last = state.messages[-1] if state.messages else None
         if isinstance(last, AIMessage) and last.tool_calls:
@@ -184,51 +146,25 @@ class DataFabricGraph:
             return "termination"
         return END
 
-    def tool_router(self, state: DataFabricSubgraphState) -> str:
+    def tool_router(self, state: OntologySubgraphState) -> str:
         """Route from ``inner_tool``: short-circuit on success, retry on error.
 
-        Skips the redundant LLM call that would otherwise reformat a
-        successful SQL result into prose — the outer agent receives the
-        raw tool output and produces the final natural-language answer.
-        Errors loop back to ``inner_llm`` so the retry path is preserved.
+        A successful execution ends the sub-graph so the outer agent reads the raw
+        rows; a rejected statement loops back to ``inner_llm`` with the runtime's
+        message so the model can correct it, within ``max_iterations``.
         """
         if state.last_tool_success:
             return END
         return "inner_llm"
 
-    def _create_execute_sql_tool(
-        self,
-        entities_service: EntitiesService,
-        entities: list[Entity],
-    ) -> BaseTool:
-        """Create the inner ``execute_sql`` tool."""
-        entity_names = ", ".join(e.name for e in entities)
-        return DataFabricQueryTool(
-            name="execute_sql",
-            description=(
-                f"Execute a SQL SELECT query against Data Fabric entities: {entity_names}. "
-                "Refer to the entity schemas in the system message for available "
-                "tables and columns. Retry with a corrected query on errors."
-            ),
-            args_schema=DataFabricExecuteSqlInput,
-            coroutine=QueryExecutor(entities_service),
-            metadata={"tool_type": "datafabric_sql"},
-        )
-
     @staticmethod
     def create(
         llm: BaseChatModel,
-        entities: list[Entity],
-        entities_service: EntitiesService,
         system_prompt: str,
+        execute_sql_tool: BaseTool,
         max_iterations: int = 25,
     ) -> CompiledStateGraph[Any]:
-        """Create and return a compiled Data Fabric ontology sub-graph."""
-        graph = DataFabricGraph(
-            llm,
-            entities,
-            entities_service,
-            system_prompt,
-            max_iterations,
-        )
-        return graph.compiled_graph
+        """Create and return a compiled ontology sub-graph."""
+        return OntologyGraph(
+            llm, system_prompt, execute_sql_tool, max_iterations
+        ).compiled_graph
