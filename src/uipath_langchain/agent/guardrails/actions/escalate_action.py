@@ -585,7 +585,9 @@ def _process_llm_escalation_response(
                         if (
                             isinstance(reviewed_data, dict)
                             and "name" in reviewed_data
-                            and "args" in reviewed_data
+                            # A reviewer reply without arguments ("args": null) must
+                            # not overwrite the call: AIMessage rejects non-dict args.
+                            and isinstance(reviewed_data.get("args"), dict)
                         ):
                             reviewed_tool_calls_map[reviewed_data["name"]] = (
                                 reviewed_data["args"]
