@@ -26,6 +26,9 @@ dependencies = [
     "jsonpath-ng>=1.7.0",
     "mcp==2.3.0",
     "pillow>=12.3.0, <14.0.0",
+    # Unused here since the ontology tool moved to the Ontology service. Kept because some
+    # agents import rdflib without declaring it and get it through this package.
+    "rdflib>=7.0.0, <8.0.0",
     "a2a-sdk>=1.1.2,<2.0.0",
     "uipath-langchain-client[openai]>=1.23.2, <1.24.0",
 ]
