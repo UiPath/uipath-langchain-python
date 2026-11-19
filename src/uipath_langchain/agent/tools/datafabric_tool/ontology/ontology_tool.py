@@ -221,14 +221,14 @@ def create_datafabric_ontology_tool(
     """
     config = agent_config or {}
     items = list(resource.ontology_set or [])
-    if len(items) > 1:
+    first = next(iter(items), None)
+    if first is not None and len(items) > 1:
         logger.warning(
             "Ontology context '%s' holds %d ontologies; using the first (%s).",
             resource.name,
             len(items),
-            items[0].name,
+            first.name,
         )
-    first = items[0] if items else None
     ontology_name = (first.name if first else None) or resource.name
     handler = DataFabricOntologyQueryHandler(
         ontology_id=getattr(first, "id", None) if first else None,
