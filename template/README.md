@@ -43,7 +43,7 @@ flowchart TD
 ```json
 // Input
 {
-  "question": "What's the weather like in London?"
+  "question": "What's the weather in Paris right now?"
 }
 
 // Output
