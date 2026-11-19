@@ -83,6 +83,13 @@ class _FakeClient:
         self.calls.append(("graph", ontology_id))
         return self.graph
 
+    # The rest of the client protocol; grounding never calls these.
+    async def get_async(self, ontology_id):
+        raise AssertionError("grounding does not read ontology details")
+
+    async def execute_sql_async(self, ontology_id, statement, params=None):
+        raise AssertionError("grounding does not run SQL")
+
 
 _DETAILS = SimpleNamespace(
     id="onto-1",

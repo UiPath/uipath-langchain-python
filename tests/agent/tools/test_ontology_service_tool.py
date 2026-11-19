@@ -209,7 +209,7 @@ async def test_build_guarded_when_flag_off(monkeypatch):
 
 async def test_cached_graph_skips_all_work(monkeypatch):
     handler = _handler()
-    handler._compiled = "CACHED"  # type: ignore[assignment]
+    handler._compiled = "CACHED"
     monkeypatch.setattr(FeatureFlags, "is_flag_enabled", lambda *a, **k: False)
     assert await handler._ensure_graph() == "CACHED"
 
