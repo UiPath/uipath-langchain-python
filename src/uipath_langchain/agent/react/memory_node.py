@@ -33,6 +33,7 @@ from uipath.platform.memory import (
 
 from ...chat import get_chat_model
 from ...chat.helpers import extract_text_content
+from ..memory_field_settings import field_settings_for_weight
 from ..tools.internal_tools.analyze_files_tool import (
     add_files_to_message,
     resolve_attachments_to_file_infos,
@@ -585,7 +586,7 @@ def _build_search_fields(
             continue
         settings = FieldSettings()
         if field_weights and name in field_weights:
-            settings = FieldSettings(weight=field_weights[name])
+            settings = field_settings_for_weight(name, field_weights[name])
         fields.append(
             SearchField(key_path=[field_type, name], value=value_str, settings=settings)
         )
