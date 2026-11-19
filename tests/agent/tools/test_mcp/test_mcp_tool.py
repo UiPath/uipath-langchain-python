@@ -21,6 +21,8 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
 )
 from uipath_langchain.agent.tools.mcp import McpClient
 from uipath_langchain.agent.tools.mcp.mcp_tool import (
@@ -748,6 +750,26 @@ class TestToolsConfiguration:
         await create_mcp_tools(mcp_resource_dynamic, mock_mcp_client)
 
         mock_mcp_client.list_tools.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_dynamic_list_tools_failure_names_the_server(
+        self, mcp_resource_dynamic, mock_mcp_client
+    ):
+        """A failed startup listing used to say only "Server returned an error response" (MST-18256)."""
+        error = MCPError(code=-32603, message="Server returned an error response")
+        mock_mcp_client.list_tools = AsyncMock(side_effect=error)
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            await create_mcp_tools(mcp_resource_dynamic, mock_mcp_client)
+
+        info = exc_info.value.error_info
+        assert info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.HTTP_ERROR
+        )
+        assert info.category == UiPathErrorCategory.SYSTEM
+        assert info.title == "Could not load tools from MCP server 'dynamic-server'"
+        assert "Server returned an error response" in info.detail
+        assert exc_info.value.__cause__ is error
 
     @pytest.mark.asyncio
     async def test_dynamic_returns_all_server_tools(
