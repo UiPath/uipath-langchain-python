@@ -11,20 +11,6 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
-[options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
-exclude-newer-span = "P2D"
-
-[options.exclude-newer-package]
-uipath-runtime = false
-uipath = false
-uipath-platform = false
-uipath-langchain = false
-uipath-llm-client = false
-jsonschema-pydantic-converter = false
-uipath-langchain-client = false
-uipath-core = false
-
 [[package]]
 name = "a2a-sdk"
 version = "1.2.3"
