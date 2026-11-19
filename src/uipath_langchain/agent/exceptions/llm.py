@@ -5,7 +5,9 @@ a ``UiPathError`` carrying a semantic ``error_code`` (handled by
 ``raise_for_llm_client_error``), and a ``UiPathAPIError`` carrying an HTTP
 ``status_code`` + ``body`` for provider passthrough failures (handled by
 ``raise_for_provider_http_error``). Both are mapped to ``AgentRuntimeError`` so
-upstream handling can categorise without provider-specific logic.
+upstream handling can categorise without provider-specific logic. A request the
+LLM gateway's centralized (AI Trust Layer) guardrails blocked is recognised
+first, by the gateway's error code (``centralized_guardrail_error``).
 """
 
 import re
@@ -13,6 +15,7 @@ from collections.abc import Sequence
 from typing import NoReturn
 
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
+from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions.exceptions import (
@@ -103,6 +106,97 @@ _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
     ),
 )
 
+_GUARDRAIL_BLOCK_ERROR_CODE = "3040"
+_GUARDRAIL_BLOCK_ERROR_CODE_HEADER = "X-UiPath-LlmGateway-ErrorCode"
+_GUARDRAIL_BLOCK_DETAIL = (
+    "Execution was blocked by your organization's AI Trust Layer policy."
+)
+_GUARDRAIL_BLOCK_MESSAGE_LIMIT = 300
+
+
+def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | None:
+    """The agent error for an LLM call the gateway's centralized guardrails blocked.
+
+    The AI Trust Layer policy of the organization is enforced by the LLM gateway
+    on every LLM call, and a blocked call is answered 400 with gateway error
+    code 3040, in the ``X-UiPath-LlmGateway-ErrorCode`` header or in the body.
+    Neither retrying nor changing the model settings helps, so this is a
+    ``TERMINATION_GUARDRAIL_VIOLATION``. Its detail carries the gateway's own
+    message up to the validators' details, which can quote the request.
+
+    Args:
+        error: Any exception from an LLM call: a ``UiPathAPIError``, a raw
+            provider SDK error or ``httpx.HTTPStatusError`` carrying the
+            response, or an exception chained from one.
+
+    Returns:
+        The error to raise, chained on ``error``, or ``None`` when ``error`` is
+        not a centralized guardrail block.
+    """
+    api_error = as_uipath_error(error) if isinstance(error, Exception) else None
+    if not isinstance(api_error, UiPathAPIError) or api_error.status_code != 400:
+        return None
+    if not _has_guardrail_block_error_code(api_error):
+        return None
+
+    blocked = AgentRuntimeError(
+        code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
+        title="Guardrail violation",
+        detail=_guardrail_block_detail(api_error.body),
+        category=UiPathErrorCategory.USER,
+        status=api_error.status_code,
+    )
+    blocked.__cause__ = error
+    return blocked
+
+
+def _has_guardrail_block_error_code(error: UiPathAPIError) -> bool:
+    body = error.body if isinstance(error.body, dict) else {}
+    envelope = body.get("error")
+    codes = (
+        body.get("ErrorCode"),
+        envelope.get("code") if isinstance(envelope, dict) else None,
+        error.response.headers.get(_GUARDRAIL_BLOCK_ERROR_CODE_HEADER),
+    )
+    return any(
+        isinstance(code, (int, str))
+        and not isinstance(code, bool)
+        and str(code).strip() == _GUARDRAIL_BLOCK_ERROR_CODE
+        for code in codes
+    )
+
+
+def _guardrail_block_detail(body: object) -> str:
+    # After the first colon come the validators' details, which can quote the request (pii_detection
+    # lists the values it matched); the gateway's audit sanitiser drops them at the same place.
+    for message in _gateway_messages(body):
+        summary = _printable(message.partition(":")[0])
+        if len(summary) > _GUARDRAIL_BLOCK_MESSAGE_LIMIT:
+            summary = summary[:_GUARDRAIL_BLOCK_MESSAGE_LIMIT].rstrip() + "…"
+        if summary:
+            return f"{_GUARDRAIL_BLOCK_DETAIL} {summary}"
+    return _GUARDRAIL_BLOCK_DETAIL
+
+
+def _gateway_messages(body: object) -> list[str]:
+    """The message of each gateway error envelope the body may be, verbatim."""
+    if isinstance(body, str):
+        return [body]
+    if not isinstance(body, dict):
+        return []
+    error = body.get("error")
+    candidates = (
+        body.get("Message"),
+        body.get("message"),
+        error.get("message") if isinstance(error, dict) else error,
+    )
+    return [message for message in candidates if isinstance(message, str)]
+
+
+def _printable(text: str) -> str:
+    # A line break or bidi control in the gateway's message would forge lines in the error.
+    return "".join(ch if ch.isprintable() else " " for ch in text).strip()
+
 
 def raise_for_llm_client_error(
     error: UiPathError, attachments: Sequence[str] = ()
@@ -168,7 +262,8 @@ def raise_for_file_analysis_http_error(
     about those files: either the model cannot read them, or their content does
     not fit its context window. The error names the files and says which, so
     the user knows what to change -- unlike the generic bad-request detail,
-    which points at model settings. Any other status, a 400 carrying the
+    which points at model settings. A centralized guardrail block is a
+    guardrail violation, not a file error. Any other status, a 400 carrying the
     gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
     rejected the call), a content-filter rejection, and a 400 matching one of
     the ``_BAD_REQUEST_SIGNATURES`` (which already names the file limit hit)
@@ -185,6 +280,9 @@ def raise_for_file_analysis_http_error(
         all_pdf: Every attachment was sent as a PDF, so converting to PDF is
             not the advice to give.
     """
+    if (blocked := centralized_guardrail_error(error)) is not None:
+        raise blocked from error
+
     fields = _body_fields(error.body)
     if (
         error.status_code != 400
@@ -380,10 +478,14 @@ def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
     """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
 
     Reads the HTTP status code and ``error.body``, and re-raises as an
-    ``AgentRuntimeError`` chained on the original. When ``_classify`` names no
-    detail, the error's own message -- the HTTP reason phrase -- is all that is
-    left.
+    ``AgentRuntimeError`` chained on the original. A centralized guardrail block
+    is recognised first (:func:`centralized_guardrail_error`). When
+    ``_classify`` names no detail, the error's own message -- the HTTP reason
+    phrase -- is all that is left.
     """
+    if (blocked := centralized_guardrail_error(error)) is not None:
+        raise blocked from error
+
     status_code = error.status_code
     code, category, title, detail = _classify(status_code, error.body)
 

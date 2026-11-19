@@ -42,7 +42,10 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupError,
     AgentStartupErrorCode,
 )
-from uipath_langchain.agent.exceptions.llm import raise_for_provider_http_error
+from uipath_langchain.agent.exceptions.llm import (
+    centralized_guardrail_error,
+    raise_for_provider_http_error,
+)
 from uipath_langchain.agent.multimodal import (
     download_file_base64,
     is_image,
@@ -591,6 +594,9 @@ def _raise_for_api_error(
     llm_writes_input: bool,
 ) -> None:
     """Raise the tool error for a call the provider rejected."""
+    # Before the tool error below: inviting the LLM to rewrite its input would let it route around the policy.
+    if (blocked := centralized_guardrail_error(error)) is not None:
+        raise blocked from error
     name = provider.display_name
     if provider.is_unknown_model_error(error) or is_gateway_unknown_model_error(
         error.status_code, provider.provider_message(error)

@@ -1156,6 +1156,39 @@ async def test_jev_input_error_for_llm_content_is_a_tool_error(
     assert ("The request is too large" in message.content) == (status == 413)
 
 
+async def test_centralized_guardrail_block_of_llm_content_is_a_runtime_error(
+    jev_client: Any,
+) -> None:
+    response = httpx.Response(
+        400,
+        json={
+            "StatusCode": 400,
+            "Message": "Request rejected due to Centralized guardrails "
+            "user_prompt_attacks: User prompt attack detected",
+            "ErrorCode": "3040",
+        },
+        request=httpx.Request("POST", "https://api.typesafe.ai/v1/systemone"),
+    )
+    jev_client.asystem_one.side_effect = UiPathAPIError.from_response(response)
+    tool = create_internal_tool(_resource({}), AsyncMock())
+
+    # A tool error would ask the LLM to rewrite the input and call again.
+    with pytest.raises(AgentRuntimeError) as exc_info:
+        await tool.ainvoke(
+            tool_call(
+                name=tool.name,
+                args={"state": "text", "questions": QUESTIONS},
+                id="call-1",
+            )
+        )
+
+    error = exc_info.value.error_info
+    assert error.code == AgentRuntimeError.full_code(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
+    )
+    assert error.detail.endswith("Centralized guardrails user_prompt_attacks")
+
+
 # --- Configuration errors (not the LLM's to fix) --------------------------------
 
 CONFIGURED_STATE: dict[str, Any] = {"$['state']": _argument("$['ticket']")}

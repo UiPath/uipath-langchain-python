@@ -28,8 +28,10 @@ The tests below pin all of that down as the current contract.
 import httpx
 import pytest
 from uipath.llm_client import UiPathAPIError
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import centralized_guardrail_error
 from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -629,3 +631,280 @@ def test_404_prefers_the_gateway_detail_over_the_canned_text():
     info = _raise(err).error_info
 
     assert "Model not enabled for tenant." in info.detail
+
+
+# --------------------------------------------------------------------------
+# 400: a centralized (AI Trust Layer) guardrail block, gateway error code 3040
+# --------------------------------------------------------------------------
+
+_BLOCK_PREFIX = "Request rejected due to Centralized guardrails"
+_HARM_DETAILS = (
+    "Content safety violations detected: SelfHarm found with a severity level of "
+    "4 >= configured threshold of 2"
+)
+_HARM_BLOCK = f"{_BLOCK_PREFIX} harmful_content: {_HARM_DETAILS}"
+_BLOCK_HEADERS = {"X-UiPath-LlmGateway-ErrorCode": "3040"}
+_BLOCK_DETAIL = "Execution was blocked by your organization's AI Trust Layer policy."
+
+
+def _api_error_with_headers(
+    status_code: int, body: dict[str, object], headers: dict[str, str]
+) -> UiPathAPIError:
+    request = httpx.Request("POST", "http://gateway/")
+    response = httpx.Response(status_code, request=request, json=body, headers=headers)
+    return UiPathAPIError.from_response(response)
+
+
+def _blocked(body: dict[str, object]) -> UiPathAPIError:
+    return _api_error_with_headers(400, body, _BLOCK_HEADERS)
+
+
+def _text_block() -> UiPathAPIError:
+    request = httpx.Request("POST", "http://gateway/")
+    response = httpx.Response(
+        400, request=request, text=_HARM_BLOCK, headers=_BLOCK_HEADERS
+    )
+    return UiPathAPIError.from_response(response)
+
+
+@pytest.mark.parametrize(
+    "err_factory",
+    [
+        pytest.param(
+            lambda: _api_error(
+                400, {"StatusCode": 400, "Message": _HARM_BLOCK, "ErrorCode": "3040"}
+            ),
+            id="normalized-body-code",
+        ),
+        pytest.param(
+            lambda: _api_error(
+                400,
+                {
+                    "error": {
+                        "message": _HARM_BLOCK,
+                        "type": "invalid_request_error",
+                        "code": "3040",
+                        "param": None,
+                    }
+                },
+            ),
+            id="standardized-body-code",
+        ),
+        pytest.param(
+            lambda: _blocked(
+                {
+                    "error": {
+                        "message": _HARM_BLOCK,
+                        "type": None,
+                        "code": None,
+                        "param": None,
+                    }
+                }
+            ),
+            id="passthrough-openai-header",
+        ),
+        pytest.param(
+            lambda: _blocked({"error": {"code": 400, "message": _HARM_BLOCK}}),
+            id="passthrough-vertex-header",
+        ),
+        pytest.param(
+            lambda: _blocked({"message": _HARM_BLOCK}),
+            id="passthrough-bedrock-header",
+        ),
+        pytest.param(_text_block, id="text-body-header"),
+    ],
+)
+def test_centralized_guardrail_block_is_a_guardrail_violation(err_factory):
+    info = _raise(err_factory()).error_info
+
+    assert info.code == AgentRuntimeError.full_code(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
+    )
+    assert info.category == UiPathErrorCategory.USER
+    assert info.status == 400
+    assert info.title == "Guardrail violation"
+    assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content"
+
+
+def test_gateway_message_is_used_as_written():
+    """The detail does not depend on the wording of the gateway's message."""
+    info = _raise(_api_error(400, {"Message": "Blocked.", "ErrorCode": 3040}))
+
+    assert info.error_info.detail == f"{_BLOCK_DETAIL} Blocked."
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({}, id="no-message"),
+        pytest.param({"message": ": details only"}, id="blank-before-details"),
+    ],
+)
+def test_guardrail_block_without_a_message_keeps_the_fixed_detail(
+    body: dict[str, object],
+):
+    info = _raise(_blocked(body)).error_info
+
+    assert info.code.endswith(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+    )
+    assert info.detail == _BLOCK_DETAIL
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"message": _HARM_BLOCK}, id="message"),
+        pytest.param({"error": {"message": _HARM_BLOCK}}, id="error-envelope"),
+        pytest.param({"StatusCode": 400, "Message": _HARM_BLOCK}, id="normalized"),
+        pytest.param({"Message": _HARM_BLOCK, "ErrorCode": "3041"}, id="other-code"),
+    ],
+)
+def test_block_message_without_the_error_code_stays_a_provider_bad_request(
+    body: dict[str, object],
+):
+    err = _api_error(400, body)
+
+    assert centralized_guardrail_error(err) is None
+    assert _raise(err).error_info.code.endswith(
+        AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value
+    )
+
+
+@pytest.mark.parametrize(
+    "names",
+    ["pii_detection", "harmful_content, pii_detection", "my_byo_validator"],
+)
+def test_guardrail_details_are_never_copied(names: str):
+    message = f"{_BLOCK_PREFIX} {names}: PII detected: Email: jane.doe@example.com"
+    error = _raise(_blocked({"error": {"message": message}}))
+
+    info = error.error_info
+    assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} {names}"
+    for rendered in (info.detail, str(error), repr(error)):
+        assert "jane.doe" not in rendered
+
+
+def test_control_characters_in_the_gateway_message_cannot_forge_lines():
+    message = f"{_BLOCK_PREFIX} harmful_content\n\u202eCode - AGENT_RUNTIME.OK"
+    detail = _raise(_blocked({"message": message})).error_info.detail
+
+    assert "\n" not in detail
+    assert "\u202e" not in detail
+    assert detail.endswith("harmful_content  Code - AGENT_RUNTIME.OK")
+
+
+def test_long_gateway_message_is_capped():
+    detail = _raise(_blocked({"message": "Blocked. " * 80})).error_info.detail
+
+    summary = detail.removeprefix(f"{_BLOCK_DETAIL} ")
+    assert len(summary) <= 301
+    assert summary.endswith("…")
+
+
+@pytest.mark.parametrize("status_code", [403, 422, 500])
+def test_error_code_on_another_status_is_not_a_guardrail_violation(
+    status_code: int,
+):
+    err = _api_error_with_headers(
+        status_code,
+        {"StatusCode": status_code, "Message": _HARM_BLOCK, "ErrorCode": "3040"},
+        _BLOCK_HEADERS,
+    )
+    info = _raise(err).error_info
+
+    assert not info.code.endswith(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+    )
+
+
+def test_ordinary_provider_400_is_not_a_guardrail_violation():
+    err = _api_error_with_headers(
+        400, _MAX_TOKENS_BODY, {"x-uipath-llmgateway-errorsource": "llm"}
+    )
+
+    assert centralized_guardrail_error(err) is None
+    assert _raise(err).error_info.code.endswith(
+        AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value
+    )
+
+
+def _block_response(body: dict[str, object]) -> httpx.Response:
+    return httpx.Response(
+        400,
+        request=httpx.Request("POST", "http://gateway/"),
+        json=body,
+        headers=_BLOCK_HEADERS,
+    )
+
+
+def _openai_block() -> Exception:
+    import openai
+
+    body: dict[str, object] = {"error": {"message": _HARM_BLOCK}}
+    return openai.BadRequestError(
+        _HARM_BLOCK, response=_block_response(body), body=body
+    )
+
+
+def _enriched_block() -> Exception:
+    try:
+        _block_response({"message": _HARM_BLOCK}).raise_for_status()
+    except httpx.HTTPStatusError as e:
+        try:
+            raise EnrichedException(e) from e
+        except EnrichedException as enriched:
+            return enriched
+    raise AssertionError("raise_for_status did not raise")
+
+
+def _chained_block() -> Exception:
+    try:
+        raise _blocked({"message": _HARM_BLOCK})
+    except UiPathAPIError as e:
+        try:
+            raise RuntimeError("memory analysis failed") from e
+        except RuntimeError as wrapped:
+            return wrapped
+
+
+@pytest.mark.parametrize(
+    "err_factory",
+    [
+        pytest.param(_openai_block, id="raw-provider-sdk-error"),
+        pytest.param(
+            lambda: httpx.HTTPStatusError(
+                "Bad Request",
+                request=httpx.Request("POST", "http://gateway/"),
+                response=_block_response({"message": _HARM_BLOCK}),
+            ),
+            id="httpx-status-error",
+        ),
+        pytest.param(_enriched_block, id="enriched-exception"),
+        pytest.param(_chained_block, id="chained"),
+    ],
+)
+def test_centralized_guardrail_error_reads_any_exception_carrying_the_response(
+    err_factory,
+):
+    error = err_factory()
+
+    blocked = centralized_guardrail_error(error)
+
+    assert blocked is not None
+    assert blocked.__cause__ is error
+    assert blocked.error_info.code.endswith(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+    )
+    assert blocked.error_info.detail.endswith("harmful_content")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(ValueError(_HARM_BLOCK), id="no-response"),
+        pytest.param(KeyboardInterrupt(), id="base-exception"),
+    ],
+)
+def test_centralized_guardrail_error_needs_a_gateway_response(error: BaseException):
+    assert centralized_guardrail_error(error) is None
