@@ -17,6 +17,8 @@ from uipath.core.guardrails import (
 )
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
 from ._spans import (
@@ -238,14 +240,20 @@ class UiPathDeterministicGuardrailMiddleware:
         ToolCallRequest | None, dict[str, Any] | None, ToolMessage | Command[Any] | None
     ]:
         """Evaluate rules and apply modifications if validation fails."""
+        with guardrail_evaluation_span(self._name, self._description) as span:
+            result = self._evaluate_rules(rules, stage, input_data, output_data)
+            set_validation_result(span, result)
+        if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
+            return request, input_data, tool_result
+
         try:
-            failed, modified_data = self._check(
-                stage, rules, input_data, output_data, data_for_action
+            modified_data = self._handle_validation_result(
+                result, data_for_action, evaluation_span_id=span_guid(span)
             )
         except GuardrailBlockException as exc:
             raise convert_block_exception(exc) from exc
-        if not failed:
-            return request, input_data, tool_result
+        except AgentRuntimeError:
+            raise
 
         if stage == GuardrailExecutionStage.PRE:
             if modified_data is not None and isinstance(modified_data, dict):
@@ -263,27 +271,6 @@ class UiPathDeterministicGuardrailMiddleware:
                 return request, input_data, modified_result
 
         return request, input_data, tool_result
-
-    def _check(
-        self,
-        stage: GuardrailExecutionStage,
-        rules: Sequence[RuleFunction],
-        input_data: dict[str, Any] | None,
-        output_data: dict[str, Any] | None,
-        data_for_action: dict[str, Any] | str,
-    ) -> tuple[bool, str | dict[str, Any] | None]:
-        """Evaluate the rules and apply the action on a violation.
-
-        Returns:
-            Whether the rules failed, and the data the action modified.
-        """
-        with guardrail_evaluation_span(self._name, self._description) as span:
-            result = self._evaluate_rules(rules, stage, input_data, output_data)
-            set_validation_result(span, result)
-        if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
-            return False, None
-        result = result.model_copy(update={"span_id": span_guid(span)})
-        return True, self._handle_validation_result(result, data_for_action)
 
     def _evaluate_rules(
         self,
@@ -399,10 +386,13 @@ class UiPathDeterministicGuardrailMiddleware:
             return {"output": content}
 
     def _handle_validation_result(
-        self, result: GuardrailValidationResult, input_data: str | dict[str, Any]
+        self,
+        result: GuardrailValidationResult,
+        input_data: str | dict[str, Any],
+        evaluation_span_id: str | None = None,
     ) -> str | dict[str, Any] | None:
         """Handle guardrail validation result."""
         if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
             return None
-        with guardrail_action_span(self._name, self.action, result):
+        with guardrail_action_span(self._name, self.action, result, evaluation_span_id):
             return self.action.handle_validation_result(result, input_data, self._name)

@@ -54,7 +54,11 @@ def _error_text(exc: BaseException) -> str:
 
 
 def span_guid(span: Span) -> str:
-    """Span id in the GUID form LLMOps uses."""
+    """``span``'s id as a GUID, the form the Guardrails Service returns its span ids in.
+
+    Action spans link to their check through ``guardrailSpanId``; this keeps
+    that link in one format whether the check ran in the service or locally.
+    """
     span_id = format(span.get_span_context().span_id, "016x")
     return f"00000000-0000-0000-{span_id[:4]}-{span_id[4:]}"
 
@@ -67,16 +71,23 @@ def action_name(action: Any) -> str:
 
 @contextmanager
 def guardrail_action_span(
-    guardrail_name: str, action: Any, result: GuardrailValidationResult
+    guardrail_name: str,
+    action: Any,
+    result: GuardrailValidationResult,
+    evaluation_span_id: str | None = None,
 ) -> Generator[Span]:
-    """Record the action taken on a failed ``result``."""
+    """Record the action taken on a failed ``result``.
+
+    The span links to the check that failed: ``evaluation_span_id`` for a
+    check recorded locally, otherwise the service's span id on ``result``.
+    """
     severity = getattr(action, "severity_level", None)
     span = _new_span(
         action_name(action),
         GUARDRAIL_ACTION,
         guardrailName=guardrail_name,
         action=action_name(action),
-        guardrailSpanId=result.span_id,
+        guardrailSpanId=evaluation_span_id or result.span_id,
         reason=result.reason or None,
         severityLevel=(
             severity.name.title()
