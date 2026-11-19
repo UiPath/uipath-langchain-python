@@ -54,11 +54,7 @@ def _error_text(exc: BaseException) -> str:
 
 
 def span_guid(span: Span) -> str:
-    """``span``'s id as a GUID, the form the Guardrails Service returns its span ids in.
-
-    Action spans link to their check through ``guardrailSpanId``; this keeps
-    that link in one format whether the check ran in the service or locally.
-    """
+    """``span``'s id as a GUID, the form ``guardrailSpanId`` uses."""
     span_id = format(span.get_span_context().span_id, "016x")
     return f"00000000-0000-0000-{span_id[:4]}-{span_id[4:]}"
 
@@ -76,11 +72,7 @@ def guardrail_action_span(
     result: GuardrailValidationResult,
     evaluation_span_id: str | None = None,
 ) -> Generator[Span]:
-    """Record the action taken on a failed ``result``.
-
-    The span links to the check that failed: ``evaluation_span_id`` for a
-    check recorded locally, otherwise the service's span id on ``result``.
-    """
+    """Record the action taken on a failed ``result``."""
     severity = getattr(action, "severity_level", None)
     span = _new_span(
         action_name(action),
@@ -103,7 +95,7 @@ def guardrail_action_span(
 def guardrail_evaluation_span(
     guardrail_name: str, description: str | None = None
 ) -> Generator[Span]:
-    """Record a client-side check; set its outcome with ``set_validation_result``."""
+    """Record a rule check that runs in the agent."""
     span = _new_span(
         guardrail_name,
         GUARDRAIL_EVALUATION,
@@ -116,7 +108,7 @@ def guardrail_evaluation_span(
 
 
 def set_validation_result(span: Span, result: GuardrailValidationResult) -> None:
-    """Record ``result`` the way the Guardrails Service does."""
+    """Record ``result``'s outcome on its evaluation span."""
     span.set_attribute("validationResult", result.result.name)
     if result.reason:
         span.set_attribute("details", [result.reason])
