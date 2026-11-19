@@ -14,6 +14,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
+from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
+from uipath.agent.react.conversational_prompts import get_chat_system_prompt
 
 from uipath_langchain._utils._attachments import render_attachments_block
 from uipath_langchain.agent.advanced.agent import (
@@ -22,6 +24,9 @@ from uipath_langchain.agent.advanced.agent import (
 )
 from uipath_langchain.agent.advanced.types import (
     ConversationalAdvancedAgentGraphState,
+)
+from uipath_langchain.agent.react.utils import (
+    build_conversational_output_args_schema,
 )
 
 
@@ -500,7 +505,176 @@ class TestCustomOutputFields:
                 }
             )
 
-        assert [message.id for message in seen[0]] == ["u0", "u1", "ai-1"]
+        # The system prompt leads the list (see TestExtractionSeesTheSystemPrompt);
+        # what this test pins is that no part of the transcript is dropped.
+        assert [message.id for message in seen[0][1:]] == ["u0", "u1", "ai-1"]
+
+
+class TestExtractionSeesTheSystemPrompt:
+    """The advanced conversational loop keeps its system prompt in state and injects it per
+    call, so it never reaches ``state.messages``. The extraction step prepends
+    the system prompt to the messages array so the LLM-call for output generation has it
+    as context (matching standard loop logic).
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_static_prompt_is_prepended(self) -> None:
+        seen = await _extraction_messages(system_prompt="builder prompt")
+
+        assert isinstance(seen[0], SystemMessage)
+        assert seen[0].content == "builder prompt"
+
+    @pytest.mark.asyncio
+    async def test_a_resolved_prompt_is_prepended(self) -> None:
+        """A callable prompt lives in a state field, not on the closure."""
+        seen = await _extraction_messages(
+            system_prompt=lambda args: f"system:{args['tenant']}",
+            input_schema=_Input,
+            invoke_input={
+                "messages": [HumanMessage(content="hi", id="u1")],
+                "tenant": "finance",
+            },
+        )
+
+        assert isinstance(seen[0], SystemMessage)
+        assert seen[0].content == "system:finance"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_prompt_prepends_nothing(self) -> None:
+        seen = await _extraction_messages(system_prompt="")
+
+        assert not any(isinstance(message, SystemMessage) for message in seen)
+
+    @pytest.mark.asyncio
+    async def test_the_prompt_is_not_written_into_graph_state(self) -> None:
+        """``transform_output`` emits ``messages[initial_message_count:]``, so a
+        system message persisted into state would surface to the user as a
+        response message."""
+        seen: list[list[Any]] = []
+
+        async def record(messages: Any) -> dict[str, Any]:
+            seen.append(list(messages))
+            return {"ticketId": "INC-1"}
+
+        with (
+            patch(
+                "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+                return_value=_fake_inner_agent(),
+            ),
+            patch(
+                "uipath_langchain.agent.advanced.agent.create_conversational_output_extractor",
+                return_value=record,
+            ),
+        ):
+            graph = create_conversational_advanced_agent_graph(
+                model=_mock_model(),
+                tools=[],
+                system_prompt="builder prompt",
+                backend=None,
+                output_schema=_OutputWithCustomFields,
+            ).compile()
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content="hi", id="u1")]}
+            )
+
+        assert isinstance(seen[0][0], SystemMessage)
+        assert len(result["uipath__agent_response_messages"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_output_hint_section_is_stripped_before_extraction(self) -> None:
+        """The prepended prompt carries the loop's output-schema section, which
+        tells the model there is no tool for the fields -- the opposite of what
+        the extraction call needs. The shared extractor has to strip it, so this
+        exercises the real extractor rather than a stand-in."""
+        model, bound = _mock_extractor_model()
+        loop_prompt = get_chat_system_prompt(
+            model="claude-3-sonnet",
+            system_message="builder prompt",
+            agent_name="Agent",
+            output_schema=build_conversational_output_args_schema(
+                _OutputWithCustomFields
+            ),
+        )
+        assert "STRUCTURED OUTPUT FOR THIS TURN" in loop_prompt
+
+        with patch(
+            "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+            return_value=_fake_inner_agent(),
+        ):
+            graph = create_conversational_advanced_agent_graph(
+                model=model,
+                tools=[],
+                system_prompt=loop_prompt,
+                backend=None,
+                output_schema=_OutputWithCustomFields,
+            ).compile()
+            await graph.ainvoke({"messages": [HumanMessage(content="hi", id="u1")]})
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert isinstance(sent[0], SystemMessage)
+        assert "STRUCTURED OUTPUT FOR THIS TURN" not in sent[0].content
+        assert "builder prompt" in sent[0].content
+
+
+async def _extraction_messages(
+    system_prompt: Any,
+    input_schema: type[BaseModel] | None = None,
+    invoke_input: dict[str, Any] | None = None,
+) -> list[Any]:
+    """Run the wrapper and return the messages the extraction call received."""
+    seen: list[list[Any]] = []
+
+    async def record(messages: Any) -> dict[str, Any]:
+        seen.append(list(messages))
+        return {"ticketId": "INC-1"}
+
+    with (
+        patch(
+            "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+            return_value=_fake_inner_agent(),
+        ),
+        patch(
+            "uipath_langchain.agent.advanced.agent.create_conversational_output_extractor",
+            return_value=record,
+        ),
+    ):
+        graph = create_conversational_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt=system_prompt,
+            backend=None,
+            input_schema=input_schema,
+            output_schema=_OutputWithCustomFields,
+        ).compile()
+        await graph.ainvoke(
+            invoke_input or {"messages": [HumanMessage(content="hi", id="u1")]}
+        )
+
+    return seen[0]
+
+
+def _mock_extractor_model() -> tuple[MagicMock, MagicMock]:
+    """A model whose ``model_copy().bind_tools().ainvoke()`` chain records the
+    messages and answers with a set_conversational_output call, so the real
+    extractor can run against it. Returns (model, bound)."""
+    response = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": SET_CONVERSATIONAL_OUTPUT_TOOL.name,
+                "args": {"ticketId": "INC-1", "resolved": True},
+                "id": "call_1",
+            }
+        ],
+    )
+    bound = MagicMock()
+    bound.ainvoke = AsyncMock(return_value=response)
+    non_streaming = MagicMock()
+    non_streaming.bind_tools = MagicMock(return_value=bound)
+    model = MagicMock(spec=BaseChatModel)
+    model.profile = None
+    model.model_copy = MagicMock(return_value=non_streaming)
+    return model, bound
 
 
 def _extractor(args: dict[str, Any]) -> Any:

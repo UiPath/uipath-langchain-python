@@ -16,12 +16,18 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.runnables.config import var_child_runnable_config
 from pydantic import BaseModel
 from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
 from uipath.agent.react.conversational_prompts import (
     get_generate_output_prompt,
+    strip_conversational_output_hint_section,
 )
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
@@ -76,8 +82,28 @@ def create_conversational_output_extractor(
     )
     output_prompt = get_generate_output_prompt()
 
+    def without_output_hint_section(
+        exchange_messages: Sequence[BaseMessage],
+    ) -> Sequence[BaseMessage]:
+        """Drop the output-fields section from the system message, which is only relevant for the central conversational loop."""
+        if not exchange_messages:
+            return exchange_messages
+        first = exchange_messages[0]
+        if not isinstance(first, SystemMessage) or not isinstance(first.content, str):
+            return exchange_messages
+        stripped = strip_conversational_output_hint_section(first.content)
+        if stripped == first.content:
+            return exchange_messages
+        return [
+            first.model_copy(update={"content": stripped}),
+            *exchange_messages[1:],
+        ]
+
     async def extract(exchange_messages: Sequence[BaseMessage]) -> dict[str, Any]:
-        messages = [*exchange_messages, HumanMessage(content=output_prompt)]
+        messages = [
+            *without_output_hint_section(exchange_messages),
+            HumanMessage(content=output_prompt),
+        ]
         config = config_without_streaming(var_child_runnable_config.get(None))
 
         try:
