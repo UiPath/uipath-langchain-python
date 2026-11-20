@@ -901,14 +901,16 @@ class TestAttachmentRejection:
         response = httpx.Response(
             400,
             request=request,
+            headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
             json={
                 "message": "Request rejected due to Centralized guardrails Harmful content: a@b.com",
                 "problem": {"errorCode": "Agent.CentralizedGuardrailBlocked"},
             },
         )
-        evaluate.side_effect = EnrichedException(
-            httpx.HTTPStatusError("400", request=request, response=response)
-        )
+        status_error = httpx.HTTPStatusError("400", request=request, response=response)
+        blocked = EnrichedException(status_error)
+        blocked.__cause__ = status_error  # as the SDK's `raise ... from e` does
+        evaluate.side_effect = blocked
         middleware = _pii([GuardrailScope.LLM], stage=_PRE, action=LogAction())
 
         with pytest.raises(AgentRuntimeError) as exc_info:
@@ -920,7 +922,7 @@ class TestAttachmentRejection:
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
         )
-        assert "cv.pdf" in exc_info.value.error_info.detail
+        assert "Harmful content" in exc_info.value.error_info.detail
         assert "a@b.com" not in exc_info.value.error_info.detail
         assert evaluate.call_count == 1
 

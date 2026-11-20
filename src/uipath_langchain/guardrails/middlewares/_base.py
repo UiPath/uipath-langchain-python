@@ -42,7 +42,7 @@ from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockExce
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
-    centralized_guardrail_check_error,
+    centralized_guardrail_error,
 )
 
 from .._action_context import (
@@ -272,10 +272,7 @@ class BuiltInGuardrailMiddlewareMixin:
                 input_data, self._guardrail, attachments=attachments
             )
         except EnrichedException as exc:
-            blocked = centralized_guardrail_check_error(
-                exc, self._name, [a.file_name for a in attachments]
-            )
-            if blocked is not None:
+            if (blocked := centralized_guardrail_error(exc)) is not None:
                 raise blocked from exc
             if exc.status_code != 400:
                 raise

@@ -1936,17 +1936,19 @@ class TestGuardrailNodeAttachments:
                 "POST",
                 "https://cloud.uipath.com/org/tenant/agentsruntime_/api/execution/guardrails/validate",
             ),
+            headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
             json={
                 "statusCode": 400,
-                "message": "The LLM as Judge call was blocked by your organization's "
-                "AI Trust Layer policy. Request rejected due to Centralized guardrails "
+                "message": "Request rejected due to Centralized guardrails "
                 "Harmful content: Violence found in jane.doe@example.com",
                 "problem": {"errorCode": "Agent.CentralizedGuardrailBlocked"},
             },
         )
-        blocked = EnrichedException(
-            httpx.HTTPStatusError("400", request=response.request, response=response)
+        status_error = httpx.HTTPStatusError(
+            "400", request=response.request, response=response
         )
+        blocked = EnrichedException(status_error)
+        blocked.__cause__ = status_error  # as the SDK's `raise ... from e` does
 
         class BlockedGuardrails:
             def evaluate_guardrail(
@@ -1990,10 +1992,8 @@ class TestGuardrailNodeAttachments:
         assert error.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
         )
-        assert guardrail.name in error.detail
         assert "Centralized guardrails Harmful content" in error.detail
         assert "jane.doe@example.com" not in error.detail
-        assert ("cv.pdf" in error.detail) == with_attachment
         assert raised.value.__cause__ is blocked
         assert len(calls) == 1
 

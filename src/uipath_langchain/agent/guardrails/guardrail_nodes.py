@@ -46,7 +46,7 @@ from uipath_langchain.agent.react.utils import (
 from ..exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
-    centralized_guardrail_check_error,
+    centralized_guardrail_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -130,10 +130,7 @@ async def _evaluate_builtin_guardrail(
         )
         return result, attachments
     except EnrichedException as exc:
-        blocked = centralized_guardrail_check_error(
-            exc, guardrail.name, [a.file_name for a in attachments or []]
-        )
-        if blocked is not None:
+        if (blocked := centralized_guardrail_error(exc)) is not None:
             raise blocked from exc
         # Any other 400 with attachments means the references were rejected; a file
         # must never fail the run, so evaluate the text alone.
