@@ -23,8 +23,8 @@ from uipath.platform.guardrails.decorators import (
 )
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
-GUARDRAIL_ACTION = "guardrailAction"
-GUARDRAIL_EVALUATION = "guardrailEvaluation"
+from ._span_name import SpanName, SpanType
+
 _CONTAINER_MARK = "uipath.guardrail_container"
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ def guardrail_action_span(
     severity = getattr(action, "severity_level", None)
     span = _new_span(
         action_name(action),
-        GUARDRAIL_ACTION,
+        SpanType.GUARDRAIL_ACTION,
         guardrailName=guardrail_name,
         action=action_name(action),
         guardrailSpanId=evaluation_span_id or result.span_id,
@@ -117,7 +117,7 @@ def guardrail_evaluation_span(
     """Record a rule check that runs in the agent."""
     span = _new_span(
         guardrail_name,
-        GUARDRAIL_EVALUATION,
+        SpanType.GUARDRAIL_EVALUATION,
         guardrailName=guardrail_name,
         guardrailDescription=description,
         guardrailType="custom",
@@ -136,17 +136,32 @@ def set_validation_result(span: Span, result: GuardrailValidationResult) -> None
 _PRE = GuardrailExecutionStage.PRE
 _POST = GuardrailExecutionStage.POST
 
-# (scope, stage) -> (container name, span type), as in low-code agents.
+# (scope, stage) -> (container name, span type)
 _STAGES: dict[tuple[GuardrailScope, GuardrailExecutionStage], tuple[str, str]] = {
-    (GuardrailScope.AGENT, _PRE): ("Agent input guardrail check", "agentPreGuardrails"),
-    (GuardrailScope.AGENT, _POST): (
-        "Agent output guardrail check",
-        "agentPostGuardrails",
+    (GuardrailScope.AGENT, _PRE): (
+        SpanName.AGENT_PRE_GUARDRAILS,
+        SpanType.AGENT_PRE_GUARDRAILS,
     ),
-    (GuardrailScope.LLM, _PRE): ("LLM input guardrail check", "llmPreGuardrails"),
-    (GuardrailScope.LLM, _POST): ("LLM output guardrail check", "llmPostGuardrails"),
-    (GuardrailScope.TOOL, _PRE): ("Tool input guardrail check", "toolPreGuardrails"),
-    (GuardrailScope.TOOL, _POST): ("Tool output guardrail check", "toolPostGuardrails"),
+    (GuardrailScope.AGENT, _POST): (
+        SpanName.AGENT_POST_GUARDRAILS,
+        SpanType.AGENT_POST_GUARDRAILS,
+    ),
+    (GuardrailScope.LLM, _PRE): (
+        SpanName.LLM_PRE_GUARDRAILS,
+        SpanType.LLM_PRE_GUARDRAILS,
+    ),
+    (GuardrailScope.LLM, _POST): (
+        SpanName.LLM_POST_GUARDRAILS,
+        SpanType.LLM_POST_GUARDRAILS,
+    ),
+    (GuardrailScope.TOOL, _PRE): (
+        SpanName.TOOL_PRE_GUARDRAILS,
+        SpanType.TOOL_PRE_GUARDRAILS,
+    ),
+    (GuardrailScope.TOOL, _POST): (
+        SpanName.TOOL_POST_GUARDRAILS,
+        SpanType.TOOL_POST_GUARDRAILS,
+    ),
 }
 
 
