@@ -891,8 +891,15 @@ class TestAttachmentRejection:
         assert text_only.kwargs == {}
         assert "rejected the attachment references" in caplog.text
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            pytest.param(f"hi {_block(_wire())}", id="with-files"),
+            pytest.param("hi", id="text-only"),
+        ],
+    )
     async def test_message_hook_stops_on_a_centralized_block_without_retrying(
-        self, evaluate: MagicMock
+        self, evaluate: MagicMock, content: str
     ) -> None:
         request = httpx.Request(
             "POST",
@@ -915,7 +922,7 @@ class TestAttachmentRejection:
 
         with pytest.raises(AgentRuntimeError) as exc_info:
             await _hook(middleware, "before_model").abefore_model(
-                {"messages": [HumanMessage(content=f"hi {_block(_wire())}")]},
+                {"messages": [HumanMessage(content=content)]},
                 MagicMock(),
             )
 
