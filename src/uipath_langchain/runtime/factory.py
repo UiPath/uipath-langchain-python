@@ -28,7 +28,7 @@ from uipath_langchain_client import UIPATH_SKIP_CLIENT_LLM_SPANS_KEY
 from uipath_langchain._tracing import _instrument_traceable_attributes
 from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
-from uipath_langchain.guardrails.middlewares._spans import (
+from uipath_langchain.guardrails.middlewares._grouping import (
     enable_guardrail_grouping,
     is_exported,
 )

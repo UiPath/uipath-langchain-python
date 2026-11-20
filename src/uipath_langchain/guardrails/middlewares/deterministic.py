@@ -22,11 +22,10 @@ from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
+from ._grouping import guardrail_stage, guardrails_in_use
 from ._spans import (
     guardrail_action_span,
     guardrail_evaluation_span,
-    guardrail_stage,
-    guardrails_in_use,
     set_validation_result,
     span_guid,
 )

@@ -1,4 +1,4 @@
-"""Guardrail span types and display names, the same as low-code agents use."""
+"""Guardrail span types and display names."""
 
 
 class SpanType:

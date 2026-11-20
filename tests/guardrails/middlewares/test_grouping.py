@@ -49,9 +49,9 @@ from uipath_langchain.guardrails.middlewares import (
     UiPathPIIDetectionMiddleware,
     UiPathPromptInjectionMiddleware,
     _base,
-    _spans,
+    _grouping,
 )
-from uipath_langchain.guardrails.middlewares._spans import (
+from uipath_langchain.guardrails.middlewares._grouping import (
     enable_guardrail_grouping,
     guardrail_stage,
     is_exported,
@@ -67,7 +67,7 @@ _OPENINFERENCE = "openinference.instrumentation.langchain"
 
 @pytest.fixture
 def exporter(monkeypatch: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporter]:
-    monkeypatch.setattr(_spans, "_state", _spans._GroupingState())
+    monkeypatch.setattr(_grouping, "_state", _grouping._GroupingState())
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -306,7 +306,7 @@ class TestStages:
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
-            patch.object(_spans, "_shared_container", side_effect=RuntimeError),
+            patch.object(_grouping, "_shared_container", side_effect=RuntimeError),
             pytest.raises(AgentRuntimeError),
             graph.node(f"{hook.name}.before_model"),
         ):
@@ -371,7 +371,7 @@ class TestTools:
         assert container.start_time >= tool_span.end_time
         assert container.end_time == tools.end_time
 
-    def test_a_container_closed_during_a_check_keeps_no_end_time(
+    def test_a_container_closed_during_a_check_stays_closed(
         self, graph: _Graph
     ) -> None:
         _pii()
@@ -379,9 +379,12 @@ class TestTools:
             with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
                 with graph.node("get_weather", parent=tools):  # closes it
                     pass
+        spans = graph.finish()
 
-        assert _spans._state.containers == {}
-        assert _spans._state.last_check_end == {}
+        [container] = _named(spans, "Tool input guardrail check")
+        [tool_span] = _named(spans, "get_weather")
+        assert container.end_time == tool_span.start_time
+        assert _grouping._state.containers == {}
 
     async def test_input_checks_close_when_the_output_stage_starts(
         self, graph: _Graph
@@ -414,7 +417,7 @@ class TestTools:
             with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
                 pass
             with (
-                patch.object(_spans, "_new_span", side_effect=RuntimeError),
+                patch.object(_grouping, "new_span", side_effect=RuntimeError),
                 guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.POST),
             ):
                 pass
@@ -422,7 +425,7 @@ class TestTools:
 
         [container] = _named(spans, "Tool input guardrail check")
         assert container.end_time == _named(spans, "tools")[0].end_time
-        assert _spans._state.containers == {}
+        assert _grouping._state.containers == {}
 
 
 class TestEnabling:
@@ -436,8 +439,8 @@ class TestEnabling:
             pass
         node.end()
 
-        assert _spans._state.containers == {}
-        assert not _spans._state.enabled
+        assert _grouping._state.containers == {}
+        assert not _grouping._state.enabled
 
     async def test_nothing_is_grouped_under_an_invalid_node_span(
         self, exporter: InMemorySpanExporter
@@ -448,8 +451,8 @@ class TestEnabling:
         with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
             pass
 
-        assert _spans._state.enabled
-        assert _spans._state.containers == {}
+        assert _grouping._state.enabled
+        assert _grouping._state.containers == {}
 
     def test_the_closer_is_added_once_per_trace_manager(
         self, exporter: InMemorySpanExporter
@@ -471,11 +474,11 @@ class TestEnabling:
         [closer] = [call.args[0] for call in manager.add_span_processor.call_args_list]
 
         closer.shutdown()  # what UiPathTraceManager.shutdown() does
-        assert not _spans._state.enabled
+        assert not _grouping._state.enabled
         enable_guardrail_grouping(manager, lambda: None)
 
         assert manager.add_span_processor.call_count == 2
-        assert _spans._state.enabled
+        assert _grouping._state.enabled
 
     def test_a_shut_down_trace_manager_is_not_reused(
         self, exporter: InMemorySpanExporter
@@ -489,7 +492,7 @@ class TestEnabling:
         _pii()  # a middleware built before the next runtime factory
 
         manager.add_span_processor.assert_called_once()
-        assert not _spans._state.enabled
+        assert not _grouping._state.enabled
 
     async def test_nothing_is_grouped_under_a_sampled_out_node(
         self, exporter: InMemorySpanExporter
@@ -505,8 +508,8 @@ class TestEnabling:
         with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
             pass
 
-        assert _spans._state.enabled
-        assert _spans._state.containers == {}
+        assert _grouping._state.enabled
+        assert _grouping._state.containers == {}
 
     def test_nothing_is_grouped_under_a_sampled_out_parent(
         self, exporter: InMemorySpanExporter
@@ -528,7 +531,7 @@ class TestEnabling:
             pass
 
         assert node.is_recording()
-        assert _spans._state.containers == {}
+        assert _grouping._state.containers == {}
         node.end()
         provider.shutdown()
 
@@ -536,8 +539,8 @@ class TestEnabling:
         self, graph: _Graph, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         lock = MagicMock()
-        monkeypatch.setattr(_spans._state, "lock", lock)
-        closer = _spans.GuardrailStageCloser()
+        monkeypatch.setattr(_grouping._state, "lock", lock)
+        closer = _grouping.GuardrailStageCloser()
 
         with graph.node("model") as span:
             closer.on_start(span)
@@ -564,7 +567,7 @@ class TestEnabling:
         worker.join(timeout=5)
 
         assert not worker.is_alive()
-        assert len(_spans._state.containers) == 1
+        assert len(_grouping._state.containers) == 1
         node.end()
         provider.shutdown()
 
@@ -576,7 +579,7 @@ class TestEnabling:
         _rule(GuardrailExecutionStage.PRE)
 
         manager.add_span_processor.assert_called_once()
-        assert _spans._state.enabled
+        assert _grouping._state.enabled
 
     def test_grouping_stays_off_without_guardrail_middlewares(
         self, exporter: InMemorySpanExporter
@@ -585,7 +588,7 @@ class TestEnabling:
         enable_guardrail_grouping(manager, lambda: None)
 
         manager.add_span_processor.assert_not_called()
-        assert not _spans._state.enabled
+        assert not _grouping._state.enabled
 
     async def test_only_guardrail_node_spans_are_hidden(self, graph: _Graph) -> None:
         pii = _pii()
@@ -687,7 +690,7 @@ class TestRealAgent:
             and not is_exported(by_id[s.parent.span_id])
         ]
         assert orphans == []
-        assert _spans._state.containers == {}
+        assert _grouping._state.containers == {}
 
     async def test_parallel_tool_calls_group_per_tools_span(
         self, exporter: InMemorySpanExporter, instrumented: None

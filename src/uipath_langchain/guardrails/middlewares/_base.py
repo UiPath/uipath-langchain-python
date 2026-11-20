@@ -55,12 +55,12 @@ from ._attachments import (
     registry_references,
     tool_result_references,
 )
-from ._spans import (
-    guardrail_action_span,
+from ._grouping import (
     guardrail_stage,
     guardrails_in_use,
     register_guardrail_node,
 )
+from ._spans import guardrail_action_span
 from ._utils import (
     convert_block_exception,
     create_modified_tool_request,
