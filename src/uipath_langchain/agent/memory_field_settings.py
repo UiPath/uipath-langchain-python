@@ -17,14 +17,19 @@ def field_settings_for_weight(field_name: str, weight: float) -> FieldSettings:
     error for ``FieldSettings``.
     """
     if not _MIN_WEIGHT <= weight <= _MAX_WEIGHT:
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.INVALID_MEMORY_FIELD_WEIGHT,
-            title=f"Invalid memory weight for field '{field_name}'",
-            detail=(
-                f"The memory search weight for field '{field_name}' is {weight}. "
-                f"It must be between {_MIN_WEIGHT} and {_MAX_WEIGHT}. Change the "
-                "field's weight in the agent's memory settings."
-            ),
-            category=UiPathErrorCategory.DEPLOYMENT,
-        )
+        raise invalid_field_weight_error(field_name, weight)
     return FieldSettings(weight=weight)
+
+
+def invalid_field_weight_error(field_name: str, weight: object) -> AgentRuntimeError:
+    """Return the error for a memory field whose weight is outside 0..1."""
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.INVALID_MEMORY_FIELD_WEIGHT,
+        title=f"Invalid memory weight for field '{field_name}'",
+        detail=(
+            f"The memory search weight for field '{field_name}' is {weight}. "
+            f"It must be between {_MIN_WEIGHT} and {_MAX_WEIGHT}. Change the "
+            "field's weight in the agent's memory settings."
+        ),
+        category=UiPathErrorCategory.DEPLOYMENT,
+    )

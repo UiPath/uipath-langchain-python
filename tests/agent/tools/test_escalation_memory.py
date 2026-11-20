@@ -18,7 +18,12 @@ from uipath.platform.memory import (
     FieldMatching,
     SearchMode,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.escalation_memory import (
     ESCALATION_MEMORY_STRATEGY,
     MEMORY_CACHE_HIT_METRIC,
@@ -394,6 +399,38 @@ class TestGetEscalationMemorySettings:
         assert settings.field_settings == [
             EscalationMemoryFieldSetting(name="question", weight=0.4)
         ]
+
+    def test_names_the_field_when_a_weight_is_out_of_range(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=True,
+            properties={
+                "memory": {
+                    "fieldSettings": [
+                        {"name": "question", "weight": 0.4},
+                        {"name": "request_details", "weight": 2.0},
+                    ],
+                }
+            },
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            _get_escalation_memory_settings(resource)
+
+        error = exc_info.value.error_info
+        assert error.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.INVALID_MEMORY_FIELD_WEIGHT
+        )
+        assert error.category == UiPathErrorCategory.DEPLOYMENT
+        assert "'request_details' is 2.0" in error.detail
+
+    def test_keeps_the_validation_error_for_other_invalid_settings(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=True,
+            properties={"memory": {"threshold": 5}},
+        )
+
+        with pytest.raises(ValidationError):
+            _get_escalation_memory_settings(resource)
 
     def test_returns_settings_when_escalation_memory_enabled_in_properties(
         self,
