@@ -980,6 +980,8 @@ class TestEscalateAction:
         assert result.update is not None
         updated_message = result.update["messages"][1]
         assert updated_message.tool_calls[0]["args"] == original_args
+        # The review JSON must not replace the assistant's own text.
+        assert updated_message.content == "Original content"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
