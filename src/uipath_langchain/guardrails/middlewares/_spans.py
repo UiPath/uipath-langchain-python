@@ -8,7 +8,7 @@ import weakref
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, TypeGuard
 
 from langgraph.errors import GraphBubbleUp
 from opentelemetry import context as otel_context
@@ -234,8 +234,8 @@ def _shared_container(
         parent: SpanContext | None = node.get_span_context()
     else:
         parent = getattr(node, "parent", None)
-    if parent is None or not parent.is_valid or not parent.trace_flags.sampled:
-        return None  # nothing would ever close it
+    if not _can_group_under(parent):
+        return None
 
     name, span_type = _STAGES[(scope, stage)]  # type: ignore[index]
     key = (parent.span_id, span_type)
@@ -267,6 +267,11 @@ def _shared_container(
             _state.containers[key] = container
     _end_containers(previous, end_time=getattr(container, "start_time", None))
     return container
+
+
+def _can_group_under(parent: SpanContext | None) -> TypeGuard[SpanContext]:
+    """Whether a container under ``parent`` would ever be closed."""
+    return parent is not None and parent.is_valid and parent.trace_flags.sampled
 
 
 def guardrail_aware(
@@ -351,6 +356,8 @@ def is_exported(span: ReadableSpan) -> bool:
     """Span filter hiding guardrail node spans (by name: spans upload on start)."""
     if not _state.enabled or span.name not in _state.guardrail_nodes:
         return True
+    if not _can_group_under(span.parent):
+        return True  # its checks stay under it, ungrouped
     scope = getattr(span, "instrumentation_scope", None)
     return "openinference" not in (getattr(scope, "name", "") or "")
 

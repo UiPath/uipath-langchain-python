@@ -605,6 +605,28 @@ class TestEnabling:
         assert [s.instrumentation_scope.name for s in hidden] == [_OPENINFERENCE]  # type: ignore[union-attr]
         assert is_exported(_named(spans, "LLM input guardrail check")[0])
 
+    def test_a_node_that_cannot_be_grouped_stays_visible(self, graph: _Graph) -> None:
+        hook = _hook(_pii(), "_before_model")
+        node_name = f"{hook.name}.before_model"
+        # A sampler that keeps the nodes although one's parent was dropped.
+        provider = TracerProvider(sampler=ALWAYS_ON)
+        tracer = provider.get_tracer(_OPENINFERENCE)
+        unsampled = NonRecordingSpan(
+            SpanContext(
+                trace_id=1, span_id=2, is_remote=False, trace_flags=TraceFlags(0)
+            )
+        )
+        under_unsampled = tracer.start_span(
+            node_name, context=trace.set_span_in_context(unsampled)
+        )
+        without_parent = tracer.start_span(node_name)
+
+        assert is_exported(under_unsampled)  # type: ignore[arg-type]
+        assert is_exported(without_parent)  # type: ignore[arg-type]
+        under_unsampled.end()
+        without_parent.end()
+        provider.shutdown()
+
 
 class _ToolCallingModel(GenericFakeChatModel):
     def bind_tools(self, *args: Any, **kwargs: Any) -> "_ToolCallingModel":
