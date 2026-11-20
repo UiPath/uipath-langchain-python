@@ -1,6 +1,7 @@
 """Separate guardrail middlewares share one container span per stage."""
 
 import asyncio
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -19,12 +20,18 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from opentelemetry import trace
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, SpanLimits, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from opentelemetry.trace import Span, StatusCode
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    Span,
+    SpanContext,
+    StatusCode,
+    TraceFlags,
+)
 from uipath.core.guardrails import (
     GuardrailScope,
     GuardrailValidationResult,
@@ -385,6 +392,25 @@ class TestTools:
         assert post_container.start_time is not None
         assert pre_container.end_time <= post_container.start_time
 
+    async def test_a_failed_new_stage_keeps_the_previous_container_closable(
+        self, graph: _Graph
+    ) -> None:
+        _pii()  # a guardrail in use turns grouping on
+        with graph.node("tools") as tools:
+            graph.current = tools
+            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+                pass
+            with (
+                patch.object(_spans, "_new_span", side_effect=RuntimeError),
+                guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.POST),
+            ):
+                pass
+        spans = graph.finish()
+
+        [container] = _named(spans, "Tool input guardrail check")
+        assert container.end_time == _named(spans, "tools")[0].end_time
+        assert _spans._state.containers == {}
+
 
 class TestEnabling:
     async def test_nothing_is_grouped_without_a_closer(
@@ -451,6 +477,46 @@ class TestEnabling:
 
         manager.add_span_processor.assert_called_once()
         assert not _spans._state.enabled
+
+    async def test_nothing_is_grouped_under_a_sampled_out_node(
+        self, exporter: InMemorySpanExporter
+    ) -> None:
+        node = NonRecordingSpan(
+            SpanContext(
+                trace_id=1, span_id=2, is_remote=False, trace_flags=TraceFlags(0)
+            )
+        )
+        enable_guardrail_grouping(exporter.provider, lambda: node)  # type: ignore[attr-defined]
+        _pii()
+
+        with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+            pass
+
+        assert _spans._state.enabled
+        assert _spans._state.containers == {}
+
+    def test_a_container_without_its_mark_does_not_deadlock(
+        self, exporter: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # No attributes kept, so the container loses the mark the closer checks.
+        provider = TracerProvider(span_limits=SpanLimits(max_span_attributes=0))
+        monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+        node = provider.get_tracer(_OPENINFERENCE).start_span("tools")
+        enable_guardrail_grouping(provider, lambda: node)
+        _pii()
+
+        def check() -> None:
+            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+                pass
+
+        worker = threading.Thread(target=check, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+
+        assert not worker.is_alive()
+        assert len(_spans._state.containers) == 1
+        node.end()
+        provider.shutdown()
 
     def test_tool_only_guardrails_turn_grouping_on(
         self, exporter: InMemorySpanExporter

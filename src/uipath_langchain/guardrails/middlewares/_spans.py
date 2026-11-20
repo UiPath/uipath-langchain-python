@@ -171,6 +171,10 @@ _state = _GroupingState()
 _current_container: ContextVar[Span | None] = ContextVar(
     "uipath_guardrail_container", default=None
 )
+# Set while a container starts, so the closer skips it without taking the lock.
+_starting_container: ContextVar[bool] = ContextVar(
+    "uipath_guardrail_container_starting", default=False
+)
 
 
 def register_guardrail_node(
@@ -221,8 +225,8 @@ def _shared_container(
     if not _state.enabled or (scope, stage) not in _STAGES:
         return None
     node = UiPathSpanUtils.get_external_current_span()
-    if node is None:
-        return None
+    if node is None or not node.is_recording():
+        return None  # a sampled-out node never reports its end
     if scope == GuardrailScope.TOOL:
         parent: SpanContext | None = node.get_span_context()
     else:
@@ -236,22 +240,26 @@ def _shared_container(
     with _state.lock:
         container = _state.containers.get(key)
         if container is None:
+            token = _starting_container.set(True)
+            try:
+                container = _new_span(
+                    name,
+                    span_type,
+                    context=trace.set_span_in_context(NonRecordingSpan(parent)),
+                    **{
+                        _CONTAINER_MARK: True,
+                        # Its parent is non-recording, so this isn't inherited.
+                        "execution.id": (getattr(node, "attributes", None) or {}).get(
+                            "execution.id"
+                        ),
+                    },
+                )
+            finally:
+                _starting_container.reset(token)
             # No sibling may have started between the stages, e.g. when a
             # middleware answers a tool call without running the tool.
             previous = _pop_containers(
                 lambda k: k[0] == parent.span_id and k[1] != span_type
-            )
-            container = _new_span(
-                name,
-                span_type,
-                context=trace.set_span_in_context(NonRecordingSpan(parent)),
-                **{
-                    _CONTAINER_MARK: True,
-                    # Its parent is non-recording, so this isn't inherited.
-                    "execution.id": (getattr(node, "attributes", None) or {}).get(
-                        "execution.id"
-                    ),
-                },
             )
             _state.containers[key] = container
     _end_containers(previous, end_time=getattr(container, "start_time", None))
@@ -275,6 +283,8 @@ class GuardrailStageCloser(SpanProcessor):
     def on_start(
         self, span: Span, parent_context: otel_context.Context | None = None
     ) -> None:
+        if _starting_container.get():
+            return
         attributes = getattr(span, "attributes", None) or {}
         parent = getattr(span, "parent", None)
         if attributes.get(_CONTAINER_MARK) or parent is None:
