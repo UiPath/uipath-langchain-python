@@ -13,6 +13,7 @@ from uipath.platform.guardrails.decorators import LoggingSeverityLevel
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
 GUARDRAIL_ACTION = "guardrailAction"
+GUARDRAIL_EVALUATION = "guardrailEvaluation"
 
 
 def _new_span(name: str, span_type: str, **attributes: Any) -> Span:
@@ -52,6 +53,12 @@ def _error_text(exc: BaseException) -> str:
     return str(exc)
 
 
+def span_guid(span: Span) -> str:
+    """``span``'s id as a GUID, the form ``guardrailSpanId`` uses."""
+    span_id = format(span.get_span_context().span_id, "016x")
+    return f"00000000-0000-0000-{span_id[:4]}-{span_id[4:]}"
+
+
 def action_name(action: Any) -> str:
     """``BlockAction`` -> ``Block``."""
     name = type(action).__name__
@@ -60,7 +67,10 @@ def action_name(action: Any) -> str:
 
 @contextmanager
 def guardrail_action_span(
-    guardrail_name: str, action: Any, result: GuardrailValidationResult
+    guardrail_name: str,
+    action: Any,
+    result: GuardrailValidationResult,
+    evaluation_span_id: str | None = None,
 ) -> Generator[Span]:
     """Record the action taken on a failed ``result``."""
     severity = getattr(action, "severity_level", None)
@@ -69,7 +79,7 @@ def guardrail_action_span(
         GUARDRAIL_ACTION,
         guardrailName=guardrail_name,
         action=action_name(action),
-        guardrailSpanId=result.span_id,
+        guardrailSpanId=evaluation_span_id or result.span_id,
         reason=result.reason or None,
         severityLevel=(
             severity.name.title()
@@ -79,3 +89,26 @@ def guardrail_action_span(
     )
     with _active(span):
         yield span
+
+
+@contextmanager
+def guardrail_evaluation_span(
+    guardrail_name: str, description: str | None = None
+) -> Generator[Span]:
+    """Record a rule check that runs in the agent."""
+    span = _new_span(
+        guardrail_name,
+        GUARDRAIL_EVALUATION,
+        guardrailName=guardrail_name,
+        guardrailDescription=description,
+        guardrailType="custom",
+    )
+    with _active(span):
+        yield span
+
+
+def set_validation_result(span: Span, result: GuardrailValidationResult) -> None:
+    """Record ``result``'s outcome on its evaluation span."""
+    span.set_attribute("validationResult", result.result.name)
+    if result.reason:
+        span.set_attribute("details", [result.reason])
