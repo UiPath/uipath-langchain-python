@@ -543,7 +543,7 @@ class TestEnabling:
         closer = _grouping.GuardrailStageCloser()
 
         with graph.node("model") as span:
-            closer.on_start(span)
+            closer.on_start(span)  # type: ignore[arg-type]
         closer.on_end(span)  # type: ignore[arg-type]
 
         lock.__enter__.assert_not_called()
@@ -551,20 +551,22 @@ class TestEnabling:
     def test_starting_a_container_does_not_deadlock(
         self, exporter: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A container starts under the lock that the closer's on_start takes.
-        # Its own provider, so a deadlock fails the test instead of hanging the
-        # fixture's shutdown.
+        # A container starts under the lock, and with another container open
+        # the closer's on_start takes it again. Its own provider, so a deadlock
+        # fails the test instead of hanging the fixture's shutdown.
         provider = TracerProvider()
         monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
-        node = provider.get_tracer(_OPENINFERENCE).start_span("tools")
-        enable_guardrail_grouping(provider, lambda: node)
+        tracer = provider.get_tracer(_OPENINFERENCE)
+        other_tools, tools = tracer.start_span("tools"), tracer.start_span("tools")
+        current = [other_tools]
+        enable_guardrail_grouping(provider, lambda: current[0])
         _pii()
+        with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+            pass  # stays open under other_tools
+        current[0] = tools
 
         def check() -> None:
-            # The second container starts while the first is open.
             with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
-                pass
-            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.POST):
                 pass
 
         worker = threading.Thread(target=check, daemon=True)
@@ -572,9 +574,32 @@ class TestEnabling:
         worker.join(timeout=5)
 
         assert not worker.is_alive()
-        assert len(_grouping._state.containers) == 1
-        node.end()
+        assert len(_grouping._state.containers) == 2
+        tools.end()
+        other_tools.end()
         provider.shutdown()
+
+    def test_a_new_stage_ends_the_previous_one_without_the_closer(
+        self, graph: _Graph, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Containers from a provider the closer isn't attached to, so it never
+        # sees their start (as when another manager's shutdown detached it).
+        hidden = TracerProvider()
+        finished = InMemorySpanExporter()
+        hidden.add_span_processor(SimpleSpanProcessor(finished))
+        monkeypatch.setattr(trace, "get_tracer", hidden.get_tracer)
+        _pii()
+
+        with graph.node("tools"):
+            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+                pass
+            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.POST):
+                pass
+
+            ended = [s.name for s in finished.get_finished_spans()]
+            assert ended == ["Tool input guardrail check"]
+        graph.finish()
+        hidden.shutdown()
 
     def test_tool_only_guardrails_turn_grouping_on(
         self, exporter: InMemorySpanExporter

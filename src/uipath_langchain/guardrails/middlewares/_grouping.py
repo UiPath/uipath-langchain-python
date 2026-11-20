@@ -11,7 +11,6 @@ guardrail node spans.
 import logging
 import threading
 import time
-import weakref
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -63,40 +62,45 @@ _STAGES: dict[tuple[GuardrailScope, GuardrailExecutionStage], _Stage] = {
 }
 
 
-class _ContainerKey(NamedTuple):
-    parent_id: int
-    span_type: str
-
-
 @dataclass
 class _Container:
     span: Span
-    last_check_end: int = 0  # ns; the container never ends before this
+    span_type: str
+    last_check_end: int = 0  # ns
+
+    def end(self, end_time: int | None) -> None:
+        status = getattr(self.span, "status", None)
+        if status is None or status.status_code is StatusCode.UNSET:
+            self.span.set_status(StatusCode.OK)
+        # Never before its last check: coarse clocks (Windows before Python
+        # 3.13) can stamp the next sibling's start a tick earlier.
+        self.span.end(end_time=max(end_time, self.last_check_end) if end_time else None)
 
 
 class _GroupingState:
-    """Process-wide state. Grouping stays off until a closer is registered."""
+    """Process-wide state. Grouping is on while a closer is attached."""
 
     def __init__(self) -> None:
-        self.enabled = False
         self.in_use = False  # a guardrail middleware was built
         self.trace_manager: Any = None  # offered by the runtime factory
-        self.closers: weakref.WeakKeyDictionary[Any, GuardrailStageCloser] = (
-            weakref.WeakKeyDictionary()
-        )  # trace manager -> its closer
+        self.closer: GuardrailStageCloser | None = None
         self.guardrail_nodes: dict[str, str] = {}  # node name -> stage span type
-        self.containers: dict[_ContainerKey, _Container] = {}
-        self.lock = threading.Lock()
+        # Parent span id -> its open container. One at a time: starting a
+        # stage's container ends the other stage's one under the same parent.
+        self.containers: dict[int, _Container] = {}
+        # Re-entrant: starting a container runs the closer's on_start, which
+        # takes it again on the same thread.
+        self.lock = threading.RLock()
+
+    @property
+    def enabled(self) -> bool:
+        return self.closer is not None
 
 
 _state = _GroupingState()
 
 _current_container: ContextVar[Span | None] = ContextVar(
     "uipath_guardrail_container", default=None
-)
-# Set while a container starts, so the closer skips it without taking the lock.
-_starting_container: ContextVar[bool] = ContextVar(
-    "uipath_guardrail_container_starting", default=False
 )
 
 
@@ -134,11 +138,9 @@ def _activate() -> None:
         manager = _state.trace_manager
         if manager is None or not _state.in_use:
             return
-        if manager not in _state.closers:
-            closer = GuardrailStageCloser()
-            manager.add_span_processor(closer)
-            _state.closers[manager] = closer
-        _state.enabled = True
+        if _state.closer is None or _state.closer.trace_manager is not manager:
+            _state.closer = GuardrailStageCloser(manager)
+            manager.add_span_processor(_state.closer)
 
 
 @contextmanager
@@ -191,20 +193,25 @@ def _shared_container(
     if not _can_group_under(parent):
         return None
 
-    stage_spans = _STAGES[(scope, stage)]  # type: ignore[index]
-    key = _ContainerKey(parent.span_id, stage_spans.span_type)
+    spans = _STAGES[(scope, stage)]  # type: ignore[index]
     with _state.lock:
-        container = _state.containers.get(key)
-        if container is not None:
-            return container
-        container = _Container(_start_container(stage_spans, parent, node))
-        # The other stage under this parent is over, even if no sibling
-        # started in between (a middleware that answers a tool call itself).
-        other_stage = _pop_containers(
-            lambda k: k.parent_id == key.parent_id and k.span_type != key.span_type
-        )
-        _state.containers[key] = container
-    _end_containers(other_stage, end_time=getattr(container.span, "start_time", None))
+        previous = _state.containers.get(parent.span_id)
+        if previous is not None and previous.span_type == spans.span_type:
+            return previous
+        # Taken out first, so the new container's start finds nothing to close.
+        _state.containers.pop(parent.span_id, None)
+        try:
+            span = _start_container(spans, parent, node)
+        except Exception:
+            if previous is not None:
+                _state.containers[parent.span_id] = previous
+            raise
+        container = _Container(span, spans.span_type)
+        _state.containers[parent.span_id] = container
+    # The other stage under this parent is over, even if no sibling started in
+    # between (a middleware that answers a tool call itself).
+    if previous is not None:
+        previous.end(getattr(span, "start_time", None))
     return container
 
 
@@ -221,82 +228,62 @@ def _can_group_under(parent: SpanContext | None) -> TypeGuard[SpanContext]:
 
 
 def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> Span:
-    token = _starting_container.set(True)
-    try:
-        return new_span(
-            stage.name,
-            stage.span_type,
-            context=trace.set_span_in_context(NonRecordingSpan(parent)),
-            **{
-                # Its parent is non-recording, so this isn't inherited.
-                "execution.id": (getattr(node, "attributes", None) or {}).get(
-                    "execution.id"
-                ),
-            },
-        )
-    finally:
-        _starting_container.reset(token)
+    """Start ``stage``'s container under ``parent``."""
+    return new_span(
+        stage.name,
+        stage.span_type,
+        context=trace.set_span_in_context(NonRecordingSpan(parent)),
+        **{
+            # Its parent is non-recording, so this isn't inherited.
+            "execution.id": (getattr(node, "attributes", None) or {}).get(
+                "execution.id"
+            ),
+        },
+    )
 
 
 class GuardrailStageCloser(SpanProcessor):
     """End a container when a non-guardrail sibling starts or its parent ends."""
 
+    def __init__(self, trace_manager: Any = None) -> None:
+        self.trace_manager = trace_manager
+
     def on_start(
-        self, span: Span, parent_context: otel_context.Context | None = None
+        self, span: ReadableSpan, parent_context: otel_context.Context | None = None
     ) -> None:
-        if _starting_container.get() or not _state.containers:
+        if not _state.containers or span.parent is None:
             return
-        parent = getattr(span, "parent", None)
-        if parent is None:
-            return
-        # A guardrail node of the same stage joins the container; anything
-        # else starting beside it ends the stage.
-        same_stage = _state.guardrail_nodes.get(getattr(span, "name", ""))
-        _close(
-            lambda key: key.parent_id == parent.span_id and key.span_type != same_stage,
-            end_time=getattr(span, "start_time", None),
-        )
+        with _state.lock:
+            container = _state.containers.get(span.parent.span_id)
+            # A guardrail node of the same stage joins the container; anything
+            # else starting beside it ends the stage.
+            if container is None or container.span_type == _state.guardrail_nodes.get(
+                span.name
+            ):
+                return
+            del _state.containers[span.parent.span_id]
+        container.end(span.start_time)
 
     def on_end(self, span: ReadableSpan) -> None:
-        if not _state.containers:
+        if not _state.containers or span.context is None:
             return
-        span_id = span.context.span_id if span.context else None
-        _close(lambda key: key.parent_id == span_id, end_time=span.end_time)
+        with _state.lock:
+            container = _state.containers.pop(span.context.span_id, None)
+        if container is not None:
+            container.end(span.end_time)
 
     def shutdown(self) -> None:
-        """Called when its trace manager shuts down: unregister, end what's open."""
+        """Called when its trace manager shuts down: detach, end what's open."""
         with _state.lock:
-            owners = [m for m, closer in _state.closers.items() if closer is self]
-            for manager in owners:
-                del _state.closers[manager]
-            if any(manager is _state.trace_manager for manager in owners):
+            if self is not _state.closer:
+                return
+            _state.closer = None
+            if _state.trace_manager is self.trace_manager:
                 _state.trace_manager = None
-            _state.enabled = bool(_state.closers)
-        if not _state.enabled:
-            _close(lambda key: True, end_time=None)
-
-
-def _close(matches: Callable[[_ContainerKey], bool], end_time: int | None) -> None:
-    with _state.lock:
-        done = _pop_containers(matches)
-    _end_containers(done, end_time)
-
-
-def _pop_containers(matches: Callable[[_ContainerKey], bool]) -> list[_Container]:
-    """Remove the matching open containers. Call with the lock held."""
-    keys = [key for key in _state.containers if matches(key)]
-    return [_state.containers.pop(key) for key in keys]
-
-
-def _end_containers(containers: list[_Container], end_time: int | None) -> None:
-    for container in containers:
-        span = container.span
-        status = getattr(span, "status", None)
-        if status is None or status.status_code is StatusCode.UNSET:
-            span.set_status(StatusCode.OK)
-        # Never before its last check: coarse clocks (Windows before Python
-        # 3.13) can stamp the next sibling's start a tick earlier.
-        span.end(end_time=max(end_time, container.last_check_end) if end_time else None)
+            still_open = list(_state.containers.values())
+            _state.containers.clear()
+        for container in still_open:
+            container.end(None)
 
 
 def is_exported(span: ReadableSpan) -> bool:
