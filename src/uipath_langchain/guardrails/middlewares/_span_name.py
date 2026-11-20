@@ -2,12 +2,11 @@
 
 
 class SpanType:
-    """Span types of guardrail spans."""
+    """Values of a guardrail span's ``span_type``."""
 
     GUARDRAIL_ACTION = "guardrailAction"
     GUARDRAIL_EVALUATION = "guardrailEvaluation"
 
-    # Stage containers
     AGENT_PRE_GUARDRAILS = "agentPreGuardrails"
     AGENT_POST_GUARDRAILS = "agentPostGuardrails"
     LLM_PRE_GUARDRAILS = "llmPreGuardrails"

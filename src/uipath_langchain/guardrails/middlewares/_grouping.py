@@ -73,7 +73,7 @@ class _ContainerKey(NamedTuple):
 @dataclass
 class _Container:
     span: Span
-    last_check_end: int = 0  # ns; it never ends before its last check
+    last_check_end: int = 0  # ns; the container never ends before this
 
 
 class _GroupingState:
@@ -87,7 +87,7 @@ class _GroupingState:
             weakref.WeakKeyDictionary()
         )  # trace manager -> its closer
         self.guardrail_nodes: dict[str, str] = {}  # node name -> stage span type
-        self.containers: dict[_ContainerKey, _Container] = {}  # the open ones
+        self.containers: dict[_ContainerKey, _Container] = {}
         self.lock = threading.Lock()
 
 
@@ -100,9 +100,6 @@ _current_container: ContextVar[Span | None] = ContextVar(
 _starting_container: ContextVar[bool] = ContextVar(
     "uipath_guardrail_container_starting", default=False
 )
-
-
-# --- Setup -------------------------------------------------------------------
 
 
 def enable_guardrail_grouping(
@@ -144,9 +141,6 @@ def _activate() -> None:
             manager.add_span_processor(closer)
             _state.closers[manager] = closer
         _state.enabled = True
-
-
-# --- Running a check ---------------------------------------------------------
 
 
 @contextmanager
@@ -247,9 +241,6 @@ def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> Span:
         _starting_container.reset(token)
 
 
-# --- Closing containers ------------------------------------------------------
-
-
 class GuardrailStageCloser(SpanProcessor):
     """End a container when a non-guardrail sibling starts or its parent ends."""
 
@@ -312,11 +303,8 @@ def _end_containers(containers: list[_Container], end_time: int | None) -> None:
         span.end(end_time=max(end_time, container.last_check_end) if end_time else None)
 
 
-# --- Export filter -----------------------------------------------------------
-
-
 def is_exported(span: ReadableSpan) -> bool:
-    """Span filter hiding guardrail node spans (by name: spans upload on start)."""
+    """Hide guardrail node spans. Decided by name: a span uploads when it starts."""
     if not _state.enabled or span.name not in _state.guardrail_nodes:
         return True
     if not _can_group_under(span.parent):
