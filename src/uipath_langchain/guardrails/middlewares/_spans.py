@@ -215,7 +215,10 @@ def guardrail_stage(
     finally:
         _current_container.reset(token)
         with _state.lock:
-            _state.last_check_end[container.get_span_context().span_id] = time.time_ns()
+            # A container closed meanwhile was already popped; don't re-add it.
+            if any(open_ is container for open_ in _state.containers.values()):
+                span_id = container.get_span_context().span_id
+                _state.last_check_end[span_id] = time.time_ns()
 
 
 def _shared_container(
@@ -231,7 +234,7 @@ def _shared_container(
         parent: SpanContext | None = node.get_span_context()
     else:
         parent = getattr(node, "parent", None)
-    if parent is None or not parent.is_valid:
+    if parent is None or not parent.is_valid or not parent.trace_flags.sampled:
         return None  # nothing would ever close it
 
     name, span_type = _STAGES[(scope, stage)]  # type: ignore[index]
@@ -283,7 +286,7 @@ class GuardrailStageCloser(SpanProcessor):
     def on_start(
         self, span: Span, parent_context: otel_context.Context | None = None
     ) -> None:
-        if _starting_container.get():
+        if _starting_container.get() or not _state.containers:
             return
         attributes = getattr(span, "attributes", None) or {}
         parent = getattr(span, "parent", None)
@@ -296,6 +299,8 @@ class GuardrailStageCloser(SpanProcessor):
         )
 
     def on_end(self, span: ReadableSpan) -> None:
+        if not _state.containers:
+            return
         span_id = span.context.span_id if span.context else None
         self._close(lambda key: key[0] == span_id, end_time=span.end_time)
 

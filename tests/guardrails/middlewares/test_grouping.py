@@ -25,6 +25,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import (
     NonRecordingSpan,
     Span,
@@ -370,6 +371,18 @@ class TestTools:
         assert container.start_time >= tool_span.end_time
         assert container.end_time == tools.end_time
 
+    def test_a_container_closed_during_a_check_keeps_no_end_time(
+        self, graph: _Graph
+    ) -> None:
+        _pii()
+        with graph.node("tools") as tools:
+            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+                with graph.node("get_weather", parent=tools):  # closes it
+                    pass
+
+        assert _spans._state.containers == {}
+        assert _spans._state.last_check_end == {}
+
     async def test_input_checks_close_when_the_output_stage_starts(
         self, graph: _Graph
     ) -> None:
@@ -494,6 +507,43 @@ class TestEnabling:
 
         assert _spans._state.enabled
         assert _spans._state.containers == {}
+
+    def test_nothing_is_grouped_under_a_sampled_out_parent(
+        self, exporter: InMemorySpanExporter
+    ) -> None:
+        # A sampler that keeps the node although its parent was dropped.
+        provider = TracerProvider(sampler=ALWAYS_ON)
+        parent = NonRecordingSpan(
+            SpanContext(
+                trace_id=1, span_id=2, is_remote=False, trace_flags=TraceFlags(0)
+            )
+        )
+        node = provider.get_tracer(_OPENINFERENCE).start_span(
+            "pii_detection_before_model", context=trace.set_span_in_context(parent)
+        )
+        enable_guardrail_grouping(exporter.provider, lambda: node)  # type: ignore[attr-defined]
+        _pii()
+
+        with guardrail_stage(GuardrailScope.LLM, GuardrailExecutionStage.PRE):
+            pass
+
+        assert node.is_recording()
+        assert _spans._state.containers == {}
+        node.end()
+        provider.shutdown()
+
+    def test_the_closer_skips_the_lock_with_nothing_open(
+        self, graph: _Graph, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lock = MagicMock()
+        monkeypatch.setattr(_spans._state, "lock", lock)
+        closer = _spans.GuardrailStageCloser()
+
+        with graph.node("model") as span:
+            closer.on_start(span)
+        closer.on_end(span)  # type: ignore[arg-type]
+
+        lock.__enter__.assert_not_called()
 
     def test_a_container_without_its_mark_does_not_deadlock(
         self, exporter: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
