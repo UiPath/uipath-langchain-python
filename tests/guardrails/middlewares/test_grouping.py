@@ -20,7 +20,7 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from opentelemetry import trace
-from opentelemetry.sdk.trace import ReadableSpan, SpanLimits, TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
@@ -548,18 +548,23 @@ class TestEnabling:
 
         lock.__enter__.assert_not_called()
 
-    def test_a_container_without_its_mark_does_not_deadlock(
+    def test_starting_a_container_does_not_deadlock(
         self, exporter: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # No attributes kept, so the container loses the mark the closer checks.
-        provider = TracerProvider(span_limits=SpanLimits(max_span_attributes=0))
+        # A container starts under the lock that the closer's on_start takes.
+        # Its own provider, so a deadlock fails the test instead of hanging the
+        # fixture's shutdown.
+        provider = TracerProvider()
         monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
         node = provider.get_tracer(_OPENINFERENCE).start_span("tools")
         enable_guardrail_grouping(provider, lambda: node)
         _pii()
 
         def check() -> None:
+            # The second container starts while the first is open.
             with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+                pass
+            with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.POST):
                 pass
 
         worker = threading.Thread(target=check, daemon=True)

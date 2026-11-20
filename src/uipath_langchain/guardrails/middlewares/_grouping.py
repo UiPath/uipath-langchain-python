@@ -32,8 +32,6 @@ from ._spans import error_text, new_span
 
 logger = logging.getLogger(__name__)
 
-_CONTAINER_MARK = "uipath.guardrail_container"
-
 
 class _Stage(NamedTuple):
     name: str
@@ -230,7 +228,6 @@ def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> Span:
             stage.span_type,
             context=trace.set_span_in_context(NonRecordingSpan(parent)),
             **{
-                _CONTAINER_MARK: True,
                 # Its parent is non-recording, so this isn't inherited.
                 "execution.id": (getattr(node, "attributes", None) or {}).get(
                     "execution.id"
@@ -249,9 +246,8 @@ class GuardrailStageCloser(SpanProcessor):
     ) -> None:
         if _starting_container.get() or not _state.containers:
             return
-        attributes = getattr(span, "attributes", None) or {}
         parent = getattr(span, "parent", None)
-        if attributes.get(_CONTAINER_MARK) or parent is None:
+        if parent is None:
             return
         # A guardrail node of the same stage joins the container; anything
         # else starting beside it ends the stage.
