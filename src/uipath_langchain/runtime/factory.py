@@ -11,7 +11,7 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from uipath.core.adapters import EvaluatorProtocol
-from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
+from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager, UiPathTraceSettings
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
 )
@@ -28,6 +28,10 @@ from uipath_langchain_client import UIPATH_SKIP_CLIENT_LLM_SPANS_KEY
 from uipath_langchain._tracing import _instrument_traceable_attributes
 from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
+from uipath_langchain.guardrails.middlewares._grouping import (
+    enable_guardrail_grouping,
+    is_exported,
+)
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.graph import LangGraphLoader
@@ -67,7 +71,7 @@ class UiPathLangGraphRuntimeFactory:
         """Setup tracing and instrumentation."""
         _instrument_traceable_attributes()
         LangChainInstrumentor().instrument()
-        UiPathSpanUtils.register_current_span_provider(get_current_span)
+        enable_guardrail_grouping(trace_manager, get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 
     def _get_connection_string(self) -> str:
@@ -251,6 +255,7 @@ class UiPathLangGraphRuntimeFactory:
         return UiPathRuntimeFactorySettings(
             agent_type=_AGENT_TYPE_CODED,
             agent_framework=_AGENT_FRAMEWORK,
+            trace_settings=UiPathTraceSettings(span_filter=is_exported),
         )
 
     async def get_storage(self) -> UiPathRuntimeStorageProtocol | None:
