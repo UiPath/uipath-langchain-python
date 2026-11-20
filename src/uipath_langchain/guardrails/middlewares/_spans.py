@@ -1,6 +1,7 @@
 """Guardrail spans shaped like low-code agents': actions, rule evaluations and
 stage containers that group a stage's checks across separate middleware nodes."""
 
+import logging
 import threading
 import time
 import weakref
@@ -25,6 +26,8 @@ from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockExce
 GUARDRAIL_ACTION = "guardrailAction"
 GUARDRAIL_EVALUATION = "guardrailEvaluation"
 _CONTAINER_MARK = "uipath.guardrail_container"
+
+logger = logging.getLogger(__name__)
 
 
 def _new_span(
@@ -189,7 +192,11 @@ def guardrail_stage(
     scope: GuardrailScope | None, stage: GuardrailExecutionStage | None
 ) -> Generator[None]:
     """Run one check inside its stage's shared container."""
-    container = _shared_container(scope, stage)
+    try:
+        container = _shared_container(scope, stage)
+    except Exception:
+        logger.warning("Could not group a guardrail check", exc_info=True)
+        container = None
     if container is None:
         yield
         return
@@ -225,9 +232,15 @@ def _shared_container(
 
     name, span_type = _STAGES[(scope, stage)]  # type: ignore[index]
     key = (parent.span_id, span_type)
+    previous: list[tuple[Span, int]] = []
     with _state.lock:
         container = _state.containers.get(key)
         if container is None:
+            # No sibling may have started between the stages, e.g. when a
+            # middleware answers a tool call without running the tool.
+            previous = _pop_containers(
+                lambda k: k[0] == parent.span_id and k[1] != span_type
+            )
             container = _new_span(
                 name,
                 span_type,
@@ -241,6 +254,7 @@ def _shared_container(
                 },
             )
             _state.containers[key] = container
+    _end_containers(previous, end_time=getattr(container, "start_time", None))
     return container
 
 
@@ -281,6 +295,8 @@ class GuardrailStageCloser(SpanProcessor):
             owners = [m for m, closer in _state.closers.items() if closer is self]
             for manager in owners:
                 del _state.closers[manager]
+            if any(manager is _state.trace_manager for manager in owners):
+                _state.trace_manager = None
             _state.enabled = bool(_state.closers)
         if not _state.enabled:
             self._close(lambda key: True, end_time=None)
@@ -290,19 +306,30 @@ class GuardrailStageCloser(SpanProcessor):
         matches: Callable[[tuple[int, str]], bool], end_time: int | None
     ) -> None:
         with _state.lock:
-            done = [key for key in _state.containers if matches(key)]
-            spans = [_state.containers.pop(key) for key in done]
-            last_ends = [
-                _state.last_check_end.pop(span.get_span_context().span_id, 0)
-                for span in spans
-            ]
-        for span, last_end in zip(spans, last_ends, strict=True):
-            status = getattr(span, "status", None)
-            if status is None or status.status_code is StatusCode.UNSET:
-                span.set_status(StatusCode.OK)
-            # Never before its last check: coarse clocks (Windows before Python
-            # 3.13) can stamp the next sibling's start a tick earlier.
-            span.end(end_time=max(end_time, last_end) if end_time else None)
+            done = _pop_containers(matches)
+        _end_containers(done, end_time)
+
+
+def _pop_containers(
+    matches: Callable[[tuple[int, str]], bool],
+) -> list[tuple[Span, int]]:
+    """Remove matching containers, with their last check's end. Hold the lock."""
+    keys = [key for key in _state.containers if matches(key)]
+    spans = [_state.containers.pop(key) for key in keys]
+    return [
+        (span, _state.last_check_end.pop(span.get_span_context().span_id, 0))
+        for span in spans
+    ]
+
+
+def _end_containers(containers: list[tuple[Span, int]], end_time: int | None) -> None:
+    for span, last_end in containers:
+        status = getattr(span, "status", None)
+        if status is None or status.status_code is StatusCode.UNSET:
+            span.set_status(StatusCode.OK)
+        # Never before its last check: coarse clocks (Windows before Python
+        # 3.13) can stamp the next sibling's start a tick earlier.
+        span.end(end_time=max(end_time, last_end) if end_time else None)
 
 
 def is_exported(span: ReadableSpan) -> bool:

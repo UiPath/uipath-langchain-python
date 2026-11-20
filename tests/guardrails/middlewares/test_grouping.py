@@ -292,6 +292,22 @@ class TestStages:
         [container] = _named(spans, "LLM input guardrail check")
         assert container.status.status_code == StatusCode.ERROR
 
+    async def test_a_grouping_failure_still_runs_the_check(self, graph: _Graph) -> None:
+        pii = _pii(action=BlockAction())
+        hook = _hook(pii, "_before_model")
+
+        with (
+            patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
+            patch.object(_spans, "_shared_container", side_effect=RuntimeError),
+            pytest.raises(AgentRuntimeError),
+            graph.node(f"{hook.name}.before_model"),
+        ):
+            await hook.abefore_model(_STATE, MagicMock())
+        spans = graph.finish()
+
+        assert _named(spans, "LLM input guardrail check") == []
+        assert len(_named(spans, "Block")) == 1
+
     async def test_a_stage_with_nothing_to_check_leaves_no_container(
         self, graph: _Graph
     ) -> None:
@@ -347,6 +363,28 @@ class TestTools:
         assert container.start_time >= tool_span.end_time
         assert container.end_time == tools.end_time
 
+    async def test_input_checks_close_when_the_output_stage_starts(
+        self, graph: _Graph
+    ) -> None:
+        [pre] = list(_rule(GuardrailExecutionStage.PRE))
+        [post] = list(_rule(GuardrailExecutionStage.POST))
+        with graph.node("tools"):
+
+            async def answer_without_the_tool(request: ToolCallRequest) -> ToolMessage:
+                return ToolMessage(content="cached", tool_call_id="tc1")
+
+            async def inner(request: ToolCallRequest) -> ToolMessage:
+                return await post.awrap_tool_call(request, answer_without_the_tool)
+
+            await pre.awrap_tool_call(_tool_request(), inner)
+        spans = graph.finish()
+
+        [pre_container] = _named(spans, "Tool input guardrail check")
+        [post_container] = _named(spans, "Tool output guardrail check")
+        assert pre_container.end_time is not None
+        assert post_container.start_time is not None
+        assert pre_container.end_time <= post_container.start_time
+
 
 class TestEnabling:
     async def test_nothing_is_grouped_without_a_closer(
@@ -399,6 +437,20 @@ class TestEnabling:
 
         assert manager.add_span_processor.call_count == 2
         assert _spans._state.enabled
+
+    def test_a_shut_down_trace_manager_is_not_reused(
+        self, exporter: InMemorySpanExporter
+    ) -> None:
+        manager = MagicMock()
+        enable_guardrail_grouping(manager, lambda: None)
+        _pii()
+        [closer] = [call.args[0] for call in manager.add_span_processor.call_args_list]
+
+        closer.shutdown()
+        _pii()  # a middleware built before the next runtime factory
+
+        manager.add_span_processor.assert_called_once()
+        assert not _spans._state.enabled
 
     def test_tool_only_guardrails_turn_grouping_on(
         self, exporter: InMemorySpanExporter
