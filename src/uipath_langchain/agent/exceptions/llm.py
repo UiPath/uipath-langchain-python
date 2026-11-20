@@ -16,6 +16,7 @@ from typing import NoReturn
 
 from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
 from uipath.llm_client.utils.exceptions import as_uipath_error
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions.exceptions import (
@@ -112,6 +113,7 @@ _GUARDRAIL_BLOCK_DETAIL = (
     "Execution was blocked by your organization's AI Trust Layer policy."
 )
 _GUARDRAIL_BLOCK_MESSAGE_LIMIT = 300
+_GUARDRAIL_CHECK_BLOCK_ERROR_CODE = "Agent.CentralizedGuardrailBlocked"
 
 
 def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | None:
@@ -196,6 +198,54 @@ def _gateway_messages(body: object) -> list[str]:
 def _printable(text: str) -> str:
     # A line break or bidi control in the gateway's message would forge lines in the error.
     return "".join(ch if ch.isprintable() else " " for ch in text).strip()
+
+
+def centralized_guardrail_check_error(
+    error: EnrichedException,
+    guardrail_name: str,
+    file_names: Sequence[str] = (),
+) -> AgentRuntimeError | None:
+    """The agent error for a guardrail check the centralized guardrails blocked.
+
+    A built-in guardrail that calls a model (LLM as Judge) goes through the LLM
+    gateway, where the AI Trust Layer policy of the organization can block that
+    call. The guardrails service then answers with error code
+    ``Agent.CentralizedGuardrailBlocked``. The policy's block is not a verdict
+    of the guardrail, so the run stops whatever action the guardrail is
+    configured with.
+
+    Args:
+        error: The error the guardrails service answered with.
+        guardrail_name: Name of the guardrail whose check was blocked.
+        file_names: Names of the files sent with the check.
+
+    Returns:
+        The error to raise, chained on ``error``, or ``None`` when ``error`` is
+        not a centralized guardrail block.
+    """
+    info = error.error_info
+    if info is None or info.error_code != _GUARDRAIL_CHECK_BLOCK_ERROR_CODE:
+        return None
+
+    # As in _guardrail_block_detail: what follows the first colon can quote the request.
+    summary = _printable((info.message or "").partition(":")[0])
+    if len(summary) > _GUARDRAIL_BLOCK_MESSAGE_LIMIT:
+        summary = summary[:_GUARDRAIL_BLOCK_MESSAGE_LIMIT].rstrip() + "…"
+    detail = f"Execution was blocked while evaluating guardrail [{guardrail_name}]."
+    if summary:
+        detail = f"{detail} {summary}."
+    if file_names:
+        detail = f"{detail} Files sent with the check: {', '.join(file_names)}."
+
+    blocked = AgentRuntimeError(
+        code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
+        title="Guardrail violation",
+        detail=detail,
+        category=UiPathErrorCategory.USER,
+        status=error.status_code,
+    )
+    blocked.__cause__ = error
+    return blocked
 
 
 def raise_for_llm_client_error(

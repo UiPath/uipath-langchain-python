@@ -43,7 +43,11 @@ from uipath_langchain.agent.react.utils import (
     find_latest_ai_message,
 )
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    centralized_guardrail_check_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +130,11 @@ async def _evaluate_builtin_guardrail(
         )
         return result, attachments
     except EnrichedException as exc:
+        blocked = centralized_guardrail_check_error(
+            exc, guardrail.name, [a.file_name for a in attachments or []]
+        )
+        if blocked is not None:
+            raise blocked from exc
         # A 400 with attachments means the references were rejected; a file must never
         # fail the run, so evaluate the text alone.
         if not attachments or exc.status_code != 400:
