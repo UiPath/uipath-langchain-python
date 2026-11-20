@@ -5,7 +5,7 @@ description = "Chat agent with UiPath LLM and web search"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=1.0.10",
+    "langgraph>=1.2.14",
     "langchain-community>=0.4.1",
     "ddgs>=9.6.1",
     "uipath-langchain>=0.18.46",

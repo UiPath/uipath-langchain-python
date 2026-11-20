@@ -7,7 +7,7 @@ authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     "uipath-langchain",
-    "langgraph>=1.0.10",
+    "langgraph>=1.2.14",
 ]
 
 [project.optional-dependencies]
