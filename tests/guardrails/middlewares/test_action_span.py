@@ -32,6 +32,7 @@ from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 from uipath_langchain.guardrails.middlewares import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathPIIDetectionMiddleware,
+    _spans,
 )
 from uipath_langchain.guardrails.middlewares._spans import action_name
 from uipath_langchain.guardrails.models import PIIDetectionEntity
@@ -49,6 +50,7 @@ _PASSED = GuardrailValidationResult(
 
 @pytest.fixture
 def recorded_spans(monkeypatch: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporter]:
+    monkeypatch.setattr(_spans, "_state", _spans._GroupingState())
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))

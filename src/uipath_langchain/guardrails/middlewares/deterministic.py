@@ -12,6 +12,7 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from uipath.core.guardrails import (
+    GuardrailScope,
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
@@ -24,6 +25,8 @@ from ..models import GuardrailAction
 from ._spans import (
     guardrail_action_span,
     guardrail_evaluation_span,
+    guardrail_stage,
+    guardrails_in_use,
     set_validation_result,
     span_guid,
 )
@@ -162,6 +165,7 @@ class UiPathDeterministicGuardrailMiddleware:
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
         """Create middleware instances from decorated functions."""
+        guardrails_in_use()
         instances = []
         middleware_instance = self
         guardrail_name = self._name.replace(" ", "_")
@@ -240,16 +244,16 @@ class UiPathDeterministicGuardrailMiddleware:
         ToolCallRequest | None, dict[str, Any] | None, ToolMessage | Command[Any] | None
     ]:
         """Evaluate rules and apply modifications if validation fails."""
-        with guardrail_evaluation_span(self._name, self._description) as span:
-            result = self._evaluate_rules(rules, stage, input_data, output_data)
-            set_validation_result(span, result)
-        if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
-            return request, input_data, tool_result
-
         try:
-            modified_data = self._handle_validation_result(
-                result, data_for_action, evaluation_span_id=span_guid(span)
-            )
+            with guardrail_stage(GuardrailScope.TOOL, stage):
+                with guardrail_evaluation_span(self._name, self._description) as span:
+                    result = self._evaluate_rules(rules, stage, input_data, output_data)
+                    set_validation_result(span, result)
+                if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
+                    return request, input_data, tool_result
+                modified_data = self._handle_validation_result(
+                    result, data_for_action, evaluation_span_id=span_guid(span)
+                )
         except GuardrailBlockException as exc:
             raise convert_block_exception(exc) from exc
         except AgentRuntimeError:
