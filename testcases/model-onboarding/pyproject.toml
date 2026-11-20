@@ -4,9 +4,9 @@ version = "0.0.1"
 description = "Onboard a runtime-specified LLM model across get_chat_model code paths"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
-    "langgraph>=1.0.10",
+    "langgraph>=1.2.14",
     "langchain-core>=1.3.3",
-    "langgraph-checkpoint-sqlite>=3.1.1",
+    "langgraph-checkpoint-sqlite>=3.1.2",
     "uipath-langchain[vertex,bedrock]",
     "pydantic>=2.10.6",
 ]

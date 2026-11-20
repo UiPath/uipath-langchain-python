@@ -393,6 +393,33 @@ class TestCreateAnalyzeFileTool:
         assert "'Budget.csv' (text/csv)" in detail
         assert "Convert the file to PDF" in detail
 
+    async def test_centralized_guardrail_block_is_a_guardrail_violation(
+        self, resource_config, mock_llm
+    ):
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={
+                "message": "Request rejected due to Centralized guardrails "
+                "harmful_content: Content safety violations detected: SelfHarm "
+                "found with a severity level of 4 >= configured threshold of 2"
+            },
+            headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
+        )
+        error = UiPathAPIError.from_response(response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error)
+
+        info = exc_info.value.error_info
+        assert info.code.endswith(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+        )
+        assert info.category == UiPathErrorCategory.USER
+        assert info.detail.endswith("Centralized guardrails harmful_content")
+        assert "test.pdf" not in info.detail
+
     async def test_raw_provider_400_names_the_attached_file(
         self, resource_config, mock_llm
     ):

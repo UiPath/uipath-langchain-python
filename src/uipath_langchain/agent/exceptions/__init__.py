@@ -6,6 +6,7 @@ from .exceptions import (
     max_iterations_error,
 )
 from .helpers import raise_for_enriched
+from .llm import centralized_guardrail_error
 
 __all__ = [
     "AgentStartupError",
@@ -14,4 +15,5 @@ __all__ = [
     "AgentRuntimeErrorCode",
     "raise_for_enriched",
     "max_iterations_error",
+    "centralized_guardrail_error",
 ]

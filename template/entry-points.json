@@ -10,14 +10,12 @@
                 "type": "object",
                 "properties": {
                     "question": {
-                        "description": "Question for the assistant, e.g. 'What's the weather in Paris?'",
+                        "default": "What's the weather in Paris right now?",
+                        "description": "Question for the assistant, e.g. 'What's the weather in Paris right now?'",
                         "title": "Question",
                         "type": "string"
                     }
-                },
-                "required": [
-                    "question"
-                ]
+                }
             },
             "output": {
                 "type": "object",

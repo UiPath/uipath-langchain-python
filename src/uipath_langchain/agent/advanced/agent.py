@@ -954,6 +954,15 @@ def create_conversational_advanced_agent_graph(
     async def generate_conversational_output(state: BaseModel) -> dict[str, Any]:
         assert extract_output is not None  # guarded by with_output_extraction
         messages = cast(ConversationalAdvancedAgentGraphState, state).messages
+        # Inject the system prompt into the messages array for extraction, matching
+        # standard loop behavior (for advanced, the system prompt is not in the messages array for the core loop).
+        system_prompt = runtime_prompt.static_prompt or (
+            getattr(state, runtime_prompt.state_key, None)
+            if runtime_prompt.state_key
+            else None
+        )
+        if system_prompt:
+            messages = [SystemMessage(content=system_prompt), *messages]
         return {conversational_output_key: await extract_output(messages)}
 
     wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(

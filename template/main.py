@@ -30,7 +30,8 @@ MAX_RESPONSE_LENGTH = 5000
 
 class InputModel(BaseModel):
     question: str = Field(
-        description="Question for the assistant, e.g. 'What's the weather in Paris?'"
+        default="What's the weather in Paris right now?",
+        description="Question for the assistant, e.g. 'What's the weather in Paris right now?'",
     )
 
 
@@ -51,7 +52,7 @@ def get_current_time() -> str:
 
 @tool
 def get_weather(city: str, utc_time: str) -> str:
-    """Get the current weather for a city. Requires the current UTC time from get_current_time.
+    """Get the current weather for a city.
 
     Args:
         city: The city name, e.g. 'Paris' or 'Tokyo'.

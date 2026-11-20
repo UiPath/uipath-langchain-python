@@ -5,7 +5,7 @@ description = "Supervisor agent that coordinates between a researcher and a code
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=1.0.10",
+    "langgraph>=1.2.14",
     "langchain-anthropic>=1.4.6",
     "langchain-experimental>=0.4.0",
     "langchain-tavily>=0.2.13",

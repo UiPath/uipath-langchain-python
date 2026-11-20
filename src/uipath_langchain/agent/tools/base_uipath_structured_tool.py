@@ -1,4 +1,3 @@
-from inspect import signature
 from typing import Any
 
 from langchain_core.callbacks import (
@@ -8,6 +7,7 @@ from langchain_core.callbacks import (
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from langchain_core.tools.base import ArgsSchema, _get_runnable_config_param
+from langchain_core.utils._signature import _signature_parameters
 from langchain_core.utils.pydantic import get_fields
 from pydantic import BaseModel, ValidationError
 from uipath.runtime.errors import UiPathErrorCategory
@@ -53,7 +53,7 @@ class BaseUiPathStructuredTool(StructuredTool):
             The result of the tool execution
         """
         if __obj_internal_self__.func:
-            if run_manager and signature(__obj_internal_self__.func).parameters.get(
+            if run_manager and _signature_parameters(__obj_internal_self__.func).get(
                 "callbacks"
             ):
                 kwargs["callbacks"] = run_manager.get_child()
@@ -82,9 +82,9 @@ class BaseUiPathStructuredTool(StructuredTool):
             The result of the tool execution
         """
         if __obj_internal_self__.coroutine:
-            if run_manager and signature(
+            if run_manager and _signature_parameters(
                 __obj_internal_self__.coroutine
-            ).parameters.get("callbacks"):
+            ).get("callbacks"):
                 kwargs["callbacks"] = run_manager.get_child()
             if config_param := _get_runnable_config_param(
                 __obj_internal_self__.coroutine

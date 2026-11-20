@@ -7,12 +7,20 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
 from pydantic import BaseModel, Field
-from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
+from uipath.agent.react import (
+    SET_CONVERSATIONAL_OUTPUT_TOOL,
+    get_chat_system_prompt,
+    get_generate_output_prompt,
+)
 
 from uipath_langchain.agent.react.conversational_output_node import (
+    create_conversational_output_extractor,
     create_conversational_output_node,
 )
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
+from uipath_langchain.agent.react.utils import (
+    build_conversational_output_args_schema,
+)
 
 
 class _OutputSchema(BaseModel):
@@ -114,6 +122,32 @@ class TestCreateConversationalOutputNode:
         assert "messages" not in result
 
     @pytest.mark.asyncio
+    async def test_stripping_does_not_write_back_into_graph_state(self):
+        """The node hands `state.messages` to the extractor directly, so a
+        strip that edited the system message in place would leave graph state
+        holding a prompt stripped of its output-fields section -- the loop
+        would silently lose it. Only the call's copy may be rewritten.
+        """
+        model, _non_streaming, bound = _make_mock_model()
+        node = create_conversational_output_node(model, _OutputSchema)
+        section_bearing = get_chat_system_prompt(
+            model="claude-3-sonnet",
+            system_message="builder prompt",
+            agent_name="Agent",
+            output_schema=build_conversational_output_args_schema(_OutputSchema),
+        )
+        state = _make_state(
+            [SystemMessage(content=section_bearing), HumanMessage(content="hi")]
+        )
+
+        await node(state)
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert "STRUCTURED OUTPUT FOR THIS TURN" not in sent[0].content
+        assert "builder prompt" in sent[0].content
+        assert state.messages[0].content == section_bearing
+
+    @pytest.mark.asyncio
     async def test_binds_only_set_conversational_output_tool(self):
         model, non_streaming, _bound = _make_mock_model()
         create_conversational_output_node(model, _OutputSchema)
@@ -197,3 +231,92 @@ class TestCreateConversationalOutputNode:
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.LLM_INVALID_RESPONSE
         )
+
+
+class TestExtractionSeesTheStoredMessages:
+    """The extraction call replays state verbatim.
+
+    The output-fields section is added by the loop's model call and never
+    stored, so there is nothing here to strip back out.
+    """
+
+    @pytest.mark.asyncio
+    async def test_system_message_is_passed_through_untouched(self):
+        model, _non_streaming, bound = _make_mock_model()
+        extract = create_conversational_output_extractor(model, _OutputSchema)
+        system = SystemMessage(
+            content=get_chat_system_prompt(
+                model="claude-3-sonnet",
+                system_message="Set ready_for_handoff once billing is confirmed.",
+                agent_name="Agent",
+            )
+        )
+        human = HumanMessage(content="hi")
+
+        await extract([system, human])
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert sent[0] is system
+        assert sent[1] is human
+        assert "STRUCTURED OUTPUT FOR THIS TURN" not in sent[0].content
+        assert "Set ready_for_handoff once billing is confirmed." in sent[0].content
+
+    @pytest.mark.asyncio
+    async def test_generate_output_prompt_still_trails_the_messages(self):
+        model, _non_streaming, bound = _make_mock_model()
+        extract = create_conversational_output_extractor(model, _OutputSchema)
+
+        await extract([SystemMessage(content="sys"), HumanMessage(content="hi")])
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert sent[-1].content == get_generate_output_prompt()
+
+
+class TestOnlyTheFirstMessageIsConsidered:
+    """The section can only be in the system message at index 0.
+
+    The standard loop's init node puts the freshly built prompt there and drops
+    any stale one from the replayed history; the advanced wrapper prepends its
+    own prompt at index 0 before calling the extractor.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_later_system_message_is_left_alone(self):
+        model, _non_streaming, bound = _make_mock_model()
+        extract = create_conversational_output_extractor(model, _OutputSchema)
+        section_bearing = get_chat_system_prompt(
+            model="claude-3-sonnet",
+            system_message="builder prompt",
+            agent_name="Agent",
+            output_schema=build_conversational_output_args_schema(_OutputSchema),
+        )
+        stray = SystemMessage(content=section_bearing)
+
+        await extract([SystemMessage(content="real prompt"), HumanMessage("hi"), stray])
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert sent[0].content == "real prompt"
+        assert sent[2] is stray
+
+    @pytest.mark.asyncio
+    async def test_a_history_with_no_system_message_is_tolerated(self):
+        """A caller may hand over a bare transcript -- an advanced agent whose
+        system prompt resolved to nothing, say. The rewrite must not apply."""
+        model, _non_streaming, bound = _make_mock_model()
+        extract = create_conversational_output_extractor(model, _OutputSchema)
+        history = [HumanMessage("hi"), AIMessage(content="done")]
+
+        await extract(history)
+
+        sent = bound.ainvoke.call_args.args[0]
+        assert sent[0] is history[0]
+        assert sent[1] is history[1]
+
+    @pytest.mark.asyncio
+    async def test_empty_history_is_tolerated(self):
+        model, _non_streaming, bound = _make_mock_model()
+        extract = create_conversational_output_extractor(model, _OutputSchema)
+
+        await extract([])
+
+        assert len(bound.ainvoke.call_args.args[0]) == 1

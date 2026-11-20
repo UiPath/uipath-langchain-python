@@ -204,3 +204,29 @@ def test_named_file_limit_keeps_its_specific_error(message: str, title: str) -> 
     info = raised.error_info
     assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
     assert info.title == title
+
+
+def test_centralized_guardrail_block_is_not_a_file_error() -> None:
+    """The gateway's AI Trust Layer policy blocked the request, not the model."""
+    message = (
+        "Request rejected due to Centralized guardrails harmful_content: Content "
+        "safety violations detected: Violence found with a severity level of 4 >= "
+        "configured threshold of 2 (inspected together with the attached file "
+        "Budget-csv)"
+    )
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://llm-gateway/completions"),
+        json={"error": {"message": message}},
+        headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
+    )
+    raised = _raised(UiPathAPIError.from_response(response))
+
+    info = raised.error_info
+    assert info.code.endswith(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+    )
+    assert info.title == "Guardrail violation"
+    assert "AI Trust Layer" in info.detail
+    assert info.detail.endswith("Centralized guardrails harmful_content")
+    assert isinstance(raised.__cause__, UiPathAPIError)
