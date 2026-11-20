@@ -1931,13 +1931,13 @@ class TestGuardrailNodeAttachments:
 
         calls: list[list[GuardrailAttachment] | None] = []
         response = httpx.Response(
-            422,
+            400,
             request=httpx.Request(
                 "POST",
                 "https://cloud.uipath.com/org/tenant/agentsruntime_/api/execution/guardrails/validate",
             ),
             json={
-                "statusCode": 422,
+                "statusCode": 400,
                 "message": "The LLM as Judge call was blocked by your organization's "
                 "AI Trust Layer policy. Request rejected due to Centralized guardrails "
                 "Harmful content: Violence found in jane.doe@example.com",
@@ -1945,7 +1945,7 @@ class TestGuardrailNodeAttachments:
             },
         )
         blocked = EnrichedException(
-            httpx.HTTPStatusError("422", request=response.request, response=response)
+            httpx.HTTPStatusError("400", request=response.request, response=response)
         )
 
         class BlockedGuardrails:

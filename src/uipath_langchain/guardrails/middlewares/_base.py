@@ -40,7 +40,10 @@ from uipath.platform.guardrails import (
 from uipath.platform.guardrails.decorators import GuardrailExecutionStage
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    centralized_guardrail_check_error,
+)
 
 from .._action_context import (
     GuardrailActionContext,
@@ -247,7 +250,8 @@ class BuiltInGuardrailMiddlewareMixin:
         nothing about files, so a text-only evaluation sends the same request as
         before files were supported. When the service
         rejects the attachment references (HTTP 400), the input is evaluated again
-        without them, so a file never disables the guardrail.
+        without them, so a file never disables the guardrail. A check the
+        organization's AI Trust Layer policy blocked is not retried: it stops the run.
         """
         uipath = self._get_uipath()
         files_apply = detection_scope_includes_files(self._guardrail)
@@ -268,6 +272,11 @@ class BuiltInGuardrailMiddlewareMixin:
                 input_data, self._guardrail, attachments=attachments
             )
         except EnrichedException as exc:
+            blocked = centralized_guardrail_check_error(
+                exc, self._name, [a.file_name for a in attachments]
+            )
+            if blocked is not None:
+                raise blocked from exc
             if exc.status_code != 400:
                 raise
             logger.warning(

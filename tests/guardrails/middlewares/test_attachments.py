@@ -891,6 +891,39 @@ class TestAttachmentRejection:
         assert text_only.kwargs == {}
         assert "rejected the attachment references" in caplog.text
 
+    async def test_message_hook_stops_on_a_centralized_block_without_retrying(
+        self, evaluate: MagicMock
+    ) -> None:
+        request = httpx.Request(
+            "POST",
+            "https://cloud.uipath.com/org/tenant/agentsruntime_/api/execution/guardrails/validate",
+        )
+        response = httpx.Response(
+            400,
+            request=request,
+            json={
+                "message": "Request rejected due to Centralized guardrails Harmful content: a@b.com",
+                "problem": {"errorCode": "Agent.CentralizedGuardrailBlocked"},
+            },
+        )
+        evaluate.side_effect = EnrichedException(
+            httpx.HTTPStatusError("400", request=request, response=response)
+        )
+        middleware = _pii([GuardrailScope.LLM], stage=_PRE, action=LogAction())
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _hook(middleware, "before_model").abefore_model(
+                {"messages": [HumanMessage(content=f"hi {_block(_wire())}")]},
+                MagicMock(),
+            )
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
+        )
+        assert "cv.pdf" in exc_info.value.error_info.detail
+        assert "a@b.com" not in exc_info.value.error_info.detail
+        assert evaluate.call_count == 1
+
     @pytest.mark.parametrize(
         ("status", "content"),
         [

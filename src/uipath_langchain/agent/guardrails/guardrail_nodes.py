@@ -135,8 +135,8 @@ async def _evaluate_builtin_guardrail(
         )
         if blocked is not None:
             raise blocked from exc
-        # A 400 with attachments means the references were rejected; a file must never
-        # fail the run, so evaluate the text alone.
+        # Any other 400 with attachments means the references were rejected; a file
+        # must never fail the run, so evaluate the text alone.
         if not attachments or exc.status_code != 400:
             raise
         logger.warning(
