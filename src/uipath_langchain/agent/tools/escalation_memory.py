@@ -27,7 +27,10 @@ from uipath_langchain._utils import (
     set_span_attribute,
 )
 
-from ..memory_field_settings import field_settings_for_weight
+from ..memory_field_settings import (
+    field_settings_for_weight,
+    invalid_field_weight_error,
+)
 from .utils import SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
 
 logger = logging.getLogger(__name__)
@@ -781,7 +784,31 @@ def _coerce_memory_settings(memory: Any) -> EscalationMemorySettings:
             )
             if hasattr(memory, key)
         }
-    return EscalationMemorySettings.model_validate(memory)
+    try:
+        return EscalationMemorySettings.model_validate(memory)
+    except ValidationError as error:
+        _raise_for_invalid_field_weight(memory, error)
+        raise
+
+
+def _raise_for_invalid_field_weight(memory: Any, error: ValidationError) -> None:
+    """Name the field when the settings were rejected for a weight outside 0..1."""
+    for issue in error.errors():
+        location = issue["loc"]
+        if (
+            len(location) != 3
+            or location[0] not in ("fieldSettings", "field_settings")
+            or location[2] != "weight"
+            or issue["type"] not in ("greater_than_equal", "less_than_equal")
+        ):
+            continue
+        fields = _read_value(memory, "fieldSettings", "field_settings") or []
+        index = location[1]
+        field = (
+            fields[index] if isinstance(index, int) and index < len(fields) else None
+        )
+        name = _read_value(field, "name") or f"#{index}"
+        raise invalid_field_weight_error(str(name), issue["input"]) from error
 
 
 def _read_value(source: Any, *keys: str) -> Any:
