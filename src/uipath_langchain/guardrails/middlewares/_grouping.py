@@ -183,43 +183,57 @@ def guardrail_aware(
 def _shared_container(
     scope: GuardrailScope | None, stage: GuardrailExecutionStage | None
 ) -> _Container | None:
-    """Get the stage's open container, or start one."""
-    if not _state.enabled or (scope, stage) not in _STAGES:
+    """Get the stage's open container, or start one. ``None`` if not grouped."""
+    stage_spans = _STAGES.get((scope, stage))  # type: ignore[arg-type]
+    if not _state.enabled or stage_spans is None:
         return None
+    place = _container_place(scope)
+    if place is None:
+        return None
+    node, parent = place
+    return _open_container(stage_spans, parent, node)
+
+
+def _container_place(scope: GuardrailScope | None) -> tuple[Span, SpanContext] | None:
+    """The check's node and the container's parent, if a container there would close.
+
+    Tool checks go inside the ``tools`` node; others beside their own node.
+    """
     node = UiPathSpanUtils.get_external_current_span()
     if node is None or not node.is_recording():
         return None  # a sampled-out node never reports its end
-    parent = _container_parent(node, scope)
+    if scope == GuardrailScope.TOOL:
+        parent: SpanContext | None = node.get_span_context()
+    else:
+        parent = getattr(node, "parent", None)
     if not _can_group_under(parent):
         return None
+    return node, parent
 
-    spans = _STAGES[(scope, stage)]  # type: ignore[index]
+
+def _open_container(stage: _Stage, parent: SpanContext, node: Span) -> _Container:
+    """Reuse ``stage``'s open container under ``parent``, or start it there.
+
+    Starting it ends the other stage's container under the same parent, even if
+    no sibling started in between (a middleware that answers a tool call itself).
+    """
     with _state.lock:
         previous = _state.containers.get(parent.span_id)
-        if previous is not None and previous.span_type == spans.span_type:
+        if previous is not None and previous.span_type == stage.span_type:
             return previous
-        # Taken out first, so the new container's start finds nothing to close.
+        # Out while the new one starts, so the closer doesn't end it under the
+        # lock; back in if the start fails.
         _state.containers.pop(parent.span_id, None)
         try:
-            span = _start_container(spans, parent, node)
+            container = _start_container(stage, parent, node)
         except Exception:
             if previous is not None:
                 _state.containers[parent.span_id] = previous
             raise
-        container = _Container(span, spans.span_type)
         _state.containers[parent.span_id] = container
-    # The other stage under this parent is over, even if no sibling started in
-    # between (a middleware that answers a tool call itself).
     if previous is not None:
-        previous.end(getattr(span, "start_time", None))
+        previous.end(getattr(container.span, "start_time", None))
     return container
-
-
-def _container_parent(node: Span, scope: GuardrailScope | None) -> SpanContext | None:
-    """Tool checks go inside the ``tools`` node; others beside their own node."""
-    if scope == GuardrailScope.TOOL:
-        return node.get_span_context()
-    return getattr(node, "parent", None)
 
 
 def _can_group_under(parent: SpanContext | None) -> TypeGuard[SpanContext]:
@@ -227,9 +241,9 @@ def _can_group_under(parent: SpanContext | None) -> TypeGuard[SpanContext]:
     return parent is not None and parent.is_valid and parent.trace_flags.sampled
 
 
-def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> Span:
+def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> _Container:
     """Start ``stage``'s container under ``parent``."""
-    return new_span(
+    span = new_span(
         stage.name,
         stage.span_type,
         context=trace.set_span_in_context(NonRecordingSpan(parent)),
@@ -240,6 +254,7 @@ def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> Span:
             ),
         },
     )
+    return _Container(span, stage.span_type)
 
 
 class GuardrailStageCloser(SpanProcessor):
