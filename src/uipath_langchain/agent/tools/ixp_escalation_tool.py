@@ -44,6 +44,9 @@ from .utils import (
     sanitize_tool_name,
 )
 
+# Error code Document Understanding returns when the storage bucket is missing.
+_BUCKET_NOT_FOUND_CODE = "OrchestratorBucketNotFoundError"
+
 
 class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
     pass
@@ -105,15 +108,32 @@ def create_ixp_escalation_tool(
         @durable_interrupt
         async def start_extraction_validation():
             uipath = UiPath()
-            validation_response = (
-                await uipath.documents.create_validate_extraction_action_async(
-                    extraction_response=extraction_result,
-                    action_title=task_title,
-                    storage_bucket_name=storage_bucket_name,
-                    storage_bucket_directory_path=storage_bucket_folder_path,
-                    action_priority=action_priority,
+            try:
+                validation_response = (
+                    await uipath.documents.create_validate_extraction_action_async(
+                        extraction_response=extraction_result,
+                        action_title=task_title,
+                        storage_bucket_name=storage_bucket_name,
+                        storage_bucket_directory_path=storage_bucket_folder_path,
+                        action_priority=action_priority,
+                    )
                 )
-            )
+            except RuntimeError as e:
+                # The SDK reports a failed validation operation as a bare RuntimeError
+                # carrying the Document Understanding error, so match on its code.
+                if _BUCKET_NOT_FOUND_CODE not in str(e):
+                    raise
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.STORAGE_BUCKET_NOT_FOUND,
+                    title=f"Storage bucket '{storage_bucket_name}' was not found",
+                    detail=(
+                        f"Escalation '{resource.name}' stores its validation data in "
+                        f"storage bucket '{storage_bucket_name}', which does not exist. "
+                        "Create the bucket or select an existing one in the "
+                        "escalation's settings."
+                    ),
+                    category=UiPathErrorCategory.DEPLOYMENT,
+                ) from e
 
             start_response = StartExtractionValidationResponse(
                 operation_id=validation_response.operation_id,
