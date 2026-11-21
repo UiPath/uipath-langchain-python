@@ -40,7 +40,10 @@ from uipath.platform.guardrails import (
 from uipath.platform.guardrails.decorators import GuardrailExecutionStage
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    centralized_guardrail_error,
+)
 
 from .._action_context import (
     GuardrailActionContext,
@@ -247,26 +250,32 @@ class BuiltInGuardrailMiddlewareMixin:
         nothing about files, so a text-only evaluation sends the same request as
         before files were supported. When the service
         rejects the attachment references (HTTP 400), the input is evaluated again
-        without them, so a file never disables the guardrail.
+        without them, so a file never disables the guardrail. A check the
+        organization's AI Trust Layer policy blocked is not retried: it stops the run.
         """
         uipath = self._get_uipath()
+
+        def evaluate(**files: Any) -> GuardrailValidationResult:
+            try:
+                return uipath.guardrails.evaluate_guardrail(
+                    input_data, self._guardrail, **files
+                )
+            except EnrichedException as exc:
+                if (blocked := centralized_guardrail_error(exc)) is not None:
+                    raise blocked from exc
+                raise
+
         files_apply = detection_scope_includes_files(self._guardrail)
         files_requested = files_apply and (
             self.detection_scope in (DetectionScope.FILES, DetectionScope.BOTH)
             or _declares_detection_scope(self._guardrail)
         )
         if not files_apply or attachments is None:
-            return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+            return evaluate()
         if not attachments:
-            if files_requested:
-                return uipath.guardrails.evaluate_guardrail(
-                    input_data, self._guardrail, attachments=[]
-                )
-            return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+            return evaluate(attachments=[]) if files_requested else evaluate()
         try:
-            return uipath.guardrails.evaluate_guardrail(
-                input_data, self._guardrail, attachments=attachments
-            )
+            return evaluate(attachments=attachments)
         except EnrichedException as exc:
             if exc.status_code != 400:
                 raise
@@ -275,7 +284,7 @@ class BuiltInGuardrailMiddlewareMixin:
                 "re-evaluating without attachments.",
                 self._name,
             )
-            return uipath.guardrails.evaluate_guardrail(input_data, self._guardrail)
+            return evaluate()
 
     def _attachments_for(
         self,

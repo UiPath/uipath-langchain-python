@@ -1914,6 +1914,90 @@ class TestGuardrailNodeAttachments:
             await node(AgentGuardrailsGraphState(messages=[HumanMessage("payload")]))
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("with_attachment", [True, False])
+    async def test_centralized_block_of_the_check_stops_the_run(
+        self, monkeypatch, with_attachment
+    ):
+        """A check the AI Trust Layer policy blocked is not retried without the files
+        and never reaches the guardrail's action: the run stops."""
+        import httpx
+        from uipath.platform.errors import EnrichedException
+        from uipath.platform.guardrails import GuardrailAttachment
+
+        from uipath_langchain.agent.exceptions import (
+            AgentRuntimeError,
+            AgentRuntimeErrorCode,
+        )
+
+        calls: list[list[GuardrailAttachment] | None] = []
+        response = httpx.Response(
+            400,
+            request=httpx.Request(
+                "POST",
+                "https://cloud.uipath.com/org/tenant/agentsruntime_/api/execution/guardrails/validate",
+            ),
+            headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
+            json={
+                "statusCode": 400,
+                "message": "Request rejected due to Centralized guardrails "
+                "Harmful content: Violence found in jane.doe@example.com",
+                "problem": {"errorCode": "Agent.CentralizedGuardrailBlocked"},
+            },
+        )
+        status_error = httpx.HTTPStatusError(
+            "400", request=response.request, response=response
+        )
+        blocked = EnrichedException(status_error)
+        blocked.__cause__ = status_error  # as the SDK's `raise ... from e` does
+
+        class BlockedGuardrails:
+            def evaluate_guardrail(
+                self,
+                text,
+                guardrail,
+                *,
+                attachments=None,
+                termination_mode=None,
+                scope=None,
+                execution_stage=None,
+                action_type=None,
+            ):
+                calls.append(attachments)
+                raise blocked
+
+        class BlockedUiPath:
+            guardrails = BlockedGuardrails()
+
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
+            lambda: BlockedUiPath(),
+        )
+        attachment = GuardrailAttachment(
+            id=self._UUID, file_name="cv.pdf", mime_type="application/pdf"
+        )
+        self._patch_resolver(monkeypatch, [attachment] if with_attachment else [])
+
+        guardrail = self._judge_guardrail()
+        _, node = create_agent_init_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        with pytest.raises(AgentRuntimeError) as raised:
+            await node(self._state_with_attachment())
+
+        error = raised.value.error_info
+        assert error.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
+        )
+        assert "Centralized guardrails Harmful content" in error.detail
+        assert "jane.doe@example.com" not in error.detail
+        assert raised.value.__cause__ is blocked
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
     async def test_payload_generator_runs_once_per_evaluation(self, monkeypatch):
         """Regression guard: the generator used to run twice — once for observability
         metadata and once inside the evaluator — which would double every resolution."""
