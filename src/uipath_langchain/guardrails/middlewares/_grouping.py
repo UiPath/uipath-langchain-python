@@ -26,7 +26,7 @@ from uipath.core.guardrails import GuardrailScope
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.platform.guardrails.decorators import GuardrailExecutionStage
 
-from ._governance import container_attributes
+from ._enforcement import container_attributes
 from ._span_name import SpanName, SpanType
 from ._spans import error_text, new_span
 
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class _Stage(NamedTuple):
     name: str
     span_type: str
-    # uipath_governance.* version and hook, so the container groups as governance.
+    # uipath_governance.* version and the hook the stage guards.
     attributes: dict[str, str]
 
 

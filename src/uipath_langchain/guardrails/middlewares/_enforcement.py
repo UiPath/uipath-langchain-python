@@ -61,7 +61,7 @@ def action_type(action: Any) -> str | None:
 def container_attributes(
     scope: GuardrailScope, stage: GuardrailExecutionStage
 ) -> dict[str, str]:
-    """Mark a stage container as governance and say which hook it guards."""
+    """The contract version and the hook a stage container guards."""
     stage_hook = hook(scope, stage)
     if stage_hook is None:
         return {}
@@ -69,7 +69,7 @@ def container_attributes(
 
 
 @dataclass(frozen=True)
-class GovernanceContext:
+class EnforcementContext:
     """Where one guardrail check runs and what it does on a violation."""
 
     scope: GuardrailScope | None

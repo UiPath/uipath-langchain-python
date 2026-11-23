@@ -58,7 +58,7 @@ from ._attachments import (
     registry_references,
     tool_result_references,
 )
-from ._governance import GovernanceContext
+from ._enforcement import EnforcementContext
 from ._grouping import (
     guardrail_stage,
     guardrails_in_use,
@@ -243,13 +243,13 @@ class BuiltInGuardrailMiddlewareMixin:
             self._uipath = UiPath()
         return self._uipath
 
-    def _governance(
+    def _enforcement(
         self,
         scope: GuardrailScope | None,
         stage: GuardrailExecutionStage | None,
-    ) -> GovernanceContext:
+    ) -> EnforcementContext:
         """Where a check of this guardrail runs and what it does on a violation."""
-        return GovernanceContext(
+        return EnforcementContext(
             scope=scope,
             stage=stage,
             action=self.action,
@@ -262,7 +262,7 @@ class BuiltInGuardrailMiddlewareMixin:
         input_data: str | dict[str, Any],
         attachments: list[GuardrailAttachment] | None = None,
         *,
-        governance: GovernanceContext | None = None,
+        enforcement: EnforcementContext | None = None,
     ) -> GuardrailValidationResult:
         """Evaluate the guardrail against input data via the UiPath API.
 
@@ -274,11 +274,11 @@ class BuiltInGuardrailMiddlewareMixin:
         rejects the attachment references (HTTP 400), the input is evaluated again
         without them, so a file never disables the guardrail. A check the
         organization's AI Trust Layer policy blocked is not retried: it stops the run.
-        ``governance`` adds the check's ``scope``, ``execution_stage`` and
+        ``enforcement`` adds the check's ``scope``, ``execution_stage`` and
         ``action_type`` to the request.
         """
         uipath = self._get_uipath()
-        options = governance.evaluation_options() if governance else {}
+        options = enforcement.evaluation_options() if enforcement else {}
 
         def evaluate(**files: Any) -> GuardrailValidationResult:
             try:
@@ -401,7 +401,7 @@ class BuiltInGuardrailMiddlewareMixin:
                 self._name,
                 self.action,
                 result,
-                governance=self._governance(scope, stage),
+                enforcement=self._enforcement(scope, stage),
             ):
                 return self.action.handle_validation_result(
                     result, input_data, self._name
@@ -460,7 +460,7 @@ class BuiltInGuardrailMiddlewareMixin:
                         self._evaluate_guardrail,
                         input_data,
                         attachments,
-                        governance=self._governance(
+                        enforcement=self._enforcement(
                             GuardrailScope.TOOL, GuardrailExecutionStage.PRE
                         ),
                     )
@@ -509,7 +509,7 @@ class BuiltInGuardrailMiddlewareMixin:
                             self._evaluate_guardrail,
                             output_data,
                             attachments,
-                            governance=self._governance(
+                            enforcement=self._enforcement(
                                 GuardrailScope.TOOL, GuardrailExecutionStage.POST
                             ),
                         )
@@ -732,7 +732,7 @@ class BuiltInGuardrailMiddlewareMixin:
         try:
             with guardrail_stage(scope, stage):
                 result = self._evaluate_guardrail(
-                    payload, attachments, governance=self._governance(scope, stage)
+                    payload, attachments, enforcement=self._enforcement(scope, stage)
                 )
                 modified_text = self._handle_validation_result(
                     result,

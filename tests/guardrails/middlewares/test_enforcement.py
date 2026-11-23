@@ -32,8 +32,8 @@ from uipath_langchain.guardrails.middlewares import (
     UiPathPIIDetectionMiddleware,
     _grouping,
 )
-from uipath_langchain.guardrails.middlewares._governance import (
-    GovernanceContext,
+from uipath_langchain.guardrails.middlewares._enforcement import (
+    EnforcementContext,
     container_attributes,
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
@@ -49,7 +49,7 @@ _PASSED = GuardrailValidationResult(
 )
 
 
-def _governance(span: ReadableSpan) -> dict[str, Any]:
+def _contract(span: ReadableSpan) -> dict[str, Any]:
     return {
         key.removeprefix("uipath_governance."): value
         for key, value in (span.attributes or {}).items()
@@ -102,9 +102,9 @@ def test_each_stage_container_carries_its_version_and_hook(
     assert _grouping._STAGES[(scope, stage)].attributes == expected
 
 
-class TestGovernanceContext:
+class TestEnforcementContext:
     @staticmethod
-    def _context(action: Any, **overrides: Any) -> GovernanceContext:
+    def _context(action: Any, **overrides: Any) -> EnforcementContext:
         fields: dict[str, Any] = {
             "scope": GuardrailScope.LLM,
             "stage": _PRE,
@@ -112,7 +112,7 @@ class TestGovernanceContext:
             "guardrail_name": "PII Detection",
             "guardrail_type": "pii_detection",
         }
-        return GovernanceContext(**(fields | overrides))
+        return EnforcementContext(**(fields | overrides))
 
     @pytest.mark.parametrize(
         ("action", "action_applied", "mode"),
@@ -259,11 +259,11 @@ class TestBuiltInChecks:
             )
 
         [span] = _of_type(recorded_spans, "guardrailAction")
-        governance = _governance(span)
-        assert governance["hook"] == "BEFORE_MODEL"
-        assert governance["evaluator_result"] == "DENY"
-        assert governance["action_applied"] == "AUDIT"
-        assert governance["guardrail_type"] == "pii_detection"
+        decision = _contract(span)
+        assert decision["hook"] == "BEFORE_MODEL"
+        assert decision["evaluator_result"] == "DENY"
+        assert decision["action_applied"] == "AUDIT"
+        assert decision["guardrail_type"] == "pii_detection"
 
 
 class TestDeterministicChecks:
@@ -299,8 +299,8 @@ class TestDeterministicChecks:
             "guardrail_type": "custom",
             "guardrail_name": "London Rule",
         }
-        assert _governance(evaluation) == expected
-        assert _governance(action) == expected
+        assert _contract(evaluation) == expected
+        assert _contract(action) == expected
 
     async def test_a_pass_stamps_the_evaluation(
         self, recorded_spans: InMemorySpanExporter
@@ -308,10 +308,10 @@ class TestDeterministicChecks:
         await self._rule(_PRE).awrap_tool_call(_request({"city": "Paris"}), _sunny)
 
         [evaluation] = _of_type(recorded_spans, "guardrailEvaluation")
-        governance = _governance(evaluation)
-        assert governance["evaluator_result"] == "ALLOW"
-        assert governance["action_applied"] == "ALLOW"
-        assert governance["evidence"] == "Rules passed: Rule 1"
+        decision = _contract(evaluation)
+        assert decision["evaluator_result"] == "ALLOW"
+        assert decision["action_applied"] == "ALLOW"
+        assert decision["evidence"] == "Rules passed: Rule 1"
         assert _of_type(recorded_spans, "guardrailAction") == []
 
     async def test_a_rule_that_raises_is_an_error(
@@ -335,10 +335,10 @@ class TestDeterministicChecks:
         [evaluation] = _of_type(recorded_spans, "guardrailEvaluation")
         [action] = _of_type(recorded_spans, "guardrailAction")
         for span in (evaluation, action):
-            governance = _governance(span)
-            assert governance["evaluator_result"] == "ERROR"
-            assert governance["action_applied"] == "AUDIT"
-            assert "Rule 2 raised exception: boom" in governance["evidence"]
+            decision = _contract(span)
+            assert decision["evaluator_result"] == "ERROR"
+            assert decision["action_applied"] == "AUDIT"
+            assert "Rule 2 raised exception: boom" in decision["evidence"]
 
     async def test_a_post_check_is_after_the_tool(
         self, recorded_spans: InMemorySpanExporter
@@ -346,4 +346,4 @@ class TestDeterministicChecks:
         await self._rule(_POST).awrap_tool_call(_request({"city": "London"}), _sunny)
 
         [evaluation] = _of_type(recorded_spans, "guardrailEvaluation")
-        assert _governance(evaluation)["hook"] == "AFTER_TOOL"
+        assert _contract(evaluation)["hook"] == "AFTER_TOOL"

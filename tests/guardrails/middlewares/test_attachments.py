@@ -840,15 +840,15 @@ def _rejection(status: int) -> EnrichedException:
     )
 
 
-_GOVERNANCE_OPTIONS = ("scope", "execution_stage", "action_type")
+_ENFORCEMENT_OPTIONS = ("scope", "execution_stage", "action_type")
 
 
 def _file_options(call: Any) -> dict[str, Any]:
-    """A validate call's keyword arguments, without the check's governance fields."""
+    """A validate call's keyword arguments, without the check's enforcement fields."""
     return {
         key: value
         for key, value in call.kwargs.items()
-        if key not in _GOVERNANCE_OPTIONS
+        if key not in _ENFORCEMENT_OPTIONS
     }
 
 
