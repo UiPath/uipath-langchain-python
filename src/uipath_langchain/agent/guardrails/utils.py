@@ -91,8 +91,8 @@ def current_tool_call_args(
     ToolMessage appended after each. The call under evaluation is therefore not "the
     first call named ``tool_name``" but, before execution, the first one without a
     ToolMessage yet (the same selection the tool node makes), and after execution,
-    the one the last ToolMessage answers. Falls back to the first matching call when
-    the history has no ToolMessage bookkeeping.
+    the ``tool_name`` call the last ToolMessage answers. Falls back to the first
+    matching call when the history has no such ToolMessage bookkeeping.
     """
     if not messages:
         return {}
@@ -117,6 +117,7 @@ def current_tool_call_args(
                     call
                     for call in ai_message.tool_calls
                     if _tool_call_field(call, "id") == last_message.tool_call_id
+                    and _tool_call_field(call, "name") == tool_name
                 ),
                 None,
             )

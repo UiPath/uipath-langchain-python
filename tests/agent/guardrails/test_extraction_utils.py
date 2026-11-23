@@ -238,6 +238,24 @@ class TestCurrentToolCallArgs:
 
         assert result == {"file": "a"}
 
+    def test_post_execution_ignores_a_result_for_another_tool(self):
+        messages: list[AnyMessage] = [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "tool_a", "args": {"x": 1}, "id": "call_1"},
+                    {"name": "tool_b", "args": {"y": 2}, "id": "call_2"},
+                ],
+            ),
+            ToolMessage(content="b done", tool_call_id="call_2"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "tool_a", ExecutionStage.POST_EXECUTION
+        )
+
+        assert result == {"x": 1}
+
     def test_tool_call_field_reads_dicts_and_objects(self):
         assert _tool_call_field({"id": "call_1"}, "id") == "call_1"
         assert _tool_call_field(SimpleNamespace(id="call_2"), "id") == "call_2"
