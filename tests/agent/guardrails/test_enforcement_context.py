@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
@@ -16,6 +16,7 @@ from uipath.platform.guardrails import (
 
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
     create_agent_init_guardrail_node,
+    create_tool_guardrail_node,
 )
 from uipath_langchain.agent.guardrails.types import (
     ExecutionStage,
@@ -82,6 +83,43 @@ class TestEnforcementContextForwarding:
             GuardrailScope.AGENT,
             "preExecution",
             "Block",
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_node_sends_its_enforcement_context(self, monkeypatch):
+        guardrails = _StrictGuardrails(accepts_enforcement=True)
+        _patch(monkeypatch, guardrails)
+        _, node = create_tool_guardrail_node(
+            _built_in(),
+            ExecutionStage.PRE_EXECUTION,
+            "ok",
+            "nope",
+            tool_name="my_tool",
+            enforcement_context=GuardrailEnforcementContext(
+                scope=GuardrailScope.TOOL,
+                execution_stage=ExecutionStage.PRE_EXECUTION,
+                action_type="Log",
+            ),
+        )
+
+        await node(
+            AgentGuardrailsGraphState(
+                messages=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {"name": "my_tool", "args": {"x": 1}, "id": "call_1"}
+                        ],
+                    )
+                ]
+            )
+        )
+
+        call = guardrails.calls[0]
+        assert (call["scope"], call["execution_stage"], call["action_type"]) == (
+            GuardrailScope.TOOL,
+            "preExecution",
+            "Log",
         )
 
     @pytest.mark.asyncio
