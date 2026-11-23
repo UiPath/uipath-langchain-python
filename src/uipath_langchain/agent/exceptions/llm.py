@@ -32,6 +32,15 @@ _BAD_REQUEST_DETAIL = (
     "is recorded on the LLM call span for this run."
 )
 
+# The LLM client has already retried a 429 (with backoff, honouring Retry-After)
+# before this mapping sees it, so "try again" alone is not enough advice.
+_RATE_LIMIT_DETAIL = (
+    "The model call was refused as too many requests (HTTP 429) and the "
+    "automatic retries were used up. Wait and run the agent again, run fewer "
+    "agents in parallel, or use a different model. If it keeps happening, ask "
+    "your administrator to check the rate limits that apply to this model."
+)
+
 _Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]
 _ResponseSignature = tuple[re.Pattern[str], _Verdict]
 
@@ -420,7 +429,8 @@ def _forbidden_verdict(body: object) -> _Verdict:
 def _status_verdict(status_code: int, body: object) -> _Verdict:
     """The verdict this mapping decides for a status, before the gateway's detail.
 
-    Only 400, 403 and 404 are classified beyond the 5xx/other split.
+    Only 400, 403 and 404 are classified beyond the 5xx/other split; 429 keeps
+    that split and gains a canned detail.
 
     400, 403 and 404 are the statuses whose meaning depends on the body; keeping the
     code, category, title and detail decided in one place stops them drifting
@@ -457,7 +467,9 @@ def _status_verdict(status_code: int, body: object) -> _Verdict:
         if status_code >= 500
         else UiPathErrorCategory.UNKNOWN,
         f"LLM provider returned HTTP {status_code}",
-        None,
+        # Whether the limit is the tenant's quota or shared capacity is not in
+        # the status, so the category stays as it was; only the advice is added.
+        _RATE_LIMIT_DETAIL if status_code == 429 else None,
     )
 
 
