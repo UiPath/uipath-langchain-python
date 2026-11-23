@@ -85,16 +85,33 @@ async def test_force_reload_replaces_the_set_and_its_tool(
     assert out.startswith("# ops/vendor-lookup")
 
 
-async def test_force_reload_keeps_a_root_the_old_set_does_not_own(
-    skill_set: SkillSet,
+async def test_force_reload_removes_only_what_the_old_set_wrote(
+    skill_set: SkillSet, empty_skill_set: SkillSet
 ) -> None:
-    old = skill_set.model_copy()
+    root = skill_set.root
+    assert root is not None
+    (root / "notes.txt").write_text("mine", encoding="utf-8")
     sdk = _sdk()
-    sdk.skills.load_all_async = AsyncMock(side_effect=[old, skill_set])
-    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    sdk.skills.load_all_async = AsyncMock(side_effect=[skill_set, empty_skill_set])
+    skills = UiPathSkills(REFS, uipath_sdk=sdk, destination=root)
     await skills.load()
     await skills.load(force=True)
-    assert old.root is not None and old.root.exists()
+    assert skill_set.root is None
+    assert sorted(p.name for p in root.iterdir()) == ["notes.txt"]
+
+
+async def test_force_reload_into_the_same_destination_resolves_again(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    # The skill_set fixture sets up the local source and a real UiPath().
+    dest = tmp_path / "workspace" / "skills"
+    skills = UiPathSkills(REFS, destination=dest)
+    first = await skills.load()
+    assert (first.failures, first.root) == ([], dest)
+    second = await skills.load(force=True)
+    assert (second.failures, second.root) == ([], dest)
+    assert second.names() == first.names()
+    assert first.root is None
 
 
 async def test_prompt_section_is_empty_before_load(skill_set: SkillSet) -> None:

@@ -10,7 +10,7 @@
         "versionMode": { "defaultValue": "pinned", "isExpression": false, "displayName": "Version Mode" },
         "version": { "defaultValue": "3", "isExpression": false, "displayName": "Version" }
       },
-      "metadata": { "ActivityName": "load_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName" }
+      "metadata": { "ActivityName": "load_all_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName" }
     },
     {
       "resource": "skillBundle",
@@ -20,7 +20,7 @@
         "folderPath": { "defaultValue": "Shared/Skills", "isExpression": false, "displayName": "Folder Path" },
         "versionMode": { "defaultValue": "latest", "isExpression": false, "displayName": "Version Mode" }
       },
-      "metadata": { "ActivityName": "load_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName" }
+      "metadata": { "ActivityName": "load_all_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName" }
     }
   ]
 }

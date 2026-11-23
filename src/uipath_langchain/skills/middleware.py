@@ -32,11 +32,13 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from uipath.platform.skills import Skill, SkillBundle, SkillSet
-
-# Private SDK module on purpose: the skill span names and attributes are a
-# cross-runtime contract, so they come from the SDK's one implementation.
-from uipath.platform.skills._telemetry import SkillLoad, skill_load_span
+from uipath.platform.skills import (
+    Skill,
+    SkillBundle,
+    SkillLoad,
+    SkillSet,
+    skill_load_span,
+)
 
 from .prompt import UIPATH_SKILLS_PROMPT
 

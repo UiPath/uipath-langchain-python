@@ -61,8 +61,9 @@ class UiPathSkills:
             bundles: The skill bundles the agent is bound to.
             uipath_sdk: The SDK to load through; by default a ``UiPath()`` is
                 built on the first ``load``.
-            destination: The folder the bundles are written to; by default a
-                temp folder the set owns and ``cleanup`` removes.
+            destination: The folder the bundles are written to, which must be
+                empty or missing; by default a temp folder the set owns.
+                ``cleanup`` removes what was written either way.
             tool_name: The name the model knows the load-skill tool by.
 
         Raises:
@@ -97,8 +98,9 @@ class UiPathSkills:
         set. A platform error, including one building ``UiPath()``, is logged
         and cached as a set whose failures mark every bundle
         ``source_unavailable``, so the agent does not retry on every turn.
-        ``force=True`` resolves again and removes the previous set's temp
-        folder, if it owns one, so a tool built for that set stops working.
+        ``force=True`` first removes what the previous set wrote (its temp
+        folder, or its bundles in ``destination``), so the same folder can be
+        loaded into again and a tool built for that set stops working.
 
         Args:
             destination: Overrides the constructor's ``destination`` for this
@@ -112,10 +114,11 @@ class UiPathSkills:
             if self._skill_set is not None and not force:
                 return self._skill_set
             target = destination if destination is not None else self._destination
+            if self._skill_set is not None:
+                # Before resolving: the SDK writes only into an empty folder.
+                self._skill_set.cleanup()
             result = await self._fetch(target)
-            previous, self._skill_set, self._tool = self._skill_set, result, None
-        if previous is not None and previous is not result and previous.owns_root:
-            previous.cleanup()
+            self._skill_set, self._tool = result, None
         return result
 
     def prompt_section(self) -> str:
@@ -155,7 +158,7 @@ class UiPathSkills:
 
         Load with ``destination=<workspace>/skills``, where ``<workspace>`` is
         the backend's root, so the files live in the backend's filesystem at
-        ``/skills/<bundle>/<skill>/``::
+        ``/skills/<bundle>/<skill>/``. The folder must be empty or missing::
 
             backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
             await skills.load(destination=workspace / "skills")
@@ -204,7 +207,7 @@ class UiPathSkills:
         ]
 
     def cleanup(self) -> None:
-        """Remove the set's temp folder, if it owns one, and forget the set.
+        """Remove what the set wrote (its temp folder, or its bundles in ``destination``) and forget the set.
 
         Call it once ``load`` has finished, for example when the graph's
         context manager exits; the next ``load`` resolves again.
