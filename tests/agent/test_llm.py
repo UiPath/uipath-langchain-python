@@ -248,7 +248,7 @@ def test_429_tells_the_user_what_to_do_instead_of_the_reason_phrase():
 
     assert info.status == 429
     assert info.title == "LLM provider returned HTTP 429"
-    assert "rate limiting requests" in info.detail
+    assert "refused as too many requests" in info.detail
     assert "run fewer agents in parallel" in info.detail
 
 

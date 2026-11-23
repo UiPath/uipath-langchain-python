@@ -35,10 +35,10 @@ _BAD_REQUEST_DETAIL = (
 # The LLM client has already retried a 429 (with backoff, honouring Retry-After)
 # before this mapping sees it, so "try again" alone is not enough advice.
 _RATE_LIMIT_DETAIL = (
-    "The model provider is rate limiting requests (too many requests) and the "
+    "The model call was refused as too many requests (HTTP 429) and the "
     "automatic retries were used up. Wait and run the agent again, run fewer "
     "agents in parallel, or use a different model. If it keeps happening, ask "
-    "your administrator to check the model's rate limit."
+    "your administrator to check the rate limits that apply to this model."
 )
 
 _Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]
