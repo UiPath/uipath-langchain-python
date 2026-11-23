@@ -13,6 +13,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from uipath.core.guardrails import (
     GuardrailScope,
+    GuardrailValidationErrorType,
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
@@ -303,6 +304,7 @@ class UiPathDeterministicGuardrailMiddleware:
         violations = []
         passed_rules = []
         evaluated_count = 0
+        raised = False
 
         for i, rule in enumerate(rules):
             try:
@@ -342,6 +344,7 @@ class UiPathDeterministicGuardrailMiddleware:
                 logger.error(f"Error in rule function {i + 1}: {e}", exc_info=True)
                 violations.append(f"Rule {i + 1} raised exception: {str(e)}")
                 evaluated_count += 1
+                raised = True
 
         if evaluated_count == 0:
             return GuardrailValidationResult(
@@ -355,9 +358,12 @@ class UiPathDeterministicGuardrailMiddleware:
                 reason=f"Rules passed: {', '.join(passed_rules)}",
             )
 
+        # A rule that raised counts as a violation, so the check still fails
+        # closed, but it could not evaluate: record that as an internal error.
         return GuardrailValidationResult(
             result=GuardrailValidationResultType.VALIDATION_FAILED,
             reason="; ".join(violations),
+            error_type=GuardrailValidationErrorType.INTERNAL_ERROR if raised else None,
         )
 
     def _extract_tool_input_data(self, request: ToolCallRequest) -> dict[str, Any]:

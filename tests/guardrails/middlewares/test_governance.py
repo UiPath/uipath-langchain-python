@@ -314,6 +314,32 @@ class TestDeterministicChecks:
         assert governance["evidence"] == "Rules passed: Rule 1"
         assert _of_type(recorded_spans, "guardrailAction") == []
 
+    async def test_a_rule_that_raises_is_an_error(
+        self, recorded_spans: InMemorySpanExporter
+    ) -> None:
+        def broken(args: dict[str, Any]) -> bool:
+            raise ValueError("boom")
+
+        [wrapper] = list(
+            UiPathDeterministicGuardrailMiddleware(
+                tools=["get_weather"],
+                rules=[lambda args: args.get("city") == "London", broken],
+                action=LogAction(),
+                stage=_PRE,
+                name="London Rule",
+            )
+        )
+
+        await wrapper.awrap_tool_call(_request({"city": "London"}), _sunny)
+
+        [evaluation] = _of_type(recorded_spans, "guardrailEvaluation")
+        [action] = _of_type(recorded_spans, "guardrailAction")
+        for span in (evaluation, action):
+            governance = _governance(span)
+            assert governance["evaluator_result"] == "ERROR"
+            assert governance["action_applied"] == "AUDIT"
+            assert "Rule 2 raised exception: boom" in governance["evidence"]
+
     async def test_a_post_check_is_after_the_tool(
         self, recorded_spans: InMemorySpanExporter
     ) -> None:
