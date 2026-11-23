@@ -10,7 +10,13 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.utils import (
+    extract_current_tool_call_index,
+    find_latest_ai_message,
+)
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -65,6 +71,63 @@ def _extract_tool_args_from_message(
                         return {}
 
     return {}
+
+
+def _tool_call_field(tool_call: Any, field: str) -> Any:
+    """Read ``field`` from a tool call given as a dict or an object."""
+    if isinstance(tool_call, dict):
+        return tool_call.get(field)
+    return getattr(tool_call, field, None)
+
+
+def current_tool_call_args(
+    messages: list[AnyMessage],
+    tool_name: str,
+    execution_stage: ExecutionStage,
+) -> dict[str, Any]:
+    """Arguments of the ``tool_name`` call a tool guardrail is about.
+
+    One AI message can carry several tool calls, executed one after another with a
+    ToolMessage appended after each. The call under evaluation is therefore not "the
+    first call named ``tool_name``" but, before execution, the first one without a
+    ToolMessage yet (the same selection the tool node makes), and after execution,
+    the ``tool_name`` call the last ToolMessage answers. Falls back to the first
+    matching call when the history has no such ToolMessage bookkeeping.
+    """
+    if not messages:
+        return {}
+
+    ai_message = find_latest_ai_message(messages)
+    if ai_message is None or not ai_message.tool_calls:
+        return {}
+
+    selected: Any = None
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        try:
+            index = extract_current_tool_call_index(messages, tool_name)
+        except AgentRuntimeError:
+            index = None
+        if index is not None and index < len(ai_message.tool_calls):
+            selected = ai_message.tool_calls[index]
+    else:
+        last_message = messages[-1]
+        if isinstance(last_message, ToolMessage):
+            selected = next(
+                (
+                    call
+                    for call in ai_message.tool_calls
+                    if _tool_call_field(call, "id") == last_message.tool_call_id
+                    and _tool_call_field(call, "name") == tool_name
+                ),
+                None,
+            )
+
+    if selected is None:
+        return _extract_tool_args_from_message(ai_message, tool_name)
+
+    return _extract_tool_args_from_message(
+        AIMessage(content="", tool_calls=[selected]), tool_name
+    )
 
 
 def _extract_tools_args_from_message(message: AnyMessage) -> list[dict[str, Any]]:

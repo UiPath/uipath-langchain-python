@@ -1,13 +1,17 @@
 """Tests for guardrail utility functions."""
 
 import json
+from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
     _extract_tool_args_from_message,
     _extract_tool_output_data,
     _extract_tools_args_from_message,
+    _tool_call_field,
+    current_tool_call_args,
     get_message_content,
 )
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
@@ -151,3 +155,108 @@ class TestGetMessageContent:
         message = AIMessage(content="")
         result = get_message_content(message)
         assert result == ""
+
+
+def _two_calls() -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "test_tool", "args": {"file": "a"}, "id": "call_1"},
+            {"name": "test_tool", "args": {"file": "b"}, "id": "call_2"},
+        ],
+    )
+
+
+class TestCurrentToolCallArgs:
+    """Tests for current_tool_call_args function."""
+
+    def test_pre_execution_selects_the_first_call_without_a_result(self):
+        messages: list[AnyMessage] = [
+            _two_calls(),
+            ToolMessage(content="a done", tool_call_id="call_1"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "test_tool", ExecutionStage.PRE_EXECUTION
+        )
+
+        assert result == {"file": "b"}
+
+    def test_post_execution_selects_the_call_the_last_result_answers(self):
+        messages: list[AnyMessage] = [
+            _two_calls(),
+            ToolMessage(content="a done", tool_call_id="call_1"),
+            ToolMessage(content="b done", tool_call_id="call_2"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "test_tool", ExecutionStage.POST_EXECUTION
+        )
+
+        assert result == {"file": "b"}
+
+    def test_no_messages_returns_empty(self):
+        assert (
+            current_tool_call_args([], "test_tool", ExecutionStage.PRE_EXECUTION) == {}
+        )
+
+    def test_no_tool_calls_returns_empty(self):
+        messages: list[AnyMessage] = [
+            HumanMessage(content="hi"),
+            AIMessage(content="no tools"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "test_tool", ExecutionStage.PRE_EXECUTION
+        )
+
+        assert result == {}
+
+    def test_pre_execution_without_tool_message_bookkeeping_falls_back_to_first_match(
+        self,
+    ):
+        messages: list[AnyMessage] = [
+            _two_calls(),
+            HumanMessage(content="interjection"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "test_tool", ExecutionStage.PRE_EXECUTION
+        )
+
+        assert result == {"file": "a"}
+
+    def test_post_execution_without_a_matching_result_falls_back_to_first_match(self):
+        messages: list[AnyMessage] = [
+            _two_calls(),
+            ToolMessage(content="other", tool_call_id="call_unknown"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "test_tool", ExecutionStage.POST_EXECUTION
+        )
+
+        assert result == {"file": "a"}
+
+    def test_post_execution_ignores_a_result_for_another_tool(self):
+        messages: list[AnyMessage] = [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "tool_a", "args": {"x": 1}, "id": "call_1"},
+                    {"name": "tool_b", "args": {"y": 2}, "id": "call_2"},
+                ],
+            ),
+            ToolMessage(content="b done", tool_call_id="call_2"),
+        ]
+
+        result = current_tool_call_args(
+            messages, "tool_a", ExecutionStage.POST_EXECUTION
+        )
+
+        assert result == {"x": 1}
+
+    def test_tool_call_field_reads_dicts_and_objects(self):
+        assert _tool_call_field({"id": "call_1"}, "id") == "call_1"
+        assert _tool_call_field(SimpleNamespace(id="call_2"), "id") == "call_2"
+        assert _tool_call_field(SimpleNamespace(), "id") is None

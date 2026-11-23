@@ -39,7 +39,7 @@ from ...react.utils import extract_current_tool_call_index, find_latest_ai_messa
 from ...tools.escalation_recipient import resolve_recipient_value
 from ...tools.utils import SOLUTION_LOCAL_FOLDER_PLACEHOLDERS
 from ..types import ExecutionStage
-from ..utils import _extract_tool_args_from_message, get_message_content
+from ..utils import current_tool_call_args, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
 from .block_action import _printable
 
@@ -189,32 +189,15 @@ class EscalateAction(GuardrailAction):
                 data["AgentTrace"] = _get_agent_execution_viewer_url(cloud_base_url)
 
             # Add stage-specific fields
+            input_content = _extract_escalation_inputs(
+                state, scope, execution_stage, guarded_component_name
+            )
             if execution_stage == ExecutionStage.PRE_EXECUTION:
-                # PRE_EXECUTION: Only Inputs field from last message
-                input_content = _extract_escalation_content(
-                    state.messages[-1],
-                    state,
-                    scope,
-                    execution_stage,
-                    guarded_component_name,
-                )
                 data["Inputs"] = data["ToolInputs"] = _with_files(
                     input_content, state.inner_state.guardrail_attachments, _INPUT_KEY
                 )
                 files_listed = data["Inputs"] is not input_content
             else:  # POST_EXECUTION
-                if scope == GuardrailScope.AGENT:
-                    input_message = state.messages[1]
-                else:
-                    input_message = state.messages[-2]
-                input_content = _extract_escalation_content(
-                    input_message,
-                    state,
-                    scope,
-                    ExecutionStage.PRE_EXECUTION,
-                    guarded_component_name,
-                )
-
                 # Extract Outputs from last message using POST_EXECUTION logic
                 output_content = _extract_escalation_content(
                     state.messages[-1],
@@ -745,6 +728,38 @@ def _process_tool_escalation_response(
         ) from e
 
 
+def _extract_escalation_inputs(
+    state: AgentGuardrailsGraphState,
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    guarded_node_name: str,
+) -> str | list[str | Dict[str, Any]]:
+    """Extract the guarded component's input for the escalation task.
+
+    At TOOL scope this is the call the guardrail evaluated, which is not always
+    in the last messages: one AI message can carry several tool calls.
+    """
+    if scope == GuardrailScope.TOOL:
+        args = current_tool_call_args(
+            state.messages, guarded_node_name, execution_stage
+        )
+        return json.dumps(args) if args else ""
+
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        input_message = state.messages[-1]
+    elif scope == GuardrailScope.AGENT:
+        input_message = state.messages[1]
+    else:
+        input_message = state.messages[-2]
+    return _extract_escalation_content(
+        input_message,
+        state,
+        scope,
+        ExecutionStage.PRE_EXECUTION,
+        guarded_node_name,
+    )
+
+
 def _extract_escalation_content(
     message: BaseMessage,
     state: AgentGuardrailsGraphState,
@@ -770,9 +785,7 @@ def _extract_escalation_content(
         case GuardrailScope.AGENT:
             return _extract_agent_escalation_content(message, state, execution_stage)
         case GuardrailScope.TOOL:
-            return _extract_tool_escalation_content(
-                message, execution_stage, guarded_node_name
-            )
+            return _extract_tool_escalation_content(message)
 
 
 def _extract_agent_escalation_content(
@@ -838,45 +851,38 @@ def _extract_llm_escalation_content(
 
 
 def _extract_tool_escalation_content(
-    message: BaseMessage, execution_stage: ExecutionStage, tool_name: str
+    message: BaseMessage,
 ) -> str | list[str | Dict[str, Any]]:
-    """Extract escalation content for TOOL scope guardrails.
+    """Extract the tool result for TOOL scope escalations.
+
+    The tool call's input is extracted by `_extract_escalation_inputs`.
 
     Args:
-        message: The message to extract content from.
-        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
-        tool_name: Optional tool name to filter tool calls. If provided, only extracts args for matching tool.
+        message: The message holding the tool result.
 
     Returns:
-        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string with tool call arguments
-        for the specified tool name, or empty string if not found. For PostExecution, returns string with
-        tool message content, or empty string if message type doesn't match.
+        str or list[str | Dict[str, Any]]: The tool message content, or empty string
+        if the message is not a ToolMessage.
     """
-    if execution_stage == ExecutionStage.PRE_EXECUTION:
-        args = _extract_tool_args_from_message(cast(AnyMessage, message), tool_name)
-        if args:
-            return json.dumps(args)
+    if not isinstance(message, ToolMessage):
         return ""
-    else:
-        if not isinstance(message, ToolMessage):
-            return ""
-        content = message.content
+    content = message.content
 
-        # If content is already dict/list, serialize to JSON
-        if isinstance(content, (dict, list)):
-            return json.dumps(content)
+    # If content is already dict/list, serialize to JSON
+    if isinstance(content, (dict, list)):
+        return json.dumps(content)
 
-        # If content is a string that looks like a Python literal, convert to JSON
-        if isinstance(content, str):
-            try:
-                # Try to parse as Python literal and convert to JSON
-                parsed_content = ast.literal_eval(content)
-                return json.dumps(parsed_content)
-            except (ValueError, SyntaxError):
-                # If parsing fails, return as-is
-                pass
+    # If content is a string that looks like a Python literal, convert to JSON
+    if isinstance(content, str):
+        try:
+            # Try to parse as Python literal and convert to JSON
+            parsed_content = ast.literal_eval(content)
+            return json.dumps(parsed_content)
+        except (ValueError, SyntaxError):
+            # If parsing fails, return as-is
+            pass
 
-        return content
+    return content
 
 
 def _execution_stage_to_escalation_field(

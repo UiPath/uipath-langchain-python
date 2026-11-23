@@ -1534,37 +1534,6 @@ class TestEscalateAction:
     # ── Content extraction (pure function tests – no change needed) ───────
 
     @pytest.mark.asyncio
-    async def test_extract_tool_content_pre_execution(self):
-        """Extract TOOL content PreExecution: returns JSON array of tool call args."""
-        from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_tool_escalation_content,
-        )
-
-        ai_message = AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "test_tool",
-                    "args": {"input": "test", "param": 123},
-                    "id": "call_1",
-                },
-                {
-                    "name": "another_tool",
-                    "args": {"data": "value"},
-                    "id": "call_2",
-                },
-            ],
-        )
-
-        result = _extract_tool_escalation_content(
-            ai_message, ExecutionStage.PRE_EXECUTION, "test_tool"
-        )
-
-        assert isinstance(result, str)
-        parsed = json.loads(result)
-        assert parsed == {"input": "test", "param": 123}
-
-    @pytest.mark.asyncio
     async def test_extract_tool_content_post_execution(self):
         """Extract TOOL content PostExecution: returns tool message content."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
@@ -1576,26 +1545,9 @@ class TestEscalateAction:
             tool_call_id="call_1",
         )
 
-        result = _extract_tool_escalation_content(
-            tool_message, ExecutionStage.POST_EXECUTION, "test_tool"
-        )
+        result = _extract_tool_escalation_content(tool_message)
 
         assert result == "Tool execution result"
-
-    @pytest.mark.asyncio
-    async def test_extract_tool_content_pre_execution_non_ai_message(self):
-        """Extract TOOL content PreExecution with non-AIMessage: returns empty string."""
-        from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_tool_escalation_content,
-        )
-
-        message = HumanMessage(content="Not an AI message")
-
-        result = _extract_tool_escalation_content(
-            message, ExecutionStage.PRE_EXECUTION, "test_tool"
-        )
-
-        assert result == ""
 
     @pytest.mark.asyncio
     async def test_extract_tool_content_post_execution_non_tool_message(self):
@@ -1606,24 +1558,7 @@ class TestEscalateAction:
 
         message = AIMessage(content="Not a tool message")
 
-        result = _extract_tool_escalation_content(
-            message, ExecutionStage.POST_EXECUTION, "test_tool"
-        )
-
-        assert result == ""
-
-    @pytest.mark.asyncio
-    async def test_extract_tool_content_pre_execution_no_tool_calls(self):
-        """Extract TOOL content PreExecution with no tool calls: returns empty array JSON."""
-        from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_tool_escalation_content,
-        )
-
-        ai_message = AIMessage(content="No tool calls")
-
-        result = _extract_tool_escalation_content(
-            ai_message, ExecutionStage.PRE_EXECUTION, "test_tool"
-        )
+        result = _extract_tool_escalation_content(message)
 
         assert result == ""
 
@@ -3310,3 +3245,80 @@ class TestEscalationFilesResume:
         )
         review = excinfo.value.escalation_review_data  # type: ignore[attr-defined]
         assert review["reviewed_inputs"] == "e"
+
+
+def _analyze_call(call_id: str, file_name: str, tool_name: str = "test_tool"):
+    return {
+        "name": tool_name,
+        "args": {
+            "attachments": [{"ID": call_id, "FullName": file_name}],
+            "analysisTask": "Summarise",
+        },
+        "id": call_id,
+    }
+
+
+class TestEscalationTaskToolCallUnderReview:
+    """One LLM turn with several tool calls: each task shows its own call's args."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("first_tool", ["test_tool", "other_tool"])
+    async def test_pre_execution_shows_the_args_of_the_second_call(self, first_tool):
+        first = _analyze_call("call_1", "a.txt", tool_name=first_tool)
+        second = _analyze_call("call_2", "b.txt")
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(content="", tool_calls=[first, second]),
+                ToolMessage(content="summary of a", tool_call_id="call_1"),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_validation_details="PII detected",
+                guardrail_attachments=[_attachment("b.txt", _FILE_ID_2)],
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        assert json.loads(data["Inputs"])["Input"] == second["args"]
+        assert data["ToolInputs"] == data["Inputs"]
+
+    @pytest.mark.asyncio
+    async def test_pre_execution_shows_the_args_of_the_first_call(self):
+        first = _analyze_call("call_1", "a.txt")
+        second = _analyze_call("call_2", "b.txt")
+        state = AgentGuardrailsGraphState(
+            messages=[AIMessage(content="", tool_calls=[first, second])],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_validation_details="PII detected"
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION, state
+        )
+
+        assert json.loads(data["Inputs"]) == first["args"]
+
+    @pytest.mark.asyncio
+    async def test_post_execution_shows_the_args_of_the_answered_call(self):
+        first = _analyze_call("call_1", "a.txt")
+        second = _analyze_call("call_2", "b.txt")
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(content="", tool_calls=[first, second]),
+                ToolMessage(content="summary of a", tool_call_id="call_1"),
+                ToolMessage(content="summary of b", tool_call_id="call_2"),
+            ],
+            inner_state=InnerAgentGuardrailsGraphState(
+                guardrail_validation_details="PII detected"
+            ),
+        )
+
+        data = await _created_task_data(
+            GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION, state
+        )
+
+        assert json.loads(data["Inputs"]) == second["args"]
+        assert data["Outputs"] == "summary of b"
