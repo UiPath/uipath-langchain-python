@@ -140,7 +140,7 @@ async def make_graph():
 - deepagents needs the model when the graph is built, so the model is created in the factory and `uipath init` needs LLM credentials too; building the model on the first step applies to the plain LangGraph patterns above only.
 - Pass the middleware, not `create_advanced_agent`'s `skills` argument; do not pass both.
 - The middleware applies to the main agent only. Subagents do not see the skills list; the prompt tells the main agent to put a skill's `SKILL.md` path in the task it delegates.
-- `destination` must be empty or missing; nothing already in it is removed. `SKILLS.cleanup()`, or `load(force=True)`, removes what the previous load wrote there; see [Files on disk](../core/skills.md#files-on-disk).
+- `destination` may be missing, empty, or hold only an earlier load's bundles, which the SDK replaces; a folder with anything else in it is refused and left as it is. `SKILLS.cleanup()`, or `load(force=True)`, removes what the previous load wrote there; see [Files on disk](../core/skills.md#files-on-disk).
 - `autonomous_skills_directive()` tells an agent that runs without a human in the loop to take a skill's defaults instead of asking, and to stop rather than run a step that needs approval or would delete or overwrite something. Leave it out for a conversational agent, which can ask the user.
 - The middleware records a `Skill load` span whenever the model reads a `SKILL.md` with `read_file`. The span is current while the tool runs, so a tracer that follows the OpenTelemetry context nests the `read_file` tool call under it. A read that fails leaves the span with an error status.
 

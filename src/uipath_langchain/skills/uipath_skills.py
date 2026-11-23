@@ -61,8 +61,9 @@ class UiPathSkills:
             bundles: The skill bundles the agent is bound to.
             uipath_sdk: The SDK to load through; by default a ``UiPath()`` is
                 built on the first ``load``.
-            destination: The folder the bundles are written to, which must be
-                empty or missing; by default a temp folder the set owns.
+            destination: The folder the bundles are written to; by default a
+                temp folder the set owns. It may be missing, empty, or hold only
+                an earlier load's bundles, which the SDK clears first.
                 ``cleanup`` removes what was written either way.
             tool_name: The name the model knows the load-skill tool by.
 
@@ -115,7 +116,7 @@ class UiPathSkills:
                 return self._skill_set
             target = destination if destination is not None else self._destination
             if self._skill_set is not None:
-                # Before resolving: the SDK writes only into an empty folder.
+                # Before resolving, so a temp root is not left behind.
                 self._skill_set.cleanup()
             result = await self._fetch(target)
             self._skill_set, self._tool = result, None
@@ -158,7 +159,8 @@ class UiPathSkills:
 
         Load with ``destination=<workspace>/skills``, where ``<workspace>`` is
         the backend's root, so the files live in the backend's filesystem at
-        ``/skills/<bundle>/<skill>/``. The folder must be empty or missing::
+        ``/skills/<bundle>/<skill>/``. The folder may hold an earlier load's bundles,
+        which are replaced, but nothing else::
 
             backend = FilesystemBackend(root_dir=workspace, virtual_mode=True)
             await skills.load(destination=workspace / "skills")
