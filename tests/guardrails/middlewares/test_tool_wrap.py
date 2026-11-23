@@ -232,7 +232,7 @@ class TestRunToolGuardrail:
 
         mock_handler.side_effect = tracked_handler
 
-        def tracked_eval(data, attachments=None):
+        def tracked_eval(data, attachments=None, **options):
             call_order.append("eval")
             return _PASSED
 

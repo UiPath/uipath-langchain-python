@@ -22,6 +22,7 @@ from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
+from ._governance import GovernanceContext
 from ._grouping import guardrail_stage, guardrails_in_use
 from ._spans import (
     guardrail_action_span,
@@ -243,15 +244,25 @@ class UiPathDeterministicGuardrailMiddleware:
         ToolCallRequest | None, dict[str, Any] | None, ToolMessage | Command[Any] | None
     ]:
         """Evaluate rules and apply modifications if validation fails."""
+        governance = GovernanceContext(
+            scope=GuardrailScope.TOOL,
+            stage=stage,
+            action=self.action,
+            guardrail_name=self._name,
+            guardrail_type="custom",
+        )
         try:
             with guardrail_stage(GuardrailScope.TOOL, stage):
                 with guardrail_evaluation_span(self._name, self._description) as span:
                     result = self._evaluate_rules(rules, stage, input_data, output_data)
-                    set_validation_result(span, result)
+                    set_validation_result(span, result, governance)
                 if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
                     return request, input_data, tool_result
                 modified_data = self._handle_validation_result(
-                    result, data_for_action, evaluation_span_id=span_guid(span)
+                    result,
+                    data_for_action,
+                    evaluation_span_id=span_guid(span),
+                    governance=governance,
                 )
         except GuardrailBlockException as exc:
             raise convert_block_exception(exc) from exc
@@ -393,9 +404,12 @@ class UiPathDeterministicGuardrailMiddleware:
         result: GuardrailValidationResult,
         input_data: str | dict[str, Any],
         evaluation_span_id: str | None = None,
+        governance: GovernanceContext | None = None,
     ) -> str | dict[str, Any] | None:
         """Handle guardrail validation result."""
         if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
             return None
-        with guardrail_action_span(self._name, self.action, result, evaluation_span_id):
+        with guardrail_action_span(
+            self._name, self.action, result, evaluation_span_id, governance
+        ):
             return self.action.handle_validation_result(result, input_data, self._name)
