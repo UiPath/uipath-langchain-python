@@ -892,6 +892,48 @@ class TestAttachmentRejection:
         assert "rejected the attachment references" in caplog.text
 
     @pytest.mark.parametrize(
+        "content",
+        [
+            pytest.param(f"hi {_block(_wire())}", id="with-files"),
+            pytest.param("hi", id="text-only"),
+        ],
+    )
+    async def test_message_hook_stops_on_a_centralized_block_without_retrying(
+        self, evaluate: MagicMock, content: str
+    ) -> None:
+        request = httpx.Request(
+            "POST",
+            "https://cloud.uipath.com/org/tenant/agentsruntime_/api/execution/guardrails/validate",
+        )
+        response = httpx.Response(
+            400,
+            request=request,
+            headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
+            json={
+                "message": "Request rejected due to Centralized guardrails Harmful content: a@b.com",
+                "problem": {"errorCode": "Agent.CentralizedGuardrailBlocked"},
+            },
+        )
+        status_error = httpx.HTTPStatusError("400", request=request, response=response)
+        blocked = EnrichedException(status_error)
+        blocked.__cause__ = status_error  # as the SDK's `raise ... from e` does
+        evaluate.side_effect = blocked
+        middleware = _pii([GuardrailScope.LLM], stage=_PRE, action=LogAction())
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _hook(middleware, "before_model").abefore_model(
+                {"messages": [HumanMessage(content=content)]},
+                MagicMock(),
+            )
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION
+        )
+        assert "Harmful content" in exc_info.value.error_info.detail
+        assert "a@b.com" not in exc_info.value.error_info.detail
+        assert evaluate.call_count == 1
+
+    @pytest.mark.parametrize(
         ("status", "content"),
         [
             pytest.param(400, "mail me at a@b.com", id="400-without-files"),
