@@ -4,7 +4,7 @@ A LangGraph agent that answers accounts-payable questions with skills from two b
 
 See [Skills](../../docs/skills.md) for the LangChain patterns and the SDK's [Skills](https://uipath.github.io/uipath-python/core/skills/) page for how bundles are resolved.
 
-> **Preview:** the Orchestrator Skills API is not live yet. This sample reads its own `skills/` folder (`UIPATH_SKILLS_SOURCE=local`), so no bundle has to exist in Orchestrator. The chat model still runs through the UiPath LLM gateway, so you need a tenant.
+> **Preview:** skill bundles are a preview feature, and Orchestrator skill bundles are not generally available yet. This sample reads its own `skills/` folder (`UIPATH_SKILLS_SOURCE=local` in `.env.example`), so no bundle has to exist in Orchestrator. The chat model still runs through the UiPath LLM gateway, so you need a tenant.
 
 ## What it contains
 
@@ -96,11 +96,11 @@ On Windows PowerShell:
 New-Item -ItemType Directory -Force __uipath; Copy-Item resource-overwrites.example.json __uipath/uipath.json
 ```
 
-It pins `ops` to version 1 instead of `latest`. An override replaces the whole binding, so the entry repeats the bundle's `name` and `folderPath` along with `versionMode` and `version`; an incomplete entry is skipped with a warning. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. A local folder holds one version only, so pinning a version it does not hold loads the folder anyway, with a warning. To point the binding at another bundle, change the entry's `name` to `finance`: `ops` is then read from the `finance` folder, the agent still sees it as `ops` (`ops/invoice-triage`, `ops/vendor-lookup`), and its event has `skill.bundle.lookup_name` = `finance`. Delete `__uipath/uipath.json` to go back to the declared bindings.
+It pins `ops` to version 1 instead of `latest`. An override replaces the whole binding, so the entry repeats the bundle's `name` and `folderPath` along with `versionMode` and `version`. An incomplete entry (for instance `pinned` without a `version`) fails that bundle as `invalid`, and the declared binding is not used instead. Run the agent again: the log starts with `Resource overwrites read from` and the file's path, and the `ops` event on the `Skill bundles resolved` span has `skill.version_mode` = `pinned`. A local folder holds one version only, so pinning a version it does not hold loads the folder anyway, with a warning. To point the binding at another bundle, change the entry's `name` to `finance`: `ops` is then read from the `finance` folder, the agent still sees it as `ops` (`ops/invoice-triage`, `ops/vendor-lookup`), and its event has `skill.bundle.lookup_name` = `finance`. Delete `__uipath/uipath.json` to go back to the declared bindings.
 
 ## Switch the source
 
 `UIPATH_SKILLS_SOURCE` in `.env` selects where bundles come from:
 
-- `local` (this sample, and the default): copies `UIPATH_SKILLS_LOCAL_ROOT` (default `./skills`). Set `UIPATH_SKILLS_LOCAL_ROOT` if the folder is elsewhere.
-- `orchestrator`: the Orchestrator Skills API. Until it ships this is a placeholder that skips every bundle as `source_unavailable`, so the agent runs without skills; once it is live the bundles must exist in the `Shared/Skills` folder.
+- `local` (this sample): copies `UIPATH_SKILLS_LOCAL_ROOT` (default `./skills`). Set `UIPATH_SKILLS_LOCAL_ROOT` if the folder is elsewhere.
+- `orchestrator` (the default when the variable is not set): downloads the bundles from Orchestrator. They must exist in the `Shared/Skills` folder, with `finance` at version 3, as `bindings.json` declares. A missing bundle is skipped as `not_found` and a missing version as `version_not_found`; the agent runs without it.

@@ -3,7 +3,7 @@
 A coded LangGraph agent can be bound to [skill bundles](../core/skills.md): versioned groups of skills, each a folder with a `SKILL.md` and its reference files. `uipath_langchain.skills` wires them into a graph: the skill descriptions go into the system prompt, and the model reads a skill's full `SKILL.md` on demand through a `load_skill` tool.
 
 !!! warning "Preview Feature"
-    The Orchestrator Skills API is not available yet. Until it ships, `UIPATH_SKILLS_SOURCE` defaults to `local` and bundles are read from `./skills` in the project; see [Local development](../core/skills.md#local-development). `orchestrator` becomes the default once the API is live.
+    Skill bundles are a preview feature, and Orchestrator skill bundles are not generally available yet. By default bundles are fetched from Orchestrator; to work with a copy in the project, set `UIPATH_SKILLS_SOURCE=local` (see [Local development](../core/skills.md#local-development)).
 
 How bundles are resolved, where their files land, what happens when one cannot be loaded, and how bindings and per-environment overrides work is described once, on the SDK's [Skills](../core/skills.md) page. This page covers the LangChain side.
 
@@ -164,6 +164,6 @@ What each span and event carries is listed under [Traces](../core/skills.md#trac
 ## See Also
 
 - [Declare and load bundles](../core/skills.md#declare-and-load-bundles): version modes, folders and what a failed bundle looks like.
-- [Local development](../core/skills.md#local-development) and [Environment variables](../core/environment_variables.md#skill-bundles): the `local` source and the `orchestrator` placeholder.
+- [Local development](../core/skills.md#local-development) and [Environment variables](../core/environment_variables.md#skill-bundles): the `orchestrator` and `local` sources.
 - [Bindings](../core/skills.md#bindings) and [Overrides per environment](../core/skills.md#overrides-per-environment).
 - [Limits](../core/skills.md#limits): file, bundle and time limits.
