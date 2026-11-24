@@ -23,6 +23,7 @@ from uipath.runtime.base import UiPathDisposableProtocol
 
 from uipath_langchain._utils import get_execution_folder_path
 
+from .mcp_tasks import resolve_claimed_result, session_extension_kwargs
 from .protocol_strategy import (
     ProtocolMode,
     ProtocolStrategy,
@@ -300,8 +301,14 @@ class McpClient(UiPathDisposableProtocol):
                         )
                     )
                     read_stream, write_stream = streams
+                    # The Tasks extension is era-aware by construction: the SDK
+                    # advertises it and activates its claim only on protocol
+                    # versions that deliver claimed shapes, so legacy-era
+                    # connections keep their wire byte-for-byte.
                     self._session = await connection_stack.enter_async_context(
-                        ClientSession(read_stream, write_stream)
+                        ClientSession(
+                            read_stream, write_stream, **session_extension_kwargs()
+                        )
                     )
                     await self._initialize_session()
                 except BaseException as error:
@@ -547,6 +554,10 @@ class McpClient(UiPathDisposableProtocol):
     ) -> CallToolResult:
         """Call an MCP tool by name.
 
+        A server that answers with a durable task handle (the MCP Tasks
+        extension, modern era only) has its task polled to completion here, so
+        the caller always receives the final ``CallToolResult``.
+
         Args:
             name: The name of the tool to call.
             arguments: Optional arguments to pass to the tool.
@@ -554,10 +565,39 @@ class McpClient(UiPathDisposableProtocol):
         Returns:
             The tool call result.
         """
-        return await self._execute_with_retry(
-            lambda session: session.call_tool(name, arguments=arguments),
+
+        # Submission keeps the client's session-recovery retry, unchanged and
+        # predating Tasks. Note what that retry does *not* prove: a session the
+        # server rejected means the call never ran, but a dropped transport
+        # means only that the connection died -- possibly after the server
+        # received `tools/call` and started a job, in which case the resend
+        # runs the tool twice. That applies to every tool call, task-shaped or
+        # not, so narrowing it is a decision for `_execute_with_retry` and its
+        # own tests (`test_dropped_connection_resumes_the_persisted_session`
+        # pins today's behavior), not something to slip in here.
+        # allow_claimed lets the claimed task shape reach us instead of raising.
+        submitted = await self._execute_with_retry(
+            lambda session: session.call_tool(
+                name, arguments=arguments, allow_claimed=True
+            ),
             f"call_tool({name})",
         )
+
+        # An ordinary result is finished business: return it without touching
+        # the session. Reaching for one first would let a call that already
+        # succeeded fail on a concurrent session drop, for a session it has no
+        # further use for.
+        if isinstance(submitted, CallToolResult):
+            return submitted
+
+        # Resolution stays *outside* that retry. A task handle means the server
+        # already accepted the work -- a job is running -- so a failure while
+        # polling must propagate rather than re-run tools/call and start a
+        # second job on a fresh poll budget. Any recovery for polling itself
+        # belongs inside the poll loop, which keeps the task id and the
+        # original deadline.
+        session = await self._ensure_session()
+        return await resolve_claimed_result(session, name, submitted)
 
     async def dispose(self) -> None:
         """Dispose of the client and release all resources.
