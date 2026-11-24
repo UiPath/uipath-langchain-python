@@ -27,9 +27,9 @@ SKILLS = UiPathSkills(
 
 | Call | Returns |
 | --- | --- |
-| `await SKILLS.load()` | The resolved `SkillSet`. Runs once per process; later and concurrent calls share the result. Never raises for a bundle or platform error: those land in `SkillSet.failures`. |
+| `await SKILLS.load()` | The resolved `SkillSet`. Runs once per process: concurrent calls in one event loop share one resolution, and later calls return the cached set. Calls from several threads at once are not coordinated. Never raises for a bundle or platform error: those land in `SkillSet.failures`. |
 | `SKILLS.prompt_section()` | The `## Skills` system-prompt section plus how to use the tool; `""` before `load()` or when no bundle has a skill. |
-| `SKILLS.load_skill_tool()` | The `load_skill` tool, whose `name` argument is an enum of the qualified `<bundle>/<skill>` names, or `None` when there are no skills. Call it after `load()`. |
+| `SKILLS.load_skill_tool()` | The `load_skill` tool, whose `name` argument is an enum of the qualified `<bundle>/<skill>` names, or `None` when there are no skills. Call it after `load()`. A call that fails, such as one asking for a file the skill does not have, returns a tool message with status `error` and a text the model can act on. A response is at most 64,000 characters: a longer file is cut, and a long list of supporting files ends with "and N more". |
 | `SKILLS.advanced_middleware(backend)` | The middleware for an advanced (deepagents) agent; see [Advanced agents](#advanced-agents). |
 | `SKILLS.cleanup()` | Removes the set's temp folder and forgets the set. |
 

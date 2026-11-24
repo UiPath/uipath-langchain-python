@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Sequence
 from typing import Any, Literal
 
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import StructuredTool, ToolException
 from pydantic import Field, create_model
 from uipath.platform.skills import Skill, SkillBundle, SkillSet
 
@@ -15,20 +16,52 @@ _TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _BINARY_SNIFF_CHARS = 8 * 1024
 
 MAX_OUTPUT_CHARS = 64_000
-"""Longest file text the tool returns; longer text is cut and marked as truncated."""
+"""Longest response the tool returns; a longer file is cut and marked as truncated."""
+
+MAX_LIST_CHARS = 2_000
+"""Longest list of names (supporting files, skills) a response shows; the rest are counted."""
 
 MAX_ENUM_NAMES = 200
 """Most skill names listed as an enum in the tool schema; above it ``name`` is a plain string."""
 
+_TRUNCATION_NOTE_CHARS = 64
+"""Room kept for the truncation note, so a cut response stays within ``MAX_OUTPUT_CHARS``."""
+
 
 def _render(bundle: SkillBundle, skill: Skill, path: str, text: str) -> str:
-    """The tool output for one file: a header the model can cite, then the text."""
+    """The tool output for one file: a header the model can cite, then the text.
+
+    A ``SKILL.md`` ends with the list of the skill's other files. The text is
+    cut so that the whole output stays within ``MAX_OUTPUT_CHARS``.
+    """
     qualified = f"{bundle.ref.name}/{skill.name}"
+    footer = ""
     if path == _SKILL_MD:
+        header = f"# {qualified} (bundle {bundle.ref.name} v{bundle.version})\n\n"
         others = [f for f in skill.files if f != _SKILL_MD]
-        footer = f"\n\nSupporting files: {', '.join(others)}" if others else ""
-        return f"# {qualified} (bundle {bundle.ref.name} v{bundle.version})\n\n{text}{footer}"
-    return f"# {qualified} — {path}\n\n{text}"
+        if others:
+            footer = f"\n\nSupporting files: {_name_list(others)}"
+    else:
+        header = f"# {qualified} — {path}\n\n"
+    room = MAX_OUTPUT_CHARS - len(header) - len(footer)
+    return header + _truncate(text, room) + footer
+
+
+def _name_list(names: Sequence[str]) -> str:
+    """``names`` joined by commas, up to ``MAX_LIST_CHARS``; the names left out are counted."""
+    shown: list[str] = []
+    length = 0
+    for name in names:
+        length += len(name) + (2 if shown else 0)
+        if length > MAX_LIST_CHARS:
+            break
+        shown.append(name)
+    rest = len(names) - len(shown)
+    if not rest:
+        return ", ".join(shown)
+    if not shown:
+        return f"{rest} (names too long to list)"
+    return f"{', '.join(shown)}, and {rest} more"
 
 
 def _validate_tool_name(tool_name: str) -> None:
@@ -39,14 +72,12 @@ def _validate_tool_name(tool_name: str) -> None:
         )
 
 
-def _truncate(text: str) -> str:
-    """``text`` cut to ``MAX_OUTPUT_CHARS``, with a note saying how much was left out."""
-    if len(text) <= MAX_OUTPUT_CHARS:
+def _truncate(text: str, limit: int) -> str:
+    """``text`` cut to fit in ``limit`` characters, with a note saying how much was left out."""
+    if len(text) <= limit:
         return text
-    return (
-        f"{text[:MAX_OUTPUT_CHARS]}\n\n"
-        f"[truncated: showing {MAX_OUTPUT_CHARS} of {len(text)} characters]"
-    )
+    shown = max(limit - _TRUNCATION_NOTE_CHARS, 0)
+    return f"{text[:shown]}\n\n[truncated: showing {shown} of {len(text)} characters]"
 
 
 def create_load_skill_tool(
@@ -57,10 +88,11 @@ def create_load_skill_tool(
     The model-facing ``name`` argument is an enum of the set's qualified
     ``<bundle>/<skill>`` names, so the model cannot ask for a skill that is not
     bound; with no skills, or more than ``MAX_ENUM_NAMES``, it is a plain
-    string. Errors are returned as text so the model can recover; nothing is
-    raised past the tool node. Text longer than ``MAX_OUTPUT_CHARS`` is
-    truncated and non-text files are refused. Reading a ``SKILL.md`` records
-    the SDK's ``Skill load`` span.
+    string. An error reaches the model as a tool message with status
+    ``error`` and a text it can act on; nothing is raised past the tool.
+    A response is at most ``MAX_OUTPUT_CHARS`` long: a longer file is cut,
+    and a list of names is cut at ``MAX_LIST_CHARS``. Non-text files are
+    refused. Reading a ``SKILL.md`` records the SDK's ``Skill load`` span.
 
     Args:
         skill_set: The skills bound to the agent, materialized to disk.
@@ -98,25 +130,29 @@ def create_load_skill_tool(
     def load(name: str, path: str = _SKILL_MD) -> str:
         hit = skill_set.find(name)
         if hit is None:
-            return f"Unknown skill '{name}'. Available: {', '.join(names) or 'none'}"
+            raise ToolException(
+                f"Unknown skill '{name}'. Available: {_name_list(names) or 'none'}"
+            )
         bundle, skill = hit
         path = path.replace("\\", "/").removeprefix("./")
         try:
             text = skill_set.read(name, path)
-        except KeyError:
-            return (
-                f"Skill '{name}' has no file '{path}'. Files: {', '.join(skill.files)}"
-            )
+        except KeyError as e:
+            raise ToolException(
+                f"Skill '{name}' has no file '{path}'. Files: {_name_list(skill.files)}"
+            ) from e
         except RuntimeError as e:
-            return f"Skill '{name}' is not available any more: {e}"
+            raise ToolException(f"Skill '{name}' is not available any more: {e}") from e
         except OSError as e:
             # strerror only: the exception's own text carries the local file path.
-            return f"Skill '{name}' could not be read: {e.strerror or type(e).__name__}"
+            raise ToolException(
+                f"Skill '{name}' could not be read: {e.strerror or type(e).__name__}"
+            ) from e
         if "\x00" in text[:_BINARY_SNIFF_CHARS]:
-            return (
+            raise ToolException(
                 f"Skill '{name}' file '{path}' is not a text file and cannot be shown."
             )
-        return _render(bundle, skill, path, _truncate(text))
+        return _render(bundle, skill, path, text)
 
     async def aload(name: str, path: str = _SKILL_MD) -> str:
         return await asyncio.to_thread(load, name, path)
@@ -131,4 +167,5 @@ def create_load_skill_tool(
             "following it. `name` is `<bundle>/<skill>`."
         ),
         metadata={"tool_type": "internal", "display_name": tool_name},
+        handle_tool_error=True,
     )

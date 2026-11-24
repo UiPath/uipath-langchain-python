@@ -75,7 +75,8 @@ class UiPathSkills:
         self._sdk = uipath_sdk
         self._destination = destination
         self._tool_name = tool_name
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop: asyncio.AbstractEventLoop | None = None
         self._skill_set: SkillSet | None = None
         self._tool: tuple[SkillSet, StructuredTool] | None = None
         """The tool and the set it was built for."""
@@ -95,10 +96,11 @@ class UiPathSkills:
     ) -> SkillSet:
         """Resolve the bundles, once per process.
 
-        Concurrent calls share one resolution; later calls return the cached
-        set. A platform error, including one building ``UiPath()``, is logged
-        and cached as a set whose failures mark every bundle
-        ``source_unavailable``, so the agent does not retry on every turn.
+        Concurrent calls in one event loop share one resolution; later calls,
+        in any event loop, return the cached set. Calls from several threads at
+        once are not coordinated. A platform error, including one building
+        ``UiPath()``, is logged and cached as a set whose failures mark every
+        bundle ``source_unavailable``, so the agent does not retry on every turn.
         ``force=True`` first removes what the previous set wrote (its temp
         folder, or its bundles in ``destination``), so the same folder can be
         loaded into again and a tool built for that set stops working.
@@ -111,15 +113,16 @@ class UiPathSkills:
         Returns:
             The resolved set; never raises except on cancellation.
         """
-        async with self._lock:
+        async with self._loop_lock():
             if self._skill_set is not None and not force:
                 return self._skill_set
             target = destination if destination is not None else self._destination
             if self._skill_set is not None:
                 # Before resolving, so a temp root is not left behind.
-                self._skill_set.cleanup()
+                previous, self._skill_set, self._tool = self._skill_set, None, None
+                previous.cleanup()
             result = await self._fetch(target)
-            self._skill_set, self._tool = result, None
+            self._skill_set = result
         return result
 
     def prompt_section(self) -> str:
@@ -217,6 +220,13 @@ class UiPathSkills:
         skill_set, self._skill_set, self._tool = self._skill_set, None, None
         if skill_set is not None:
             skill_set.cleanup()
+
+    def _loop_lock(self) -> asyncio.Lock:
+        """The lock for the running event loop; a new loop gets a new lock."""
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._lock_loop is not loop:
+            self._lock, self._lock_loop = asyncio.Lock(), loop
+        return self._lock
 
     async def _fetch(self, target: Path | None) -> SkillSet:
         if not self._bundles:

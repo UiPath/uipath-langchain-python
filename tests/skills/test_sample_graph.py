@@ -158,6 +158,30 @@ async def test_sample_does_not_count_a_failed_load(
     assert model.built == 1
 
 
+async def test_sample_does_not_count_a_load_whose_file_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, sample: ModuleType
+) -> None:
+    missing_file = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "load_skill",
+                "args": {"name": "finance/invoice-triage", "path": "nope.md"},
+                "id": "call-missing",
+            }
+        ],
+    )
+    replies = [missing_file, _load("ops/escalation-policy"), AIMessage(content=ANSWER)]
+    model = _script(monkeypatch, sample, replies)
+
+    output = await (await sample.make_graph()).ainvoke({"task": TASK})
+
+    assert output["skills_used"] == ["ops/escalation-policy"]
+    failed = model.prompts[1][-1]
+    assert isinstance(failed, ToolMessage) and failed.status == "error"
+    assert failed.text.startswith("Skill 'finance/invoice-triage' has no file")
+
+
 async def test_sample_applies_a_binding_override(
     monkeypatch: pytest.MonkeyPatch, sample: ModuleType
 ) -> None:

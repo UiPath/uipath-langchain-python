@@ -57,6 +57,26 @@ async def test_concurrent_first_loads_hit_the_sdk_once(skill_set: SkillSet) -> N
     sdk.skills.load_all_async.assert_awaited_once()
 
 
+def test_concurrent_loads_in_successive_event_loops_each_resolve_once() -> None:
+    async def slow(*args: Any, **kwargs: Any) -> SkillSet:
+        await asyncio.sleep(0.01)
+        return SkillSet(source="local", bundles=[], failures=[])
+
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=slow)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+
+    async def two_loads() -> tuple[SkillSet, SkillSet]:
+        return await asyncio.gather(skills.load(), skills.load())
+
+    # Each asyncio.run is a new loop, as for each test or each job in a host.
+    for _ in range(2):
+        first, second = asyncio.run(two_loads())
+        assert first is second
+        skills.cleanup()
+    assert sdk.skills.load_all_async.await_count == 2
+
+
 async def test_destination_is_passed_through_and_overridable(
     skill_set: SkillSet, tmp_path: Path
 ) -> None:
@@ -98,6 +118,38 @@ async def test_force_reload_removes_only_what_the_old_set_wrote(
     await skills.load(force=True)
     assert skill_set.root is None
     assert sorted(p.name for p in root.iterdir()) == ["notes.txt"]
+
+
+async def test_a_cancelled_force_reload_leaves_no_set_cached(
+    skill_set: SkillSet, tmp_path: Path
+) -> None:
+    old = _owned(skill_set, tmp_path / "old")
+    started = asyncio.Event()
+    results = iter([old, None, skill_set])
+
+    async def fetch(*args: Any, **kwargs: Any) -> SkillSet:
+        result = next(results)
+        if result is None:
+            started.set()
+            await asyncio.Event().wait()
+        assert result is not None
+        return result
+
+    sdk = _sdk()
+    sdk.skills.load_all_async = AsyncMock(side_effect=fetch)
+    skills = UiPathSkills(REFS, uipath_sdk=sdk)
+    await skills.load()
+    assert skills.load_skill_tool() is not None
+    reload = asyncio.create_task(skills.load(force=True))
+    await started.wait()
+    reload.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reload
+    assert old.root is None
+    assert skills.skill_set is None
+    assert skills.prompt_section() == ""
+    assert await skills.load() is skill_set
+    assert sdk.skills.load_all_async.await_count == 3
 
 
 async def test_force_reload_into_the_same_destination_resolves_again(

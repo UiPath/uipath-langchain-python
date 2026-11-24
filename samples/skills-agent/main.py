@@ -72,10 +72,7 @@ def skills_used(messages: list[AnyMessage]) -> list[str]:
                     requested[call["id"]] = str(call["args"].get("name", ""))
         elif isinstance(message, ToolMessage) and message.tool_call_id in requested:
             name = requested[message.tool_call_id]
-            loaded = message.status != "error" and not message.text.startswith(
-                "Unknown skill"
-            )
-            if loaded and name not in names:
+            if message.status != "error" and name not in names:
                 names.append(name)
     return names
 

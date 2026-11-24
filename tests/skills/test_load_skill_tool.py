@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import StructuredTool, ToolException
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -24,10 +24,28 @@ def _schema(tool: StructuredTool) -> dict[str, Any]:
     return args_schema.model_json_schema()
 
 
-def _call(tool: StructuredTool, **kwargs: str) -> str:
-    """Call the sync implementation directly, bypassing argument validation."""
+def _error(tool: StructuredTool, **kwargs: str) -> str:
+    """The error the sync implementation raises, called directly to bypass argument validation."""
     assert tool.func is not None
-    return tool.func(**kwargs)
+    with pytest.raises(ToolException) as info:
+        tool.func(**kwargs)
+    return str(info.value)
+
+
+def _tool_message(tool: StructuredTool, args: dict[str, str]) -> ToolMessage:
+    """The message a ``ToolNode`` sends back for one call of ``tool``."""
+    # ToolNode reads its runtime from the graph config, so run it inside one.
+    graph = StateGraph(MessagesState)
+    graph.add_node("tools", ToolNode([tool]))
+    graph.add_edge(START, "tools")
+    graph.add_edge("tools", END)
+    call = {"name": tool.name, "args": args, "id": "call-1"}
+    request = AIMessage(content="", tool_calls=[call])
+    result = graph.compile().invoke({"messages": [request]})
+    [_, message] = result["messages"]
+    assert isinstance(message, ToolMessage)
+    assert message.tool_call_id == "call-1"
+    return message
 
 
 def _file(skill_set: SkillSet, qualified: str, path: str = "SKILL.md") -> Path:
@@ -86,8 +104,8 @@ def test_tool_normalizes_a_dot_slash_path(skill_set: SkillSet) -> None:
     assert "# Vendor normalization" in out
 
 
-def test_tool_unknown_name_returns_message_not_error(skill_set: SkillSet) -> None:
-    out = _call(create_load_skill_tool(skill_set), name="finance/nope")
+def test_tool_unknown_name_is_an_error_listing_the_skills(skill_set: SkillSet) -> None:
+    out = _error(create_load_skill_tool(skill_set), name="finance/nope")
     assert out == (
         "Unknown skill 'finance/nope'. Available: finance/invoice-triage, "
         "finance/vendor-lookup, ops/vendor-lookup"
@@ -97,23 +115,24 @@ def test_tool_unknown_name_returns_message_not_error(skill_set: SkillSet) -> Non
 def test_tool_node_turns_an_unknown_name_into_an_error_message(
     skill_set: SkillSet,
 ) -> None:
-    # ToolNode reads its runtime from the graph config, so run it inside one.
-    graph = StateGraph(MessagesState)
-    graph.add_node("tools", ToolNode([create_load_skill_tool(skill_set)]))
-    graph.add_edge(START, "tools")
-    graph.add_edge("tools", END)
-    call = {"name": "load_skill", "args": {"name": "finance/nope"}, "id": "call-1"}
-    request = AIMessage(content="", tool_calls=[call])
-    result = graph.compile().invoke({"messages": [request]})
-    [_, message] = result["messages"]
-    assert isinstance(message, ToolMessage)
+    tool = create_load_skill_tool(skill_set)
+    message = _tool_message(tool, {"name": "finance/nope"})
     assert message.status == "error"
-    assert message.tool_call_id == "call-1"
     assert "finance/nope" in str(message.content)
 
 
+def test_tool_node_marks_a_failed_read_as_an_error(skill_set: SkillSet) -> None:
+    tool = create_load_skill_tool(skill_set)
+    failed = _tool_message(tool, {"name": "finance/invoice-triage", "path": "nope.md"})
+    assert failed.status == "error"
+    assert failed.text.startswith("Skill 'finance/invoice-triage' has no file")
+    loaded = _tool_message(tool, {"name": "finance/invoice-triage"})
+    assert loaded.status == "success"
+    assert loaded.text.startswith("# finance/invoice-triage (bundle finance v3)")
+
+
 def test_tool_unknown_path_lists_files(skill_set: SkillSet) -> None:
-    out = _call(
+    out = _error(
         create_load_skill_tool(skill_set), name="finance/invoice-triage", path="nope.md"
     )
     assert out == (
@@ -125,30 +144,79 @@ def test_tool_unknown_path_lists_files(skill_set: SkillSet) -> None:
 def test_tool_cleaned_up_set_reports_unavailable(skill_set: SkillSet) -> None:
     tool = create_load_skill_tool(skill_set)
     skill_set.root = None
-    out = _call(tool, name="finance/invoice-triage")
+    out = _error(tool, name="finance/invoice-triage")
     assert out.startswith("Skill 'finance/invoice-triage' is not available any more: ")
 
 
 def test_tool_unreadable_file_reports_without_the_path(skill_set: SkillSet) -> None:
     tool = create_load_skill_tool(skill_set)
     _file(skill_set, "finance/invoice-triage").unlink()
-    out = _call(tool, name="finance/invoice-triage")
+    out = _error(tool, name="finance/invoice-triage")
     assert out == (
         "Skill 'finance/invoice-triage' could not be read: No such file or directory"
     )
     assert str(skill_set.root) not in out
 
 
-def test_tool_truncates_long_text(
+def test_tool_cuts_a_long_file_so_the_response_fits_the_limit(
     skill_set: SkillSet, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(module, "MAX_OUTPUT_CHARS", 10)
+    monkeypatch.setattr(module, "MAX_OUTPUT_CHARS", 200)
+    text = "0123456789" * 100
     vendors = _file(skill_set, "finance/invoice-triage", "reference/vendors.md")
-    vendors.write_text("0123456789abcdef", encoding="utf-8")
+    vendors.write_text(text, encoding="utf-8")
     out = create_load_skill_tool(skill_set).invoke(
         {"name": "finance/invoice-triage", "path": "reference/vendors.md"}
     )
-    assert out.endswith("\n\n0123456789\n\n[truncated: showing 10 of 16 characters]")
+    header = "# finance/invoice-triage — reference/vendors.md\n\n"
+    shown = 200 - len(header) - module._TRUNCATION_NOTE_CHARS
+    assert out == (
+        f"{header}{text[:shown]}\n\n[truncated: showing {shown} of 1000 characters]"
+    )
+    assert len(out) <= 200
+
+
+def test_tool_keeps_the_file_list_after_a_long_skill_md(
+    skill_set: SkillSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(module, "MAX_OUTPUT_CHARS", 300)
+    _file(skill_set, "finance/invoice-triage").write_text("x" * 1000, encoding="utf-8")
+    out = create_load_skill_tool(skill_set).invoke({"name": "finance/invoice-triage"})
+    assert "[truncated: showing " in out
+    assert out.endswith("\n\nSupporting files: reference/vendors.md")
+    assert len(out) <= 300
+
+
+def test_tool_cuts_a_long_list_of_supporting_files(
+    skill_set: SkillSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(module, "MAX_LIST_CHARS", 40)
+    hit = skill_set.find("finance/invoice-triage")
+    assert hit is not None
+    hit[1].files.extend(f"reference/f{i:03}.md" for i in range(100))
+    out = create_load_skill_tool(skill_set).invoke({"name": "finance/invoice-triage"})
+    assert out.endswith(
+        "\n\nSupporting files: reference/vendors.md, reference/f000.md, and 99 more"
+    )
+
+
+def test_tool_cuts_a_long_list_of_skill_names(
+    skill_set: SkillSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(module, "MAX_LIST_CHARS", 30)
+    out = _error(create_load_skill_tool(skill_set), name="finance/nope")
+    assert (
+        out
+        == "Unknown skill 'finance/nope'. Available: finance/invoice-triage, and 2 more"
+    )
+
+
+def test_tool_names_too_long_to_list_are_counted(
+    skill_set: SkillSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(module, "MAX_LIST_CHARS", 5)
+    out = _error(create_load_skill_tool(skill_set), name="finance/nope")
+    assert out == "Unknown skill 'finance/nope'. Available: 3 (names too long to list)"
 
 
 def test_tool_refuses_a_binary_file(skill_set: SkillSet) -> None:
@@ -186,7 +254,7 @@ def test_tool_with_empty_set_accepts_any_name_and_reports_none(
     name = _schema(tool)["properties"]["name"]
     assert "enum" not in name
     assert name["type"] == "string"
-    assert _call(tool, name="x") == "Unknown skill 'x'. Available: none"
+    assert _error(tool, name="x") == "Unknown skill 'x'. Available: none"
 
 
 def test_tool_records_one_skill_load_span(
