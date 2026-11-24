@@ -10,6 +10,7 @@ from .a2a import (
 )
 from .context_tool import create_context_tool
 from .datafabric_tool import create_datafabric_tool
+from .datafabric_tool.ontology import create_ontology_tool
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
@@ -38,6 +39,7 @@ __all__ = [
     "create_tool_node",
     "create_context_tool",
     "create_datafabric_tool",
+    "create_ontology_tool",
     "open_mcp_tools",
     "create_process_tool",
     "create_integration_tool",

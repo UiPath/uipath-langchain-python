@@ -8,7 +8,7 @@ statements fed back as errors) and the terminal-message handling.
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_type_hints
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.core.feature_flags import FeatureFlags
 
+from uipath_langchain.agent import tools as agent_tools
 from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from uipath_langchain.agent.tools.datafabric_tool.ontology import (
     ontology_subgraph as _sg,
@@ -28,6 +29,7 @@ from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_service_sql 
 from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_tool import (
     DataFabricOntologyQueryHandler,
     create_datafabric_ontology_tool,
+    create_ontology_tool,
 )
 
 # --- fakes ------------------------------------------------------------------
@@ -173,7 +175,7 @@ def test_factory_reads_the_first_ontology_id():
         MagicMock(),
     )
     assert tool.name == "query_datafabric_ontology"
-    assert tool.coroutine._ontology_id == "onto-1"  # type: ignore[attr-defined]
+    assert tool.coroutine.__self__._ontology_id == "onto-1"  # type: ignore[attr-defined]
     assert "nxorders" in tool.description
 
 
@@ -187,7 +189,7 @@ def test_factory_uses_the_first_of_several_and_warns(caplog):
         ),
         MagicMock(),
     )
-    assert tool.coroutine._ontology_id == "onto-1"  # type: ignore[attr-defined]
+    assert tool.coroutine.__self__._ontology_id == "onto-1"  # type: ignore[attr-defined]
     assert "using the first" in caplog.text
 
 
@@ -195,7 +197,69 @@ def test_factory_without_an_id_fails_on_first_use(monkeypatch):
     tool = create_datafabric_ontology_tool(
         _resource([{"name": "nxorders", "folderId": "f-1"}]), MagicMock()
     )
-    assert tool.coroutine._ontology_id is None  # type: ignore[attr-defined]
+    assert tool.coroutine.__self__._ontology_id is None  # type: ignore[attr-defined]
+
+
+# --- coded-agent factory ----------------------------------------------------
+
+
+def _coded_tool(ontology_id: str = ONTOLOGY_ID):
+    return create_ontology_tool(
+        llm=MagicMock(),
+        name="query_orders",
+        description="Query orders and customers.",
+        ontology_id=ontology_id,
+        base_system_prompt="Answer only from the ontology.",
+    )
+
+
+def test_coded_ontology_factory_is_public():
+    assert agent_tools.create_ontology_tool is create_ontology_tool
+    assert not hasattr(agent_tools, "create_datafabric_ontology_tool")
+
+
+def test_coded_factory_builds_the_tool_from_direct_arguments():
+    tool = _coded_tool()
+
+    assert tool.name == "query_orders"
+    assert tool.description == "Query orders and customers."
+    assert tool.metadata == {"tool_type": "datafabric_ontology_sql"}
+    handler = tool.coroutine.__self__
+    assert isinstance(handler, DataFabricOntologyQueryHandler)
+    assert handler._ontology_id == ONTOLOGY_ID
+    assert handler._resource_description == "Query orders and customers."
+    assert handler._base_system_prompt == "Answer only from the ontology."
+
+
+def test_coded_tool_exposes_type_hints_a_langgraph_tool_node_can_read():
+    assert get_type_hints(_coded_tool().coroutine) == {
+        "user_query": str,
+        "return": str,
+    }
+
+
+async def test_coded_tool_builds_with_the_low_code_flag_off(monkeypatch):
+    monkeypatch.setattr(FeatureFlags, "is_flag_enabled", lambda *a, **k: False)
+    client = _FakeOntologyClient()
+    _sdk(monkeypatch, client)
+    captured, sentinel = _capture_graph_create(monkeypatch)
+
+    handler = _coded_tool().coroutine.__self__
+
+    assert await handler._ensure_graph() is sentinel
+    assert "Answer only from the ontology." in captured["system_prompt"]
+
+
+async def test_coded_tool_with_an_unsafe_id_fails_on_first_use(monkeypatch):
+    _sdk(monkeypatch, _FakeOntologyClient())
+    handler = _coded_tool("../other").coroutine.__self__
+
+    with pytest.raises(AgentRuntimeError) as raised:
+        await handler._ensure_graph()
+
+    assert raised.value.error_info.code == AgentRuntimeError.full_code(
+        AgentRuntimeErrorCode.ONTOLOGY_INVALID_REFERENCE
+    )
 
 
 # --- lazy build -------------------------------------------------------------
