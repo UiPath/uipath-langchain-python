@@ -7,6 +7,7 @@ from uipath.agent.models.agent import (
     AgentAllFieldsSelector,
     AgentBooleanOperator,
     AgentBooleanRule,
+    AgentBuiltInValidatorGuardrail,
     AgentCustomGuardrail,
     AgentFieldSelector,
     AgentGuardrail,
@@ -14,6 +15,7 @@ from uipath.agent.models.agent import (
     AgentGuardrailEscalateAction,
     AgentGuardrailFilterAction,
     AgentGuardrailLogAction,
+    AgentGuardrailMaskAction,
     AgentGuardrailSeverityLevel,
     AgentNumberOperator,
     AgentNumberRule,
@@ -42,6 +44,7 @@ from uipath_langchain.agent.guardrails.actions import (
     FilterAction,
     GuardrailAction,
     LogAction,
+    MaskAction,
 )
 from uipath_langchain.agent.guardrails.utils import _sanitize_selector_tool_names
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
@@ -501,6 +504,41 @@ def _convert_agent_custom_guardrail_to_deterministic(
     )
 
 
+_MASK_VALIDATOR_TYPE = "pii_detection"
+_MASK_SCOPES = (GuardrailScope.AGENT, GuardrailScope.TOOL)
+
+
+def _validate_mask_guardrail(
+    guardrail: AgentCustomGuardrail | AgentBuiltInValidatorGuardrail,
+) -> None:
+    """Allow the Mask action on built-in PII detection guardrails at AGENT and TOOL scope."""
+    if not (
+        isinstance(guardrail, AgentBuiltInValidatorGuardrail)
+        and guardrail.validator_type == _MASK_VALIDATOR_TYPE
+    ):
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+            title="Invalid guardrail action",
+            detail=f"Guardrail '{guardrail.name}' uses the Mask action, which only PII detection guardrails support. "
+            f"Please choose another action or use a PII detection guardrail.",
+            category=UiPathErrorCategory.USER,
+        )
+    invalid_scopes = [
+        scope
+        for scope in (guardrail.selector.scopes if guardrail.selector else [])
+        if scope not in _MASK_SCOPES
+    ]
+    if invalid_scopes:
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+            title="Invalid guardrail scope",
+            detail=f"Guardrail '{guardrail.name}' uses the Mask action, which can only be used with AGENT and TOOL scopes. "
+            f"Found invalid scopes: {[scope.name for scope in invalid_scopes]}. "
+            f"Please configure this guardrail to use only AGENT or TOOL scope.",
+            category=UiPathErrorCategory.USER,
+        )
+
+
 def build_guardrails_with_actions(
     guardrails: Sequence[AgentGuardrail] | None, tools: list[BaseTool]
 ) -> list[tuple[BaseGuardrail, GuardrailAction]]:
@@ -519,6 +557,8 @@ def build_guardrails_with_actions(
     for guardrail in guardrails:
         if isinstance(guardrail, AgentUnknownGuardrail):
             continue
+        if isinstance(guardrail.action, AgentGuardrailMaskAction):
+            _validate_mask_guardrail(guardrail)
 
         converted_guardrail: BaseGuardrail
         if isinstance(guardrail, AgentCustomGuardrail):
@@ -580,4 +620,6 @@ def build_guardrails_with_actions(
             )
         elif isinstance(action, AgentGuardrailFilterAction):
             result.append((converted_guardrail, FilterAction(fields=action.fields)))
+        elif isinstance(action, AgentGuardrailMaskAction):
+            result.append((converted_guardrail, MaskAction()))
     return result

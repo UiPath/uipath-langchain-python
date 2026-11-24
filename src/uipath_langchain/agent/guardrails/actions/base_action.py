@@ -32,6 +32,30 @@ class GuardrailAction(ABC):
         """When the guardrail service may stop scanning; everything unless the action says so."""
         return GuardrailTerminationMode.EVALUATE_ALL
 
+    @property
+    def text_only(self) -> bool:
+        """Whether the check reads the payload's own text alone.
+
+        A text-only check sends no files, and a JSON payload keeps its non-ASCII
+        characters unescaped, so what the service finds matches the values in it.
+        """
+        return False
+
+    def unconditional_node(
+        self,
+        *,
+        guardrail: BaseGuardrail,
+        scope: GuardrailScope,
+        execution_stage: ExecutionStage,
+        guarded_component_name: str,
+    ) -> GuardrailActionNode | None:
+        """A node that runs at this stage instead of evaluating the guardrail.
+
+        ``None``, the default, evaluates the guardrail and runs ``action_node`` on a
+        violation.
+        """
+        return None
+
     @abstractmethod
     def action_node(
         self,

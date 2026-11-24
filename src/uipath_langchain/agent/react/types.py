@@ -31,6 +31,8 @@ class InnerAgentGraphState(BaseModel):
     memory_injection: str = ""
     conversational_output: dict[str, Any] | None = None
     output_file_retries: int = 0
+    # Placeholder -> original value, for every value a mask guardrail replaced.
+    masked_values: Annotated[dict[str, str], merge_dicts] = {}
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
@@ -42,6 +44,7 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     guardrail_span_id: Optional[str] = None
     guardrail_flagged_file_names: Optional[list[str]] = None
     guardrail_attachments: Optional[list[dict[str, str]]] = None
+    guardrail_detections: Optional[list[dict[str, Any]]] = None
     escalation_files_listed: Optional[bool] = None
     agent_result: Optional[dict[str, Any]] = None
     hitl_task_info: Optional[Any] = {}

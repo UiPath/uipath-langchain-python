@@ -48,6 +48,7 @@ class GuardrailNodeFactory(Protocol):
         *,
         termination_mode: GuardrailTerminationMode | None = None,
         enforcement_context: GuardrailEnforcementContext | None = None,
+        text_only: bool = False,
     ) -> GuardrailActionNode: ...
 
 
@@ -163,6 +164,8 @@ def _build_guardrail_node_chain(
     - Each guardrail node evaluates the guardrail condition
     - On success, it routes to the next guardrail node (or the final next_node)
     - On failure, it routes to a failure node that either throws an error or continues to next_node
+    - An action with an unconditional node at this stage runs that node instead,
+      without evaluating the guardrail
 
     Args:
         subgraph: The StateGraph to add nodes and edges to.
@@ -181,6 +184,35 @@ def _build_guardrail_node_chain(
 
     guardrail, action = guardrails[-1]
     remaining_guardrails = guardrails[:-1]
+
+    unconditional_node = action.unconditional_node(
+        guardrail=guardrail,
+        scope=scope,
+        execution_stage=execution_stage,
+        guarded_component_name=guarded_node_name,
+    )
+    if unconditional_node is not None:
+        node_name, node = unconditional_node
+        node_metadata = getattr(node, "__metadata__", None) or {}
+        subgraph.add_node(
+            node_name,
+            node,
+            metadata={
+                **node_metadata,
+                "action_type": action.action_type,
+                "node_type": "guardrail_action",
+            },
+        )
+        subgraph.add_edge(node_name, next_node)
+        return _build_guardrail_node_chain(
+            subgraph,
+            remaining_guardrails,
+            scope,
+            execution_stage,
+            node_factory,
+            node_name,
+            guarded_node_name,
+        )
 
     action_nodes: GuardrailActionNodes = action.action_node(
         guardrail=guardrail,
@@ -210,6 +242,7 @@ def _build_guardrail_node_chain(
             execution_stage=execution_stage,
             action_type=action.action_type,
         ),
+        text_only=action.text_only,
     )
 
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
