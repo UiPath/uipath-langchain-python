@@ -1,5 +1,6 @@
 """Tests for the skills middleware wiring over a real workspace backend."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -193,6 +194,10 @@ def test_advanced_middleware_rejects_a_cleaned_up_set(
         _loaded(gone).advanced_middleware(_backend(workspace))
 
 
+# Taken before other tests clear os.environ; a Windows child needs SYSTEMROOT.
+_ENV_AT_COLLECTION = dict(os.environ)
+
+
 def test_importing_the_package_does_not_import_deepagents() -> None:
     code = (
         "import sys, uipath_langchain.skills as s\n"
@@ -203,6 +208,10 @@ def test_importing_the_package_does_not_import_deepagents() -> None:
         "assert 'deepagents' in sys.modules\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_ENV_AT_COLLECTION,
     )
     assert result.returncode == 0, result.stderr
