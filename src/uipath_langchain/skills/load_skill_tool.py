@@ -64,6 +64,17 @@ def _name_list(names: Sequence[str]) -> str:
     return f"{', '.join(shown)}, and {rest} more"
 
 
+def _skill_relative_path(path: str, bundle: SkillBundle, skill: Skill) -> str:
+    """``path`` relative to the skill folder.
+
+    ``\\`` becomes ``/``, and a leading ``./``, ``/`` or the skill folder as the
+    agent's filesystem shows it (``/skills/<bundle>/<skill>/``) is dropped.
+    """
+    path = path.replace("\\", "/").removeprefix("./").lstrip("/")
+    folder = f"{bundle.virtual_root.lstrip('/')}{skill.name}/"
+    return path.removeprefix(folder)
+
+
 def _validate_tool_name(tool_name: str) -> None:
     """Raise ``ValueError`` unless ``tool_name`` is 1-64 letters, digits, ``_`` or ``-``."""
     if not _TOOL_NAME.fullmatch(tool_name):
@@ -90,9 +101,11 @@ def create_load_skill_tool(
     bound; with no skills, or more than ``MAX_ENUM_NAMES``, it is a plain
     string. An error reaches the model as a tool message with status
     ``error`` and a text it can act on; nothing is raised past the tool.
-    A response is at most ``MAX_OUTPUT_CHARS`` long: a longer file is cut,
-    and a list of names is cut at ``MAX_LIST_CHARS``. Non-text files are
-    refused. Reading a ``SKILL.md`` records the SDK's ``Skill load`` span.
+    ``path`` is read relative to the skill folder; a leading ``/`` or
+    ``/skills/<bundle>/<skill>/``, as a skill's own text may write it, is
+    dropped. A response is at most ``MAX_OUTPUT_CHARS`` long: a longer file
+    is cut, and a list of names is cut at ``MAX_LIST_CHARS``. Non-text files
+    are refused. Reading a ``SKILL.md`` records the SDK's ``Skill load`` span.
 
     Args:
         skill_set: The skills bound to the agent, materialized to disk.
@@ -122,7 +135,10 @@ def create_load_skill_tool(
             str,
             Field(
                 default=_SKILL_MD,
-                description="A file inside the skill folder. Default: its SKILL.md.",
+                description=(
+                    "A file inside the skill folder, relative to it, such as "
+                    "`reference/notes.md`. Default: its SKILL.md."
+                ),
             ),
         ),
     )
@@ -134,7 +150,7 @@ def create_load_skill_tool(
                 f"Unknown skill '{name}'. Available: {_name_list(names) or 'none'}"
             )
         bundle, skill = hit
-        path = path.replace("\\", "/").removeprefix("./")
+        path = _skill_relative_path(path, bundle, skill)
         try:
             text = skill_set.read(name, path)
         except KeyError as e:

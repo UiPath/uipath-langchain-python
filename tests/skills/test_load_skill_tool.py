@@ -96,12 +96,46 @@ def test_tool_reads_supporting_file(skill_set: SkillSet) -> None:
     assert "# Vendor normalization" in out
 
 
-def test_tool_normalizes_a_dot_slash_path(skill_set: SkillSet) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "./reference/vendors.md",
+        "reference\\vendors.md",
+        "/reference/vendors.md",
+        "/skills/finance/invoice-triage/reference/vendors.md",
+        "skills/finance/invoice-triage/reference/vendors.md",
+    ],
+)
+def test_tool_reads_a_path_relative_to_the_skill_folder(
+    skill_set: SkillSet, path: str
+) -> None:
     out = create_load_skill_tool(skill_set).invoke(
-        {"name": "finance/invoice-triage", "path": "./reference/vendors.md"}
+        {"name": "finance/invoice-triage", "path": path}
     )
     assert out.startswith("# finance/invoice-triage — reference/vendors.md")
     assert "# Vendor normalization" in out
+
+
+def test_tool_reads_skill_md_by_its_full_path(skill_set: SkillSet) -> None:
+    out = create_load_skill_tool(skill_set).invoke(
+        {
+            "name": "finance/invoice-triage",
+            "path": "/skills/finance/invoice-triage/SKILL.md",
+        }
+    )
+    assert out.startswith("# finance/invoice-triage (bundle finance v3)")
+
+
+def test_tool_keeps_a_path_into_another_skill(skill_set: SkillSet) -> None:
+    out = _error(
+        create_load_skill_tool(skill_set),
+        name="finance/invoice-triage",
+        path="/skills/finance/vendor-lookup/SKILL.md",
+    )
+    assert out.startswith(
+        "Skill 'finance/invoice-triage' has no file "
+        "'skills/finance/vendor-lookup/SKILL.md'."
+    )
 
 
 def test_tool_unknown_name_is_an_error_listing_the_skills(skill_set: SkillSet) -> None:
