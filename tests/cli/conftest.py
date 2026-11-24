@@ -1,3 +1,5 @@
+import os
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -5,6 +7,15 @@ from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_environ() -> Iterator[None]:
+    """Put back ``os.environ`` after each CLI test; several of them clear it."""
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 @pytest.fixture
