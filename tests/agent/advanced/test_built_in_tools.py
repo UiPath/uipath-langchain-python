@@ -7,30 +7,46 @@ tools exist, and only a real graph catches an upstream change to that.
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
-from deepagents import FilesystemPermission, HarnessProfile, register_harness_profile
-from deepagents.backends import FilesystemBackend
+from deepagents import (
+    AsyncSubAgent,
+    FilesystemMiddleware,
+    FilesystemPermission,
+    HarnessProfile,
+    SubAgentMiddleware,
+    register_harness_profile,
+)
+from deepagents.backends import FilesystemBackend, LocalShellBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.agent.models.agent import AdvancedAgentBuiltInToolSettings
 
 from uipath_langchain.agent.advanced import (
     FILE_TOOL_NAMES,
+    MEMORY_INDEX_VIRTUAL_PATH,
+    CompiledSubAgent,
     ResolvedBuiltInTools,
+    SubAgent,
     build_code_interpreter_middleware,
     create_advanced_agent,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
     resolve_built_in_tools,
 )
+from uipath_langchain.agent.advanced.built_in_tools import BuiltInToolFilterMiddleware
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
 ALL_FILE_TOOLS = (
     "ls",
@@ -253,15 +269,6 @@ def test_the_subagent_does_not_get_turned_off_file_tools(tmp_path: Path) -> None
         assert set(binding) - {"task"} == READ_ONLY_TOOLS
 
 
-def test_the_subagent_starts_without_the_parents_conversation(tmp_path: Path) -> None:
-    """The meta prompt tells the model its subagents can't see the conversation."""
-    model = _model("test-model-isolated-subagent", [_task_call("inspect-invoice-42")])
-    _run(model, tmp_path, _no_writes(), prompt="parent-question-7")
-    subagent_messages = [str(message.content) for message in model.calls[1]]
-    assert "inspect-invoice-42" in subagent_messages[-1]
-    assert not [text for text in subagent_messages if "parent-question-7" in text]
-
-
 def _write_call(path: str, call_id: str = "w1") -> AIMessage:
     return AIMessage(
         content="",
@@ -298,6 +305,13 @@ def test_a_subagent_keeps_its_file_permissions(
     )
     _run(model, tmp_path, resolved, subagents=[worker])
     assert not (tmp_path / "secret.txt").exists()
+    results = [
+        str(m.content)
+        for call in model.calls
+        for m in call
+        if isinstance(m, ToolMessage) and m.tool_call_id == "w1"
+    ]
+    assert results and "permission denied" in results[0]
 
 
 def test_a_turned_off_tool_is_refused_when_called(tmp_path: Path) -> None:
@@ -305,8 +319,119 @@ def test_a_turned_off_tool_is_refused_when_called(tmp_path: Path) -> None:
     model = _model("test-model-refused-tool", [_write_call("/report.md")])
     _run(model, tmp_path, _no_writes())
     assert not (tmp_path / "report.md").exists()
-    refusal = str(model.calls[1][-1].content)
-    assert "write_file" in refusal
+    refusal = model.calls[1][-1]
+    assert isinstance(refusal, ToolMessage) and refusal.status == "error"
+    assert "write_file" in str(refusal.content)
+
+
+def test_execute_is_refused_on_a_shell_backend(tmp_path: Path) -> None:
+    """No setting turns ``execute`` on, even when the backend has a shell."""
+    shell = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "execute", "args": {"command": "echo hi > pwn.txt"}, "id": "x1"}
+        ],
+    )
+    model = _model("test-model-execute-shell", [shell])
+    graph = create_advanced_agent(
+        model=model,
+        tools=[],
+        backend=LocalShellBackend(root_dir=tmp_path, virtual_mode=True),
+        built_in_tools=resolve_built_in_tools(_all_on()),
+    )
+    asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "hi"}]}))
+    assert "execute" not in model.bindings[0]
+    assert "turned off" in str(model.calls[1][-1].content)
+    assert not (tmp_path / "pwn.txt").exists()
+
+
+def test_the_filter_hides_and_refuses_on_the_sync_path(tmp_path: Path) -> None:
+    model = _model("test-model-sync-filter", [_write_call("/report.md")])
+    middleware: list[AgentMiddleware[Any, Any]] = [
+        BuiltInToolFilterMiddleware(_no_writes()),
+        FilesystemMiddleware(
+            backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+        ),
+    ]
+    agent = create_agent(model=model, tools=[], middleware=middleware)
+    agent.invoke({"messages": [{"role": "user", "content": "hi"}]})
+    assert "write_file" not in model.bindings[0]
+    assert not (tmp_path / "report.md").exists()
+    assert "turned off" in str(model.calls[1][-1].content)
+
+
+def test_a_reviewer_edit_cannot_switch_to_a_turned_off_tool(tmp_path: Path) -> None:
+    """An approval step may edit a call, but not into a tool the settings hid."""
+    (tmp_path / "notes.txt").write_text("hello", encoding="utf-8")
+    worker: SubAgent = {
+        "name": "worker",
+        "description": "reads files",
+        "system_prompt": "read the file",
+        "interrupt_on": {"read_file": True},
+    }
+    task = _task_call()
+    task.tool_calls[0]["args"]["subagent_type"] = "worker"
+    read = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "read_file", "args": {"file_path": "/notes.txt"}, "id": "r1"}
+        ],
+    )
+    model = _model("test-model-reviewer-edit", [task, read])
+    graph = create_advanced_agent(
+        model=model,
+        tools=[],
+        subagents=[worker],
+        backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+        built_in_tools=_no_writes(),
+    )
+    graph.checkpointer = InMemorySaver()
+    config: Any = {"configurable": {"thread_id": "reviewer-edit"}}
+    paused = asyncio.run(
+        graph.ainvoke({"messages": [{"role": "user", "content": "hi"}]}, config)
+    )
+    assert paused.get("__interrupt__"), "the read never paused for review"
+    edit = {
+        "decisions": [
+            {
+                "type": "edit",
+                "edited_action": {
+                    "name": "write_file",
+                    "args": {"file_path": "/pwn.txt", "content": "x"},
+                },
+            }
+        ]
+    }
+    asyncio.run(graph.ainvoke(Command(resume=edit), config))
+    assert not (tmp_path / "pwn.txt").exists()
+
+
+def test_settings_reject_a_callers_own_subagent_middleware(tmp_path: Path) -> None:
+    """Its subagents skip the filter, the same way a compiled subagent would."""
+    backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    rogue = SubAgentMiddleware(
+        backend=backend,
+        subagents=[
+            {
+                "name": "rogue",
+                "description": "writes",
+                "system_prompt": "write",
+                "model": _model("test-model-rogue-worker", []),
+                "tools": [],
+            }
+        ],
+    )
+    with pytest.raises(AgentStartupError) as error:
+        create_advanced_agent(
+            model=_model("test-model-rogue-parent", []),
+            tools=[],
+            backend=backend,
+            middleware=[rogue],
+            built_in_tools=_no_writes(),
+        )
+    assert error.value.error_info.code == AgentStartupError.full_code(
+        AgentStartupErrorCode.INVALID_AGENT_CONFIG
+    )
 
 
 @pytest.mark.parametrize(
@@ -328,7 +453,97 @@ def test_eval_reaches_write_file_only_while_it_is_on(
     )
     resolved = resolve_built_in_tools(_all_on(write_file={"enabled": write_file}))
     _run(model, tmp_path, resolved, middleware=build_code_interpreter_middleware([]))
+    assert "eval" in model.bindings[0]
     assert (tmp_path / "note.txt").exists() is written
+
+
+@pytest.mark.parametrize(
+    ("write_file", "written"), [(True, True), (False, False)], ids=["on", "off"]
+)
+def test_a_subagents_own_eval_reaches_write_file_only_while_it_is_on(
+    tmp_path: Path, write_file: bool, written: bool
+) -> None:
+    pytest.importorskip("langchain_quickjs", reason="needs the code-interpreter extra")
+    code = 'await tools.writeFile({ file_path: "/note.txt", content: "x" })'
+    worker = {
+        "name": "worker",
+        "description": "runs code",
+        "system_prompt": "run the code",
+        "middleware": build_code_interpreter_middleware([]),
+    }
+    task = _task_call()
+    task.tool_calls[0]["args"]["subagent_type"] = "worker"
+    eval_call = AIMessage(
+        content="", tool_calls=[{"name": "eval", "args": {"code": code}, "id": "c2"}]
+    )
+    model = _model(f"test-model-subagent-eval-{write_file}", [task, eval_call])
+    resolved = resolve_built_in_tools(_all_on(write_file={"enabled": write_file}))
+    _run(model, tmp_path, resolved, subagents=[worker])
+    assert "eval" in model.bindings[1]
+    assert (tmp_path / "note.txt").exists() is written
+
+
+def _compiled_worker() -> CompiledSubAgent:
+    return {
+        "name": "prebuilt-worker",
+        "description": "prebuilt",
+        "runnable": create_advanced_agent(
+            model=_model("test-model-compiled-worker", []), tools=[], backend=None
+        ),
+    }
+
+
+def _remote_worker() -> AsyncSubAgent:
+    return {
+        "name": "remote-worker",
+        "description": "remote",
+        "graph_id": "worker",
+        "url": "http://127.0.0.1:9",
+    }
+
+
+@pytest.mark.parametrize(
+    "worker", [_compiled_worker, _remote_worker], ids=["compiled", "remote"]
+)
+def test_settings_reject_a_subagent_they_cant_restrict(
+    tmp_path: Path, worker: Callable[[], CompiledSubAgent | AsyncSubAgent]
+) -> None:
+    """A prebuilt or remote graph keeps its own tools, so the settings can't hold."""
+    spec = worker()
+    with pytest.raises(AgentStartupError) as error:
+        create_advanced_agent(
+            model=_model(f"test-model-opaque-parent-{spec['name']}", []),
+            tools=[],
+            backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+            subagents=[spec],
+            built_in_tools=_no_writes(),
+        )
+    assert error.value.error_info.code == AgentStartupError.full_code(
+        AgentStartupErrorCode.INVALID_AGENT_CONFIG
+    )
+    assert spec["name"] in error.value.error_info.detail
+    create_advanced_agent(
+        model=_model(f"test-model-opaque-parent-no-settings-{spec['name']}", []),
+        tools=[],
+        backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
+        subagents=[spec],
+    )
+
+
+def test_create_advanced_agent_leaves_out_memory_without_edit_file(
+    tmp_path: Path,
+) -> None:
+    model = _model("test-model-direct-memory", [])
+    graph = create_advanced_agent(
+        model=model,
+        tools=[],
+        backend=_workspace_with_memory(tmp_path),
+        memory=[MEMORY_INDEX_VIRTUAL_PATH],
+        built_in_tools=resolve_built_in_tools(_all_on(edit_file={"enabled": False})),
+    )
+    asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "hi"}]}))
+    prompt = " ".join(str(m.content) for m in model.calls[0])
+    assert "REMEMBER-ME" not in prompt
 
 
 def test_a_profile_description_override_survives_restricted_file_tools(

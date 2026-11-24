@@ -5,16 +5,23 @@
 ``BuiltInToolFilterMiddleware``. deepagents still builds its own file-tool
 middleware either way, so a subagent spec's ``permissions`` and the harness
 profile's tool descriptions keep applying; the filter only hides the turned-off
-tools and refuses them. Without settings there is no filter. Memory and the
-uipath-agents meta prompt then read ``DEFAULT_BUILT_IN_TOOLS``, and ``eval``
-depends on its feature flag alone.
+tools and refuses them. Without settings there is no filter and memory isn't
+gated; ``eval`` then depends on its feature flag alone. The uipath-agents meta
+prompt reads ``DEFAULT_BUILT_IN_TOOLS`` for that case, so it must keep matching
+what an agent without settings gets on a backend without a shell. Passing it as
+``built_in_tools`` is not the same as passing nothing: that applies the filter.
 
 The rules:
 
 - A tool missing from the settings is off, so a tool added later never turns
   on by itself for an agent someone configured.
-- ``read_file`` is always on, because ``FilesystemMiddleware`` requires it.
-- ``execute`` is never offered, because the advanced agent's backend has no shell.
+- ``read_file`` is always on: deepagents saves oversized tool results to files
+  and tells the model to read them back with it, and attachments are read with
+  it too.
+- ``execute`` is never a setting. With settings, the filter hides and refuses it
+  like every deepagents file tool that isn't enabled, so a backend with a shell
+  can't bring it back. deepagents' grep description and shell-path prompt still
+  mention it on such a backend, because they are written before the filter runs.
 - ``eval`` is only recorded here: the caller builds the code interpreter.
 - ``task`` isn't a setting: the agent always gets it, and a ``task`` entry is
   ignored like any unknown tool.
@@ -25,8 +32,8 @@ The rules:
 To add a built-in tool:
 
 1. A deepagents file tool needs nothing here: it arrives through ``FsToolName``
-   on a deepagents bump and lands in ``FILE_TOOL_NAMES`` and
-   ``enabled_file_tools`` (see "When deepagents changes its tools" below).
+   on a deepagents bump and lands in ``FILE_TOOL_NAMES`` and in
+   ``DEFAULT_BUILT_IN_TOOLS`` (see "When deepagents changes its tools" below).
    For any other tool, add its name to ``BUILT_IN_TOOL_NAMES`` and a field
    without a default to ``ResolvedBuiltInTools``, and set the field in
    ``resolve_built_in_tools`` with ``_is_enabled``. Report the field in
@@ -39,8 +46,9 @@ To add a built-in tool:
    a feature flag, like ``eval``, takes that default from its flag instead: the
    caller gives it to agents without settings while the flag is on, and to
    agents with settings only when the field is on too. ``eval_requested`` in
-   ``DEFAULT_BUILT_IN_TOOLS`` is never read. A tool that comes from a middleware
-   goes in ``shared_middleware``, so subagents get it as well.
+   ``DEFAULT_BUILT_IN_TOOLS`` is never read. The filter only hides file tools:
+   any other tool is turned off by not building it. A tool that comes from a
+   middleware goes in ``shared_middleware``, so subagents get it as well.
 3. Use the field in the uipath-agents meta prompt if the prompt describes the
    tool.
 4. Add the tool to the Studio Web designer in the Agents repo: frontend-sw's
@@ -55,18 +63,22 @@ When deepagents changes its tools:
 uipath-agents pins deepagents exactly, so a change arrives only through a bump
 PR there, and its tool-surface tests fail when the tool set changes. That PR
 handles each change below. Agents without settings, and every agent while
-EnableAdvancedAgentBuiltInToolSettings is off, use deepagents' own file-tool
-middleware, so they get deepagents' file tools as they are on their next run
-after the bump ships.
+EnableAdvancedAgentBuiltInToolSettings is off, get no ``built_in_tools`` and so
+no filter: they get deepagents' file tools as they are on their next run after
+the bump ships.
 
-- A new file tool lands in ``FILE_TOOL_NAMES`` on its own. Agents with settings
+- A new file tool lands in ``FILE_TOOL_NAMES`` on its own. If a backend only
+  offers it when it has some capability, as with ``execute``, leave it out of
+  ``FILE_TOOL_NAMES`` instead: the filter still hides it. Agents with settings
   have it off until someone turns it on. Agents without settings get it on the
-  bump, before the designer shows it. To hold it back, give those agents
-  ``BuiltInToolFilterMiddleware`` too, with a default that leaves the tool out
-  until its feature flag is on, the way ``eval`` waits for
-  EnableAdvancedAgentCodeInterpreter. ``DEFAULT_BUILT_IN_TOOLS`` alone won't do:
-  it lists every name in ``FILE_TOOL_NAMES``. Then add the tool to the
-  designer, as in "To add a built-in tool".
+  bump, before the designer shows it. To hold it back, pass those agents a
+  ``built_in_tools`` that leaves the tool out until its feature flag is on, the
+  way ``eval`` waits for EnableAdvancedAgentCodeInterpreter.
+  ``DEFAULT_BUILT_IN_TOOLS`` alone won't do: it lists every name in
+  ``FILE_TOOL_NAMES``. Passing ``built_in_tools`` also hides ``execute``, gates
+  their memory, and rejects compiled and remote subagents and a caller's own
+  subagent middleware. Then add the tool to the designer, as
+  in "To add a built-in tool".
 - A removed tool becomes unknown: its entries are logged and ignored, and every
   agent loses it on the bump. Remove it from the designer's catalog no later
   than the bump ships: until then the designer shows a switch that does
@@ -85,12 +97,13 @@ after the bump ships.
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, get_args
 
 from deepagents import FsToolName
 from langchain.agents.middleware import (
     AgentMiddleware,
+    AgentState,
     ModelRequest,
     ModelResponse,
     ToolCallRequest,
@@ -107,6 +120,13 @@ logger = logging.getLogger(__name__)
 FILE_TOOL_NAMES: tuple[FsToolName, ...] = tuple(
     name for name in get_args(FsToolName) if name != "execute"
 )
+"""The deepagents file tools that are settings: every ``FsToolName`` but
+``execute``, which a backend offers only when it has a shell."""
+
+_FILTERED_TOOL_NAMES = frozenset(get_args(FsToolName))
+"""What the filter decides on: every deepagents file tool, ``execute`` included,
+so one the settings don't enable is hidden even when it isn't a setting."""
+
 BUILT_IN_TOOL_NAMES = frozenset({*FILE_TOOL_NAMES, EVAL_TOOL_NAME})
 
 
@@ -115,9 +135,10 @@ class ResolvedBuiltInTools:
     """Which of deepagents' built-in tools and ``eval`` an agent gets.
 
     Attributes:
-        enabled_file_tools: The deepagents file tools to build, in deepagents'
-            order. A file tool not listed is never built, so neither the model
-            nor the code interpreter can reach it.
+        enabled_file_tools: The deepagents file tools the agent may use, in
+            deepagents' order. deepagents still builds the others;
+            ``BuiltInToolFilterMiddleware`` hides them from the model and the
+            code interpreter, and refuses calls to them.
         eval_requested: Whether the settings ask for ``eval``. uipath-langchain
             doesn't build the code interpreter; the caller does, and decides
             whether it can be built at all.
@@ -136,7 +157,10 @@ DEFAULT_BUILT_IN_TOOLS = ResolvedBuiltInTools(
     enabled_file_tools=FILE_TOOL_NAMES, eval_requested=False
 )
 """What an agent gets without built-in tool settings: every file tool. ``eval``
-then depends on its feature flag alone."""
+then depends on its feature flag alone. Keep it equal to what the builders give
+for ``built_in_tools=None`` on a backend without a shell: the uipath-agents meta
+prompt reads it for that case. Passing it as ``built_in_tools`` still applies the
+filter, which also hides ``execute``."""
 
 
 def resolve_built_in_tools(
@@ -175,7 +199,7 @@ def _is_enabled(
     return entry is not None and entry.enabled
 
 
-class BuiltInToolFilterMiddleware(AgentMiddleware[Any, Any]):
+class BuiltInToolFilterMiddleware(AgentMiddleware[AgentState[Any], Any]):
     """Hide the file tools an agent's settings turn off, and refuse calls to them.
 
     deepagents' own file-tool middleware still builds every file tool, with the
@@ -185,15 +209,23 @@ class BuiltInToolFilterMiddleware(AgentMiddleware[Any, Any]):
     """
 
     def __init__(self, built_in_tools: ResolvedBuiltInTools) -> None:
-        self.turned_off = frozenset(FILE_TOOL_NAMES) - set(
-            built_in_tools.enabled_file_tools
-        )
+        self.turned_off = _FILTERED_TOOL_NAMES - set(built_in_tools.enabled_file_tools)
 
     def _visible(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
         tools = [
             tool for tool in request.tools if _tool_name(tool) not in self.turned_off
         ]
         return request.override(tools=tools)
+
+    def _narrowed(self, request: ToolCallRequest) -> ToolCallRequest:
+        """Leave the turned-off tools out of what inner middleware can switch to.
+
+        An approval step that lets a reviewer edit a call looks the edited tool up
+        in ``runtime.tools``, after this hook has checked the original name.
+        """
+        runtime = request.runtime
+        tools = [tool for tool in runtime.tools if tool.name not in self.turned_off]
+        return replace(request, runtime=replace(runtime, tools=tools))
 
     def _refusal(self, request: ToolCallRequest) -> ToolMessage | None:
         name = request.tool_call["name"]
@@ -225,14 +257,14 @@ class BuiltInToolFilterMiddleware(AgentMiddleware[Any, Any]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
-        return self._refusal(request) or handler(request)
+        return self._refusal(request) or handler(self._narrowed(request))
 
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
-        return self._refusal(request) or await handler(request)
+        return self._refusal(request) or await handler(self._narrowed(request))
 
 
 def _tool_name(tool: BaseTool | dict[str, Any]) -> str | None:

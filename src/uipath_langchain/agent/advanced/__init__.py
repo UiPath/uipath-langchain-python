@@ -1,6 +1,6 @@
 """UiPath Advanced agent implementation."""
 
-from deepagents import CompiledSubAgent, SubAgent
+from deepagents import AsyncSubAgent, CompiledSubAgent, SubAgent
 from deepagents.backends import BackendProtocol, FilesystemBackend
 
 from .agent import (
@@ -40,6 +40,7 @@ __all__ = [
     "PersistenceMode",
     "AdvancedAgentGraphState",
     "BackendProtocol",
+    "AsyncSubAgent",
     "CompiledSubAgent",
     "ConversationalAdvancedAgentGraphState",
     "FilesystemBackend",
