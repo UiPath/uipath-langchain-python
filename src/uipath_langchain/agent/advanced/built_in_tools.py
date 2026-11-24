@@ -1,11 +1,13 @@
 """Built-in tool settings for advanced agents.
 
 ``resolve_built_in_tools`` turns an agent's tool settings into
-``ResolvedBuiltInTools``, and the advanced agent builders apply it. Without
-settings, the builders keep deepagents' own file-tool middleware, which also
-applies a subagent spec's ``permissions``. Memory and the uipath-agents meta
-prompt then read ``DEFAULT_BUILT_IN_TOOLS``, and ``eval`` depends on its
-feature flag alone.
+``ResolvedBuiltInTools``, and the advanced agent builders apply it with
+``BuiltInToolFilterMiddleware``. deepagents still builds its own file-tool
+middleware either way, so a subagent spec's ``permissions`` and the harness
+profile's tool descriptions keep applying; the filter only hides the turned-off
+tools and refuses them. Without settings there is no filter. Memory and the
+uipath-agents meta prompt then read ``DEFAULT_BUILT_IN_TOOLS``, and ``eval``
+depends on its feature flag alone.
 
 The rules:
 
@@ -60,13 +62,11 @@ after the bump ships.
 - A new file tool lands in ``FILE_TOOL_NAMES`` on its own. Agents with settings
   have it off until someone turns it on. Agents without settings get it on the
   bump, before the designer shows it. To hold it back, give those agents
-  ``build_file_tool_middleware`` too, with a default that leaves the tool out
+  ``BuiltInToolFilterMiddleware`` too, with a default that leaves the tool out
   until its feature flag is on, the way ``eval`` waits for
   EnableAdvancedAgentCodeInterpreter. ``DEFAULT_BUILT_IN_TOOLS`` alone won't do:
-  it lists every name in ``FILE_TOOL_NAMES``. This replaces deepagents' own
-  middleware for those agents, so a subagent spec's ``permissions`` no longer
-  apply to them. Then add the tool to the designer, as in "To add a built-in
-  tool".
+  it lists every name in ``FILE_TOOL_NAMES``. Then add the tool to the
+  designer, as in "To add a built-in tool".
 - A removed tool becomes unknown: its entries are logged and ignored, and every
   agent loses it on the bump. Remove it from the designer's catalog no later
   than the bump ships: until then the designer shows a switch that does
@@ -84,13 +84,20 @@ after the bump ships.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import get_args
+from typing import Any, get_args
 
-from deepagents import FilesystemMiddleware, FsToolName
-from deepagents.backends import BackendProtocol
-from langchain_core.language_models import BaseChatModel
+from deepagents import FsToolName
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelRequest,
+    ModelResponse,
+    ToolCallRequest,
+)
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import BaseTool
+from langgraph.types import Command
 from uipath.agent.models.agent import AdvancedAgentBuiltInToolSettings
 
 from .code_interpreter import EVAL_TOOL_NAME
@@ -168,34 +175,65 @@ def _is_enabled(
     return entry is not None and entry.enabled
 
 
-def build_file_tool_middleware(
-    built_in_tools: ResolvedBuiltInTools,
-    model: BaseChatModel,
-    backend: BackendProtocol | None,
-) -> FilesystemMiddleware:
-    """Build a file-tool middleware that offers only the enabled file tools.
+class BuiltInToolFilterMiddleware(AgentMiddleware[Any, Any]):
+    """Hide the file tools an agent's settings turn off, and refuse calls to them.
 
-    deepagents swaps a caller's middleware in for its own by name, so this one
-    replaces deepagents' default. The tool descriptions come from the model's
-    harness profile, as deepagents' own middleware would take them, so overrides
-    such as ``read_file``'s still apply.
-
-    Args:
-        built_in_tools: The resolved built-in tools.
-        model: The agent's chat model, whose harness profile holds the descriptions.
-        backend: The agent's backend.
-
-    Returns:
-        A ``FilesystemMiddleware`` that builds only ``enabled_file_tools``.
+    deepagents' own file-tool middleware still builds every file tool, with the
+    subagent's ``permissions`` and the harness profile's descriptions. Listed
+    ahead of the code interpreter, this also keeps the turned-off tools out of
+    ``eval``, which reads the same ``request.tools``.
     """
-    from deepagents.profiles.harness.harness_profiles import (
-        _harness_profile_for_model,
-    )
 
-    return FilesystemMiddleware(
-        backend=backend,
-        tools=list(built_in_tools.enabled_file_tools),
-        custom_tool_descriptions=_harness_profile_for_model(
-            model, None
-        ).tool_description_overrides,
-    )
+    def __init__(self, built_in_tools: ResolvedBuiltInTools) -> None:
+        self.turned_off = frozenset(FILE_TOOL_NAMES) - set(
+            built_in_tools.enabled_file_tools
+        )
+
+    def _visible(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
+        tools = [
+            tool for tool in request.tools if _tool_name(tool) not in self.turned_off
+        ]
+        return request.override(tools=tools)
+
+    def _refusal(self, request: ToolCallRequest) -> ToolMessage | None:
+        name = request.tool_call["name"]
+        if name not in self.turned_off:
+            return None
+        return ToolMessage(
+            content=f"Error: the {name} tool is turned off for this agent.",
+            tool_call_id=request.tool_call["id"],
+            name=name,
+            status="error",
+        )
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        return handler(self._visible(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        return await handler(self._visible(request))
+
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
+        return self._refusal(request) or handler(request)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        return self._refusal(request) or await handler(request)
+
+
+def _tool_name(tool: BaseTool | dict[str, Any]) -> str | None:
+    return tool.name if isinstance(tool, BaseTool) else tool.get("name")

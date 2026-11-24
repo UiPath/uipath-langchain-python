@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from deepagents import HarnessProfile, register_harness_profile
+from deepagents import FilesystemPermission, HarnessProfile, register_harness_profile
 from deepagents.backends import FilesystemBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -260,6 +260,53 @@ def test_the_subagent_starts_without_the_parents_conversation(tmp_path: Path) ->
     subagent_messages = [str(message.content) for message in model.calls[1]]
     assert "inspect-invoice-42" in subagent_messages[-1]
     assert not [text for text in subagent_messages if "parent-question-7" in text]
+
+
+def _write_call(path: str, call_id: str = "w1") -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "write_file",
+                "args": {"file_path": path, "content": "x"},
+                "id": call_id,
+            }
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "resolved",
+    [None, resolve_built_in_tools(_all_on())],
+    ids=["without_settings", "with_every_tool_on"],
+)
+def test_a_subagent_keeps_its_file_permissions(
+    tmp_path: Path, resolved: ResolvedBuiltInTools | None
+) -> None:
+    worker = {
+        "name": "worker",
+        "description": "writes files",
+        "system_prompt": "write the file",
+        "permissions": [
+            FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")
+        ],
+    }
+    task = _task_call()
+    task.tool_calls[0]["args"]["subagent_type"] = "worker"
+    model = _model(
+        f"test-model-permissions-{resolved is None}", [task, _write_call("/secret.txt")]
+    )
+    _run(model, tmp_path, resolved, subagents=[worker])
+    assert not (tmp_path / "secret.txt").exists()
+
+
+def test_a_turned_off_tool_is_refused_when_called(tmp_path: Path) -> None:
+    """The model can still name a tool it wasn't offered; it must not run."""
+    model = _model("test-model-refused-tool", [_write_call("/report.md")])
+    _run(model, tmp_path, _no_writes())
+    assert not (tmp_path / "report.md").exists()
+    refusal = str(model.calls[1][-1].content)
+    assert "write_file" in refusal
 
 
 @pytest.mark.parametrize(

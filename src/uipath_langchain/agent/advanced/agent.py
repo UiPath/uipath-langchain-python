@@ -63,8 +63,8 @@ from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .built_in_tools import (
     DEFAULT_BUILT_IN_TOOLS,
+    BuiltInToolFilterMiddleware,
     ResolvedBuiltInTools,
-    build_file_tool_middleware,
 )
 from .job_attachments_middleware import (
     JOB_ATTACHMENTS_STATE_KEY,
@@ -599,8 +599,8 @@ def create_advanced_agent(
 
     ``built_in_tools`` applies the agent's built-in tool settings (see
     ``resolve_built_in_tools``) to the main agent and every subagent; ``None``
-    keeps deepagents' full tool set. A subagent spec's own ``permissions`` are
-    not applied to its file tools while ``built_in_tools`` is given.
+    keeps deepagents' full tool set. Its filter goes ahead of ``middleware``,
+    so the code interpreter can't reach a turned-off tool either.
     """
     tools = [
         tool.with_workspace(backend)
@@ -615,10 +615,11 @@ def create_advanced_agent(
         _PayloadHandlerMiddleware(),
         JobAttachmentsMiddleware(),
     ]
-    if built_in_tools is not None:
-        shared_middleware.append(
-            build_file_tool_middleware(built_in_tools, model, backend)
-        )
+    tool_filter: list[AgentMiddleware[Any, Any]] = (
+        [BuiltInToolFilterMiddleware(built_in_tools)]
+        if built_in_tools is not None
+        else []
+    )
     main_budget, subagent_budget = _iteration_budget_middleware(
         max_iterations, initial_message_count_key
     )
@@ -627,13 +628,17 @@ def create_advanced_agent(
         system_prompt=system_prompt,
         tools=list(tools),
         subagents=_resolve_subagent_specs(
-            subagents, tools, skills, [*subagent_budget, *shared_middleware]
+            subagents,
+            tools,
+            skills,
+            [*subagent_budget, *tool_filter, *shared_middleware],
         ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
         middleware=[
             *main_budget,
+            *tool_filter,
             *middleware,
             *shared_middleware,
             *([ToolChoiceMiddleware()] if unforced_tool_choice else []),
