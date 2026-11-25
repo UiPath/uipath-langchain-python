@@ -2,19 +2,30 @@
 
 import json
 import re
+import secrets
 from collections import Counter
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
-# The LLM Gateway's own masking writes ``[Email-1]`` and, when it restores a
-# response, replaces that token bracketed or not and in any case. A placeholder
-# therefore never holds a hyphen, so the gateway cannot restore one of ours to
-# another value.
-_PLACEHOLDER = re.compile(r"\[([A-Za-z0-9]+)_([0-9]+)\]")
+# ``[Email-Tool-7f3a9c-1]``: category, scope, the run's tag, number. The LLM
+# Gateway's own masking writes ``[Email-1]`` and, when it restores a response,
+# replaces that token bracketed or not, in any case and anywhere in the text. The
+# scope keeps ``Email-1`` from ever appearing inside one of ours, and the run tag
+# keeps a run from restoring placeholders another run wrote, such as a parent
+# agent's placeholders in the input of an agent it calls as a tool.
+_PLACEHOLDER = re.compile(r"\[([A-Za-z0-9]+)-(Agent|Tool)-([0-9a-f]{6})-([0-9]+)\]")
 
 
 def placeholder_label(category: str) -> str:
     """The category as it appears in a placeholder: its ASCII letters and digits."""
     return re.sub(r"[^A-Za-z0-9]", "", category) or "PII"
+
+
+def new_run_tag(texts: Iterable[str]) -> str:
+    """A tag for the run's placeholders that no placeholder in ``texts`` carries."""
+    taken = {match.group(3) for text in texts for match in _PLACEHOLDER.finditer(text)}
+    while (tag := secrets.token_hex(3)) in taken:
+        pass
+    return tag
 
 
 def map_strings(data: Any, transform: Callable[[str], str]) -> Any:
@@ -83,19 +94,24 @@ def decode_json_escapes(text: str) -> str:
 
 
 class PlaceholderAssigner:
-    """Gives each value a placeholder such as ``[Email_1]``.
+    """Gives each value a placeholder such as ``[Email-Tool-7f3a9c-1]``.
 
-    Placeholders are numbered per category across the run, and a value the run has
-    masked before keeps its placeholder.
+    Placeholders are numbered per category and scope across the run, and a value
+    the run has masked before in the same scope keeps its placeholder.
     """
 
-    def __init__(self, masked_values: Mapping[str, str]) -> None:
-        self._placeholders = {value: key for key, value in masked_values.items()}
+    def __init__(self, masked_values: Mapping[str, str], scope: str, tag: str) -> None:
+        self._scope = scope
+        self._tag = tag
+        self._placeholders: dict[str, str] = {}
         self._counts: dict[str, int] = {}
-        for key in masked_values:
-            if match := _PLACEHOLDER.fullmatch(key):
-                label, number = match.group(1), int(match.group(2))
-                self._counts[label] = max(self._counts.get(label, 0), number)
+        for key, value in masked_values.items():
+            match = _PLACEHOLDER.fullmatch(key)
+            if match is None or match.group(2) != scope:
+                continue
+            self._placeholders[value] = key
+            label, number = match.group(1), int(match.group(4))
+            self._counts[label] = max(self._counts.get(label, 0), number)
         self.added: dict[str, str] = {}
 
     def placeholder(self, value: str, category: str) -> str:
@@ -104,7 +120,7 @@ class PlaceholderAssigner:
         if placeholder is None:
             label = placeholder_label(category)
             self._counts[label] = self._counts.get(label, 0) + 1
-            placeholder = f"[{label}_{self._counts[label]}]"
+            placeholder = f"[{label}-{self._scope}-{self._tag}-{self._counts[label]}]"
             self._placeholders[value] = placeholder
             self.added[placeholder] = value
         return placeholder

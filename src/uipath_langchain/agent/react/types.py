@@ -13,6 +13,7 @@ from uipath.platform.attachments import Attachment
 from uipath.platform.memory import FieldMatching, SearchMode
 
 from uipath_langchain.agent.react.reducers import (
+    keep_first,
     merge_dicts,
     merge_dicts_dropping_none,
     merge_objects,
@@ -34,6 +35,8 @@ class InnerAgentGraphState(BaseModel):
     output_file_retries: int = 0
     # Placeholder -> original value, for every value a mask guardrail replaced.
     masked_values: Annotated[dict[str, str], merge_dicts] = {}
+    # The tag in this run's placeholders, set by the first mask and kept after it.
+    mask_run_tag: Annotated[str | None, keep_first] = None
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):

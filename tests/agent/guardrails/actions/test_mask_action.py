@@ -21,6 +21,7 @@ from uipath.platform.errors import EnrichedException
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from uipath_langchain.agent.guardrails import masking
 from uipath_langchain.agent.guardrails.actions import MaskAction
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.guardrails.guardrails_subgraph import (
@@ -96,6 +97,14 @@ class _PiiDetector:
         )
 
 
+_TAG = "7f3a9c"
+
+
+@pytest.fixture(autouse=True)
+def _fixed_run_tag(monkeypatch):
+    monkeypatch.setattr(masking.secrets, "token_hex", lambda _n: _TAG)
+
+
 def _patch(monkeypatch, detector: _PiiDetector) -> _PiiDetector:
     monkeypatch.setattr(
         "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
@@ -167,7 +176,10 @@ def _tool_call_input(
                 content="", tool_calls=[{"name": _TOOL, "args": args, "id": "c1"}]
             )
         ],
-        "inner_state": {"masked_values": masked_values or {}},
+        "inner_state": {
+            "masked_values": masked_values or {},
+            "mask_run_tag": _TAG if masked_values else None,
+        },
     }
 
 
@@ -188,7 +200,12 @@ class TestToolScope:
             )
         )
 
-        assert received == [{"to": "[Email_1]", "body": "Hi [Person_1], from Jane"}]
+        assert received == [
+            {
+                "to": "[Email-Tool-7f3a9c-1]",
+                "body": "Hi [Person-Tool-7f3a9c-1], from Jane",
+            }
+        ]
         assert final["messages"][0].tool_calls[0]["args"] == received[0]
         result = final["messages"][-1]
         assert isinstance(result, ToolMessage) and isinstance(result.content, str)
@@ -198,8 +215,8 @@ class TestToolScope:
             "preview": "Hi José García, from Jane",
         }
         assert final["inner_state"].masked_values == {
-            "[Email_1]": "jane@example.com",
-            "[Person_1]": "José García",
+            "[Email-Tool-7f3a9c-1]": "jane@example.com",
+            "[Person-Tool-7f3a9c-1]": "José García",
         }
         # Checked once, before the call, as a text-only Mask check.
         assert len(detector.calls) == 1
@@ -225,7 +242,7 @@ class TestToolScope:
             _tool_call_input({"to": "x", "body": "Ship to 1 Main St\nSpringfield"})
         )
 
-        assert received == [{"to": "x", "body": "Ship to [Address_1]"}]
+        assert received == [{"to": "x", "body": "Ship to [Address-Tool-7f3a9c-1]"}]
 
     @pytest.mark.asyncio
     async def test_a_value_masked_earlier_in_the_run_keeps_its_placeholder(
@@ -240,14 +257,16 @@ class TestToolScope:
         final = await graph.ainvoke(
             _tool_call_input(
                 {"to": "bob@example.com", "body": "cc jane@example.com"},
-                masked_values={"[Email_1]": "jane@example.com"},
+                masked_values={"[Email-Tool-7f3a9c-1]": "jane@example.com"},
             )
         )
 
-        assert received == [{"to": "[Email_2]", "body": "cc [Email_1]"}]
+        assert received == [
+            {"to": "[Email-Tool-7f3a9c-2]", "body": "cc [Email-Tool-7f3a9c-1]"}
+        ]
         assert final["inner_state"].masked_values == {
-            "[Email_1]": "jane@example.com",
-            "[Email_2]": "bob@example.com",
+            "[Email-Tool-7f3a9c-1]": "jane@example.com",
+            "[Email-Tool-7f3a9c-2]": "bob@example.com",
         }
         # Both placeholders were written by this mask, so both come back.
         assert json.loads(final["messages"][-1].content) == {
@@ -267,16 +286,18 @@ class TestToolScope:
 
         final = await graph.ainvoke(
             _tool_call_input(
-                {"to": "bob@example.com", "body": "cc [Email_1]"},
-                masked_values={"[Email_1]": "jane@example.com"},
+                {"to": "bob@example.com", "body": "cc [Email-Tool-7f3a9c-1]"},
+                masked_values={"[Email-Tool-7f3a9c-1]": "jane@example.com"},
             )
         )
 
-        assert received == [{"to": "[Email_2]", "body": "cc [Email_1]"}]
+        assert received == [
+            {"to": "[Email-Tool-7f3a9c-2]", "body": "cc [Email-Tool-7f3a9c-1]"}
+        ]
         assert json.loads(final["messages"][-1].content) == {
             "status": "sent",
             "to": "bob@example.com",
-            "preview": "cc [Email_1]",
+            "preview": "cc [Email-Tool-7f3a9c-1]",
         }
         # The call's record is dropped once its result is restored.
         assert final["inner_state"].masked_tool_calls == {}
@@ -288,13 +309,15 @@ class TestToolScope:
 
         final = await graph.ainvoke(
             _tool_call_input(
-                {"to": "[Email_1]", "body": "hello"},
-                masked_values={"[Email_1]": "jane@example.com"},
+                {"to": "[Email-Tool-7f3a9c-1]", "body": "hello"},
+                masked_values={"[Email-Tool-7f3a9c-1]": "jane@example.com"},
             )
         )
 
-        assert received == [{"to": "[Email_1]", "body": "hello"}]
-        assert json.loads(final["messages"][-1].content)["to"] == "[Email_1]"
+        assert received == [{"to": "[Email-Tool-7f3a9c-1]", "body": "hello"}]
+        assert (
+            json.loads(final["messages"][-1].content)["to"] == "[Email-Tool-7f3a9c-1]"
+        )
         assert len(detector.calls) == 1
 
     @pytest.mark.asyncio
@@ -315,7 +338,7 @@ class TestToolScope:
 
         # The stand-in tool returned no result, so the record is still there.
         assert final["inner_state"].masked_tool_calls == {
-            f"{guardrail.id}:c1": ["[Email_1]", "[Person_1]"]
+            f"{guardrail.id}:c1": ["[Email-Tool-7f3a9c-1]", "[Person-Tool-7f3a9c-1]"]
         }
 
     @pytest.mark.asyncio
@@ -414,18 +437,18 @@ class TestAgentScope:
         )
 
         assert [m.content for m in final["messages"]] == [
-            "Reply to [Email_1] only.",
-            "Write to [Email_1] about [Person_1].",
+            "Reply to [Email-Agent-7f3a9c-1] only.",
+            "Write to [Email-Agent-7f3a9c-1] about [Person-Agent-7f3a9c-1].",
         ]
-        assert final["email"] == "[Email_1]"
+        assert final["email"] == "[Email-Agent-7f3a9c-1]"
         profile = final["profile"]
         assert _Profile.model_validate(profile).model_dump() == {
-            "name": "[Person_1]",
+            "name": "[Person-Agent-7f3a9c-1]",
             "age": 41,
         }
         assert final["inner_state"].masked_values == {
-            "[Email_1]": "jane@example.com",
-            "[Person_1]": "Jane Doe",
+            "[Email-Agent-7f3a9c-1]": "jane@example.com",
+            "[Person-Agent-7f3a9c-1]": "Jane Doe",
         }
         call = detector.calls[0]
         assert call["text"] == "Write to jane@example.com about Jane Doe."
@@ -440,8 +463,8 @@ class TestAgentScope:
             terminate_node=(
                 "terminate",
                 lambda _state: {
-                    "summary": "Wrote to [Email_1] about [Person_1].",
-                    "recipients": ["[Email_1]", "[Email_7]"],
+                    "summary": "Wrote to [Email-Agent-7f3a9c-1] about [Person-Agent-7f3a9c-1].",
+                    "recipients": ["[Email-Agent-7f3a9c-1]", "[Email-Agent-7f3a9c-7]"],
                 },
             ),
             guardrails=[(_pii_guardrail("Agent"), MaskAction())],
@@ -449,19 +472,20 @@ class TestAgentScope:
 
         result = await run(
             {
-                "messages": [HumanMessage("Write to [Email_1].")],
+                "messages": [HumanMessage("Write to [Email-Agent-7f3a9c-1].")],
                 "inner_state": {
                     "masked_values": {
-                        "[Email_1]": "jane@example.com",
-                        "[Person_1]": "Jane Doe",
-                    }
+                        "[Email-Agent-7f3a9c-1]": "jane@example.com",
+                        "[Person-Agent-7f3a9c-1]": "Jane Doe",
+                    },
+                    "mask_run_tag": _TAG,
                 },
             }
         )
 
         assert result == {
             "summary": "Wrote to jane@example.com about Jane Doe.",
-            "recipients": ["jane@example.com", "[Email_7]"],
+            "recipients": ["jane@example.com", "[Email-Agent-7f3a9c-7]"],
         }
         assert detector.calls == []
 

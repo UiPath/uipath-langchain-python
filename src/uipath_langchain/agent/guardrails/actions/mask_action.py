@@ -15,6 +15,7 @@ from uipath_langchain.agent.guardrails.masking import (
     map_content,
     map_strings,
     map_tool_content,
+    new_run_tag,
 )
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.utils import (
@@ -32,10 +33,11 @@ class MaskAction(GuardrailAction):
     """Action that masks the PII a guardrail finds in a call's input.
 
     Before an agent or tool call, each value the guardrail detected in the call's
-    input is replaced with a placeholder such as ``[Email_1]``. After the call the
-    guardrail is not evaluated: the placeholders in the call's output are replaced
-    with their values, after a tool call only those this guardrail wrote into that
-    call. ``inner_state.masked_values`` keeps the run's placeholders.
+    input is replaced with a placeholder such as ``[Email-Tool-7f3a9c-1]``. After
+    the call the guardrail is not evaluated: the placeholders in the call's output
+    are replaced with their values, after a tool call only those this guardrail
+    wrote into that call. ``inner_state.masked_values`` keeps the run's
+    placeholders, and ``inner_state.mask_run_tag`` the tag they carry.
     """
 
     @property
@@ -84,9 +86,15 @@ class MaskAction(GuardrailAction):
                     "so the input could not be masked.",
                 )
 
-            assigner = PlaceholderAssigner(state.inner_state.masked_values)
-            masker = Masker(values, assigner)
             inner_update: dict[str, Any] = {}
+            tag = state.inner_state.mask_run_tag
+            if tag is None:
+                tag = new_run_tag([repr(state)])
+                inner_update["mask_run_tag"] = tag
+            assigner = PlaceholderAssigner(
+                state.inner_state.masked_values, scope.name.title(), tag
+            )
+            masker = Masker(values, assigner)
             if scope == GuardrailScope.TOOL:
                 update, call_id = _mask_tool_call(state, guarded_component_name, masker)
                 if call_id is not None:

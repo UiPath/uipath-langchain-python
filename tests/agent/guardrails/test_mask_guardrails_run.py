@@ -20,6 +20,7 @@ from uipath.core.guardrails import (
 )
 from uipath.platform.guardrails import BuiltInValidatorGuardrail
 
+from uipath_langchain.agent.guardrails import masking
 from uipath_langchain.agent.guardrails.actions import MaskAction
 from uipath_langchain.agent.react.agent import create_agent
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -27,6 +28,9 @@ from uipath_langchain.agent.react.types import InnerAgentGraphState
 
 _EMAIL = "jane@example.com"
 _TOOL = "send_email"
+_TAG = "7f3a9c"
+_AGENT_EMAIL = f"[Email-Agent-{_TAG}-1]"
+_TOOL_EMAIL = f"[Email-Tool-{_TAG}-1]"
 
 _INPUT_SCHEMA = {
     "type": "object",
@@ -120,6 +124,11 @@ def _mask_guardrail(scope: str) -> BuiltInValidatorGuardrail:
     )
 
 
+@pytest.fixture(autouse=True)
+def _fixed_run_tag(monkeypatch):
+    monkeypatch.setattr(masking.secrets, "token_hex", lambda _n: _TAG)
+
+
 @pytest.fixture
 def detector(monkeypatch) -> _Detector:
     detector = _Detector()
@@ -133,7 +142,7 @@ def detector(monkeypatch) -> _Detector:
 def _agent(model: Any, scopes: list[str], received: list[dict[str, Any]]) -> Any:
     async def send_email(to: str, body: str) -> str:
         received.append({"to": to, "body": body})
-        return f"Sent to {to}."
+        return f"Sent to {to}: {body}"
 
     tool = StructuredTool.from_function(
         coroutine=send_email,
@@ -170,8 +179,8 @@ def _llm_inputs(model: Any) -> str:
 @pytest.mark.asyncio
 async def test_agent_scope_hides_the_values_from_the_llm_and_the_tools(detector):
     model = _scripted_model(
-        _call(_TOOL, {"to": "[Email_1]", "body": "Welcome!"}, "c1"),
-        _call("end_execution", {"summary": "Welcomed [Email_1]."}, "c2"),
+        _call(_TOOL, {"to": _AGENT_EMAIL, "body": "Welcome!"}, "c1"),
+        _call("end_execution", {"summary": f"Welcomed {_AGENT_EMAIL}."}, "c2"),
     )
     received: list[dict[str, Any]] = []
     graph = _agent(model, ["Agent"], received)
@@ -180,11 +189,12 @@ async def test_agent_scope_hides_the_values_from_the_llm_and_the_tools(detector)
     result = await graph.ainvoke({"email": _EMAIL}, config)
 
     assert result["summary"] == f"Welcomed {_EMAIL}."
-    assert received == [{"to": "[Email_1]", "body": "Welcome!"}]
+    assert received == [{"to": _AGENT_EMAIL, "body": "Welcome!"}]
     assert _EMAIL not in _llm_inputs(model)
     assert detector.texts == [f"Send a welcome note to {_EMAIL}."]
     snapshot = await graph.aget_state(config)
-    assert snapshot.values["inner_state"].masked_values == {"[Email_1]": _EMAIL}
+    assert snapshot.values["inner_state"].masked_values == {_AGENT_EMAIL: _EMAIL}
+    assert snapshot.values["inner_state"].mask_run_tag == _TAG
 
 
 @pytest.mark.asyncio
@@ -200,20 +210,20 @@ async def test_tool_scope_hides_the_values_from_the_tool_only(detector):
     result = await graph.ainvoke({"email": _EMAIL}, config)
 
     assert result["summary"] == "Done."
-    assert received == [{"to": "[Email_1]", "body": "Welcome!"}]
+    assert received == [{"to": _TOOL_EMAIL, "body": "Welcome!"}]
     snapshot = await graph.aget_state(config)
     messages = snapshot.values["messages"]
     tool_result = next(m for m in messages if isinstance(m, ToolMessage))
     # The LLM gets the tool's result with the value put back.
-    assert tool_result.content == f"Sent to {_EMAIL}."
-    assert snapshot.values["inner_state"].masked_values == {"[Email_1]": _EMAIL}
+    assert tool_result.content == f"Sent to {_EMAIL}: Welcome!"
+    assert snapshot.values["inner_state"].masked_values == {_TOOL_EMAIL: _EMAIL}
 
 
 @pytest.mark.asyncio
 async def test_a_tool_mask_never_hands_the_llm_an_agent_masked_value(detector):
     model = _scripted_model(
-        _call(_TOOL, {"to": "[Email_1]", "body": "Welcome!"}, "c1"),
-        _call("end_execution", {"summary": "Welcomed [Email_1]."}, "c2"),
+        _call(_TOOL, {"to": _AGENT_EMAIL, "body": "Welcome!"}, "c1"),
+        _call("end_execution", {"summary": f"Welcomed {_AGENT_EMAIL}."}, "c2"),
     )
     received: list[dict[str, Any]] = []
     graph = _agent(model, ["Agent", "Tool"], received)
@@ -222,14 +232,38 @@ async def test_a_tool_mask_never_hands_the_llm_an_agent_masked_value(detector):
     result = await graph.ainvoke({"email": _EMAIL}, config)
 
     assert result["summary"] == f"Welcomed {_EMAIL}."
-    assert received == [{"to": "[Email_1]", "body": "Welcome!"}]
+    assert received == [{"to": _AGENT_EMAIL, "body": "Welcome!"}]
     # The tool echoed the agent's placeholder; the tool's restore left it alone.
     assert _EMAIL not in _llm_inputs(model)
 
 
+@pytest.mark.asyncio
+async def test_a_child_agent_leaves_its_parents_placeholders_alone(detector):
+    # An agent called as a tool gets the placeholders its parent wrote, numbered
+    # from 1 like its own; only the run tag tells them apart.
+    parent_email = "[Email-Tool-1a2b3c-1]"
+    model = _scripted_model(
+        _call(_TOOL, {"to": _EMAIL, "body": f"cc {parent_email}"}, "c1"),
+        _call("end_execution", {"summary": "Done."}, "c2"),
+    )
+    received: list[dict[str, Any]] = []
+    graph = _agent(model, ["Tool"], received)
+    config = {"configurable": {"thread_id": "child-agent"}}
+
+    await graph.ainvoke({"email": parent_email}, config)
+
+    assert received == [{"to": _TOOL_EMAIL, "body": f"cc {parent_email}"}]
+    snapshot = await graph.aget_state(config)
+    tool_result = next(
+        m for m in snapshot.values["messages"] if isinstance(m, ToolMessage)
+    )
+    assert tool_result.content == f"Sent to {_EMAIL}: cc {parent_email}"
+
+
 def test_masked_values_round_trip_through_the_checkpoint_serializer(caplog):
     state = InnerAgentGraphState(
-        masked_values={"[Email_1]": _EMAIL, "[Person_1]": "José García"}
+        masked_values={_AGENT_EMAIL: _EMAIL, f"[Person-Agent-{_TAG}-1]": "José García"},
+        mask_run_tag=_TAG,
     )
     serde = JsonPlusSerializer()
 
