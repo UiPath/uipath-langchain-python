@@ -37,8 +37,8 @@ _EXECUTION_STAGES = {
 # A guardrail the agent defines always enforces its action.
 _MODE = "ENFORCE"
 
-# Action type -> the action applied on a violation. Log only records the
-# violation and lets the run go on.
+# Action type -> the action applied on a violation; a pass applies ALLOW. Log
+# only records the violation and lets the run go on.
 _ACTIONS_APPLIED: dict[str, str] = {
     "Block": "DENY",
     "Filter": "FILTER",
