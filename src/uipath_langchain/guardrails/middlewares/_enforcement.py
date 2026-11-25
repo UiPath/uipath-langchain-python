@@ -34,14 +34,16 @@ _EXECUTION_STAGES = {
     GuardrailExecutionStage.POST: "postExecution",
 }
 
-# Action type -> (action applied on a violation, mode). Log records the
-# violation and lets the run go on: an AUDIT in SIMULATE mode. Filter strips
-# what violated, a denial.
-_DECISIONS: dict[str, tuple[str, str]] = {
-    "Block": ("DENY", "ENFORCE"),
-    "Filter": ("DENY", "ENFORCE"),
-    "Log": ("AUDIT", "SIMULATE"),
-    "Escalate": ("HITL", "ENFORCE"),
+# A guardrail the agent defines always enforces its action.
+_MODE = "ENFORCE"
+
+# Action type -> the action applied on a violation. Log only records the
+# violation and lets the run go on.
+_ACTIONS_APPLIED: dict[str, str] = {
+    "Block": "DENY",
+    "Filter": "FILTER",
+    "Log": "AUDIT",
+    "Escalate": "HITL",
 }
 
 
@@ -55,7 +57,7 @@ def hook(
 def action_type(action: Any) -> str | None:
     """``BlockAction`` -> ``Block``; ``None`` for an action outside the contract."""
     name = type(action).__name__.removesuffix("Action")
-    return name if name in _DECISIONS else None
+    return name if name in _ACTIONS_APPLIED else None
 
 
 def container_attributes(
@@ -90,19 +92,22 @@ class EnforcementContext:
         return {"scope": self.scope, "execution_stage": stage, "action_type": kind}
 
     def attributes(self, result: GuardrailValidationResult) -> dict[str, Any]:
-        """The check's decision on ``result``; empty if the hook or action is unknown."""
+        """The check's decision on ``result``; empty if the hook or action is unknown.
+
+        ``evaluator_result`` says whether the check matched violating data and
+        ``action_applied`` is the action that ran.
+        """
         check_hook = hook(self.scope, self.stage)
         kind = action_type(self.action)
         if check_hook is None or kind is None:
             return {}
-        action_on_violation, mode = _DECISIONS[kind]
         if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
             # A check that could not evaluate fails closed: the action still runs.
-            evaluator_result = "ERROR" if result.error_type else "DENY"
-            action_applied = action_on_violation
+            evaluator_result = "ERROR" if result.error_type else "MATCHED"
+            action_applied = _ACTIONS_APPLIED[kind]
             evidence = result.reason or None
         else:
-            evaluator_result = action_applied = "ALLOW"
+            evaluator_result, action_applied = "NOT_MATCHED", "ALLOW"
             evidence = result.reason or f"{self.guardrail_name} passed"
         attributes = {
             "policy_id": "",
@@ -110,7 +115,7 @@ class EnforcementContext:
             "hook": check_hook,
             "evaluator_result": evaluator_result,
             "action_applied": action_applied,
-            "mode": mode,
+            "mode": _MODE,
             "version": VERSION,
             "evidence": evidence,
             "guardrail_type": self.guardrail_type,

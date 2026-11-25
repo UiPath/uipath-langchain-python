@@ -102,6 +102,10 @@ def test_each_stage_container_carries_its_version_and_hook(
     assert _grouping._STAGES[(scope, stage)].attributes == expected
 
 
+class FilterAction:
+    """Stands in for a filter action: only its type name is read."""
+
+
 class TestEnforcementContext:
     @staticmethod
     def _context(action: Any, **overrides: Any) -> EnforcementContext:
@@ -115,23 +119,24 @@ class TestEnforcementContext:
         return EnforcementContext(**(fields | overrides))
 
     @pytest.mark.parametrize(
-        ("action", "action_applied", "mode"),
+        ("action", "action_applied"),
         [
-            (BlockAction(), "DENY", "ENFORCE"),
-            (LogAction(), "AUDIT", "SIMULATE"),
-            (EscalateAction(app_name="app", app_folder_path="f"), "HITL", "ENFORCE"),
+            (BlockAction(), "DENY"),
+            (LogAction(), "AUDIT"),
+            (EscalateAction(app_name="app", app_folder_path="f"), "HITL"),
+            (FilterAction(), "FILTER"),
         ],
     )
     def test_a_violation_applies_the_action(
-        self, action: Any, action_applied: str, mode: str
+        self, action: Any, action_applied: str
     ) -> None:
         assert self._context(action).attributes(_FAILED) == {
             "uipath_governance.policy_id": "",
             "uipath_governance.policy_name": "",
             "uipath_governance.hook": "BEFORE_MODEL",
-            "uipath_governance.evaluator_result": "DENY",
+            "uipath_governance.evaluator_result": "MATCHED",
             "uipath_governance.action_applied": action_applied,
-            "uipath_governance.mode": mode,
+            "uipath_governance.mode": "ENFORCE",
             "uipath_governance.version": "1",
             "uipath_governance.evidence": "PII detected",
             "uipath_governance.guardrail_type": "pii_detection",
@@ -141,9 +146,9 @@ class TestEnforcementContext:
     def test_a_pass_allows_with_default_evidence(self) -> None:
         attributes = self._context(LogAction()).attributes(_PASSED)
 
-        assert attributes["uipath_governance.evaluator_result"] == "ALLOW"
+        assert attributes["uipath_governance.evaluator_result"] == "NOT_MATCHED"
         assert attributes["uipath_governance.action_applied"] == "ALLOW"
-        assert attributes["uipath_governance.mode"] == "SIMULATE"
+        assert attributes["uipath_governance.mode"] == "ENFORCE"
         assert attributes["uipath_governance.evidence"] == "PII Detection passed"
 
     def test_a_check_that_failed_closed_is_an_error(self) -> None:
@@ -261,7 +266,7 @@ class TestBuiltInChecks:
         [span] = _of_type(recorded_spans, "guardrailAction")
         decision = _contract(span)
         assert decision["hook"] == "BEFORE_MODEL"
-        assert decision["evaluator_result"] == "DENY"
+        assert decision["evaluator_result"] == "MATCHED"
         assert decision["action_applied"] == "AUDIT"
         assert decision["guardrail_type"] == "pii_detection"
 
@@ -291,9 +296,9 @@ class TestDeterministicChecks:
             "policy_id": "",
             "policy_name": "",
             "hook": "TOOL_CALL",
-            "evaluator_result": "DENY",
+            "evaluator_result": "MATCHED",
             "action_applied": "AUDIT",
-            "mode": "SIMULATE",
+            "mode": "ENFORCE",
             "version": "1",
             "evidence": "Rule 1 detected violation",
             "guardrail_type": "custom",
@@ -309,7 +314,7 @@ class TestDeterministicChecks:
 
         [evaluation] = _of_type(recorded_spans, "guardrailEvaluation")
         decision = _contract(evaluation)
-        assert decision["evaluator_result"] == "ALLOW"
+        assert decision["evaluator_result"] == "NOT_MATCHED"
         assert decision["action_applied"] == "ALLOW"
         assert decision["evidence"] == "Rules passed: Rule 1"
         assert _of_type(recorded_spans, "guardrailAction") == []
