@@ -110,10 +110,10 @@ class MaskAction(GuardrailAction):
                     "input, so it could not be masked.",
                 )
             _replace_contents(metadata["masked_entities"], masker.counts())
+            inner_update["guardrail_masked_entities"] = masker.counts()
             if assigner.added:
                 inner_update["masked_values"] = assigner.added
-            if inner_update:
-                update["inner_state"] = inner_update
+            update["inner_state"] = inner_update
             return update
 
         _node.__metadata__ = metadata  # type: ignore[attr-defined]

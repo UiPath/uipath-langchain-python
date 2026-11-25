@@ -49,6 +49,9 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     guardrail_flagged_file_names: Optional[list[str]] = None
     guardrail_attachments: Optional[list[dict[str, str]]] = None
     guardrail_detections: Optional[list[dict[str, Any]]] = None
+    # How many values of each category the last mask replaced (no values), for its
+    # action span: node metadata changed at run time never reaches the callbacks.
+    guardrail_masked_entities: Optional[dict[str, int]] = None
     # The placeholders each tool-scope mask wrote into a tool call's arguments, by
     # guardrail and call; only those are restored in that call's result.
     masked_tool_calls: Annotated[dict[str, list[str]], merge_dicts_dropping_none] = {}

@@ -340,6 +340,11 @@ class TestToolScope:
         assert final["inner_state"].masked_tool_calls == {
             f"{guardrail.id}:c1": ["[Email-Tool-7f3a9c-1]", "[Person-Tool-7f3a9c-1]"]
         }
+        # Counts for the action span, never the values.
+        assert final["inner_state"].guardrail_masked_entities == {
+            "Email": 1,
+            "Person": 1,
+        }
 
     @pytest.mark.asyncio
     async def test_the_output_is_restored_without_a_check(self, monkeypatch):
