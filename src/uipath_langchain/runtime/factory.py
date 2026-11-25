@@ -25,7 +25,10 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain_client import UIPATH_SKIP_CLIENT_LLM_SPANS_KEY
 
-from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain._tracing import (
+    UiPathTraceConfig,
+    _instrument_traceable_attributes,
+)
 from uipath_langchain.chat.chat_model_factory import _TraceContextHeadersCallback
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
@@ -66,7 +69,7 @@ class UiPathLangGraphRuntimeFactory:
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         _instrument_traceable_attributes()
-        LangChainInstrumentor().instrument()
+        LangChainInstrumentor().instrument(config=UiPathTraceConfig())
         UiPathSpanUtils.register_current_span_provider(get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 

@@ -164,6 +164,16 @@ def _flagged_file_names(
     return names or None
 
 
+def _detections(
+    guardrail_result: GuardrailValidationResult,
+) -> list[dict[str, Any]] | None:
+    """The findings behind a failed validation, as plain dicts."""
+    detections = getattr(guardrail_result, "detections", None)
+    if not isinstance(detections, list):
+        return None
+    return [detection.model_dump() for detection in detections]
+
+
 def _create_validation_command(
     guardrail_result: GuardrailValidationResult,
     success_node: str,
@@ -173,9 +183,9 @@ def _create_validation_command(
     """Create command based on validation result.
 
     ``guardrail_flagged_file_names``, ``guardrail_attachments`` (the files sent, as
-    plain dicts so the checkpoint stays msgpack-safe) and
-    ``guardrail_validation_error_type`` are written on every outcome so that a value
-    from an earlier guardrail never survives the inner-state merge.
+    plain dicts so the checkpoint stays msgpack-safe), ``guardrail_detections`` (also
+    plain dicts) and ``guardrail_validation_error_type`` are written on every outcome
+    so that a value from an earlier guardrail never survives the inner-state merge.
 
     Args:
         guardrail_result: The guardrail evaluation result.
@@ -200,6 +210,7 @@ def _create_validation_command(
             "guardrail_validation_error_type": None,
             "guardrail_flagged_file_names": flagged_file_names,
             "guardrail_attachments": sent_attachments,
+            "guardrail_detections": None,
         }
         if span_id:
             inner_state["guardrail_span_id"] = span_id
@@ -227,6 +238,7 @@ def _create_validation_command(
             ),
             "guardrail_flagged_file_names": flagged_file_names,
             "guardrail_attachments": sent_attachments,
+            "guardrail_detections": _detections(guardrail_result),
         }
         if span_id:
             inner_state["guardrail_span_id"] = span_id
@@ -293,6 +305,7 @@ def _create_guardrail_node(
     termination_mode: GuardrailTerminationMode | None = None,
     attachment_source: AttachmentSource | None = None,
     enforcement_context: GuardrailEnforcementContext | None = None,
+    text_only: bool = False,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
@@ -301,8 +314,9 @@ def _create_guardrail_node(
     - goto failure_node on validation fail
 
     ``attachment_source`` picks the files a built-in guardrail inspects; see
-    :func:`_resolve_attachments`. ``enforcement_context`` is sent with a built-in
-    check for the service's evaluation span.
+    :func:`_resolve_attachments`. A ``text_only`` check sends none.
+    ``enforcement_context`` is sent with a built-in check for the service's
+    evaluation span.
     """
     raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}"
     node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
@@ -352,9 +366,10 @@ def _create_guardrail_node(
                 else:
                     metadata["payload"]["output"] = payload
 
-                attachments = await _resolve_attachments(
-                    state, guardrail, attachment_source
-                )
+                if not text_only:
+                    attachments = await _resolve_attachments(
+                        state, guardrail, attachment_source
+                    )
 
                 result, attachments = await _evaluate_builtin_guardrail(
                     guardrail,
@@ -408,6 +423,7 @@ def create_llm_guardrail_node(
     *,
     termination_mode: GuardrailTerminationMode | None = None,
     enforcement_context: GuardrailEnforcementContext | None = None,
+    text_only: bool = False,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -437,6 +453,7 @@ def create_llm_guardrail_node(
             else None
         ),
         enforcement_context=enforcement_context,
+        text_only=text_only,
     )
 
 
@@ -448,6 +465,7 @@ def create_agent_init_guardrail_node(
     *,
     termination_mode: GuardrailTerminationMode | None = None,
     enforcement_context: GuardrailEnforcementContext | None = None,
+    text_only: bool = False,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -463,6 +481,7 @@ def create_agent_init_guardrail_node(
         failure_node,
         termination_mode=termination_mode,
         enforcement_context=enforcement_context,
+        text_only=text_only,
     )
 
 
@@ -474,6 +493,7 @@ def create_agent_terminate_guardrail_node(
     *,
     termination_mode: GuardrailTerminationMode | None = None,
     enforcement_context: GuardrailEnforcementContext | None = None,
+    text_only: bool = False,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         return str(state.inner_state.agent_result)
@@ -491,6 +511,7 @@ def create_agent_terminate_guardrail_node(
         termination_mode=termination_mode,
         attachment_source=_agent_result,
         enforcement_context=enforcement_context,
+        text_only=text_only,
     )
 
 
@@ -503,6 +524,7 @@ def create_tool_guardrail_node(
     tool_type: str | None = None,
     termination_mode: GuardrailTerminationMode | None = None,
     enforcement_context: GuardrailEnforcementContext | None = None,
+    text_only: bool = False,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Create a guardrail node for TOOL scope guardrails.
 
@@ -515,6 +537,8 @@ def create_tool_guardrail_node(
         tool_type: Optional type of the tool (e.g., "process", "escalation", "mcp").
         termination_mode: When the guardrail service may stop scanning.
         enforcement_context: What a built-in check guards, when, and its action.
+        text_only: Send no files, and keep the arguments' non-ASCII characters
+            unescaped in the payload.
 
     Returns:
         A tuple of (node_name, node_function) for the guardrail evaluation node.
@@ -536,7 +560,7 @@ def create_tool_guardrail_node(
             return ""
 
         if execution_stage == ExecutionStage.PRE_EXECUTION:
-            return json.dumps(_current_call_args(state))
+            return json.dumps(_current_call_args(state), ensure_ascii=not text_only)
 
         return get_message_content(state.messages[-1])
 
@@ -572,4 +596,5 @@ def create_tool_guardrail_node(
             else _tool_result
         ),
         enforcement_context=enforcement_context,
+        text_only=text_only,
     )

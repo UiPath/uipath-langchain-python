@@ -52,6 +52,7 @@ from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
 from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAction
 from uipath_langchain.agent.guardrails.actions.filter_action import FilterAction
 from uipath_langchain.agent.guardrails.actions.log_action import LogAction
+from uipath_langchain.agent.guardrails.actions.mask_action import MaskAction
 from uipath_langchain.agent.guardrails.guardrails_factory import (
     _build_rule_description,
     _convert_agent_custom_guardrail_to_deterministic,
@@ -524,6 +525,116 @@ class TestGuardrailsFactory:
         # Check log action
         assert isinstance(result[2][1], LogAction)
         assert result[2][1].message == "logged"
+
+
+def _mask_guardrail(
+    validator_type: str, scopes: list[str], detection_scope: str | None = None
+) -> AgentGuardrailModel:
+    selector: dict[str, object] = {"scopes": scopes}
+    if "Tool" in scopes:
+        selector["matchNames"] = ["Send Email"]
+    parameters = (
+        [{"$parameterType": "enum", "id": "detectionScope", "value": detection_scope}]
+        if detection_scope is not None
+        else []
+    )
+    return AgentBuiltInValidatorGuardrail.model_validate(
+        {
+            "$guardrailType": "builtInValidator",
+            "id": "mask",
+            "name": "Mask PII",
+            "description": "Masks PII",
+            "enabledForEvals": True,
+            "validatorType": validator_type,
+            "validatorParameters": parameters,
+            "selector": selector,
+            "action": {"$actionType": "mask"},
+        }
+    )
+
+
+class TestMaskGuardrails:
+    @pytest.mark.parametrize("scopes", [["Tool"], ["Agent"], ["Agent", "Tool"]])
+    def test_mask_action_is_mapped_for_pii_detection(self, scopes) -> None:
+        guardrail = _mask_guardrail("pii_detection", scopes)
+
+        result = build_guardrails_with_actions([guardrail], [])
+
+        assert len(result) == 1
+        gr, action = result[0]
+        assert gr is guardrail
+        assert isinstance(action, MaskAction)
+        if "Tool" in scopes:
+            assert gr.selector is not None
+            assert gr.selector.match_names == ["Send_Email"]
+
+    @pytest.mark.parametrize("scopes", [["Llm"], ["Agent", "Llm"]])
+    def test_mask_action_outside_agent_and_tool_scope_is_rejected(self, scopes) -> None:
+        with pytest.raises(AgentStartupError) as exc_info:
+            build_guardrails_with_actions(
+                [_mask_guardrail("pii_detection", scopes)], []
+            )
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
+        assert "['LLM']" in exc_info.value.error_info.detail
+
+    @pytest.mark.parametrize(
+        "validator_type", ["prompt_injection", "harmful_content", "byo"]
+    )
+    def test_mask_action_on_another_validator_is_rejected(self, validator_type) -> None:
+        with pytest.raises(AgentStartupError) as exc_info:
+            build_guardrails_with_actions(
+                [_mask_guardrail(validator_type, ["Tool"])], []
+            )
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
+        assert "only PII detection guardrails" in exc_info.value.error_info.detail
+
+    @pytest.mark.parametrize("detection_scope", [None, "Text", "text"])
+    def test_mask_action_checking_text_is_mapped(self, detection_scope) -> None:
+        guardrail = _mask_guardrail("pii_detection", ["Tool"], detection_scope)
+
+        result = build_guardrails_with_actions([guardrail], [])
+
+        assert isinstance(result[0][1], MaskAction)
+
+    @pytest.mark.parametrize("detection_scope", ["Files", "Both", "both"])
+    def test_mask_action_checking_files_is_rejected(self, detection_scope) -> None:
+        with pytest.raises(AgentStartupError) as exc_info:
+            build_guardrails_with_actions(
+                [_mask_guardrail("pii_detection", ["Tool"], detection_scope)], []
+            )
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
+        assert "detection scope to Text" in exc_info.value.error_info.detail
+
+    def test_mask_action_on_a_custom_guardrail_is_rejected(self) -> None:
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "custom-mask",
+                "name": "custom-mask",
+                "description": "Custom guardrail with a mask action",
+                "enabledForEvals": True,
+                "selector": {"scopes": ["Tool"], "matchNames": ["Send Email"]},
+                "rules": [{"$ruleType": "always", "applyTo": "input"}],
+                "action": {"$actionType": "mask"},
+            }
+        )
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            build_guardrails_with_actions([guardrail], [])
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
+        assert "only PII detection guardrails" in exc_info.value.error_info.detail
 
 
 class TestCreateWordRuleFunc:

@@ -13,7 +13,9 @@ from uipath.platform.attachments import Attachment
 from uipath.platform.memory import FieldMatching, SearchMode
 
 from uipath_langchain.agent.react.reducers import (
+    keep_first,
     merge_dicts,
+    merge_dicts_dropping_none,
     merge_objects,
 )
 
@@ -31,6 +33,10 @@ class InnerAgentGraphState(BaseModel):
     memory_injection: str = ""
     conversational_output: dict[str, Any] | None = None
     output_file_retries: int = 0
+    # Placeholder -> original value, for every value a mask guardrail replaced.
+    masked_values: Annotated[dict[str, str], merge_dicts] = {}
+    # The tag in this run's placeholders, set by the first mask and kept after it.
+    mask_run_tag: Annotated[str | None, keep_first] = None
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
@@ -42,6 +48,13 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     guardrail_span_id: Optional[str] = None
     guardrail_flagged_file_names: Optional[list[str]] = None
     guardrail_attachments: Optional[list[dict[str, str]]] = None
+    guardrail_detections: Optional[list[dict[str, Any]]] = None
+    # How many values of each category the last mask replaced (no values), for its
+    # action span: node metadata changed at run time never reaches the callbacks.
+    guardrail_masked_entities: Optional[dict[str, int]] = None
+    # The placeholders each tool-scope mask wrote into a tool call's arguments, by
+    # guardrail and call; only those are restored in that call's result.
+    masked_tool_calls: Annotated[dict[str, list[str]], merge_dicts_dropping_none] = {}
     escalation_files_listed: Optional[bool] = None
     agent_result: Optional[dict[str, Any]] = None
     hitl_task_info: Optional[Any] = {}

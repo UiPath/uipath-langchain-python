@@ -68,7 +68,7 @@ class TestToolGuardrailsSubgraph:
 
         result = mod.create_tool_guardrails_subgraph(
             tool_node=inner,
-            guardrails=[(guardrail, MagicMock())],
+            guardrails=[(guardrail, fake_action("action"))],
             display_name="add",
         )
 
@@ -84,7 +84,7 @@ class TestToolGuardrailsSubgraph:
 
         result = mod.create_tool_guardrails_subgraph(
             tool_node=inner,
-            guardrails=[(guardrail, MagicMock())],
+            guardrails=[(guardrail, fake_action("action"))],
             display_name="Search Tool!",
         )
 

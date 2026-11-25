@@ -155,6 +155,7 @@ class TestEnforcementContextForwarding:
             *,
             termination_mode=None,
             enforcement_context=None,
+            text_only=False,
         ):
             seen[guardrail.name] = enforcement_context
             return f"eval_{guardrail.name}", (lambda s: s)

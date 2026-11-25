@@ -35,6 +35,19 @@ def merge_dicts(left: dict[K, Any], right: dict[K, Any]) -> dict[K, Any]:
     return {**left, **right}
 
 
+def merge_dicts_dropping_none(left: dict[K, Any], right: dict[K, Any]) -> dict[K, Any]:
+    """Like ``merge_dicts``, except that a ``None`` value in ``right`` removes its key."""
+    if not right:
+        return left
+    merged = {**(left or {}), **right}
+    return {key: value for key, value in merged.items() if value is not None}
+
+
+def keep_first(left: Any, right: Any) -> Any:
+    """Keep a value once it is set; a later update never replaces it."""
+    return right if left is None else left
+
+
 def merge_objects(left: Any, right: Any) -> Any:
     """Merge a Pydantic model with another model or dict, with right values taking precedence.
 

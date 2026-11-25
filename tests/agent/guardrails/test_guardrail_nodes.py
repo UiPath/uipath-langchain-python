@@ -132,6 +132,7 @@ class TestLlmGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -174,6 +175,7 @@ class TestLlmGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -221,6 +223,7 @@ class TestAgentInitGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
         assert fake.guardrails.last_text == "payload"
@@ -267,6 +270,7 @@ class TestAgentInitGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -318,6 +322,7 @@ class TestAgentTerminateGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
         assert fake.guardrails.last_text == str(agent_result)
@@ -367,6 +372,7 @@ class TestAgentTerminateGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -423,6 +429,7 @@ class TestToolGuardrailNodes:
                     "guardrail_validation_error_type": None,
                     "guardrail_flagged_file_names": None,
                     "guardrail_attachments": None,
+                    "guardrail_detections": None,
                 }
             }
             assert json.loads(fake.guardrails.last_text or "{}") == {"x": 1}
@@ -439,6 +446,7 @@ class TestToolGuardrailNodes:
                     "guardrail_validation_error_type": None,
                     "guardrail_flagged_file_names": None,
                     "guardrail_attachments": None,
+                    "guardrail_detections": None,
                 }
             }
             assert fake.guardrails.last_text == "tool output"
@@ -501,6 +509,7 @@ class TestToolGuardrailNodes:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -655,6 +664,7 @@ class TestGuardrailHelperFunctions:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -678,6 +688,7 @@ class TestGuardrailHelperFunctions:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -715,6 +726,7 @@ class TestGuardrailHelperFunctions:
                 "guardrail_validation_error_type": error_type.value,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
             }
         }
 
@@ -739,6 +751,7 @@ class TestGuardrailHelperFunctions:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
                 "guardrail_span_id": "span-123",
             }
         }
@@ -764,6 +777,7 @@ class TestGuardrailHelperFunctions:
                 "guardrail_validation_error_type": None,
                 "guardrail_flagged_file_names": None,
                 "guardrail_attachments": None,
+                "guardrail_detections": None,
                 "guardrail_span_id": "span-456",
             }
         }
@@ -2462,6 +2476,62 @@ class TestGuardrailAttachmentsState:
         assert not [r for r in caplog.records if "GuardrailAttachment" in str(r.args)]
 
 
+class TestGuardrailDetectionsInState:
+    """A failed check leaves its detections in the inner state, as plain dicts, for
+    the action node; every other outcome clears them."""
+
+    def _result(
+        self, result: GuardrailValidationResultType
+    ) -> GuardrailValidationResult:
+        from uipath.core.guardrails import GuardrailDetection
+
+        return GuardrailValidationResult(
+            result=result,
+            reason="r",
+            detections=[
+                GuardrailDetection(category="Email", text="a@b.co", offset=3, length=6)
+            ],
+        )
+
+    def test_a_violation_keeps_its_detections(self):
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        cmd = _create_validation_command(
+            self._result(GuardrailValidationResultType.VALIDATION_FAILED), "ok", "nope"
+        )
+
+        assert cmd.update is not None
+        assert cmd.update["inner_state"]["guardrail_detections"] == [
+            {
+                "category": "Email",
+                "text": "a@b.co",
+                "offset": 3,
+                "length": 6,
+                "confidence_score": None,
+            }
+        ]
+
+    def test_a_pass_clears_the_detections_of_an_earlier_guardrail(self):
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+        from uipath_langchain.agent.react.reducers import merge_objects
+
+        stale = InnerAgentGuardrailsGraphState(
+            guardrail_detections=[{"category": "Email", "text": "old@b.co"}]
+        )
+        cmd = _create_validation_command(
+            self._result(GuardrailValidationResultType.PASSED), "ok", "nope"
+        )
+
+        assert cmd.update is not None
+        assert (
+            merge_objects(stale, cmd.update["inner_state"]).guardrail_detections is None
+        )
+
+
 class TestGuardrailTerminationModeForwarding:
     """Each action's termination mode reaches the validate call, so the service stops
     scanning at the first violation for Block and Log and scans everything otherwise."""
@@ -2592,6 +2662,7 @@ class TestGuardrailTerminationModeForwarding:
             *,
             termination_mode=None,
             enforcement_context=None,
+            text_only=False,
         ):
             seen.append((guardrail.name, termination_mode))
             return f"eval_{guardrail.name}", (lambda s: s)
