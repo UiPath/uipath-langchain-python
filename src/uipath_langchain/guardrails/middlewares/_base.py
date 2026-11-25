@@ -58,6 +58,11 @@ from ._attachments import (
     registry_references,
     tool_result_references,
 )
+from ._grouping import (
+    guardrail_stage,
+    guardrails_in_use,
+    register_guardrail_node,
+)
 from ._spans import guardrail_action_span
 from ._utils import (
     convert_block_exception,
@@ -425,16 +430,17 @@ class BuiltInGuardrailMiddlewareMixin:
                 tool_args=input_data,
             )
             try:
-                result = await asyncio.to_thread(
-                    self._evaluate_guardrail, input_data, attachments
-                )
-                modified_input = self._handle_validation_result(
-                    result,
-                    input_data,
-                    scope=GuardrailScope.TOOL,
-                    stage=GuardrailExecutionStage.PRE,
-                    component=tool_name,
-                )
+                with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
+                    result = await asyncio.to_thread(
+                        self._evaluate_guardrail, input_data, attachments
+                    )
+                    modified_input = self._handle_validation_result(
+                        result,
+                        input_data,
+                        scope=GuardrailScope.TOOL,
+                        stage=GuardrailExecutionStage.PRE,
+                        component=tool_name,
+                    )
                 if modified_input is not None:
                     request = create_modified_tool_request(request, modified_input)
             except GuardrailBlockException as exc:
@@ -466,19 +472,22 @@ class BuiltInGuardrailMiddlewareMixin:
                     tool_result=output_data,
                 )
                 try:
-                    result = await asyncio.to_thread(
-                        self._evaluate_guardrail, output_data, attachments
-                    )
-                    modified_output = self._handle_validation_result(
-                        result,
-                        output_data,
-                        scope=GuardrailScope.TOOL,
-                        stage=GuardrailExecutionStage.POST,
-                        component=tool_name,
-                        input_payload=json.dumps(
-                            self._extract_tool_input_data(request)
-                        ),
-                    )
+                    with guardrail_stage(
+                        GuardrailScope.TOOL, GuardrailExecutionStage.POST
+                    ):
+                        result = await asyncio.to_thread(
+                            self._evaluate_guardrail, output_data, attachments
+                        )
+                        modified_output = self._handle_validation_result(
+                            result,
+                            output_data,
+                            scope=GuardrailScope.TOOL,
+                            stage=GuardrailExecutionStage.POST,
+                            component=tool_name,
+                            input_payload=json.dumps(
+                                self._extract_tool_input_data(request)
+                            ),
+                        )
                     if modified_output is not None:
                         tool_result = create_modified_tool_result(
                             tool_result, modified_output
@@ -501,6 +510,7 @@ class BuiltInGuardrailMiddlewareMixin:
 
     def _create_tool_wrap_hook(self, guardrail_name: str) -> AgentMiddleware:
         """Create a wrap_tool_call hook that delegates to _run_tool_guardrail."""
+        guardrails_in_use()
         middleware_instance = self
 
         async def _wrap_tool_call_func(
@@ -556,6 +566,11 @@ class BuiltInGuardrailMiddlewareMixin:
                     )
 
                 _before_agent_func.__name__ = f"{guardrail_name}_before_agent"
+                register_guardrail_node(
+                    f"{_before_agent_func.__name__}.before_agent",
+                    GuardrailScope.AGENT,
+                    GuardrailExecutionStage.PRE,
+                )
                 hooks.append(before_agent(_before_agent_func))
 
             if include_post:
@@ -584,6 +599,11 @@ class BuiltInGuardrailMiddlewareMixin:
                         )
 
                 _after_agent_func.__name__ = f"{guardrail_name}_after_agent"
+                register_guardrail_node(
+                    f"{_after_agent_func.__name__}.after_agent",
+                    GuardrailScope.AGENT,
+                    GuardrailExecutionStage.POST,
+                )
                 hooks.append(after_agent(_after_agent_func))
 
         elif scope == GuardrailScope.LLM:
@@ -605,6 +625,11 @@ class BuiltInGuardrailMiddlewareMixin:
                     )
 
                 _before_model_func.__name__ = f"{guardrail_name}_before_model"
+                register_guardrail_node(
+                    f"{_before_model_func.__name__}.before_model",
+                    GuardrailScope.LLM,
+                    GuardrailExecutionStage.PRE,
+                )
                 hooks.append(before_model(_before_model_func))
 
             if include_post:
@@ -628,6 +653,11 @@ class BuiltInGuardrailMiddlewareMixin:
                         )
 
                 _after_model_func.__name__ = f"{guardrail_name}_after_model"
+                register_guardrail_node(
+                    f"{_after_model_func.__name__}.after_model",
+                    GuardrailScope.LLM,
+                    GuardrailExecutionStage.POST,
+                )
                 hooks.append(after_model(_after_model_func))
 
         return hooks
@@ -665,15 +695,16 @@ class BuiltInGuardrailMiddlewareMixin:
         payload = text or NO_TEXT_PLACEHOLDER
 
         try:
-            result = self._evaluate_guardrail(payload, attachments)
-            modified_text = self._handle_validation_result(
-                result,
-                payload,
-                scope=scope,
-                stage=stage,
-                component=component_label(scope),
-                input_payload=json.dumps(input_text) if input_text else None,
-            )
+            with guardrail_stage(scope, stage):
+                result = self._evaluate_guardrail(payload, attachments)
+                modified_text = self._handle_validation_result(
+                    result,
+                    payload,
+                    scope=scope,
+                    stage=stage,
+                    component=component_label(scope),
+                    input_payload=json.dumps(input_text) if input_text else None,
+                )
             if text:
                 _apply_text_modification(messages, text, modified_text)
         except GuardrailBlockException as exc:
