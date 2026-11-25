@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from enum import Enum
 from typing import Any, Literal
 
@@ -199,6 +200,10 @@ def _get_exported_trace_id(trace_id: str | None) -> str | None:
     return trace_id
 
 
+# The SDK reports a missing Action Center app as a bare Exception, so match on its text.
+_APP_NOT_FOUND_PATTERN = re.compile(r"^App '.*' was not found in ")
+
+
 def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
     return (
         channel.properties.app_name
@@ -361,14 +366,30 @@ def create_escalation_tool(
             @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
-                created_task = await create_task_for_channel(
-                    client,
-                    channel,
-                    title=task_title,
-                    data=serialized_data,
-                    recipient=recipient,
-                    folder_path=folder_path,
-                )
+                try:
+                    created_task = await create_task_for_channel(
+                        client,
+                        channel,
+                        title=task_title,
+                        data=serialized_data,
+                        recipient=recipient,
+                        folder_path=folder_path,
+                    )
+                except Exception as e:
+                    if not _APP_NOT_FOUND_PATTERN.match(str(e)):
+                        raise
+                    app_name = _try_get_channel_app_name(channel)
+                    raise AgentRuntimeError(
+                        code=AgentRuntimeErrorCode.ESCALATION_APP_NOT_FOUND,
+                        title=f"Action Center app '{app_name}' was not found",
+                        detail=(
+                            f"{e}. Escalation '{resource.name}' creates its task "
+                            "with this Action Center app. Deploy the app to that "
+                            "folder or select an existing app in the escalation's "
+                            "settings."
+                        ),
+                        category=UiPathErrorCategory.DEPLOYMENT,
+                    ) from e
 
                 if created_task.id is not None:
                     _bts_context["task_key"] = str(created_task.id)
