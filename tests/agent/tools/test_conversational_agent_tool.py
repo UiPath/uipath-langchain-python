@@ -26,7 +26,7 @@ from a2a.types import (
     TaskState,
     TaskStatus,
 )
-from a2a.utils.errors import InvalidRequestError, TaskNotFoundError
+from a2a.utils.errors import A2AError, InvalidRequestError, TaskNotFoundError
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -445,6 +445,7 @@ def test_conversational_config_creates_tool_from_resource_labels() -> None:
         "display_name": "Support Agent",
         "resource_name": "Support Agent",
         "process_name": "My Conversational Agent",
+        "suspends_run": True,
     }
     assert not hasattr(resource, "slug")
     assert isinstance(clients[0], ConversationalAgentA2aClient)
@@ -1518,11 +1519,13 @@ async def test_open_conversational_agent_tools_disposes_the_clients(
 
 
 async def test_send_message_raises_request_errors() -> None:
-    """The helper does not swallow errors; the caller maps them."""
-    with pytest.raises(RuntimeError, match="boom"):
+    """The helper does not swallow errors; the caller maps them.
+
+    Errors come back as a2a errors so a replayed run raises the same type.
+    """
+    with pytest.raises(A2AError, match="boom"):
         await _send_message(
             cast(Client, _RaisingA2aClient()),
-            "support-agent",
             message="ping",
             task_id=None,
             context_id=None,
@@ -1534,7 +1537,6 @@ async def test_send_message_reports_a_plain_reply_as_input_required() -> None:
 
     result = await _send_message(
         cast(Client, client),
-        "support-agent",
         message="ping",
         task_id=None,
         context_id=None,
@@ -1550,7 +1552,6 @@ async def test_send_message_returns_the_state_and_ids_of_a_task_reply() -> None:
 
     result = await _send_message(
         cast(Client, client),
-        "support-agent",
         message="ping",
         task_id="t0",
         context_id="c1",

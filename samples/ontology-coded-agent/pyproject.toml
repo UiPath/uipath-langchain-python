@@ -1,0 +1,14 @@
+[project]
+name = "ontology-coded-agent"
+version = "0.0.1"
+description = "Coded agent that queries a UiPath ontology"
+authors = [{ name = "UiPath" }]
+dependencies = [
+    "uipath-langchain>=0.20.14",
+]
+requires-python = ">=3.11"
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]

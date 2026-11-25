@@ -242,6 +242,22 @@ def test_unclassified_4xx_remains_unknown(status_code: int):
     assert info.title == f"LLM provider returned HTTP {status_code}"
 
 
+def test_429_tells_the_user_what_to_do_instead_of_the_reason_phrase():
+    """ "Too Many Requests" alone gave the customer nothing to act on (MST-18432)."""
+    info = _raise(_api_error_text(429, "Too Many Requests")).error_info
+
+    assert info.status == 429
+    assert info.title == "LLM provider returned HTTP 429"
+    assert "refused as too many requests" in info.detail
+    assert "run fewer agents in parallel" in info.detail
+
+
+def test_429_prefers_the_gateway_detail_over_the_canned_text():
+    err = _api_error(429, {"status": 429, "detail": "Tenant quota exceeded."})
+
+    assert "Tenant quota exceeded." in _raise(err).error_info.detail
+
+
 # --------------------------------------------------------------------------
 # 400: User, with a canned detail instead of the reason phrase
 # --------------------------------------------------------------------------

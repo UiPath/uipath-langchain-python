@@ -23,6 +23,7 @@ streamable HTTP transport and provides a factory pattern for session ID tracking
 src/uipath_langchain/agent/tools/mcp/
 ├── __init__.py            # Public exports
 ├── mcp_client.py          # SessionInfoFactory, McpClient
+├── mcp_tasks.py           # MCP Tasks extension: claim + poll loop
 ├── mcp_tool.py            # Tool factory functions
 ├── protocol_strategy.py   # Per-era negotiation/recovery policy
 ├── session_tools.py       # MCP session -> LangChain tool conversion
@@ -307,6 +308,144 @@ session, and the handshake resumes it (or replaces it when the server rejects it
 modern request is self-contained, so any instance must be able to answer any
 request. Instance-local state is valid as a warm cache only; a server whose
 instances hold state no peer can rebuild should stay on `protocol_mode="legacy"`.
+
+---
+
+### mcp_tasks.py — The Tasks Extension (`io.modelcontextprotocol/tasks`)
+
+A `tools/call` the server answers with `resultType: "task"` is polled to
+completion inside `McpClient.call_tool`, so the caller always receives the
+final `CallToolResult` and agent definitions never see task semantics.
+
+It is built on the SDK's **extension/claim** seam rather than a hand-rolled
+branch in the tool layer:
+
+| Piece | Role |
+|-------|------|
+| `McpTasksExtension` | `ClientExtension` declaring the identifier and its one claim; also usable directly with the high-level `Client(extensions=[...])` |
+| `McpTaskHandle` | The claimed `resultType: "task"` shape (flat, per ext-tasks) |
+| `McpTaskSnapshot` | One `tasks/get` answer; `result`/`error` appear on terminal states |
+| `_resolve_task` | The claim resolver: the poll loop |
+| `session_extension_kwargs()` | Translates the extension into the two mappings `ClientSession` takes |
+| `resolve_claimed_result()` | Finishes a claimed result; passes an ordinary one through |
+
+**Why two seams instead of one.** The high-level `mcp.Client` resolves claims
+for you; `McpClient` drives the low-level `ClientSession`, which *parses* a
+claimed shape but raises `UnexpectedClaimedResult` unless the caller opts in.
+So `call_tool` passes `allow_claimed=True` and calls `resolve_claimed_result`,
+which mirrors what `Client.call_tool` does — including re-validating the output
+schema on a non-`isError` result. Do not drop that revalidation: it is the only
+thing keeping the claimed path's contract identical to the direct one.
+
+**An ordinary result never touches the session again.** `call_tool` returns a
+plain `CallToolResult` straight out of the retry, before `_ensure_session()`.
+Reaching for a session first would let a call that already succeeded fail on a
+concurrent session drop, for a session it has no further use for.
+
+**Resolution must not re-run `tools/call`.** `resolve_claimed_result(...)`
+runs *outside* `_execute_with_retry`. A task handle means the server already
+accepted the work and a job is running, so a failure while polling must
+propagate; recovery for polling belongs inside the poll loop, which keeps the
+task id and the original deadline. With both in the retried closure, one
+recoverable poll error re-ran `tools/call` and launched a **second job** for one
+tool call, on a restarted poll budget.
+
+Submission itself still goes through that retry, unchanged from before Tasks.
+Worth knowing what it assumes: a session the server *rejected* proves the call
+never ran, but a dropped transport proves only that the connection died — it may
+have died after the server started the job, and then the resend runs the tool
+twice. That is true of every tool call, not just task-shaped ones, and
+`test_dropped_connection_resumes_the_persisted_session` pins the current
+behavior deliberately, so narrowing it is its own change with its own
+discussion.
+
+**The era gate is free.** The SDK activates a claim (and advertises the
+extension that owns it) only on protocol versions that can carry claimed
+shapes. A legacy-era connection therefore neither advertises
+`io.modelcontextprotocol/tasks` nor can receive a task — no version check is
+written anywhere in this module, and
+`test_a_legacy_connection_never_advertises_the_extension` pins it.
+
+**Wire-shape caveat.** The models here mirror ext-tasks
+(`ttlMs`/`pollIntervalMs`), *not* the SDK's built-in `mcp.types.Task`, which
+still carries the superseded SEP-1686 names (`ttl`/`pollInterval`). Validating
+our wire against `mcp.types.Task` fails on the missing `ttl`. The SDK's
+`GetTaskRequest`/`GetTaskRequestParams` *are* reused — only the result models
+are local.
+
+**Rollout.** On by default, with two toggles on the SDK's shared
+`uipath.core.feature_flags.FeatureFlags` registry — settable programmatically
+by a host or injected as `UIPATH_FEATURE_<name>`:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `DisableMcpTasksPolling` | `false` | Kill switch; `true` restores the pre-Tasks behavior exactly |
+| `McpTasksPollBudgetSeconds` | `840` | Bounds one call's polling, inside the host's execution window |
+
+The kill switch is phrased negatively to match the package's others
+(`DisableBatchTransformFromAttachment`, `DisableDeepRagFromAttachments`), so
+`tasks_polling_enabled()` negates it.
+
+`DisableMcpTasksPolling` is an **emergency opt-out, not a rollout gate** — a
+deployed runtime image carries a fixed package version, so there is no
+per-deployment rollback here. Whether tasks happen at all is the server's call:
+a server that does not advertise the extension can never answer with one. The
+budget exists because a tool that used to fail fast on an HTTP timeout must not
+silently consume the agent's whole run; on exhaustion the call raises
+`MCPError(REQUEST_TIMEOUT)` and the task keeps running server-side. The budget
+bounds **one call, not the run** — a run that starts its first task late, or
+makes several task-shaped calls, can still reach the host's execution window,
+and the host ends it there.
+
+**Every failure out of the resolver is an `MCPError`.** `mcp_tool.tool_fn`
+catches exactly that type and turns it into a categorized `AgentRuntimeError`;
+anything else — a bare `TimeoutError`, a pydantic `ValidationError` from a
+`completed` task carrying no usable result — walks straight past it and leaves
+the tool as an uncategorized exception. That is why budget exhaustion is
+`MCPError(REQUEST_TIMEOUT)` rather than `TimeoutError`, and why
+`_completed_result` converts a validation failure.
+
+**Cancellation is never sent.** Not on budget exhaustion, and not when the run
+itself is cancelled or killed mid-poll: the task is a real Orchestrator job, and
+the agent giving up on waiting is no reason to abort it. The cost is a dropped
+result, plus a second job if the model retries the tool; the task id is in the
+message so an operator can find the first one. Nothing here reaches
+`tasks/cancel` — a caller that wants a task cancelled has to do it through
+`McpService` in the platform SDK.
+
+The budget is a **deadline, not a per-request allowance**, and one poll is also
+capped at `MAX_POLL_REQUEST_SECONDS`: each `tasks/get` is sent with
+`request_read_timeout_seconds` set to `min(remaining, 30)`, and the clock is
+re-read *after* the inter-poll sleep as well as before. Without the deadline, a
+stalled or slow server answers after the budget has expired — and an answer of
+`completed` arriving then would be accepted. Without the cap, one black-holed
+socket costs the whole call: bounding a poll by the entire remaining budget made
+a fourteen-minute budget *less* resilient than a one-minute one, which is the
+opposite of what a longer budget should buy.
+
+A failed poll is the loop's to absorb, within limits: `INTERNAL_ERROR` (what a
+gateway's non-JSON 5xx or 429 becomes on the client transport) and
+`REQUEST_TIMEOUT` (one poll hitting its cap) are logged and re-polled on the
+next tick — same task id, same deadline — up to `MAX_POLL_FAILURES` consecutive
+times, after which the error itself is raised rather than buried by an eventual
+timeout. Once the deadline has passed, any poll failure becomes the one
+budget-exhaustion error instead. A `CONNECTION_CLOSED` is **not** absorbed: the
+resolver cannot rebuild a dead transport, and the client's session recovery
+deliberately no longer covers resolution, since that would resubmit the tool
+call.
+
+Terminal statuses map as: `completed` → the carried `CallToolResult`, or
+`MCPError` when it carries nothing a `CallToolResult` can be built from;
+`failed` → `MCPError` carrying the task's message **and its code in the text**,
+raised as `INTERNAL_ERROR`; `cancelled` → `MCPError`; `input_required` →
+`MCPError`, because the tool layer has no interactive party and parking would
+burn the budget.
+
+Why the failed task's own code is not re-raised as the error's code:
+`_map_mcp_error` asks `McpClient.is_session_error(error)` whether to tell the
+user the connection was terminated, and a tool is free to fail with a code that
+answers yes — `-32000` among them. Reporting the code in the message keeps it
+diagnosable without letting a tool failure impersonate a transport failure.
 
 ---
 

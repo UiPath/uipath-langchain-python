@@ -42,12 +42,12 @@ from a2a.types import (
     AgentCard,
     AgentInterface,
     Role,
-    SendMessageRequest,
 )
 from a2a.utils.errors import InvalidRequestError, TaskNotFoundError
 from google.protobuf.json_format import ParseDict
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from opentelemetry import trace as otel_trace
@@ -64,6 +64,7 @@ from uipath.platform.common import (
 from uipath.platform.errors import FolderNotFoundException
 
 from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import SUSPENDS_RUN
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
@@ -73,10 +74,10 @@ from .a2a_tool import (
     _TERMINAL_TASK_STATES,
     A2aStructuredToolWithWrapper,
     _build_description,
-    _extract_text,
+    _read_outcome,
     _select_protocol_version,
-    _task_state_name,
 )
+from .long_running import A2aPollSettings, send_and_wait
 
 logger = getLogger(__name__)
 
@@ -284,28 +285,23 @@ _ConversationSend = Callable[
 
 async def _send_message(
     client: Client,
-    agent_label: str,
     *,
     message: str,
     task_id: str | None,
     context_id: str | None,
+    poll_settings: A2aPollSettings | None = None,
 ) -> tuple[str, str, str | None, str | None]:
     """Send a message to a conversational agent and return the response.
 
     A reply that is a plain message instead of a task is AgentHub's
     conversational reply shape: the conversation is still open, so it is
-    reported as ``input_required``. Request errors propagate.
+    reported as ``input_required``. A task the agent is still working on is
+    waited for, suspending the run between polls (see ``long_running``).
+    Request errors propagate.
 
     Returns:
         Tuple of (response_text, task_state, new_task_id, new_context_id).
     """
-    if task_id or context_id:
-        logger.info(
-            "A2A continue task=%s context=%s to %s", task_id, context_id, agent_label
-        )
-    else:
-        logger.info("A2A new message to %s", agent_label)
-
     a2a_message = new_text_message(
         message,
         role=Role.ROLE_USER,
@@ -313,27 +309,13 @@ async def _send_message(
         context_id=context_id,
     )
 
-    text = ""
-    state = "unknown"
-    new_task_id = task_id
-    new_context_id = context_id
-
-    async for response in client.send_message(SendMessageRequest(message=a2a_message)):
-        if response.HasField("message"):
-            text = _extract_text(response.message)
-            new_context_id = response.message.context_id or new_context_id
-            state = "input_required"
-            break
-        if response.HasField("task"):
-            task = response.task
-            text = _extract_text(task)
-            new_task_id = task.id or new_task_id
-            new_context_id = task.context_id or new_context_id
-            if task.HasField("status"):
-                state = _task_state_name(task.status.state)
-            break
-
-    return (text or "No response received.", state, new_task_id, new_context_id)
+    outcome = await send_and_wait(client, a2a_message, poll_settings)
+    return _read_outcome(
+        outcome,
+        task_id=task_id,
+        context_id=context_id,
+        message_state="input_required",
+    )
 
 
 def _conversation_error(error: str, conversation_id: str | None, message: str) -> str:
@@ -724,7 +706,7 @@ async def _converse_single(
 def _create_conversation_tool(
     name: str,
     description: str,
-    metadata: dict[str, str],
+    metadata: dict[str, Any],
     send: _ConversationSend,
     mode: Literal["single", "multiple"],
 ) -> BaseTool:
@@ -864,12 +846,13 @@ def _create_conversational_agent_tool(
 ) -> BaseTool:
     """Create the LangChain tool for one conversational agent."""
     display_name = agent_card.name or config.name
-    agent_label = config.properties.process_name or config.name
     metadata = {
         "tool_type": "a2a",
         "display_name": display_name,
         "resource_name": config.name,
         "process_name": config.properties.process_name or "",
+        # A task that outlives the in-job wait suspends the run on a timer.
+        SUSPENDS_RUN: True,
     }
 
     async def _invoke(
@@ -887,7 +870,12 @@ def _create_conversational_agent_tool(
         """
         parent_ctx = UiPathSpanUtils.get_parent_context()
         tracer = otel_trace.get_tracer(__name__)
-        with tracer.start_as_current_span(display_name, context=parent_ctx) as span:
+        with tracer.start_as_current_span(
+            display_name,
+            context=parent_ctx,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             # "openinference.span.kind" drives the SpanType shown in the UI;
             # "toolCall" is the recognized type for a tool invocation.
             span.set_attribute("openinference.span.kind", "toolCall")
@@ -902,12 +890,17 @@ def _create_conversational_agent_tool(
                 client = await a2a_client.get()
                 text, state, new_task_id, new_context_id = await _send_message(
                     client,
-                    agent_label,
                     message=message,
                     task_id=task_id,
                     context_id=context_id,
                 )
+            except GraphBubbleUp:
+                # The run suspends until the next poll; that run gets its own span.
+                span.set_attribute("task_state", "suspended")
+                raise
             except Exception as e:
+                span.record_exception(e)
+                span.set_status(otel_trace.StatusCode.ERROR, str(e))
                 raise _A2aRequestError(str(e)) from e
 
             span.set_attribute("output", text)

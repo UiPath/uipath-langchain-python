@@ -7,7 +7,13 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, NotRequired, cast
 
-from deepagents import CompiledSubAgent, SubAgent
+from deepagents import (
+    AsyncSubAgent,
+    AsyncSubAgentMiddleware,
+    CompiledSubAgent,
+    SubAgent,
+    SubAgentMiddleware,
+)
 from deepagents import create_deep_agent as _create_deep_agent
 from deepagents.backends import BackendProtocol, FilesystemBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
@@ -29,6 +35,7 @@ from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field, create_model
+from typing_extensions import TypeIs
 from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -46,6 +53,7 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
     AgentStartupError,
+    AgentStartupErrorCode,
     max_iterations_error,
 )
 from uipath_langchain.agent.react.conversational_output_node import (
@@ -61,6 +69,10 @@ from uipath_langchain.agent.tools.internal_tools.create_file_tool import (
 from uipath_langchain.chat.handlers import get_payload_handler
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
+from .built_in_tools import (
+    BuiltInToolFilterMiddleware,
+    ResolvedBuiltInTools,
+)
 from .job_attachments_middleware import (
     JOB_ATTACHMENTS_STATE_KEY,
     JobAttachmentsMiddleware,
@@ -507,12 +519,49 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return response
 
 
+def _is_opaque(
+    spec: SubAgent | CompiledSubAgent | AsyncSubAgent,
+) -> TypeIs[CompiledSubAgent | AsyncSubAgent]:
+    """Whether the subagent is a compiled (``runnable``) or remote (``graph_id``) graph."""
+    return "runnable" in spec or "graph_id" in spec
+
+
+def _reject_unfiltered_subagents(
+    subagents: Sequence[SubAgent | CompiledSubAgent | AsyncSubAgent],
+    middleware: Sequence[AgentMiddleware[Any, Any]],
+) -> None:
+    """Refuse subagents the built-in tool settings can't reach.
+
+    A compiled or remote subagent keeps the tools of its own graph, and a caller's
+    own subagent middleware replaces the one that carries the filter.
+    """
+    names = [f"'{spec['name']}'" for spec in subagents if _is_opaque(spec)]
+    names += [
+        type(m).__name__
+        for m in middleware
+        if isinstance(m, (SubAgentMiddleware, AsyncSubAgentMiddleware))
+    ]
+    if not names:
+        return
+    raise AgentStartupError(
+        code=AgentStartupErrorCode.INVALID_AGENT_CONFIG,
+        title="Built-in tool settings cannot apply to these subagents",
+        detail=(
+            f"{', '.join(names)} keep{'s' if len(names) == 1 else ''} the tools "
+            "of their own graph. Pass subagents as declarative specs in "
+            "`subagents`, or build the agent without built-in tool settings."
+        ),
+        category=UiPathErrorCategory.USER,
+    )
+
+
 def _resolve_subagent_specs(
-    subagents: Sequence[SubAgent | CompiledSubAgent],
+    subagents: Sequence[SubAgent | CompiledSubAgent | AsyncSubAgent],
     shared_tools: Sequence[BaseTool],
     skills: Sequence[str] | None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
-) -> list[SubAgent | CompiledSubAgent]:
+    leading_middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+) -> list[SubAgent | CompiledSubAgent | AsyncSubAgent]:
     """Pin the shared tool list and middleware on every subagent spec.
 
     deepagents hands a subagent the parent's ``tools`` unless its spec declares its
@@ -528,19 +577,26 @@ def _resolve_subagent_specs(
     skills from that subagent.
 
     ``middleware`` rides along for the same reason: ``create_deep_agent`` gives its
-    own ``middleware`` argument to the main agent alone.
+    own ``middleware`` argument to the main agent alone. ``leading_middleware``
+    goes ahead of a spec's own middleware, so a code interpreter the spec brings
+    sees only what it lets through. A compiled (``runnable``) or remote
+    (``graph_id``) subagent takes neither list.
     """
-    resolved: list[SubAgent | CompiledSubAgent] = []
+    resolved: list[SubAgent | CompiledSubAgent | AsyncSubAgent] = []
     for spec in subagents:
-        # A CompiledSubAgent brings its own graph; nothing to add to it.
-        if "runnable" in spec:
+        # A compiled or remote subagent brings its own graph; nothing to add to it.
+        if _is_opaque(spec):
             resolved.append(spec)
             continue
         resolved.append(
             {
                 **spec,
                 "tools": list(spec["tools"] if "tools" in spec else shared_tools),
-                "middleware": [*spec.get("middleware", []), *middleware],
+                "middleware": [
+                    *leading_middleware,
+                    *spec.get("middleware", []),
+                    *middleware,
+                ],
             }
         )
 
@@ -550,7 +606,7 @@ def _resolve_subagent_specs(
         gp: dict[str, Any] = {
             **GENERAL_PURPOSE_SUBAGENT,
             "tools": list(shared_tools),
-            "middleware": list(middleware),
+            "middleware": [*leading_middleware, *middleware],
         }
         if skills:
             gp["skills"] = list(skills)
@@ -562,7 +618,7 @@ def create_advanced_agent(
     model: BaseChatModel,
     system_prompt: str | SystemMessage | None = "",
     tools: Sequence[BaseTool] = (),
-    subagents: Sequence[SubAgent | CompiledSubAgent] = (),
+    subagents: Sequence[SubAgent | CompiledSubAgent | AsyncSubAgent] = (),
     backend: BackendProtocol | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
@@ -571,12 +627,14 @@ def create_advanced_agent(
     max_iterations: int | None = None,
     initial_message_count_key: str | None = None,
     unforced_tool_choice: bool = False,
+    built_in_tools: ResolvedBuiltInTools | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
     ``memory`` is a list of file paths loaded via deepagents' ``MemoryMiddleware``:
     each is read from ``backend`` and injected into the system prompt every turn,
-    and the model maintains them with ``edit_file``. Empty disables the middleware.
+    and the model maintains them with ``write_file`` and ``edit_file``. Empty
+    disables the middleware.
 
     ``skills`` is a list of skill source paths for deepagents' ``SkillsMiddleware``;
     ``None`` or empty disables it (mirroring ``_create_deep_agent``'s contract).
@@ -590,6 +648,15 @@ def create_advanced_agent(
     agent's structured-output calls unforced on models that reject a forced tool
     choice. It must stay after ``shared_middleware`` so that
     ``_PayloadHandlerMiddleware`` sees the original ``response_format``.
+
+    ``built_in_tools`` applies the agent's built-in tool settings (see
+    ``resolve_built_in_tools``) to the main agent and every subagent; ``None``
+    keeps deepagents' full tool set. Its filter goes ahead of ``middleware``, and
+    ahead of each subagent's own middleware, so a code interpreter can't reach a
+    turned-off tool either. Without both ``write_file`` and ``edit_file`` it also
+    drops ``memory``, which the model writes with them. A compiled or remote
+    subagent, or a ``SubAgentMiddleware`` in ``middleware``, is rejected while
+    ``built_in_tools`` is given: its subagents keep their own tools.
     """
     tools = [
         tool.with_workspace(backend)
@@ -604,6 +671,12 @@ def create_advanced_agent(
         _PayloadHandlerMiddleware(),
         JobAttachmentsMiddleware(),
     ]
+    tool_filter: list[AgentMiddleware[Any, Any]] = []
+    if built_in_tools is not None:
+        _reject_unfiltered_subagents(subagents, middleware)
+        tool_filter = [BuiltInToolFilterMiddleware(built_in_tools)]
+        if not built_in_tools.supports_memory:
+            memory = ()
     main_budget, subagent_budget = _iteration_budget_middleware(
         max_iterations, initial_message_count_key
     )
@@ -612,13 +685,18 @@ def create_advanced_agent(
         system_prompt=system_prompt,
         tools=list(tools),
         subagents=_resolve_subagent_specs(
-            subagents, tools, skills, [*subagent_budget, *shared_middleware]
+            subagents,
+            tools,
+            skills,
+            [*subagent_budget, *shared_middleware],
+            leading_middleware=tool_filter,
         ),
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
         middleware=[
             *main_budget,
+            *tool_filter,
             *middleware,
             *shared_middleware,
             *([ToolChoiceMiddleware()] if unforced_tool_choice else []),
@@ -641,6 +719,7 @@ def create_advanced_agent_graph(
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
     unforced_tool_choice: bool = False,
+    built_in_tools: ResolvedBuiltInTools | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -658,6 +737,9 @@ def create_advanced_agent_graph(
     ``max_iterations`` caps the model calls the agent loop may make, subagent calls
     included; ``None`` leaves it uncapped. ``unforced_tool_choice`` is passed to
     ``create_advanced_agent``.
+
+    ``built_in_tools`` is passed to ``create_advanced_agent``, which can also
+    drop memory (see there).
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -680,6 +762,7 @@ def create_advanced_agent_graph(
         skills=skills,
         max_iterations=max_iterations,
         unforced_tool_choice=unforced_tool_choice,
+        built_in_tools=built_in_tools,
     )
 
     output_file_retries_key = get_unique_model_field_name(
@@ -795,6 +878,7 @@ def create_conversational_advanced_agent_graph(
     output_schema: type[BaseModel] | None = None,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    built_in_tools: ResolvedBuiltInTools | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -811,6 +895,9 @@ def create_conversational_advanced_agent_graph(
 
     ``max_iterations`` caps the model calls the agent loop may make per exchange,
     subagent calls included; ``None`` leaves it uncapped.
+
+    ``built_in_tools`` is passed to ``create_advanced_agent``, which can also
+    drop memory (see there).
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -834,6 +921,7 @@ def create_conversational_advanced_agent_graph(
         skills=skills,
         max_iterations=max_iterations,
         initial_message_count_key=initial_message_count_key,
+        built_in_tools=built_in_tools,
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
