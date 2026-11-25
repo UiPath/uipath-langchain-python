@@ -4026,7 +4026,7 @@ wheels = [
 
 [[package]]
 name = "pysignalr"
-version = "1.3.0"
+version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4034,9 +4034,9 @@ dependencies = [
     { name = "orjson" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/93/a6/ac80bd4972604c6930050e8b0eba41d6fde41cb3286087be0188a8865f55/pysignalr-1.3.0.tar.gz", hash = "sha256:ca2e4372f213d82148fa2f060f0fefd096f1f66fca1107ac05e76ec6abd4cf52", size = 16790, upload-time = "2025-04-29T21:23:38.931Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/61/90/991c2069ea98b6328a87a2380dea6c957cbe81b7954eddbcbf0bff5d62d6/pysignalr-1.3.3.tar.gz", hash = "sha256:d5bb0676f087a06e0ae8177b5791bf060f0f6546658707bb7de290c92da3052b", size = 239016, upload-time = "2026-10-17T15:55:51.267Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/54/74e35563927ab8538e1bd1404b35027861434aecf2bcc945ff30c188e56d/pysignalr-1.3.0-py3-none-any.whl", hash = "sha256:423c91b0d1dc8387f37118ac2d1dc87ed6b9e01993a04612eab8452193f40344", size = 19966, upload-time = "2025-04-29T21:23:37.513Z" },
+    { url = "https://files.pythonhosted.org/packages/59/ea/dc88c56f80c0dfc3649948b1a768592a6e61b27623e88cce655da4ffc609/pysignalr-1.3.3-py3-none-any.whl", hash = "sha256:5012af69a812eb0b8d725b1b8ca075ec1cc8633706da4239012ab7a76b83b23b", size = 23014, upload-time = "2026-10-17T15:55:50.23Z" },
 ]
 
 [[package]]
@@ -5012,7 +5012,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.15.4"
+version = "2.15.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -5037,9 +5037,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/87/d478bcacb278ad4bedc39e7291177a5808923a966d403112e6994c722e46/uipath-2.15.4.tar.gz", hash = "sha256:febc66a19b0136c4947859df3c45357dd3163d8872e11cfac4d743b30ba40a1d", size = 4628541, upload-time = "2026-11-19T17:41:36.083Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/04/437a5773abeda0ae0c9f5c245bdcdbb3d4b2fd0819e061ccb9828613c523/uipath-2.15.9.tar.gz", hash = "sha256:15e128f5bd2ebcf411769dee04a9392bf9506234f4ebdcd5f942d2a59b880028", size = 4649324, upload-time = "2026-11-24T12:48:25.936Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/c9/7f3939b73b7d838bd96cf8a4dd22016ddc24e426adaf8a90f166656c840a/uipath-2.15.4-py3-none-any.whl", hash = "sha256:a78e7a003ac1474eabe737bd7ad1c534eddc6df6f6fca17f12651ca5689103ac", size = 462070, upload-time = "2026-11-19T17:41:33.738Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/57/ac4233ca465743019ce209b957f447d351050473c5f18341a4cc21544dbe/uipath-2.15.9-py3-none-any.whl", hash = "sha256:270ebcff950d6508e924de40a41df47365bd9ccbb0d6479d232e062d4585e246", size = 469181, upload-time = "2026-11-24T12:48:23.333Z" },
 ]
 
 [[package]]
@@ -5067,7 +5067,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.20.10"
+version = "0.21.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -5148,8 +5148,8 @@ requires-dist = [
     { name = "a2a-sdk", specifier = ">=1.1.2,<2.0.0" },
     { name = "boto3-stubs", marker = "extra == 'bedrock'", specifier = ">=1.41.4" },
     { name = "datamodel-code-generator", specifier = ">=0.81.0" },
-    { name = "deepagents", specifier = ">=0.7.11,<0.8.0" },
-    { name = "deepagents", extras = ["video"], marker = "extra == 'video'", specifier = ">=0.7.11,<0.8.0" },
+    { name = "deepagents", specifier = ">=0.7.13,<0.8.0" },
+    { name = "deepagents", extras = ["video"], marker = "extra == 'video'", specifier = ">=0.7.13,<0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
@@ -5166,7 +5166,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2.0.0" },
     { name = "rdflib", specifier = ">=7.0.0,<8.0.0" },
-    { name = "uipath", specifier = ">=2.15.4,<2.16.0" },
+    { name = "uipath", specifier = ">=2.15.9,<2.16.0" },
     { name = "uipath-core", specifier = ">=0.5.34,<0.6.0" },
     { name = "uipath-langchain", extras = ["code-interpreter"], marker = "extra == 'all'" },
     { name = "uipath-langchain", extras = ["video"], marker = "extra == 'all'" },
@@ -5265,20 +5265,21 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.3.14"
+version = "0.3.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "httpx" },
     { name = "pydantic-function-models" },
+    { name = "pyyaml" },
     { name = "sqlparse" },
     { name = "tenacity" },
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5e/76/299373e95f451031718c6ca327ae3f4f1dacc1cca865174804d85565a2aa/uipath_platform-0.3.14.tar.gz", hash = "sha256:2a572c326197e33e09da31dead71edb3832e842c4ba1b7d6fbd510b500ff18dd", size = 510256, upload-time = "2026-11-23T08:23:39.535Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/b0/186e8af7976d66a162483b538cb9311660d849e889d776a104ba077b785f/uipath_platform-0.3.15.tar.gz", hash = "sha256:6505c6c7b1a2d1b053ffd7aba1d07479f2d2897646662cfd43c4a17d8f84cfe7", size = 549534, upload-time = "2026-11-24T09:05:18.225Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/dc/298342dd65e7df8281466fe33910ec5964fcf1dd00c8516a6d824ebf667b/uipath_platform-0.3.14-py3-none-any.whl", hash = "sha256:f1d536b70796096a5be88fae07514ebeda8d947e6f7c73caea06c3ba2e8d9ba2", size = 325748, upload-time = "2026-11-23T08:23:38.079Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/57/c670d6765063506d5a90f966c6e0ac170395e99bf6c18c9311e70ecc02d6/uipath_platform-0.3.15-py3-none-any.whl", hash = "sha256:bfcbf43117d152bb3673dc336107f8654184919a903b2abedbcc49550892c4ed", size = 350757, upload-time = "2026-11-24T09:05:16.437Z" },
 ]
 
 [[package]]

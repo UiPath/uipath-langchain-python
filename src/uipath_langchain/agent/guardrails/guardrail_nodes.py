@@ -571,4 +571,5 @@ def create_tool_guardrail_node(
             if execution_stage == ExecutionStage.PRE_EXECUTION
             else _tool_result
         ),
+        enforcement_context=enforcement_context,
     )

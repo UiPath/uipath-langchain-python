@@ -582,11 +582,17 @@ def _process_llm_escalation_response(
                     # Create a name-to-args mapping from reviewed tool call data
                     reviewed_tool_calls_map = {}
                     for reviewed_data in reviewed_tool_calls_list:
-                        if (
-                            isinstance(reviewed_data, dict)
-                            and "name" in reviewed_data
-                            and "args" in reviewed_data
+                        if not (
+                            isinstance(reviewed_data, dict) and "name" in reviewed_data
                         ):
+                            continue
+                        # The review is about tool calls, so it is handled here even
+                        # when it carries no usable edit: it must not fall through and
+                        # replace the message text with the raw review JSON.
+                        tool_calls_processed = True
+                        # A reviewer reply without arguments ("args": null) must
+                        # not overwrite the call: AIMessage rejects non-dict args.
+                        if isinstance(reviewed_data.get("args"), dict):
                             reviewed_tool_calls_map[reviewed_data["name"]] = (
                                 reviewed_data["args"]
                             )
@@ -609,7 +615,6 @@ def _process_llm_escalation_response(
 
                         ai_message = replace_tool_calls(ai_message, tool_calls)
                         msgs[-1] = ai_message
-                        tool_calls_processed = True
 
             # Fallback: update message content if tool_calls weren't processed
             if not tool_calls_processed:

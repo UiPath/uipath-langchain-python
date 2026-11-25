@@ -70,11 +70,13 @@ class DataFabricOntologyQueryHandler:
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
+        requires_feature_flag: bool = True,
     ) -> None:
         self._ontology_id = ontology_id
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
+        self._requires_feature_flag = requires_feature_flag
         self._compiled: CompiledStateGraph[Any] | None = None
         self._init_lock = asyncio.Lock()
 
@@ -94,11 +96,14 @@ class DataFabricOntologyQueryHandler:
             from uipath.core.feature_flags import FeatureFlags
             from uipath.platform import UiPath
 
-            # Defense in depth: the tool is only created when the flag is on
-            # (the gate in context_tool). Re-check here — the last point before
-            # any service call — so the feature can never do work with the flag
-            # disabled, however the tool was constructed.
-            if not FeatureFlags.is_flag_enabled(DATAFABRIC_ONTOLOGY_FF, default=False):
+            # Defense in depth: the low-code tool is only created when the flag is
+            # on (the gate in context_tool). Re-check here — the last point before
+            # any service call — so a low-code agent can never do work with the
+            # flag disabled. A coded agent opts in by calling create_ontology_tool
+            # and runs on a runtime that never loads the tenant's flags.
+            if self._requires_feature_flag and not FeatureFlags.is_flag_enabled(
+                DATAFABRIC_ONTOLOGY_FF, default=False
+            ):
                 raise ValueError(
                     "Data Fabric ontology tool invoked while feature flag "
                     f"'{DATAFABRIC_ONTOLOGY_FF}' is disabled."
@@ -237,7 +242,8 @@ def create_datafabric_ontology_tool(
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
     )
 
-    return BaseUiPathStructuredTool(
+    return _build_ontology_tool(
+        handler,
         name=tool_name,
         description=(
             f"Query the business data described by the ontology '{ontology_name}' "
@@ -245,7 +251,55 @@ def create_datafabric_ontology_tool(
             "the ontology's business objects and relationships, translates your "
             "request to SQL, runs it on the Ontology service, and returns the rows."
         ),
+    )
+
+
+def create_ontology_tool(
+    *,
+    llm: BaseChatModel,
+    name: str,
+    description: str,
+    ontology_id: str,
+    base_system_prompt: str,
+) -> BaseTool:
+    """Create an ontology query tool for a coded agent.
+
+    The ontology is read and checked lazily on the first invocation: an id the
+    Ontology service does not know, or an ontology that is not deployed, fails that
+    call rather than agent start-up. Keep the tool scoped to one agent execution so
+    its cached grounding cannot cross execution contexts.
+
+    Pass the same outer-agent system prompt used to construct the coded agent so
+    its instructions are also available to the inner SQL-generation graph.
+
+    Args:
+        llm: Language model for the inner SQL generation loop.
+        name: LangChain tool name exposed to the coded agent.
+        description: Description used by the outer agent to select the tool.
+        ontology_id: Id of the deployed ontology the tool queries.
+        base_system_prompt: Outer coded-agent system prompt forwarded to the
+            inner SQL-generation graph.
+    """
+    handler = DataFabricOntologyQueryHandler(
+        ontology_id=ontology_id,
+        llm=llm,
+        resource_description=description,
+        base_system_prompt=base_system_prompt,
+        requires_feature_flag=False,
+    )
+    return _build_ontology_tool(handler, name=name, description=description)
+
+
+def _build_ontology_tool(
+    handler: DataFabricOntologyQueryHandler, *, name: str, description: str
+) -> BaseTool:
+    """Build the LangChain tool shared by coded and low-code agents."""
+    return BaseUiPathStructuredTool(
+        name=name,
+        description=description,
         args_schema=DataFabricQueryInput,
-        coroutine=handler,
+        # The bound method, not the handler: LangGraph's ToolNode reads the type
+        # hints of the coroutine and refuses a callable object.
+        coroutine=handler.__call__,
         metadata={"tool_type": "datafabric_ontology_sql"},
     )

@@ -947,6 +947,91 @@ class TestEscalateAction:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_reviewed_tool_call_without_args_keeps_original_args(
+        self, mock_interrupt
+    ):
+        """A reviewed tool call with "args": null used to fault the agent (MST-18256)."""
+        action = _make_default_action()
+        guardrail = _make_default_guardrail()
+
+        reviewed_outputs = {"tool_calls": [{"name": "test_tool", "args": None}]}
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {"ReviewedOutputs": json.dumps(reviewed_outputs)}
+        mock_interrupt.return_value = mock_escalation_result
+
+        create_task_name, _, _, interrupt_fn = _get_action_nodes(
+            action, guardrail, GuardrailScope.LLM, ExecutionStage.POST_EXECUTION
+        )
+
+        original_args = {"content": {"original": "tool_input"}}
+        ai_message = AIMessage(
+            content="Original content",
+            tool_calls=[{"name": "test_tool", "args": original_args, "id": "call_1"}],
+        )
+        state = _make_state_with_task_info(
+            messages=[HumanMessage(content="Previous input"), ai_message],
+            create_task_name=create_task_name,
+        )
+
+        result = await interrupt_fn(state)
+
+        assert isinstance(result, Command)
+        assert result.update is not None
+        updated_message = result.update["messages"][1]
+        assert updated_message.tool_calls[0]["args"] == original_args
+        # The review JSON must not replace the assistant's own text.
+        assert updated_message.content == "Original content"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_reviewed_tool_calls_skip_entries_that_are_not_tool_calls(
+        self, mock_interrupt
+    ):
+        """An entry without a tool name is ignored; the named one is still applied."""
+        action = _make_default_action()
+        guardrail = _make_default_guardrail()
+
+        reviewed_args = {"content": {"reviewed": "tool_input"}}
+        reviewed_outputs = {
+            "tool_calls": [
+                "not a tool call",
+                {"name": "test_tool", "args": reviewed_args},
+            ]
+        }
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {"ReviewedOutputs": json.dumps(reviewed_outputs)}
+        mock_interrupt.return_value = mock_escalation_result
+
+        create_task_name, _, _, interrupt_fn = _get_action_nodes(
+            action, guardrail, GuardrailScope.LLM, ExecutionStage.POST_EXECUTION
+        )
+
+        ai_message = AIMessage(
+            content="Original content",
+            tool_calls=[
+                {
+                    "name": "test_tool",
+                    "args": {"content": {"original": "tool_input"}},
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = _make_state_with_task_info(
+            messages=[HumanMessage(content="Previous input"), ai_message],
+            create_task_name=create_task_name,
+        )
+
+        result = await interrupt_fn(state)
+
+        assert isinstance(result, Command)
+        assert result.update is not None
+        updated_message = result.update["messages"][1]
+        assert updated_message.tool_calls[0]["args"] == reviewed_args
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
     async def test_agent_post_execution_updates_agent_result(
         self, mock_interrupt
     ) -> None:

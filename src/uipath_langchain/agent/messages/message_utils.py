@@ -18,6 +18,13 @@ def replace_tool_calls(message: AIMessage, tool_calls: list[ToolCall]) -> AIMess
         "output_version": "v1",  # we have to set this otherwise anthropic clients do not denormalize
     }
 
+    # AIMessage rejects a tool call whose args is not a dict. A call with no
+    # arguments can reach us as None, so treat that as "no arguments".
+    tool_calls = [
+        tool_call if tool_call["args"] is not None else {**tool_call, "args": {}}
+        for tool_call in tool_calls
+    ]
+
     # ToolCall from langchain.messages is not the same type as ToolCall from langchain_core.messages.content
     # they are both TypedDicts with the same fields, so it would be possible to just cast, but it's safer to map
     tool_call_blocks = [
