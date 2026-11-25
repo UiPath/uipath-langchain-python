@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -29,6 +30,7 @@ from uipath_langchain.agent.tools.a2a.a2a_tool import (
     _send_a2a_message,
     create_a2a_tools_and_clients,
 )
+from uipath_langchain.agent.tools.a2a.long_running import A2aPollSettings
 
 PROXY_URL = (
     "https://cloud.uipath.com/org/tenant/agenthub_/a2a/remote/folder/remote-agent"
@@ -456,10 +458,14 @@ async def test_send_message_falls_back_to_latest_agent_history() -> None:
         message="status",
         task_id="task-4",
         context_id="context-4",
+        poll_settings=A2aPollSettings(initial_inline_wait=timedelta(0)),
     )
 
+    # Outside a graph the call cannot suspend, so a working task is reported
+    # as still running, with its latest status.
     assert result == (
-        "Still working",
+        "The remote agent is still working on task task-4. "
+        "Latest status: Still working",
         "working",
         "task-4",
         "context-4",
