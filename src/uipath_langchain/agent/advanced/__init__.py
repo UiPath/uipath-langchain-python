@@ -1,12 +1,18 @@
 """UiPath Advanced agent implementation."""
 
-from deepagents import CompiledSubAgent, SubAgent
+from deepagents import AsyncSubAgent, CompiledSubAgent, SubAgent
 from deepagents.backends import BackendProtocol, FilesystemBackend
 
 from .agent import (
     create_advanced_agent,
     create_advanced_agent_graph,
     create_conversational_advanced_agent_graph,
+)
+from .built_in_tools import (
+    DEFAULT_BUILT_IN_TOOLS,
+    FILE_TOOL_NAMES,
+    ResolvedBuiltInTools,
+    resolve_built_in_tools,
 )
 from .code_interpreter import (
     PTC_FILESYSTEM_TOOLS,
@@ -25,6 +31,8 @@ from .utils import (
 )
 
 __all__ = [
+    "DEFAULT_BUILT_IN_TOOLS",
+    "FILE_TOOL_NAMES",
     "MEMORY_DIR_NAME",
     "MEMORY_INDEX_FILENAME",
     "MEMORY_INDEX_VIRTUAL_PATH",
@@ -32,9 +40,11 @@ __all__ = [
     "PersistenceMode",
     "AdvancedAgentGraphState",
     "BackendProtocol",
+    "AsyncSubAgent",
     "CompiledSubAgent",
     "ConversationalAdvancedAgentGraphState",
     "FilesystemBackend",
+    "ResolvedBuiltInTools",
     "SubAgent",
     "build_code_interpreter_middleware",
     "create_advanced_agent",
@@ -42,6 +52,7 @@ __all__ = [
     "create_conversational_advanced_agent_graph",
     "create_state_with_input",
     "ptc_tool_names",
+    "resolve_built_in_tools",
     "subagent_dispatch_is_replay_safe",
     "warm_code_interpreter",
 ]
