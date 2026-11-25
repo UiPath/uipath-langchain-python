@@ -77,6 +77,7 @@ class TestMasker:
 
         assert masked == "[Person_1] met [Person_2]."
         assert masker.counts() == {"Person": 2}
+        assert masker.placeholders() == ["[Person_1]", "[Person_2]"]
 
     def test_a_placeholder_already_written_is_not_matched_again(self):
         masker = Masker({"Jane": "Person", "Person": "Other"}, PlaceholderAssigner({}))

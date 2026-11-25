@@ -194,3 +194,25 @@ class TestMergeObjects:
         assert result.name == "updated"
         # Invalid field should not exist
         assert not hasattr(result, "invalid_field")
+
+
+class TestMergeDictsDroppingNone:
+    def test_none_removes_a_key_and_other_values_merge(self):
+        from uipath_langchain.agent.react.reducers import merge_dicts_dropping_none
+
+        merged = merge_dicts_dropping_none(
+            {"a": ["[Email_1]"], "b": ["[Person_1]"]}, {"a": None, "c": ["[Email_2]"]}
+        )
+
+        assert merged == {"b": ["[Person_1]"], "c": ["[Email_2]"]}
+
+    def test_a_record_dropped_in_the_inner_state_stays_dropped(self):
+        from uipath_langchain.agent.react.types import InnerAgentGuardrailsGraphState
+
+        state = InnerAgentGuardrailsGraphState(
+            masked_tool_calls={"g:c1": ["[Email_1]"], "g:c2": ["[Email_2]"]}
+        )
+
+        merged = merge_objects(state, {"masked_tool_calls": {"g:c1": None}})
+
+        assert merged.masked_tool_calls == {"g:c2": ["[Email_2]"]}

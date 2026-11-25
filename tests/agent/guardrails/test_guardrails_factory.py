@@ -527,10 +527,17 @@ class TestGuardrailsFactory:
         assert result[2][1].message == "logged"
 
 
-def _mask_guardrail(validator_type: str, scopes: list[str]) -> AgentGuardrailModel:
+def _mask_guardrail(
+    validator_type: str, scopes: list[str], detection_scope: str | None = None
+) -> AgentGuardrailModel:
     selector: dict[str, object] = {"scopes": scopes}
     if "Tool" in scopes:
         selector["matchNames"] = ["Send Email"]
+    parameters = (
+        [{"$parameterType": "enum", "id": "detectionScope", "value": detection_scope}]
+        if detection_scope is not None
+        else []
+    )
     return AgentBuiltInValidatorGuardrail.model_validate(
         {
             "$guardrailType": "builtInValidator",
@@ -539,7 +546,7 @@ def _mask_guardrail(validator_type: str, scopes: list[str]) -> AgentGuardrailMod
             "description": "Masks PII",
             "enabledForEvals": True,
             "validatorType": validator_type,
-            "validatorParameters": [],
+            "validatorParameters": parameters,
             "selector": selector,
             "action": {"$actionType": "mask"},
         }
@@ -586,6 +593,26 @@ class TestMaskGuardrails:
             AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
         )
         assert "only PII detection guardrails" in exc_info.value.error_info.detail
+
+    @pytest.mark.parametrize("detection_scope", [None, "Text", "text"])
+    def test_mask_action_checking_text_is_mapped(self, detection_scope) -> None:
+        guardrail = _mask_guardrail("pii_detection", ["Tool"], detection_scope)
+
+        result = build_guardrails_with_actions([guardrail], [])
+
+        assert isinstance(result[0][1], MaskAction)
+
+    @pytest.mark.parametrize("detection_scope", ["Files", "Both", "both"])
+    def test_mask_action_checking_files_is_rejected(self, detection_scope) -> None:
+        with pytest.raises(AgentStartupError) as exc_info:
+            build_guardrails_with_actions(
+                [_mask_guardrail("pii_detection", ["Tool"], detection_scope)], []
+            )
+
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
+        assert "detection scope to Text" in exc_info.value.error_info.detail
 
     def test_mask_action_on_a_custom_guardrail_is_rejected(self) -> None:
         guardrail = AgentCustomGuardrail.model_validate(

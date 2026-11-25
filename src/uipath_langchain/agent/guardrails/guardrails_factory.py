@@ -34,7 +34,11 @@ from uipath.core.guardrails import (
     UniversalRule,
     WordRule,
 )
-from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BaseGuardrail,
+    GuardrailScope,
+    detection_scope_includes_files,
+)
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
@@ -521,6 +525,14 @@ def _validate_mask_guardrail(
             title="Invalid guardrail action",
             detail=f"Guardrail '{guardrail.name}' uses the Mask action, which only PII detection guardrails support. "
             f"Please choose another action or use a PII detection guardrail.",
+            category=UiPathErrorCategory.USER,
+        )
+    if detection_scope_includes_files(guardrail):
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+            title="Invalid guardrail detection scope",
+            detail=f"Guardrail '{guardrail.name}' uses the Mask action, which masks text only. "
+            f"Please set its detection scope to Text.",
             category=UiPathErrorCategory.USER,
         )
     invalid_scopes = [

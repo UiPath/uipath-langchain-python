@@ -34,7 +34,8 @@ class MaskAction(GuardrailAction):
     Before an agent or tool call, each value the guardrail detected in the call's
     input is replaced with a placeholder such as ``[Email_1]``. After the call the
     guardrail is not evaluated: the placeholders in the call's output are replaced
-    with their values. ``inner_state.masked_values`` keeps the run's placeholders.
+    with their values, after a tool call only those this guardrail wrote into that
+    call. ``inner_state.masked_values`` keeps the run's placeholders.
     """
 
     @property
@@ -85,8 +86,12 @@ class MaskAction(GuardrailAction):
 
             assigner = PlaceholderAssigner(state.inner_state.masked_values)
             masker = Masker(values, assigner)
+            inner_update: dict[str, Any] = {}
             if scope == GuardrailScope.TOOL:
-                update = _mask_tool_call(state, guarded_component_name, masker)
+                update, call_id = _mask_tool_call(state, guarded_component_name, masker)
+                if call_id is not None:
+                    key = _tool_call_key(guardrail, call_id)
+                    inner_update["masked_tool_calls"] = {key: masker.placeholders()}
             else:
                 update = _mask_agent_input(state, masker)
 
@@ -98,7 +103,9 @@ class MaskAction(GuardrailAction):
                 )
             _replace_contents(metadata["masked_entities"], masker.counts())
             if assigner.added:
-                update["inner_state"] = {"masked_values": assigner.added}
+                inner_update["masked_values"] = assigner.added
+            if inner_update:
+                update["inner_state"] = inner_update
             return update
 
         _node.__metadata__ = metadata  # type: ignore[attr-defined]
@@ -125,10 +132,10 @@ class MaskAction(GuardrailAction):
 
         async def _node(state: AgentGuardrailsGraphState) -> dict[str, Any]:
             _ensure_maskable(guardrail, scope)
-            restorer = Restorer(state.inner_state.masked_values)
             if scope == GuardrailScope.TOOL:
-                update = _restore_tool_output(state, restorer)
+                restorer, update = _restore_tool_output(state, guardrail)
             else:
+                restorer = Restorer(state.inner_state.masked_values)
                 update = _restore_agent_result(state, restorer)
             _replace_contents(metadata["restored_entities"], restorer.counts())
             return update
@@ -145,6 +152,10 @@ def _node_name(
 ) -> str:
     raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_{suffix}"
     return re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
+
+
+def _tool_call_key(guardrail: BaseGuardrail, call_id: str) -> str:
+    return f"{guardrail.id}:{call_id}"
 
 
 def _ensure_maskable(guardrail: BaseGuardrail, scope: GuardrailScope) -> None:
@@ -194,23 +205,24 @@ def _detected_values(
 
 def _mask_tool_call(
     state: AgentGuardrailsGraphState, tool_name: str, masker: Masker
-) -> dict[str, Any]:
-    """Mask the arguments of the ``tool_name`` call about to run."""
+) -> tuple[dict[str, Any], str | None]:
+    """Mask the arguments of the ``tool_name`` call about to run; return its id too."""
     ai_message = find_latest_ai_message(state.messages)
     if ai_message is None or not ai_message.tool_calls:
-        return {}
+        return {}, None
     index = extract_current_tool_call_index(state.messages, tool_name)
     if index is None:
-        return {}
+        return {}, None
 
     tool_calls = list(ai_message.tool_calls)
+    call_id = tool_calls[index].get("id") or ""
     args = tool_calls[index]["args"]
     masked_args = masker.mask(args)
     if masked_args == args:
-        return {}
+        return {}, call_id
     masked_call: ToolCall = {**tool_calls[index], "args": masked_args}
     tool_calls[index] = masked_call
-    return {"messages": [replace_tool_calls(ai_message, tool_calls)]}
+    return {"messages": [replace_tool_calls(ai_message, tool_calls)]}, call_id
 
 
 def _mask_agent_input(
@@ -244,19 +256,36 @@ def _mask_message(message: AnyMessage, masker: Masker) -> AnyMessage:
 
 
 def _restore_tool_output(
-    state: AgentGuardrailsGraphState, restorer: Restorer
-) -> dict[str, Any]:
-    """Restore the values in the result of the tool call that just ran."""
+    state: AgentGuardrailsGraphState, guardrail: BaseGuardrail
+) -> tuple[Restorer, dict[str, Any]]:
+    """Restore, in the result of the tool call that just ran, the values this
+    guardrail masked in that call's arguments, then drop the call's record.
+
+    Any other placeholder, such as one the agent's own mask wrote and the tool
+    echoed, stays as it is.
+    """
     if not state.messages or not isinstance(state.messages[-1], ToolMessage):
-        return {}
+        return Restorer({}), {}
     result = state.messages[-1]
+    key = _tool_call_key(guardrail, result.tool_call_id or "")
+    placeholders = state.inner_state.masked_tool_calls.get(key)
+    if placeholders is None:
+        return Restorer({}), {}
+
+    masked_values = state.inner_state.masked_values
+    restorer = Restorer(
+        {p: masked_values[p] for p in placeholders if p in masked_values}
+    )
+    update: dict[str, Any] = {"inner_state": {"masked_tool_calls": {key: None}}}
     content = map_tool_content(result.content, restorer.restore_text)
-    if content == result.content:
-        return {}
-    restored = result.model_copy(update={"content": content})
-    if result.id is None:
-        return {"messages": Overwrite([*state.messages[:-1], restored])}
-    return {"messages": [restored]}
+    if content != result.content:
+        restored = result.model_copy(update={"content": content})
+        update["messages"] = (
+            [restored]
+            if result.id is not None
+            else Overwrite([*state.messages[:-1], restored])
+        )
+    return restorer, update
 
 
 def _restore_agent_result(

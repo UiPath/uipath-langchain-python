@@ -130,7 +130,7 @@ def detector(monkeypatch) -> _Detector:
     return detector
 
 
-def _agent(model: Any, scope: str, received: list[dict[str, Any]]) -> Any:
+def _agent(model: Any, scopes: list[str], received: list[dict[str, Any]]) -> Any:
     async def send_email(to: str, body: str) -> str:
         received.append({"to": to, "body": body})
         return f"Sent to {to}."
@@ -154,7 +154,7 @@ def _agent(model: Any, scope: str, received: list[dict[str, Any]]) -> Any:
         messages,
         input_schema=create_model(_INPUT_SCHEMA),
         output_schema=create_model(_OUTPUT_SCHEMA),
-        guardrails=[(_mask_guardrail(scope), MaskAction())],
+        guardrails=[(_mask_guardrail(scope), MaskAction()) for scope in scopes],
     ).compile(checkpointer=InMemorySaver())
 
 
@@ -174,7 +174,7 @@ async def test_agent_scope_hides_the_values_from_the_llm_and_the_tools(detector)
         _call("end_execution", {"summary": "Welcomed [Email_1]."}, "c2"),
     )
     received: list[dict[str, Any]] = []
-    graph = _agent(model, "Agent", received)
+    graph = _agent(model, ["Agent"], received)
     config = {"configurable": {"thread_id": "agent-scope"}}
 
     result = await graph.ainvoke({"email": _EMAIL}, config)
@@ -194,7 +194,7 @@ async def test_tool_scope_hides_the_values_from_the_tool_only(detector):
         _call("end_execution", {"summary": "Done."}, "c2"),
     )
     received: list[dict[str, Any]] = []
-    graph = _agent(model, "Tool", received)
+    graph = _agent(model, ["Tool"], received)
     config = {"configurable": {"thread_id": "tool-scope"}}
 
     result = await graph.ainvoke({"email": _EMAIL}, config)
@@ -207,6 +207,24 @@ async def test_tool_scope_hides_the_values_from_the_tool_only(detector):
     # The LLM gets the tool's result with the value put back.
     assert tool_result.content == f"Sent to {_EMAIL}."
     assert snapshot.values["inner_state"].masked_values == {"[Email_1]": _EMAIL}
+
+
+@pytest.mark.asyncio
+async def test_a_tool_mask_never_hands_the_llm_an_agent_masked_value(detector):
+    model = _scripted_model(
+        _call(_TOOL, {"to": "[Email_1]", "body": "Welcome!"}, "c1"),
+        _call("end_execution", {"summary": "Welcomed [Email_1]."}, "c2"),
+    )
+    received: list[dict[str, Any]] = []
+    graph = _agent(model, ["Agent", "Tool"], received)
+    config = {"configurable": {"thread_id": "both-scopes"}}
+
+    result = await graph.ainvoke({"email": _EMAIL}, config)
+
+    assert result["summary"] == f"Welcomed {_EMAIL}."
+    assert received == [{"to": "[Email_1]", "body": "Welcome!"}]
+    # The tool echoed the agent's placeholder; the tool's restore left it alone.
+    assert _EMAIL not in _llm_inputs(model)
 
 
 def test_masked_values_round_trip_through_the_checkpoint_serializer(caplog):

@@ -249,11 +249,40 @@ class TestToolScope:
             "[Email_1]": "jane@example.com",
             "[Email_2]": "bob@example.com",
         }
+        # Both placeholders were written by this mask, so both come back.
+        assert json.loads(final["messages"][-1].content) == {
+            "status": "sent",
+            "to": "bob@example.com",
+            "preview": "cc jane@example.com",
+        }
 
     @pytest.mark.asyncio
-    async def test_a_clean_call_runs_unmasked_and_its_result_is_still_restored(
+    async def test_a_placeholder_from_elsewhere_in_the_run_is_not_restored(
         self, monkeypatch
     ):
+        """An agent-scope placeholder the LLM passes and the tool echoes stays masked:
+        the LLM reads the tool's result and must never get the value behind it."""
+        _patch(monkeypatch, _PiiDetector({"bob@example.com": "Email"}))
+        graph, received = _tool_graph()
+
+        final = await graph.ainvoke(
+            _tool_call_input(
+                {"to": "bob@example.com", "body": "cc [Email_1]"},
+                masked_values={"[Email_1]": "jane@example.com"},
+            )
+        )
+
+        assert received == [{"to": "[Email_2]", "body": "cc [Email_1]"}]
+        assert json.loads(final["messages"][-1].content) == {
+            "status": "sent",
+            "to": "bob@example.com",
+            "preview": "cc [Email_1]",
+        }
+        # The call's record is dropped once its result is restored.
+        assert final["inner_state"].masked_tool_calls == {}
+
+    @pytest.mark.asyncio
+    async def test_a_clean_call_runs_unmasked_and_restores_nothing(self, monkeypatch):
         detector = _patch(monkeypatch, _PiiDetector({}))
         graph, received = _tool_graph()
 
@@ -265,8 +294,29 @@ class TestToolScope:
         )
 
         assert received == [{"to": "[Email_1]", "body": "hello"}]
-        assert json.loads(final["messages"][-1].content)["to"] == "jane@example.com"
+        assert json.loads(final["messages"][-1].content)["to"] == "[Email_1]"
         assert len(detector.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_mask_records_what_it_wrote_into_the_call(self, monkeypatch):
+        _patch(
+            monkeypatch,
+            _PiiDetector({"jane@example.com": "Email", "José García": "Person"}),
+        )
+        guardrail = _pii_guardrail("Tool")
+        graph = create_tool_guardrails_subgraph(
+            tool_node=(_TOOL, lambda _state: {}),
+            guardrails=[(guardrail, MaskAction())],
+        )
+
+        final = await graph.ainvoke(
+            _tool_call_input({"to": "jane@example.com", "body": "José García"})
+        )
+
+        # The stand-in tool returned no result, so the record is still there.
+        assert final["inner_state"].masked_tool_calls == {
+            f"{guardrail.id}:c1": ["[Email_1]", "[Person_1]"]
+        }
 
     @pytest.mark.asyncio
     async def test_the_output_is_restored_without_a_check(self, monkeypatch):

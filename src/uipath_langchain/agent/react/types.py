@@ -14,6 +14,7 @@ from uipath.platform.memory import FieldMatching, SearchMode
 
 from uipath_langchain.agent.react.reducers import (
     merge_dicts,
+    merge_dicts_dropping_none,
     merge_objects,
 )
 
@@ -45,6 +46,9 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     guardrail_flagged_file_names: Optional[list[str]] = None
     guardrail_attachments: Optional[list[dict[str, str]]] = None
     guardrail_detections: Optional[list[dict[str, Any]]] = None
+    # The placeholders each tool-scope mask wrote into a tool call's arguments, by
+    # guardrail and call; only those are restored in that call's result.
+    masked_tool_calls: Annotated[dict[str, list[str]], merge_dicts_dropping_none] = {}
     escalation_files_listed: Optional[bool] = None
     agent_result: Optional[dict[str, Any]] = None
     hitl_task_info: Optional[Any] = {}

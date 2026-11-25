@@ -129,6 +129,7 @@ class Masker:
             else None
         )
         self._masked: set[str] = set()
+        self._written: set[str] = set()
 
     def mask_text(self, text: str) -> str:
         """``text`` with every value replaced by its placeholder."""
@@ -139,6 +140,10 @@ class Masker:
     def mask(self, data: Any) -> Any:
         """``data`` with every value replaced inside its strings."""
         return map_strings(data, self.mask_text)
+
+    def placeholders(self) -> list[str]:
+        """The placeholders written, sorted."""
+        return sorted(self._written)
 
     def counts(self) -> dict[str, int]:
         """How many distinct values of each category were replaced."""
@@ -157,7 +162,9 @@ class Masker:
     def _replace(self, match: re.Match[str]) -> str:
         value = match.group(0)
         self._masked.add(value)
-        return self._assigner.placeholder(value, self._categories[value])
+        placeholder = self._assigner.placeholder(value, self._categories[value])
+        self._written.add(placeholder)
+        return placeholder
 
 
 class Restorer:
