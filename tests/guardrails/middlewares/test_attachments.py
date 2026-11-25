@@ -635,7 +635,7 @@ class TestMessageHooks:
         await _hook(middleware, "after_agent").aafter_agent(state, MagicMock())
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {"attachments": []}
+        assert _file_options(call) == {"attachments": []}
 
     async def test_text_scope_never_forwards(self, evaluate: MagicMock) -> None:
         middleware = _pii(
@@ -648,7 +648,7 @@ class TestMessageHooks:
         )
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {}
+        assert _file_options(call) == {}
         assert [
             (p.id, p.value)
             for p in call.args[1].validator_parameters
@@ -664,7 +664,7 @@ class TestMessageHooks:
         )
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {}
+        assert _file_options(call) == {}
         assert all(p.id != "detectionScope" for p in call.args[1].validator_parameters)
 
     async def test_a_text_scope_parameter_never_forwards(
@@ -678,7 +678,7 @@ class TestMessageHooks:
         )
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {}
+        assert _file_options(call) == {}
 
     @pytest.mark.parametrize(
         ("detection_scope", "kwargs"),
@@ -706,7 +706,7 @@ class TestMessageHooks:
 
         (call,) = evaluate.call_args_list
         assert call.args == ("screen this", middleware._guardrail)
-        assert call.kwargs == kwargs
+        assert _file_options(call) == kwargs
 
     async def test_a_files_scope_parameter_sends_an_empty_list(
         self, evaluate: MagicMock
@@ -718,7 +718,7 @@ class TestMessageHooks:
         )
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {"attachments": []}
+        assert _file_options(call) == {"attachments": []}
 
     async def test_a_poisoned_state_evaluates_without_files(
         self, evaluate: MagicMock
@@ -738,7 +738,7 @@ class TestMessageHooks:
         assert call.args[0].startswith("hi ")
         # Says nothing about files: an explicit [] would let a Files-only guardrail
         # pass without judging the text.
-        assert call.kwargs == {}
+        assert _file_options(call) == {}
 
 
 class TestToolHook:
@@ -791,7 +791,7 @@ class TestToolHook:
         )
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {"attachments": []}
+        assert _file_options(call) == {"attachments": []}
 
     async def test_pre_without_a_mention_sends_an_empty_attachment_list(
         self, evaluate: MagicMock
@@ -799,7 +799,7 @@ class TestToolHook:
         await self._run(_PRE, {"question": "summarise"}, self._held_state())
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {"attachments": []}
+        assert _file_options(call) == {"attachments": []}
 
     async def test_pre_tolerates_a_request_without_state(
         self, evaluate: MagicMock
@@ -807,7 +807,7 @@ class TestToolHook:
         await self._run(_PRE, {"document": {"ID": _HELD_ID}}, None)
 
         (call,) = evaluate.call_args_list
-        assert call.kwargs == {"attachments": []}
+        assert _file_options(call) == {"attachments": []}
 
     async def test_post_forwards_a_file_the_tool_returned(
         self, evaluate: MagicMock
@@ -829,7 +829,7 @@ class TestToolHook:
 
         (call,) = evaluate.call_args_list
         assert call.args[0] == {"output": "all good"}
-        assert call.kwargs == {"attachments": []}
+        assert _file_options(call) == {"attachments": []}
 
 
 def _rejection(status: int) -> EnrichedException:
@@ -838,6 +838,18 @@ def _rejection(status: int) -> EnrichedException:
     return EnrichedException(
         httpx.HTTPStatusError(str(status), request=request, response=response)
     )
+
+
+_ENFORCEMENT_OPTIONS = ("scope", "execution_stage", "action_type")
+
+
+def _file_options(call: Any) -> dict[str, Any]:
+    """A validate call's keyword arguments, without the check's enforcement fields."""
+    return {
+        key: value
+        for key, value in call.kwargs.items()
+        if key not in _ENFORCEMENT_OPTIONS
+    }
 
 
 def _reject_files_then(
@@ -888,7 +900,7 @@ class TestAttachmentRejection:
         with_files, text_only = evaluate.call_args_list
         assert _forwarded(with_files) == [(_HELD_ID, "cv.pdf", "application/pdf")]
         assert text_only.args == (text, middleware._guardrail)
-        assert text_only.kwargs == {}
+        assert _file_options(text_only) == {}
         assert "rejected the attachment references" in caplog.text
 
     @pytest.mark.parametrize(
@@ -995,7 +1007,7 @@ class TestAttachmentRejection:
         with_files, text_only = evaluate.call_args_list
         assert with_files.kwargs["attachments"]
         assert text_only.args == (with_files.args[0], middleware._guardrail)
-        assert text_only.kwargs == {}
+        assert _file_options(text_only) == {}
 
     async def test_tool_hook_hands_a_400_without_files_to_the_error_handler(
         self, evaluate: MagicMock, caplog: pytest.LogCaptureFixture
@@ -1160,7 +1172,7 @@ class TestAgentRun:
         for call in evaluate.call_args_list:
             assert len(call.args) == 2
             assert call.args[1] is middleware._guardrail
-            assert call.kwargs == {}
+            assert _file_options(call) == {}
 
     async def test_a_run_forwards_the_files_each_hook_may_see(
         self, evaluate: MagicMock

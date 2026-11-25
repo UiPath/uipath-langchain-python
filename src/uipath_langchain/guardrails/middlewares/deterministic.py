@@ -13,6 +13,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from uipath.core.guardrails import (
     GuardrailScope,
+    GuardrailValidationErrorType,
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
@@ -22,6 +23,7 @@ from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
+from ._enforcement import EnforcementContext
 from ._grouping import guardrail_stage, guardrails_in_use
 from ._spans import (
     guardrail_action_span,
@@ -243,15 +245,25 @@ class UiPathDeterministicGuardrailMiddleware:
         ToolCallRequest | None, dict[str, Any] | None, ToolMessage | Command[Any] | None
     ]:
         """Evaluate rules and apply modifications if validation fails."""
+        enforcement = EnforcementContext(
+            scope=GuardrailScope.TOOL,
+            stage=stage,
+            action=self.action,
+            guardrail_name=self._name,
+            guardrail_type="custom",
+        )
         try:
             with guardrail_stage(GuardrailScope.TOOL, stage):
                 with guardrail_evaluation_span(self._name, self._description) as span:
                     result = self._evaluate_rules(rules, stage, input_data, output_data)
-                    set_validation_result(span, result)
+                    set_validation_result(span, result, enforcement)
                 if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
                     return request, input_data, tool_result
                 modified_data = self._handle_validation_result(
-                    result, data_for_action, evaluation_span_id=span_guid(span)
+                    result,
+                    data_for_action,
+                    evaluation_span_id=span_guid(span),
+                    enforcement=enforcement,
                 )
         except GuardrailBlockException as exc:
             raise convert_block_exception(exc) from exc
@@ -292,6 +304,7 @@ class UiPathDeterministicGuardrailMiddleware:
         violations = []
         passed_rules = []
         evaluated_count = 0
+        raised = False
 
         for i, rule in enumerate(rules):
             try:
@@ -331,6 +344,7 @@ class UiPathDeterministicGuardrailMiddleware:
                 logger.error(f"Error in rule function {i + 1}: {e}", exc_info=True)
                 violations.append(f"Rule {i + 1} raised exception: {str(e)}")
                 evaluated_count += 1
+                raised = True
 
         if evaluated_count == 0:
             return GuardrailValidationResult(
@@ -344,9 +358,12 @@ class UiPathDeterministicGuardrailMiddleware:
                 reason=f"Rules passed: {', '.join(passed_rules)}",
             )
 
+        # A rule that raised counts as a violation, so the check still fails
+        # closed, but it could not evaluate: record that as an internal error.
         return GuardrailValidationResult(
             result=GuardrailValidationResultType.VALIDATION_FAILED,
             reason="; ".join(violations),
+            error_type=GuardrailValidationErrorType.INTERNAL_ERROR if raised else None,
         )
 
     def _extract_tool_input_data(self, request: ToolCallRequest) -> dict[str, Any]:
@@ -393,9 +410,12 @@ class UiPathDeterministicGuardrailMiddleware:
         result: GuardrailValidationResult,
         input_data: str | dict[str, Any],
         evaluation_span_id: str | None = None,
+        enforcement: EnforcementContext | None = None,
     ) -> str | dict[str, Any] | None:
         """Handle guardrail validation result."""
         if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
             return None
-        with guardrail_action_span(self._name, self.action, result, evaluation_span_id):
+        with guardrail_action_span(
+            self._name, self.action, result, evaluation_span_id, enforcement
+        ):
             return self.action.handle_validation_result(result, input_data, self._name)

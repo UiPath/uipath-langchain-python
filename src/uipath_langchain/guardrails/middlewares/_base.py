@@ -58,6 +58,7 @@ from ._attachments import (
     registry_references,
     tool_result_references,
 )
+from ._enforcement import EnforcementContext
 from ._grouping import (
     guardrail_stage,
     guardrails_in_use,
@@ -242,10 +243,26 @@ class BuiltInGuardrailMiddlewareMixin:
             self._uipath = UiPath()
         return self._uipath
 
+    def _enforcement(
+        self,
+        scope: GuardrailScope | None,
+        stage: GuardrailExecutionStage | None,
+    ) -> EnforcementContext:
+        """Where a check of this guardrail runs and what it does on a violation."""
+        return EnforcementContext(
+            scope=scope,
+            stage=stage,
+            action=self.action,
+            guardrail_name=self._name,
+            guardrail_type=self._guardrail.validator_type,
+        )
+
     def _evaluate_guardrail(
         self,
         input_data: str | dict[str, Any],
         attachments: list[GuardrailAttachment] | None = None,
+        *,
+        enforcement: EnforcementContext | None = None,
     ) -> GuardrailValidationResult:
         """Evaluate the guardrail against input data via the UiPath API.
 
@@ -257,13 +274,16 @@ class BuiltInGuardrailMiddlewareMixin:
         rejects the attachment references (HTTP 400), the input is evaluated again
         without them, so a file never disables the guardrail. A check the
         organization's AI Trust Layer policy blocked is not retried: it stops the run.
+        ``enforcement`` adds the check's ``scope``, ``execution_stage`` and
+        ``action_type`` to the request.
         """
         uipath = self._get_uipath()
+        options = enforcement.evaluation_options() if enforcement else {}
 
         def evaluate(**files: Any) -> GuardrailValidationResult:
             try:
                 return uipath.guardrails.evaluate_guardrail(
-                    input_data, self._guardrail, **files
+                    input_data, self._guardrail, **files, **options
                 )
             except EnrichedException as exc:
                 if (blocked := centralized_guardrail_error(exc)) is not None:
@@ -377,7 +397,12 @@ class BuiltInGuardrailMiddlewareMixin:
             )
         )
         try:
-            with guardrail_action_span(self._name, self.action, result):
+            with guardrail_action_span(
+                self._name,
+                self.action,
+                result,
+                enforcement=self._enforcement(scope, stage),
+            ):
                 return self.action.handle_validation_result(
                     result, input_data, self._name
                 )
@@ -432,7 +457,12 @@ class BuiltInGuardrailMiddlewareMixin:
             try:
                 with guardrail_stage(GuardrailScope.TOOL, GuardrailExecutionStage.PRE):
                     result = await asyncio.to_thread(
-                        self._evaluate_guardrail, input_data, attachments
+                        self._evaluate_guardrail,
+                        input_data,
+                        attachments,
+                        enforcement=self._enforcement(
+                            GuardrailScope.TOOL, GuardrailExecutionStage.PRE
+                        ),
                     )
                     modified_input = self._handle_validation_result(
                         result,
@@ -476,7 +506,12 @@ class BuiltInGuardrailMiddlewareMixin:
                         GuardrailScope.TOOL, GuardrailExecutionStage.POST
                     ):
                         result = await asyncio.to_thread(
-                            self._evaluate_guardrail, output_data, attachments
+                            self._evaluate_guardrail,
+                            output_data,
+                            attachments,
+                            enforcement=self._enforcement(
+                                GuardrailScope.TOOL, GuardrailExecutionStage.POST
+                            ),
                         )
                         modified_output = self._handle_validation_result(
                             result,
@@ -696,7 +731,9 @@ class BuiltInGuardrailMiddlewareMixin:
 
         try:
             with guardrail_stage(scope, stage):
-                result = self._evaluate_guardrail(payload, attachments)
+                result = self._evaluate_guardrail(
+                    payload, attachments, enforcement=self._enforcement(scope, stage)
+                )
                 modified_text = self._handle_validation_result(
                     result,
                     payload,

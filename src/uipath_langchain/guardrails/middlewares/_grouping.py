@@ -26,6 +26,7 @@ from uipath.core.guardrails import GuardrailScope
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.platform.guardrails.decorators import GuardrailExecutionStage
 
+from ._enforcement import container_attributes
 from ._span_name import SpanName, SpanType
 from ._spans import error_text, new_span
 
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 class _Stage(NamedTuple):
     name: str
     span_type: str
+    # uipath_governance.* version and the hook the stage guards.
+    attributes: dict[str, str]
 
 
 _PRE = GuardrailExecutionStage.PRE
@@ -42,22 +45,34 @@ _POST = GuardrailExecutionStage.POST
 
 _STAGES: dict[tuple[GuardrailScope, GuardrailExecutionStage], _Stage] = {
     (GuardrailScope.AGENT, _PRE): _Stage(
-        SpanName.AGENT_PRE_GUARDRAILS, SpanType.AGENT_PRE_GUARDRAILS
+        SpanName.AGENT_PRE_GUARDRAILS,
+        SpanType.AGENT_PRE_GUARDRAILS,
+        container_attributes(GuardrailScope.AGENT, _PRE),
     ),
     (GuardrailScope.AGENT, _POST): _Stage(
-        SpanName.AGENT_POST_GUARDRAILS, SpanType.AGENT_POST_GUARDRAILS
+        SpanName.AGENT_POST_GUARDRAILS,
+        SpanType.AGENT_POST_GUARDRAILS,
+        container_attributes(GuardrailScope.AGENT, _POST),
     ),
     (GuardrailScope.LLM, _PRE): _Stage(
-        SpanName.LLM_PRE_GUARDRAILS, SpanType.LLM_PRE_GUARDRAILS
+        SpanName.LLM_PRE_GUARDRAILS,
+        SpanType.LLM_PRE_GUARDRAILS,
+        container_attributes(GuardrailScope.LLM, _PRE),
     ),
     (GuardrailScope.LLM, _POST): _Stage(
-        SpanName.LLM_POST_GUARDRAILS, SpanType.LLM_POST_GUARDRAILS
+        SpanName.LLM_POST_GUARDRAILS,
+        SpanType.LLM_POST_GUARDRAILS,
+        container_attributes(GuardrailScope.LLM, _POST),
     ),
     (GuardrailScope.TOOL, _PRE): _Stage(
-        SpanName.TOOL_PRE_GUARDRAILS, SpanType.TOOL_PRE_GUARDRAILS
+        SpanName.TOOL_PRE_GUARDRAILS,
+        SpanType.TOOL_PRE_GUARDRAILS,
+        container_attributes(GuardrailScope.TOOL, _PRE),
     ),
     (GuardrailScope.TOOL, _POST): _Stage(
-        SpanName.TOOL_POST_GUARDRAILS, SpanType.TOOL_POST_GUARDRAILS
+        SpanName.TOOL_POST_GUARDRAILS,
+        SpanType.TOOL_POST_GUARDRAILS,
+        container_attributes(GuardrailScope.TOOL, _POST),
     ),
 }
 
@@ -247,6 +262,7 @@ def _start_container(stage: _Stage, parent: SpanContext, node: Span) -> _Contain
         stage.name,
         stage.span_type,
         context=trace.set_span_in_context(NonRecordingSpan(parent)),
+        **stage.attributes,
         **{
             # Its parent is non-recording, so this isn't inherited.
             "execution.id": (getattr(node, "attributes", None) or {}).get(

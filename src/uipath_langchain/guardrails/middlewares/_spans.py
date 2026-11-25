@@ -16,6 +16,7 @@ from uipath.platform.guardrails.decorators import (
 )
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
+from ._enforcement import EnforcementContext
 from ._span_name import SpanType
 
 
@@ -79,9 +80,11 @@ def guardrail_action_span(
     action: Any,
     result: GuardrailValidationResult,
     evaluation_span_id: str | None = None,
+    enforcement: EnforcementContext | None = None,
 ) -> Generator[Span]:
     """Record the action taken on a failed ``result``."""
     severity = getattr(action, "severity_level", None)
+    enforcement_attributes = enforcement.attributes(result) if enforcement else {}
     span = new_span(
         action_name(action),
         SpanType.GUARDRAIL_ACTION,
@@ -94,6 +97,7 @@ def guardrail_action_span(
             if isinstance(severity, LoggingSeverityLevel)
             else None
         ),
+        **enforcement_attributes,
     )
     with _active(span):
         yield span
@@ -115,8 +119,14 @@ def guardrail_evaluation_span(
         yield span
 
 
-def set_validation_result(span: Span, result: GuardrailValidationResult) -> None:
-    """Record ``result``'s outcome on its evaluation span."""
+def set_validation_result(
+    span: Span,
+    result: GuardrailValidationResult,
+    enforcement: EnforcementContext | None = None,
+) -> None:
+    """Record ``result``'s outcome, and the check's decision, on its evaluation span."""
     span.set_attribute("validationResult", result.result.name)
     if result.reason:
         span.set_attribute("details", [result.reason])
+    if enforcement is not None:
+        span.set_attributes(enforcement.attributes(result))
