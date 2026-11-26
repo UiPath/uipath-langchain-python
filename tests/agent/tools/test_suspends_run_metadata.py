@@ -34,6 +34,23 @@ _SUSPENDING_HELPERS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Helpers that suspend the run only when the node being run is the calling tool's
+# own tool node, and finish without suspending anywhere else, mapped to the
+# functions that reach them. Such a tool is safe to offer to a bridge -- there it
+# never raises ``GraphInterrupt`` -- so it is not stamped, and what is checked
+# instead is the guard: every one of those functions must call the helper only
+# under ``runs_in_own_tool_node(...)``. Withholding these tools instead would cost
+# an agent every tool of the kind for the sake of the rare call that is long.
+_OWN_NODE_ONLY_HELPERS: dict[str, tuple[str, ...]] = {
+    "mcp_task_suspension.py::call_with_suspension": ("mcp_tool.py::build_mcp_tool",),
+}
+
+# Entry points for a coded agent's own graph code. They build no tool, so there
+# is nothing to stamp and no bridge that could be handed one.
+_CODED_AGENT_ENTRY_POINTS: frozenset[str] = frozenset(
+    {"mcp_service_call.py::call_mcp_tool"}
+)
+
 
 def _decorator_names(fn: _Function) -> set[str]:
     names = set()
@@ -106,7 +123,9 @@ def _suspending_factories() -> list[tuple[str, _Function]]:
     found = [
         (name, fn)
         for name, fn in _top_level_functions().items()
-        if _suspends(fn) and name not in _SUSPENDING_HELPERS
+        if _suspends(fn)
+        and name not in _SUSPENDING_HELPERS
+        and name not in _OWN_NODE_ONLY_HELPERS
     ]
     assert found, f"no suspending tool factories found under {_TOOLS_DIR}"
     return found
@@ -145,3 +164,47 @@ def test_factory_using_a_suspending_helper_stamps_the_flag(factory: str) -> None
     assert _stamps(functions[factory]), (
         f"{factory} reaches a suspending helper but does not set {SUSPENDS_RUN!r}"
     )
+
+
+def _calls(node: ast.AST, name: str) -> list[ast.Call]:
+    return [
+        call
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == name
+    ]
+
+
+@pytest.mark.parametrize("helper", sorted(_OWN_NODE_ONLY_HELPERS))
+def test_own_node_only_helper_is_called_only_under_its_guard(helper: str) -> None:
+    """The exemption holds only while every caller checks whose node is running.
+
+    Each call to the helper has to sit inside an ``if`` that asks
+    ``runs_in_own_tool_node``; a call anywhere else would let the tool suspend
+    from a bridge, which is what ``SUSPENDS_RUN`` exists to prevent.
+    """
+    functions = _top_level_functions()
+    assert helper in functions, f"{helper} no longer exists"
+    assert _suspends(functions[helper]), f"{helper} no longer suspends the run"
+    helper_name = helper.split("::")[1]
+
+    callers = {
+        name
+        for name, fn in functions.items()
+        if _calls(fn, helper_name) and name != helper
+    }
+    assert callers - _CODED_AGENT_ENTRY_POINTS == set(_OWN_NODE_ONLY_HELPERS[helper])
+
+    for caller in _OWN_NODE_ONLY_HELPERS[helper]:
+        guarded = [
+            call
+            for branch in ast.walk(functions[caller])
+            if isinstance(branch, ast.If)
+            and _calls(branch.test, "runs_in_own_tool_node")
+            for statement in branch.body
+            for call in _calls(statement, helper_name)
+        ]
+        assert len(guarded) == len(_calls(functions[caller], helper_name)), (
+            f"{caller} calls {helper_name} outside a runs_in_own_tool_node guard"
+        )
