@@ -17,7 +17,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import StructuredTool, ToolException
 from opentelemetry import trace as otel_trace
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -94,6 +94,27 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
 # that should render on the llmCall span. The LLMOps callback in uipath-agents
 # reads this and stamps it on the llmCall span as the ``attachments`` attribute.
 LLM_CALL_ATTACHMENTS_METADATA_KEY = "uipath_llm_call_attachments"
+
+_ANALYSIS_TASK_PATH = "$['analysisTask']"
+
+
+def _empty_analysis_task_error(resource: AgentInternalToolResourceConfig) -> Exception:
+    """A tool error the LLM can correct, or a configuration error."""
+    if _ANALYSIS_TASK_PATH not in resource.argument_properties:
+        return ToolException(
+            "Argument 'analysisTask' is empty. Describe what to find or answer "
+            "in the attached files, then call the tool again."
+        )
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT,
+        title="Analysis task is empty",
+        detail=(
+            f"The analysis task configured for tool '{resource.name}' has no "
+            "value. Set it in the tool settings, or give a value to the agent "
+            "input it uses."
+        ),
+        category=UiPathErrorCategory.USER,
+    )
 
 
 def _original_attachment_id(file: FileInfo) -> str:
@@ -356,14 +377,12 @@ def create_analyze_file_tool(
         output_schema=output_model.model_json_schema(),
     )
     async def tool_fn(**kwargs: Any):
-        if "analysisTask" not in kwargs:
-            raise ValueError("Argument 'analysisTask' is not available")
         if "attachments" not in kwargs:
             raise ValueError("Argument 'attachments' is not available")
 
-        analysis_task = kwargs["analysisTask"]
-        if not analysis_task:
-            raise ValueError("Argument 'analysisTask' is not available")
+        analysis_task = kwargs.get("analysisTask")
+        if not isinstance(analysis_task, str) or not analysis_task.strip():
+            raise _empty_analysis_task_error(resource)
 
         attachments = kwargs["attachments"]
 
@@ -478,6 +497,7 @@ def create_analyze_file_tool(
         coroutine=tool_fn,
         output_type=output_model,
         argument_properties=resource.argument_properties,
+        handle_tool_error=True,
         metadata={
             "tool_type": resource.type.lower(),
             "display_name": tool_name,
