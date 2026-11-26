@@ -15,7 +15,9 @@ from uipath.agent.models.agent import (
     StandardRecipient,
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.tools.escalation_memory import (
     EscalationMemoryCachedResult,
 )
@@ -897,6 +899,38 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
         with pytest.raises(Exception, match="API error"):
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sdk_message",
+        [
+            "App 'ApprovalApp' was not found in the current tenant",
+            "App 'ApprovalApp' was not found in folder with identifier 'folder-key'",
+        ],
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    async def test_missing_app_is_a_deployment_error(
+        self, mock_uipath_class, sdk_message, escalation_resource
+    ):
+        """A missing Action Center app names the app instead of 'Unexpected Error'."""
+        missing_app = Exception(sdk_message)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(side_effect=missing_app)
+        mock_uipath_class.return_value = mock_client
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        error_info = exc_info.value.error_info
+        assert "ESCALATION_APP_NOT_FOUND" in error_info.code
+        assert error_info.title == "Action Center app 'ApprovalApp' was not found"
+        assert error_info.detail.startswith(sdk_message)
+        assert "Escalation 'approval'" in error_info.detail
+        assert error_info.category == UiPathErrorCategory.DEPLOYMENT
+        assert exc_info.value.__cause__ is missing_app
 
     @pytest.mark.asyncio
     @patch(
