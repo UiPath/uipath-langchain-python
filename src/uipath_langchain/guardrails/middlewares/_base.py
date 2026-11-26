@@ -85,7 +85,6 @@ from ._utils import (
 logger = logging.getLogger(__name__)
 
 
-#: State key of the output actions a model node left for the nodes after it.
 _OUTPUT_ACTIONS_KEY = "uipath_guardrail_output_actions"
 
 
@@ -107,16 +106,12 @@ class _OutputActionState(AgentState[Any]):
 
 ModelHandler = Callable[[ModelRequest], Awaitable[Any]]
 
-#: Model answers an output action was left for, by ``id``. Hooks further out
-#: check such an answer in their own node, after the action, so the checks still
-#: see it in order. Each hook runs in its own copy of the context (LangChain
-#: traces it), so a context variable would not reach the hooks further out.
-#: Weak values: an entry goes with its answer, so an ``id`` is never reused here.
+#: Answers with an action left for later, by ``id``: outer checks wait for it.
+#: Not a ContextVar: LangChain runs each hook in a copied context.
 _answers_with_pending_action: "weakref.WeakValueDictionary[int, AIMessage]" = (
     weakref.WeakValueDictionary()
 )
 
-#: A model hook's name part for the sides it checks: (input, output).
 _HOOK_STAGES = {
     (True, True): "pre_and_post",
     (True, False): "pre",
@@ -147,12 +142,7 @@ class _ModelGuardrailHook(AgentMiddleware):
 
 
 class _ModelGuardrailHookWithOutputAction(_ModelGuardrailHook):
-    """Checks around the model call; the output's action in the node after it.
-
-    The action may pause the run (an escalation). In the model node, resuming
-    would call the model again and lose what the node already did; in its own
-    node, the model node has finished and its answer is saved.
-    """
+    """Checks around the model call; actions that may pause run in the node after it."""
 
     state_schema = _OutputActionState
 
@@ -185,12 +175,7 @@ def _apply_edits_to_state(
     before: Sequence[Any],
     state: Mapping[str, Any] | None,
 ) -> None:
-    """Copy an input check's edits onto the state's own messages.
-
-    An earlier middleware may pass the model copies of the state's messages
-    (e.g. to add metadata); an edit to a copy alone would not be saved. Each
-    edited message updates the state message with the same id.
-    """
+    """Apply input-check edits to the state messages (the model may get copies)."""
     by_id = {
         message.id: message
         for message in (state or {}).get("messages", [])
@@ -695,11 +680,9 @@ class BuiltInGuardrailMiddlewareMixin:
         """Build stage-gated message hooks for an AGENT or LLM scope.
 
         AGENT: ``PRE`` registers only ``before_agent``, ``POST`` only
-        ``after_agent``, and ``PRE_AND_POST`` both. LLM: one ``wrap_model_call``
-        hook that checks the input, the output or both. Either way a guardrail validates
-        (and acts, e.g. escalates) at a single checkpoint instead of twice per
-        run. Shared by the message-based middlewares (PII / harmful content /
-        intellectual property) so their hook wiring can't drift apart.
+        ``after_agent``, and ``PRE_AND_POST`` both. LLM: one model hook that
+        checks the input, the output or both. Shared by the message-based
+        middlewares (PII / harmful content / intellectual property).
         """
         include_pre = stage in (
             GuardrailExecutionStage.PRE,
@@ -781,24 +764,15 @@ class BuiltInGuardrailMiddlewareMixin:
     def _create_model_wrap_hook(
         self, guardrail_name: str, include_pre: bool, include_post: bool
     ) -> AgentMiddleware:
-        """Create the hook that checks the model's input and output.
+        """Create the hook that checks the model's input and output in the model node.
 
-        The checks run inside the model node, so their stage containers sit under
-        its span, like tool checks under ``tools``. An input check acts there
-        too, before the model is called, so resuming its escalation calls the
-        model once. An output check acts there only if its action is the
-        built-in Log or Block, which cannot pause the run. Any other action
-        (an escalation, a custom action, a subclass of Log or Block) runs in the
-        hook's node after the model: the model node finishes first, so its
-        answer and every other middleware's work are saved, and resuming re-runs
-        only the action. Once an action is left for later, the output checks of
-        the hooks further out move to their own nodes too, so each still sees
-        the answer as the actions before it left it.
+        Output actions other than the built-in Log and Block may pause the run, so
+        they run in the hook's ``after_model`` node: resuming then re-runs only
+        the action, not the model.
         """
         guardrails_in_use()
         mw = self
-        # The stage is in the name: two guardrails with the same name, one
-        # checking the input and one the output, are still distinct hooks.
+        # The stage keeps same-named PRE and POST guardrails distinct.
         stage = _HOOK_STAGES[(include_pre, include_post)]
         hook_name = f"{guardrail_name}_{stage}_wrap_model_call"
         # Exactly the built-ins: a subclass may pause the run.
@@ -855,13 +829,8 @@ class BuiltInGuardrailMiddlewareMixin:
         *,
         act_after_model: bool,
     ) -> Any:
-        """Check the model's answer and return the hook's response.
-
-        With ``act_after_model``, a failed check leaves its action for the
-        hook's node after the model, in the response's state update. If a hook
-        further in already left an action for this answer, the check itself
-        waits for that node, since the action may change the answer.
-        """
+        """Check the answer; leave a failed check's action, or the check itself if an
+        inner action is pending, for the hook's node."""
         answer = _last_ai_message(response)
         if answer is None:
             return response
@@ -870,9 +839,7 @@ class BuiltInGuardrailMiddlewareMixin:
         attachments = self._attachments_for(
             scope=GuardrailScope.LLM,
             stage=GuardrailExecutionStage.POST,
-            # The state's own history, not the request's: an earlier middleware
-            # may have trimmed the request, and the files it held are still in
-            # the run.
+            # The full history: an earlier middleware may have trimmed the request.
             state={**state, "messages": [*state.get("messages", []), answer]},
         )
         after_inner_action = _answers_with_pending_action.get(id(answer)) is answer
@@ -932,13 +899,9 @@ class BuiltInGuardrailMiddlewareMixin:
     def _run_output_action(
         self, state: Mapping[str, Any], hook_name: str
     ) -> dict[str, Any] | None:
-        """Act on the output check ``hook_name`` left for this node.
+        """Run the output action left for this node and return the state update.
 
-        The check failed in the model node, or waited for an action of a hook
-        further in. Returns the state update: the answer with the action's
-        edit, and the action no longer pending. Resuming a paused action re-runs
-        only this. An action left for an earlier answer, one a later model turn
-        replaced (after a rejected escalation, say), is dropped.
+        Dropped if a later model turn replaced its answer.
         """
         violation = (state.get(_OUTPUT_ACTIONS_KEY) or {}).get(hook_name)
         if not violation:
@@ -983,11 +946,7 @@ class BuiltInGuardrailMiddlewareMixin:
         answer: AIMessage,
         state: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        """The pending violation for the answer as it is now, or ``None``.
-
-        The check runs again when it waited for this node, or when another
-        guardrail's action edited the answer after it was checked.
-        """
+        """The violation for the answer as it is now; re-checks it if it changed."""
         checked = "result" in violation and not (
             violation.get("has_text")
             and extract_text_from_messages([answer]) != violation["payload"]
@@ -1018,10 +977,7 @@ class BuiltInGuardrailMiddlewareMixin:
 
     @contextmanager
     def _guardrail_errors(self) -> Generator[None]:
-        """Let a block, a runtime error or a pause through; log anything else.
-
-        A guardrail that fails to evaluate must not stop the run.
-        """
+        """Let a block, a runtime error or a pause through; log anything else."""
         try:
             yield
         except GuardrailBlockException as exc:
