@@ -882,8 +882,9 @@ class TestRealAgent:
             assert container.parent is not None
             assert by_id[container.parent.span_id].name == "model"
         # Input checks end before the model runs, output checks start after it.
-        # Compared by time, not by order: a coarse clock (Windows) can stamp a
-        # container and the model run with the same start time.
+        # A container never ends before its last check, so on a coarse clock
+        # (Windows) it can end a tick after the model run starts: allow 1 ms.
+        tick = 1_000_000
         for model in _named(spans, "model"):
             children = [
                 s
@@ -891,11 +892,13 @@ class TestRealAgent:
                 if s.parent and s.parent.span_id == model.context.span_id
             ]
             llm_run = next(s for s in children if s.name == "_ToolCallingModel")
-            for container in children:
-                if container.name == "LLM input guardrail check":
-                    assert (container.end_time or 0) <= (llm_run.start_time or 0)
-                if container.name == "LLM output guardrail check":
-                    assert (container.start_time or 0) >= (llm_run.end_time or 0)
+            [before] = [s for s in children if s.name == "LLM input guardrail check"]
+            assert (before.end_time or 0) <= (llm_run.start_time or 0) + tick
+            for after in (
+                s for s in children if s.name == "LLM output guardrail check"
+            ):
+                assert (after.start_time or 0) >= (llm_run.end_time or 0) - tick
+                assert (before.end_time or 0) <= (after.start_time or 0)
 
     async def test_concurrent_runs_keep_their_own_containers(
         self, exporter: InMemorySpanExporter, instrumented: None
