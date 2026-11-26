@@ -24,6 +24,7 @@ from uipath_langchain._utils._attachments import (
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import (
+    FileTooLargeError,
     base_mime_type,
     decode_text,
     download_file_base64,
@@ -38,6 +39,8 @@ from .utils import (
 )
 
 logger = logging.getLogger("uipath")
+
+_GONE_STATUSES = frozenset({404, 410})
 
 
 def file_part_filename(name: str, mime_type: str) -> str | None:
@@ -77,18 +80,32 @@ def _empty_file_error(file_info: FileInfo) -> AgentRuntimeError:
 def _download_errors(file_info: FileInfo) -> Iterator[None]:
     try:
         yield
-    except ValueError as exc:
+    except FileTooLargeError as exc:
         raise _file_error(
             "File attachment too large", f"File '{file_info.name}': {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
+        phrase = (
+            f" ({exc.response.reason_phrase})" if exc.response.reason_phrase else ""
+        )
         raise _file_error(
             "Attachment could not be downloaded",
             f"Downloading '{file_info.name}' from storage failed with HTTP "
-            f"{status} ({exc.response.reason_phrase}).",
-            category=UiPathErrorCategory.SYSTEM,
+            f"{status}{phrase}.",
+            category=(
+                UiPathErrorCategory.USER
+                if status in _GONE_STATUSES
+                else UiPathErrorCategory.SYSTEM
+            ),
             status=status,
+        ) from exc
+    except httpx.RequestError as exc:
+        raise _file_error(
+            "Attachment could not be downloaded",
+            f"Downloading '{file_info.name}' from storage failed: "
+            f"{type(exc).__name__}.",
+            category=UiPathErrorCategory.SYSTEM,
         ) from exc
 
 
@@ -100,7 +117,9 @@ async def _tiff_content_blocks(
             pages = await stream_tiff_to_content_blocks(
                 file_info.url, max_size=max_size
             )
-        except OSError as exc:
+        except (httpx.HTTPError, FileTooLargeError):
+            raise
+        except Exception as exc:
             raise _file_error(
                 "Attachment could not be read",
                 f"File '{file_info.name}' is not a valid TIFF image.",
