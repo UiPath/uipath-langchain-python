@@ -4,7 +4,7 @@ import base64
 import codecs
 import io
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -294,7 +294,9 @@ async def encode_streamed_base64(
 
 
 @asynccontextmanager
-async def _stream_download(url: str, *, max_size: int = 0):
+async def _stream_download(
+    url: str, *, headers: Mapping[str, str] | None = None, max_size: int = 0
+):
     """Stream an HTTP download with size enforcement.
 
     Yields the validated response object. Checks Content-Length upfront
@@ -302,6 +304,7 @@ async def _stream_download(url: str, *, max_size: int = 0):
 
     Args:
         url: The URL to download from.
+        headers: Headers to send with the request.
         max_size: Maximum allowed file size in bytes. 0 means unlimited.
 
     Yields:
@@ -312,7 +315,7 @@ async def _stream_download(url: str, *, max_size: int = 0):
         httpx.HTTPStatusError: If the HTTP request fails.
     """
     async with httpx.AsyncClient(**get_httpx_client_kwargs()) as client:
-        async with client.stream("GET", url) as response:
+        async with client.stream("GET", url, headers=headers) as response:
             response.raise_for_status()
 
             if max_size > 0:
@@ -336,7 +339,7 @@ async def _stream_download(url: str, *, max_size: int = 0):
 
 
 async def stream_tiff_to_content_blocks(
-    url: str, *, max_size: int = 0
+    url: str, *, headers: Mapping[str, str] | None = None, max_size: int = 0
 ) -> list[DataContentBlock]:
     """Download a TIFF via streaming and convert each page to a content block.
 
@@ -347,6 +350,7 @@ async def stream_tiff_to_content_blocks(
 
     Args:
         url: The URL to download from.
+        headers: Headers to send with the request.
         max_size: Maximum allowed file size in bytes. 0 means unlimited.
 
     Returns:
@@ -360,7 +364,7 @@ async def stream_tiff_to_content_blocks(
     from langchain_core.messages.content import create_image_block
     from PIL import Image, ImageSequence
 
-    async with _stream_download(url, max_size=max_size) as response:
+    async with _stream_download(url, headers=headers, max_size=max_size) as response:
         buf = io.BytesIO()
         total = 0
         async for chunk in response.aiter_bytes():
@@ -387,16 +391,19 @@ async def stream_tiff_to_content_blocks(
     return blocks
 
 
-async def download_file_base64(url: str, *, max_size: int = 0) -> str:
+async def download_file_base64(
+    url: str, *, headers: Mapping[str, str] | None = None, max_size: int = 0
+) -> str:
     """Download a file from a URL and return its content as a base64 string.
 
     Args:
         url: The URL to download from.
+        headers: Headers to send with the request.
         max_size: Maximum allowed file size in bytes. 0 means unlimited.
 
     Raises:
         FileTooLargeError: If the file exceeds max_size.
         httpx.HTTPStatusError: If the HTTP request fails.
     """
-    async with _stream_download(url, max_size=max_size) as response:
+    async with _stream_download(url, headers=headers, max_size=max_size) as response:
         return await encode_streamed_base64(response.aiter_bytes(), max_size=max_size)

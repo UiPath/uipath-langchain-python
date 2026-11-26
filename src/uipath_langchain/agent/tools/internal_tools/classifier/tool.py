@@ -518,7 +518,7 @@ async def _read_images(
         if is_tiff(mime_type):
             try:
                 pages = await stream_tiff_to_content_blocks(
-                    file.url, max_size=MAX_FILE_SIZE_BYTES
+                    file.url, headers=file.headers, max_size=MAX_FILE_SIZE_BYTES
                 )
             except ValueError as exc:
                 raise _input_error(
@@ -544,7 +544,9 @@ async def _read_images(
                 f"image {provider.display_name} can classify.",
             )
         try:
-            data = await download_file_base64(file.url, max_size=MAX_FILE_SIZE_BYTES)
+            data = await download_file_base64(
+                file.url, headers=file.headers, max_size=MAX_FILE_SIZE_BYTES
+            )
         except ValueError as exc:
             raise _input_error(
                 config.llm_writes_images,

@@ -98,6 +98,7 @@ class MockBlobInfo(BaseModel):
 
     uri: str
     name: str
+    headers: dict[str, str] = {}
 
 
 _ATTACHMENT_ARG = {
@@ -810,6 +811,30 @@ class TestResolveJobAttachmentArguments:
         mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_called_once_with(
             key=attachment_id
         )
+
+    async def test_resolved_attachment_keeps_the_download_headers(
+        self, mock_uipath_client
+    ):
+        headers = {"Authorization": "Bearer token"}
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(
+                uri="https://orchestrator.example/offload",
+                name="scan.pdf",
+                headers=headers,
+            )
+        )
+
+        result = await resolve_attachments_to_file_infos(
+            [
+                MockAttachment(
+                    ID=str(uuid.uuid4()),
+                    FullName="scan.pdf",
+                    MimeType="application/pdf",
+                )
+            ]
+        )
+
+        assert result[0].headers == headers
 
     async def test_resolve_multiple_attachments(self, mock_uipath_client):
         """Test resolving multiple attachments."""

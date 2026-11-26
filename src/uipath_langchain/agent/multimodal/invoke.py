@@ -115,7 +115,7 @@ async def _tiff_content_blocks(
     with _download_errors(file_info):
         try:
             pages = await stream_tiff_to_content_blocks(
-                file_info.url, max_size=max_size
+                file_info.url, headers=file_info.headers, max_size=max_size
             )
         except (httpx.HTTPError, FileTooLargeError):
             raise
@@ -183,7 +183,9 @@ async def build_file_content_blocks_for(
         return await _tiff_content_blocks(file_info, max_size)
 
     with _download_errors(file_info):
-        base64_file = await download_file_base64(file_info.url, max_size=max_size)
+        base64_file = await download_file_base64(
+            file_info.url, headers=file_info.headers, max_size=max_size
+        )
 
     if not base64_file:
         raise _empty_file_error(file_info)

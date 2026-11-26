@@ -586,6 +586,7 @@ async def resolve_attachments_to_file_infos(
             name=blob_info.name,
             mime_type=mime_type,
             attachment_id=str(attachment_id),
+            headers=blob_info.headers,
         )
         file_infos.append(file_info)
 

@@ -262,6 +262,27 @@ class TestBuildFileContentBlocksFor:
         assert len(blocks) == 1
         assert blocks[0]["type"] == "image"
 
+    @pytest.mark.parametrize(
+        ("name", "mime_type", "content"),
+        [
+            ("doc.pdf", "application/pdf", b"%PDF-"),
+            ("scan.tiff", "image/tiff", _make_tiff()),
+        ],
+    )
+    async def test_sends_the_attachment_headers(
+        self, httpx_mock: HTTPXMock, name: str, mime_type: str, content: bytes
+    ) -> None:
+        headers = {"Authorization": "Bearer token", "x-ms-version": "2021-08-06"}
+        httpx_mock.add_response(url=FILE_URL, match_headers=headers, content=content)
+        file_info = FileInfo(
+            url=FILE_URL, name=name, mime_type=mime_type, headers=headers
+        )
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert "Bearer token" not in repr(file_info)
+
     async def test_small_pdf_succeeds(self, httpx_mock: HTTPXMock) -> None:
         content = b"tiny pdf bytes"
         httpx_mock.add_response(url=FILE_URL, content=content)

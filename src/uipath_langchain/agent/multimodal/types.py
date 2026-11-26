@@ -1,6 +1,6 @@
 """Types and constants for multimodal LLM input handling."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 MAX_FILE_SIZE_BYTES: int = 30 * 1024 * 1024  # 30MB
 
@@ -27,3 +27,4 @@ class FileInfo:
     masked_attachment_url: str | None = None
     attachment_id: str | None = None
     masked_attachment_id: str | None = None
+    headers: dict[str, str] = field(default_factory=dict, repr=False)
