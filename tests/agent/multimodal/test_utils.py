@@ -368,11 +368,21 @@ class TestBuildFileContentBlocksFor:
         with pytest.raises(AgentRuntimeError, match="report.pdf"):
             await build_file_content_blocks_for(file_info, max_size=100)
 
-    async def test_empty_file_is_a_user_file_error(self, httpx_mock: HTTPXMock) -> None:
+    @pytest.mark.parametrize(
+        "name, mime_type",
+        [
+            ("empty.pdf", "application/pdf"),
+            ("empty.tif", "image/tiff"),
+            ("empty.tiff", "image/tiff"),
+            ("empty.tif", "image/x-tiff"),
+            ("empty.tiff", ""),
+        ],
+    )
+    async def test_empty_file_is_a_user_file_error(
+        self, httpx_mock: HTTPXMock, name: str, mime_type: str
+    ) -> None:
         httpx_mock.add_response(url=FILE_URL, content=b"")
-        file_info = FileInfo(
-            url=FILE_URL, name="empty.pdf", mime_type="application/pdf"
-        )
+        file_info = FileInfo(url=FILE_URL, name=name, mime_type=mime_type)
 
         with pytest.raises(AgentRuntimeError) as exc_info:
             await build_file_content_blocks_for(file_info)
@@ -380,7 +390,7 @@ class TestBuildFileContentBlocksFor:
         info = exc_info.value.error_info
         assert info.title == "Attachment is empty"
         assert info.category == UiPathErrorCategory.USER
-        assert "'empty.pdf'" in info.detail
+        assert f"'{name}'" in info.detail
 
     @pytest.mark.parametrize("status_code", [403, 404, 500])
     @pytest.mark.parametrize(

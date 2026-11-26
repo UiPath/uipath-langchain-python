@@ -67,6 +67,12 @@ def _file_error(
     )
 
 
+def _empty_file_error(file_info: FileInfo) -> AgentRuntimeError:
+    return _file_error(
+        "Attachment is empty", f"File '{file_info.name}' has no content."
+    )
+
+
 @contextmanager
 def _download_errors(file_info: FileInfo) -> Iterator[None]:
     try:
@@ -84,6 +90,24 @@ def _download_errors(file_info: FileInfo) -> Iterator[None]:
             category=UiPathErrorCategory.SYSTEM,
             status=status,
         ) from exc
+
+
+async def _tiff_content_blocks(
+    file_info: FileInfo, max_size: int
+) -> list[DataContentBlock]:
+    with _download_errors(file_info):
+        try:
+            pages = await stream_tiff_to_content_blocks(
+                file_info.url, max_size=max_size
+            )
+        except OSError as exc:
+            raise _file_error(
+                "Attachment could not be read",
+                f"File '{file_info.name}' is not a valid TIFF image.",
+            ) from exc
+    if not pages:
+        raise _empty_file_error(file_info)
+    return pages
 
 
 async def build_file_content_blocks_for(
@@ -137,24 +161,13 @@ async def build_file_content_blocks_for(
         )
 
     if is_tiff(mime_type):
-        with _download_errors(file_info):
-            try:
-                return await stream_tiff_to_content_blocks(
-                    file_info.url, max_size=max_size
-                )
-            except OSError as exc:
-                raise _file_error(
-                    "Attachment could not be read",
-                    f"File '{file_info.name}' is not a valid TIFF image.",
-                ) from exc
+        return await _tiff_content_blocks(file_info, max_size)
 
     with _download_errors(file_info):
         base64_file = await download_file_base64(file_info.url, max_size=max_size)
 
     if not base64_file:
-        raise _file_error(
-            "Attachment is empty", f"File '{file_info.name}' has no content."
-        )
+        raise _empty_file_error(file_info)
 
     tags = (
         {

@@ -346,7 +346,8 @@ async def stream_tiff_to_content_blocks(
         max_size: Maximum allowed file size in bytes. 0 means unlimited.
 
     Returns:
-        A list of DataContentBlock instances, one per TIFF page.
+        A list of DataContentBlock instances, one per TIFF page. An empty
+        file has no pages.
 
     Raises:
         ValueError: If the file exceeds max_size.
@@ -367,6 +368,9 @@ async def stream_tiff_to_content_blocks(
                     f" (downloaded {_format_mb(total)} so far)"
                 )
             buf.write(chunk)
+
+    if total == 0:
+        return []
 
     buf.seek(0)
     blocks: list[DataContentBlock] = []
