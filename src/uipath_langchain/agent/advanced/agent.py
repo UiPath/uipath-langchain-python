@@ -452,12 +452,18 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
 
 
 def _resolve_subagent_specs(
-    subagents: Sequence[SubAgent | CompiledSubAgent],
+    subagents: Sequence[SubAgent | CompiledSubAgent] | None,
     shared_tools: Sequence[BaseTool],
     skills: Sequence[str] | None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
 ) -> list[SubAgent | CompiledSubAgent]:
     """Pin the shared tool list and middleware on every subagent spec.
+
+    ``None`` means the caller did not configure subagents, so the implicit
+    ``general-purpose`` subagent is appended. A list, empty included, is used as
+    is: an empty list declares no subagents, and the caller has to stop
+    deepagents from auto-adding ``general-purpose`` through the harness profile
+    (``GeneralPurposeSubagentProfile(enabled=False)``).
 
     deepagents hands a subagent the parent's ``tools`` unless its spec declares its
     own (``graph.py``: ``spec.get("tools") if "tools" in spec else tools``).
@@ -475,7 +481,7 @@ def _resolve_subagent_specs(
     own ``middleware`` argument to the main agent alone.
     """
     resolved: list[SubAgent | CompiledSubAgent] = []
-    for spec in subagents:
+    for spec in subagents or ():
         # A CompiledSubAgent brings its own graph; nothing to add to it.
         if "runnable" in spec:
             resolved.append(spec)
@@ -488,7 +494,7 @@ def _resolve_subagent_specs(
             }
         )
 
-    if not any(
+    if subagents is None and not any(
         spec.get("name") == GENERAL_PURPOSE_SUBAGENT["name"] for spec in resolved
     ):
         gp: dict[str, Any] = {
@@ -506,7 +512,7 @@ def create_advanced_agent(
     model: BaseChatModel,
     system_prompt: str | SystemMessage | None = "",
     tools: Sequence[BaseTool] = (),
-    subagents: Sequence[SubAgent | CompiledSubAgent] = (),
+    subagents: Sequence[SubAgent | CompiledSubAgent] | None = None,
     backend: BackendProtocol | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
@@ -528,6 +534,9 @@ def create_advanced_agent(
     ``None`` leaves it uncapped. ``initial_message_count_key`` names the state field
     holding the message count at the start of the turn, for agents whose input
     carries earlier turns.
+
+    ``subagents`` ``None`` keeps the implicit ``general-purpose`` subagent; a list
+    is the exact set of subagents (see ``_resolve_subagent_specs``).
     """
     tools = [
         tool.with_workspace(backend)
@@ -573,6 +582,7 @@ def create_advanced_agent_graph(
     output_files_enabled: bool = False,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    subagents: Sequence[SubAgent | CompiledSubAgent] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
@@ -603,6 +613,7 @@ def create_advanced_agent_graph(
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
+        subagents=subagents,
         system_prompt=runtime_prompt.static_prompt,
         backend=backend,
         response_format=response_format,
@@ -725,6 +736,7 @@ def create_conversational_advanced_agent_graph(
     output_schema: type[BaseModel] | None = None,
     max_iterations: int | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]] = (),
+    subagents: Sequence[SubAgent | CompiledSubAgent] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -757,6 +769,7 @@ def create_conversational_advanced_agent_graph(
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
+        subagents=subagents,
         system_prompt=runtime_prompt.static_prompt,
         backend=backend,
         memory=memory_sources,

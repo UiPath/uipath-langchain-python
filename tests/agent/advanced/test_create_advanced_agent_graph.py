@@ -82,6 +82,19 @@ def test_wrapper_graph_has_io_nodes() -> None:
     assert {"transform_input", "advanced_agent", "transform_output"} <= set(graph.nodes)
 
 
+def test_subagents_reach_the_inner_agent() -> None:
+    """The wrapper forwards the configured subagents untouched; None stays None."""
+    worker = {"name": "worker", "description": "works"}
+    with patch(
+        "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+        return_value=MagicMock(),
+    ) as mock_inner:
+        _build(subagents=[worker])
+        assert mock_inner.call_args.kwargs["subagents"] == [worker]
+        _build()
+        assert mock_inner.call_args.kwargs["subagents"] is None
+
+
 def test_callable_system_prompt_enables_runtime_middleware() -> None:
     """The inner deep agent keeps its base prompt and receives runtime middleware."""
     with patch(

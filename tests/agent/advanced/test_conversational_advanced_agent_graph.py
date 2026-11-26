@@ -7,6 +7,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents import SubAgent
 from deepagents.backends import FilesystemBackend
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
@@ -95,6 +96,23 @@ def _runtime_prompt_middleware(
         f"expected at most one runtime-prompt middleware, got {found}"
     )
     return found[0] if found else None
+
+
+def test_subagents_reach_the_inner_agent() -> None:
+    worker: SubAgent = {"name": "worker", "description": "works"}
+    with patch(
+        "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+        return_value=MagicMock(),
+    ) as inner:
+        create_conversational_advanced_agent_graph(
+            model=_mock_model(),
+            tools=[],
+            system_prompt="sys",
+            backend=None,
+            input_schema=_Input,
+            subagents=[worker],
+        )
+        assert inner.call_args.kwargs["subagents"] == [worker]
 
 
 def test_callable_system_prompt_enables_runtime_middleware() -> None:

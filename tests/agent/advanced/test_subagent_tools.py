@@ -107,7 +107,11 @@ def _dispatch(
     graph = create_advanced_agent(
         model=model,
         tools=[_create_file_tool(), _tool("read_invoice")],
-        subagents=[SubAgent(**{**s, "model": model}) for s in subagents],
+        subagents=(
+            [SubAgent(**{**s, "model": model}) for s in subagents]
+            if subagents
+            else None
+        ),
         backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True),
     )
     asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "hi"}]}))
@@ -178,7 +182,7 @@ def test_a_subagent_declaring_its_own_tools_still_gets_our_middleware() -> None:
     )
 
     middleware = JobAttachmentsMiddleware()
-    (spec, _general_purpose) = _resolve_subagent_specs(
+    (spec,) = _resolve_subagent_specs(
         [{**_WORKER, "tools": [_tool("only_mine")]}], [], None, [middleware]
     )
 

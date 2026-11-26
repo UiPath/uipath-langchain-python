@@ -90,6 +90,50 @@ class TestCreateAdvancedAgent:
             assert isinstance(kwargs["tools"], list)
             assert isinstance(kwargs["subagents"], list)
 
+    def test_omitted_subagents_append_the_general_purpose_subagent(
+        self, mock_model: MagicMock
+    ) -> None:
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent"
+        ) as mock_upstream:
+            mock_upstream.return_value = MagicMock(spec=CompiledStateGraph)
+            create_advanced_agent(
+                mock_model, system_prompt="test", tools=[_sample_tool]
+            )
+            specs = mock_upstream.call_args.kwargs["subagents"]
+            assert [spec["name"] for spec in specs] == ["general-purpose"]
+            assert specs[0]["tools"] == [_sample_tool]
+
+    def test_empty_subagents_declare_none(self, mock_model: MagicMock) -> None:
+        """An explicit empty list is the caller's decision, not a request for defaults."""
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent"
+        ) as mock_upstream:
+            mock_upstream.return_value = MagicMock(spec=CompiledStateGraph)
+            create_advanced_agent(mock_model, system_prompt="test", subagents=[])
+            assert mock_upstream.call_args.kwargs["subagents"] == []
+
+    def test_configured_subagents_are_used_as_is(self, mock_model: MagicMock) -> None:
+        """No general-purpose subagent is appended next to configured ones, and a
+        spec's own tool list is kept while a spec without one inherits the parent's."""
+        with patch(
+            "uipath_langchain.agent.advanced.agent._create_deep_agent"
+        ) as mock_upstream:
+            mock_upstream.return_value = MagicMock(spec=CompiledStateGraph)
+            create_advanced_agent(
+                mock_model,
+                system_prompt="test",
+                tools=[_sample_tool],
+                subagents=[
+                    {"name": "researcher", "description": "reads", "tools": []},
+                    {"name": "writer", "description": "writes"},
+                ],
+            )
+            specs = mock_upstream.call_args.kwargs["subagents"]
+            assert [spec["name"] for spec in specs] == ["researcher", "writer"]
+            assert specs[0]["tools"] == []
+            assert specs[1]["tools"] == [_sample_tool]
+
     def test_advanced_agent_forwards_skills(self, mock_model: MagicMock) -> None:
         """Non-empty skills are forwarded to the upstream builder as a list."""
         with patch(

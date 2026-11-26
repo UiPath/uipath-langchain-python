@@ -272,13 +272,17 @@ class TestSubagentWiring:
         """deepagents builds this subagent itself, so its spec is the only seam."""
         middleware = _PayloadHandlerMiddleware()
 
-        specs = _specs([], [middleware])
+        specs = _specs(None, [middleware])
 
         assert [spec["name"] for spec in specs] == ["general-purpose"]
         assert specs[0]["middleware"] == [middleware]
 
+    def test_an_empty_list_declares_no_subagents(self) -> None:
+        """Only an unset list falls back to general-purpose."""
+        assert _specs([], [_PayloadHandlerMiddleware()]) == []
+
     def test_general_purpose_spec_carries_the_shared_tools(self) -> None:
-        specs = _specs([], [_PayloadHandlerMiddleware()], shared=[echo])
+        specs = _specs(None, [_PayloadHandlerMiddleware()], shared=[echo])
 
         assert [tool.name for tool in specs[0]["tools"]] == [echo.name]
 
@@ -380,7 +384,7 @@ class TestGeneralPurposeSubagentParity:
         )
         ours = _general_purpose_spec(
             lambda: create_advanced_agent(
-                model=model, system_prompt="p", tools=[echo], subagents=[], **kwargs
+                model=model, system_prompt="p", tools=[echo], **kwargs
             )
         )
         return baseline, ours
