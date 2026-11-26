@@ -189,11 +189,7 @@ async def test_sample_applies_a_binding_override(
 
     async def overwrites() -> dict[str, ResourceOverwrite]:
         key = "skillBundle.ops"
-        value = {
-            "name": "finance",
-            "folderPath": "Shared/Skills",
-            "versionMode": "latest",
-        }
+        value = {"name": "finance", "folderPath": "Shared/Skills"}
         return {key: ResourceOverwriteParser.parse(key, value)}
 
     async with ResourceOverwritesContext(overwrites):
