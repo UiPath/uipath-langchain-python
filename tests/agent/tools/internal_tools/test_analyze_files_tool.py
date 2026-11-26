@@ -9,12 +9,13 @@ from unittest.mock import AsyncMock, Mock, patch
 import httpx
 import openai
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.messages.content import (
     ImageContentBlock,
     create_file_block,
     create_image_block,
 )
+from langchain_core.messages.tool import tool_call
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,6 +23,7 @@ from uipath.agent.models.agent import (
     AgentInternalAnalyzeFilesToolProperties,
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
+    AgentToolStaticArgumentProperties,
 )
 from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.platform.errors import EnrichedException
@@ -97,6 +99,12 @@ class MockBlobInfo(BaseModel):
     uri: str
     name: str
 
+
+_ATTACHMENT_ARG = {
+    "ID": "6f1d2c3b-0a9e-4b8c-9d7e-5f4a3b2c1d0e",
+    "FullName": "test.pdf",
+    "MimeType": "application/pdf",
+}
 
 _TEST_PDF = FileInfo(
     url="https://example.com/file.pdf", name="test.pdf", mime_type="application/pdf"
@@ -533,24 +541,56 @@ class TestCreateAnalyzeFileTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
-    async def test_create_analyze_file_tool_missing_analysis_task(
-        self, mock_get_wrapper, resource_config, mock_llm
+    @pytest.mark.parametrize("analysis_task", ["", "  \n"])
+    async def test_empty_llm_analysis_task_is_a_tool_error(
+        self, mock_get_wrapper, resource_config, mock_llm, analysis_task
     ):
-        """Test tool execution fails when analysisTask is missing."""
-        mock_wrapper = Mock()
-        mock_get_wrapper.return_value = mock_wrapper
-
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
-        mock_attachment = MockAttachment(
-            ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
+        result = await tool.ainvoke(
+            tool_call(
+                name=tool.name,
+                args={
+                    "analysisTask": analysis_task,
+                    "attachments": [_ATTACHMENT_ARG],
+                },
+                id="call-1",
+            )
         )
 
-        assert tool.coroutine is not None
-        with pytest.raises(
-            ValueError, match="Argument 'analysisTask' is not available"
-        ):
-            await tool.coroutine(attachments=[mock_attachment])
+        assert isinstance(result, ToolMessage)
+        assert result.status == "error"
+        assert "Argument 'analysisTask' is empty" in result.content
+        assert "call the tool again" in result.content
+        mock_llm.ainvoke.assert_not_awaited()
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    async def test_empty_configured_analysis_task_is_a_user_error(
+        self, mock_get_wrapper, resource_config, mock_llm
+    ):
+        resource_config.argument_properties = {
+            "$['analysisTask']": AgentToolStaticArgumentProperties(
+                value="", is_sensitive=False
+            )
+        }
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke(
+                tool_call(
+                    name=tool.name,
+                    args={"analysisTask": "", "attachments": [_ATTACHMENT_ARG]},
+                    id="call-1",
+                )
+            )
+
+        error = exc_info.value.error_info
+        assert error.code.endswith(AgentRuntimeErrorCode.INVALID_INPUT_ARGUMENT.value)
+        assert error.category == UiPathErrorCategory.USER
+        assert "analyze_files" in error.detail
+        mock_llm.ainvoke.assert_not_awaited()
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
