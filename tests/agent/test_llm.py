@@ -380,6 +380,14 @@ _TOO_MANY_IMAGES_BODY: dict[str, object] = {
             }
         },
         {"error": {"code": "ResponsibleAIPolicyViolation", "message": "Blocked."}},
+        {"error": {"code": "BadRequest", "innererror": {"code": "content_filter"}}},
+        {"code": "content_filter", "message": "Blocked."},
+        {
+            "error": {
+                "message": "The prompt triggered the content management policy.",
+                "code": "invalid_request_error",
+            }
+        },
     ],
 )
 def test_400_from_the_content_filter_names_the_content_filter(
@@ -394,6 +402,36 @@ def test_400_from_the_content_filter_names_the_content_filter(
     assert "content policy" in info.detail
     assert "model settings" not in info.detail
     assert "modify your prompt" not in info.detail.lower()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {
+            "error": {
+                "code": "invalid_request_error",
+                "message": "Invalid schema for function 'content_filter_check': "
+                "'properties' is required.",
+            }
+        },
+        {
+            "error": {
+                "code": "invalid_value",
+                "message": "Invalid value: 'content_filter'. Supported values are: "
+                "'stop'.",
+            }
+        },
+        {"error": "content_filter"},
+        {"message": "ResponsibleAIPolicyViolation"},
+    ],
+)
+def test_400_naming_the_content_filter_only_in_its_message_is_a_plain_bad_request(
+    body: dict[str, object],
+):
+    info = _raise(_api_error(400, body)).error_info
+
+    assert info.title == "LLM provider rejected the request"
+    assert "content policy" not in info.detail
 
 
 def test_400_with_too_many_images_maps_to_user_file_error():

@@ -165,6 +165,19 @@ def test_content_filter_rejection_is_not_a_file_error() -> None:
     assert "Budget.csv" not in info.detail
 
 
+def test_schema_error_naming_content_filter_is_still_a_file_error() -> None:
+    body: dict[str, object] = {
+        "error": {
+            "code": "invalid_request_error",
+            "message": "Invalid schema for function 'content_filter_check'.",
+        }
+    }
+    info = _raised(_api_error(400, body)).error_info
+
+    assert info.title == "The model could not read the attached files"
+    assert "Budget.csv" in info.detail
+
+
 @pytest.mark.parametrize("detail", ["", "   "])
 def test_blank_gateway_detail_is_no_gateway_rejection(detail: str) -> None:
     raised = _raised(_api_error(400, {"status": 400, "detail": detail}))
