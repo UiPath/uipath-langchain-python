@@ -17,13 +17,19 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import (
     CallToolResult,
     ListToolsResult,
+    Result,
 )
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
 from uipath_langchain._utils import get_execution_folder_path
 
-from .mcp_tasks import resolve_claimed_result, session_extension_kwargs
+from .mcp_tasks import (
+    McpTaskHandle,
+    peek_claimed_task,
+    resolve_claimed_result,
+    session_extension_kwargs,
+)
 from .protocol_strategy import (
     ProtocolMode,
     ProtocolStrategy,
@@ -566,6 +572,32 @@ class McpClient(UiPathDisposableProtocol):
             The tool call result.
         """
 
+        submitted = await self.submit_tool_call(name, arguments)
+
+        # An ordinary result is finished business: return it without touching
+        # the session. Reaching for one first would let a call that already
+        # succeeded fail on a concurrent session drop, for a session it has no
+        # further use for.
+        if isinstance(submitted, CallToolResult):
+            return submitted
+
+        return await self.resolve_task(name, submitted)
+
+    async def submit_tool_call(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> CallToolResult | Result:
+        """Send ``tools/call`` and return whatever the server answers with.
+
+        The first half of :meth:`call_tool`, for a caller that decides for
+        itself how to wait on a task: an ordinary ``CallToolResult``, or the
+        task handle (``McpTaskHandle``) to pass to :meth:`resolve_task`.
+
+        Args:
+            name: The name of the tool to call.
+            arguments: Optional arguments to pass to the tool.
+        """
         # Submission keeps the client's session-recovery retry, unchanged and
         # predating Tasks. Note what that retry does *not* prove: a session the
         # server rejected means the call never ran, but a dropped transport
@@ -576,28 +608,59 @@ class McpClient(UiPathDisposableProtocol):
         # own tests (`test_dropped_connection_resumes_the_persisted_session`
         # pins today's behavior), not something to slip in here.
         # allow_claimed lets the claimed task shape reach us instead of raising.
-        submitted = await self._execute_with_retry(
+        return await self._execute_with_retry(
             lambda session: session.call_tool(
                 name, arguments=arguments, allow_claimed=True
             ),
             f"call_tool({name})",
         )
 
-        # An ordinary result is finished business: return it without touching
-        # the session. Reaching for one first would let a call that already
-        # succeeded fail on a concurrent session drop, for a session it has no
-        # further use for.
-        if isinstance(submitted, CallToolResult):
-            return submitted
+    async def resolve_task(
+        self,
+        name: str,
+        handle: Result,
+        *,
+        budget_seconds: float | None = None,
+        poll_first: bool = False,
+    ) -> CallToolResult:
+        """Poll a task handle from :meth:`submit_tool_call` to its result.
 
-        # Resolution stays *outside* that retry. A task handle means the server
-        # already accepted the work -- a job is running -- so a failure while
-        # polling must propagate rather than re-run tools/call and start a
-        # second job on a fresh poll budget. Any recovery for polling itself
-        # belongs inside the poll loop, which keeps the task id and the
-        # original deadline.
+        Works on a connection other than the one the call was sent on -- a task
+        is known by its id alone -- which is what lets a run that was suspended
+        and resumed in a new process pick its task up again.
+
+        Args:
+            name: The tool the task belongs to.
+            handle: The task handle.
+            budget_seconds: How long to poll; defaults to the poll budget flag.
+            poll_first: Ask for the task before the first sleep.
+
+        Raises:
+            McpTaskPollBudgetExhausted: The budget ran out with the task still
+                working.
+            MCPError: The task failed, was cancelled, or needs input.
+        """
+        # Resolution stays *outside* the submission retry. A task handle means
+        # the server already accepted the work -- a job is running -- so a
+        # failure while polling must propagate rather than re-run tools/call
+        # and start a second job on a fresh poll budget. Any recovery for
+        # polling itself belongs inside the poll loop, which keeps the task id
+        # and the original deadline.
         session = await self._ensure_session()
-        return await resolve_claimed_result(session, name, submitted)
+        return await resolve_claimed_result(
+            session,
+            name,
+            handle,
+            budget_seconds=budget_seconds,
+            poll_first=poll_first,
+        )
+
+    async def peek_task(
+        self, name: str, handle: McpTaskHandle
+    ) -> CallToolResult | None:
+        """Ask for a task once: its result, or ``None`` while it is still working."""
+        session = await self._ensure_session()
+        return await peek_claimed_task(session, name, handle)
 
     async def dispose(self) -> None:
         """Dispose of the client and release all resources.

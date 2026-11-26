@@ -125,6 +125,19 @@ tests/agent/tools/test_mcp/
 │   ├── test_build_protocol_strategy_maps_every_mode
 │   └── test_auto_is_the_default_mode
 │
+├── test_mcp_task_suspension.py  # com.uipath/tasks: suspend the run on a long task
+│   ├── the job annotation and the polling-time flag (pure functions)
+│   ├── call_with_suspension in a real graph + checkpointer (ScriptedCall),
+│   │   incl. two calls in one node, the kill switch thrown mid-suspend, a
+│   │   poller that gives up early, and an interrupt() before the call
+│   ├── the MCP tool in its own node over real HTTP (JobBackedTaskServer),
+│   │   resumed by a second client on a new connection; FirstPollFails
+│   │   answers one chosen tasks/get with a gateway's 503
+│   ├── call_mcp_tool for a coded agent, over a real McpService
+│   ├── a low-code agent: the whole create_agent graph with a scripted model,
+│   │   suspended on its MCP tool and finished by a second process
+│   └── the interrupt through the real trigger handler: a JOB_RAW Job trigger
+│
 ├── test_session_info.py       # SessionInfo + SessionInfoFactory contract
 │
 ├── test_session_tools.py      # load_mcp_tools discovery/invocation/errors

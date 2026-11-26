@@ -46,6 +46,12 @@ from mcp.types import (
 from pydantic import Field, ValidationError
 from uipath.core.feature_flags import FeatureFlags
 
+from .mcp_task_suspension import (
+    UIPATH_TASKS_CAPABILITY,
+    UIPATH_TASKS_EXTENSION_ID,
+    suspension_enabled,
+)
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks"
@@ -164,7 +170,17 @@ def _interval_seconds(poll_interval_ms: int | None) -> float:
     return max(interval, 100) / 1000.0
 
 
-def _budget_exhausted(task_id: str, tool_name: str) -> MCPError:
+class McpTaskPollBudgetExhausted(MCPError):
+    """The poll budget ran out with the task still working.
+
+    Still an ``MCPError`` with ``REQUEST_TIMEOUT``, which is what the tool layer
+    maps. The type of its own is for a caller that set the budget on purpose
+    and has something else to do when it runs out -- suspend the run -- and
+    must not take one stalled poll's ``REQUEST_TIMEOUT`` for that.
+    """
+
+
+def _budget_exhausted(task_id: str, tool_name: str) -> McpTaskPollBudgetExhausted:
     """The one budget-exhaustion error, naming the task that outlived the budget.
 
     An ``MCPError`` rather than a ``TimeoutError`` because this is the headline
@@ -181,7 +197,7 @@ def _budget_exhausted(task_id: str, tool_name: str) -> MCPError:
     in the log line written when the task was first seen, which is what an
     operator needs to find the one left running.
     """
-    return MCPError(
+    return McpTaskPollBudgetExhausted(
         REQUEST_TIMEOUT,
         f"MCP task {_task_ref(task_id)} for tool '{tool_name}' did not finish "
         f"within the poll budget; it keeps running server-side.",
@@ -222,12 +238,26 @@ def _tolerate_poll_failure(
     return failures
 
 
-async def _resolve_task(handle: McpTaskHandle, ctx: ClaimContext) -> CallToolResult:
+async def _resolve_task(
+    handle: McpTaskHandle,
+    ctx: ClaimContext,
+    *,
+    budget_seconds: float | None = None,
+    poll_first: bool = False,
+) -> CallToolResult:
     """Poll a claimed task to completion and return its final CallToolResult.
 
     Honors the server's ``pollIntervalMs`` (re-read on every snapshot) within
     the poll budget. The statuses are terminal per spec: ``completed`` carries
     the result, ``failed`` the JSON-RPC error, ``cancelled`` neither.
+
+    Args:
+        handle: The task.
+        ctx: The session and tool the task belongs to.
+        budget_seconds: How long to poll. Defaults to the poll budget flag.
+        poll_first: Ask for the task before the first sleep. For a caller that
+            has reason to think the task is already over, such as one resumed
+            because the job behind it ended.
 
     Raises:
         MCPError: When the task reaches ``failed`` (the task's own error) or
@@ -237,7 +267,9 @@ async def _resolve_task(handle: McpTaskHandle, ctx: ClaimContext) -> CallToolRes
             Every failure out of here is an ``MCPError`` so that the tool
             layer's single ``except MCPError`` can categorize it.
     """
-    deadline = time.monotonic() + task_poll_budget_seconds()
+    deadline = time.monotonic() + (
+        task_poll_budget_seconds() if budget_seconds is None else budget_seconds
+    )
     interval = _interval_seconds(handle.poll_interval_ms)
     failures = 0
     logger.info(
@@ -245,11 +277,15 @@ async def _resolve_task(handle: McpTaskHandle, ctx: ClaimContext) -> CallToolRes
         f"polling every {interval}s"
     )
 
+    sleep = 0.0 if poll_first else interval
     while True:
-        if time.monotonic() + interval >= deadline:
+        if time.monotonic() + sleep >= deadline:
             # No room left for both the wait and the poll that would follow it.
             raise _budget_exhausted(handle.task_id, ctx.tool_name)
-        await anyio.sleep(interval)
+        await anyio.sleep(sleep)
+        # Only the first request of a `poll_first` call goes out at once. A
+        # failed one is retried on the normal interval, not in a tight loop.
+        sleep = interval
 
         # Re-read the clock after sleeping, and bound the request by what is
         # left: a sleep clamped to the deadline followed by an unbounded
@@ -277,41 +313,84 @@ async def _resolve_task(handle: McpTaskHandle, ctx: ClaimContext) -> CallToolRes
 
         failures = 0
 
-        if snapshot.status == "completed":
-            return _completed_result(handle, ctx, snapshot)
+        settled = _settled_result(handle, ctx, snapshot)
+        if settled is not None:
+            return settled
 
-        if snapshot.status == "failed":
-            error = snapshot.error or {}
-            # The task's own code is reported in the message rather than
-            # re-raised as this error's code. The tool layer reads the code to
-            # decide whether the *connection* died
-            # (`McpClient.is_session_error`), so a task failing with, say,
-            # -32000 would otherwise be announced to the user as "the
-            # connection to the server was terminated".
-            code = error.get("code", INTERNAL_ERROR)
-            message = error.get("message", "The MCP task failed.")
-            raise MCPError(
-                INTERNAL_ERROR,
-                f"MCP task {_task_ref(handle.task_id)} failed: {message} (code {code})",
-                error.get("data"),
+        interval = sleep = _interval_seconds(snapshot.poll_interval_ms)
+
+
+def _settled_result(
+    handle: McpTaskHandle, ctx: ClaimContext, snapshot: McpTaskSnapshot
+) -> CallToolResult | None:
+    """What a snapshot settles the call with, or ``None`` while the task works.
+
+    Raises:
+        MCPError: The task ``failed``, was ``cancelled``, or is parked on
+            ``input_required``.
+    """
+    if snapshot.status == "completed":
+        return _completed_result(handle, ctx, snapshot)
+
+    if snapshot.status == "failed":
+        error = snapshot.error or {}
+        # The task's own code is reported in the message rather than
+        # re-raised as this error's code. The tool layer reads the code to
+        # decide whether the *connection* died
+        # (`McpClient.is_session_error`), so a task failing with, say,
+        # -32000 would otherwise be announced to the user as "the
+        # connection to the server was terminated".
+        code = error.get("code", INTERNAL_ERROR)
+        message = error.get("message", "The MCP task failed.")
+        raise MCPError(
+            INTERNAL_ERROR,
+            f"MCP task {_task_ref(handle.task_id)} failed: {message} (code {code})",
+            error.get("data"),
+        )
+
+    if snapshot.status == "cancelled":
+        raise MCPError(
+            INTERNAL_ERROR,
+            f"MCP task {_task_ref(handle.task_id)} was cancelled before completing.",
+        )
+
+    if snapshot.status == "input_required":
+        # The tool layer has no interactive party to answer an elicitation;
+        # surfacing this beats polling the budget away on a parked task.
+        raise MCPError(
+            INTERNAL_ERROR,
+            f"MCP task {_task_ref(handle.task_id)} requires additional input, "
+            "which the agent tool layer cannot provide.",
+        )
+
+    return None
+
+
+async def _peek_task(handle: McpTaskHandle, ctx: ClaimContext) -> CallToolResult | None:
+    """Ask for the task once: its result, or ``None`` while it is still working.
+
+    A look that fails for a reason a later poll may not (the errors the poll
+    loop absorbs) also answers ``None``: it says nothing about the task.
+
+    Raises:
+        MCPError: The task settled with a failure, or the look failed in a way
+            no later poll would fix (an unknown task id, a dead transport).
+    """
+    try:
+        snapshot = await ctx.session.send_request(
+            GetTaskRequest(params=GetTaskRequestParams(task_id=handle.task_id)),
+            McpTaskSnapshot,
+            request_read_timeout_seconds=MAX_POLL_REQUEST_SECONDS,
+        )
+    except MCPError as poll_error:
+        if poll_error.code in (INTERNAL_ERROR, REQUEST_TIMEOUT):
+            logger.warning(
+                f"Transient failure reading MCP task {_task_ref(handle.task_id)} "
+                f"for tool '{ctx.tool_name}': {poll_error}"
             )
-
-        if snapshot.status == "cancelled":
-            raise MCPError(
-                INTERNAL_ERROR,
-                f"MCP task {_task_ref(handle.task_id)} was cancelled before completing.",
-            )
-
-        if snapshot.status == "input_required":
-            # The tool layer has no interactive party to answer an elicitation;
-            # surfacing this beats polling the budget away on a parked task.
-            raise MCPError(
-                INTERNAL_ERROR,
-                f"MCP task {_task_ref(handle.task_id)} requires additional input, "
-                "which the agent tool layer cannot provide.",
-            )
-
-        interval = _interval_seconds(snapshot.poll_interval_ms)
+            return None
+        raise
+    return _settled_result(handle, ctx, snapshot)
 
 
 def _completed_result(
@@ -361,6 +440,9 @@ async def resolve_claimed_result(
     session: ClientSession,
     tool_name: str,
     result: CallToolResult | Result,
+    *,
+    budget_seconds: float | None = None,
+    poll_first: bool = False,
 ) -> CallToolResult:
     """Finish a claimed ``tools/call`` answer, passing an ordinary one through.
 
@@ -381,8 +463,23 @@ async def resolve_claimed_result(
     final = await _resolve_task(
         result,
         ClaimContext(session=session, tool_name=tool_name, read_timeout_seconds=None),
+        budget_seconds=budget_seconds,
+        poll_first=poll_first,
     )
     if not final.is_error:
+        await session.validate_tool_result(tool_name, final)
+    return final
+
+
+async def peek_claimed_task(
+    session: ClientSession, tool_name: str, handle: McpTaskHandle
+) -> CallToolResult | None:
+    """One ``tasks/get``: the task's validated result, or ``None`` while it works."""
+    final = await _peek_task(
+        handle,
+        ClaimContext(session=session, tool_name=tool_name, read_timeout_seconds=None),
+    )
+    if final is not None and not final.is_error:
         await session.validate_tool_result(tool_name, final)
     return final
 
@@ -400,7 +497,14 @@ def session_extension_kwargs() -> dict[str, Any]:
         return {}
 
     extension = McpTasksExtension()
+    extensions: dict[str, dict[str, Any]] = {extension.identifier: extension.settings()}
+    if suspension_enabled():
+        # The UiPath name of the same protocol. It adds no result shape of its
+        # own -- the task it answers with is the one claimed above -- so it is
+        # declared with the trigger kinds a run can suspend on, and nothing
+        # more. A server that serves it names the job behind the task.
+        extensions[UIPATH_TASKS_EXTENSION_ID] = dict(UIPATH_TASKS_CAPABILITY)
     return {
-        "extensions": {extension.identifier: extension.settings()},
+        "extensions": extensions,
         "result_claims": {extension.identifier: extension.claims()},
     }
