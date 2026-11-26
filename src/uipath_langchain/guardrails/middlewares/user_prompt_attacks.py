@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
     """Middleware for user prompt attacks detection using UiPath guardrails.
 
-    Supports LLM scope only. PRE stage only — registers only ``before_model`` hook.
+    Supports LLM scope only. PRE stage only — its ``wrap_model_call`` hook checks
+    only the model's input.
     Takes no entity or threshold parameters.
 
     Args:
@@ -77,7 +78,7 @@ class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
-        """Create middleware instances — LLM scope, PRE only (before_model)."""
+        """Create middleware instances — LLM scope, PRE only (model input)."""
         guardrail_name = self._name.replace(" ", "_")
         return self._build_message_hooks(
             GuardrailScope.LLM, GuardrailExecutionStage.PRE, guardrail_name

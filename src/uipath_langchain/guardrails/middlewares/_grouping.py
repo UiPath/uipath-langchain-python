@@ -1,9 +1,10 @@
 """Group a stage's guardrail checks into one container span.
 
-Each guardrail hook runs as its own LangGraph node, so the checks of one stage
-(e.g. LLM input) are spread over several nodes. The first check of a stage
-starts a container next to those nodes (inside ``tools`` for tool checks);
-later checks reuse it. ``GuardrailStageCloser`` ends it when something else
+Agent checks run as their own LangGraph nodes, so the checks of one stage
+(e.g. agent input) are spread over several nodes, and their container goes
+next to those nodes. LLM and tool checks run inside the model and ``tools``
+nodes, so theirs goes inside them. The first check of a stage starts the
+container; later checks reuse it. ``GuardrailStageCloser`` ends it when something else
 starts beside it or its parent ends, and ``is_exported`` hides the now-empty
 guardrail node spans.
 """
@@ -212,12 +213,13 @@ def _shared_container(
 def _container_place(scope: GuardrailScope | None) -> tuple[Span, SpanContext] | None:
     """The check's node and the container's parent, if a container there would close.
 
-    Tool checks go inside the ``tools`` node; others beside their own node.
+    Tool and LLM checks run inside the ``tools`` and model nodes, so their
+    containers go inside them; agent checks beside their own node.
     """
     node = UiPathSpanUtils.get_external_current_span()
     if node is None or not node.is_recording():
         return None  # a sampled-out node never reports its end
-    if scope == GuardrailScope.TOOL:
+    if scope in (GuardrailScope.TOOL, GuardrailScope.LLM):
         parent: SpanContext | None = node.get_span_context()
     else:
         parent = getattr(node, "parent", None)

@@ -5,20 +5,22 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, Sequence, cast
 
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
+    ModelRequest,
     after_agent,
-    after_model,
     before_agent,
-    before_model,
+    wrap_model_call,
     wrap_tool_call,
 )
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
+from langgraph.func import task
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -50,6 +52,7 @@ from .._action_context import (
     _action_context,
     component_label,
 )
+from ..escalate_action import EscalateAction
 from ..models import GuardrailAction
 from ._attachments import (
     NO_TEXT_PLACEHOLDER,
@@ -74,6 +77,30 @@ from ._utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@task
+async def _checkpointed_model_call(handler: Any, request: ModelRequest) -> Any:
+    """Call the model once per run: on resume, LangGraph replays the saved response."""
+    return await handler(request)
+
+
+def _in_graph_run() -> bool:
+    """Whether the caller runs inside a LangGraph node, where a task can be saved."""
+    try:
+        get_config()
+    except RuntimeError:
+        return False
+    return True
+
+
+def _last_ai_message(response: Any) -> AIMessage | None:
+    """The model's answer in a ``wrap_model_call`` handler's response."""
+    if isinstance(response, AIMessage):
+        return response
+    messages = getattr(response, "result", None) or []
+    return next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+
 
 #: ``$guardrailType`` discriminator for built-in validator guardrails. Typed as
 #: a ``Literal`` so it satisfies ``BuiltInValidatorGuardrail.guardrail_type``.
@@ -563,10 +590,11 @@ class BuiltInGuardrailMiddlewareMixin:
         stage: GuardrailExecutionStage,
         guardrail_name: str,
     ) -> list[AgentMiddleware]:
-        """Build stage-gated before/after message hooks for an AGENT or LLM scope.
+        """Build stage-gated message hooks for an AGENT or LLM scope.
 
-        ``PRE`` registers only the ``before_*`` hook, ``POST`` only the
-        ``after_*`` hook, and ``PRE_AND_POST`` both — so a guardrail validates
+        AGENT: ``PRE`` registers only ``before_agent``, ``POST`` only
+        ``after_agent``, and ``PRE_AND_POST`` both. LLM: one ``wrap_model_call``
+        hook that checks the input, the output or both. Either way a guardrail validates
         (and acts, e.g. escalates) at a single checkpoint instead of twice per
         run. Shared by the message-based middlewares (PII / harmful content /
         intellectual property) so their hook wiring can't drift apart.
@@ -617,7 +645,7 @@ class BuiltInGuardrailMiddlewareMixin:
                     # not the whole conversation, so the flagged content maps back
                     # to a single message (an escalation's ReviewedOutputs edit can
                     # be applied) and the original input is carried separately as
-                    # input_text. Mirrors the LLM-scope after_model behavior.
+                    # input_text. Mirrors the LLM-scope output check.
                     messages = state.get("messages", [])
                     ai_messages = [m for m in messages if isinstance(m, AIMessage)]
                     if ai_messages:
@@ -642,66 +670,69 @@ class BuiltInGuardrailMiddlewareMixin:
                 hooks.append(after_agent(_after_agent_func))
 
         elif scope == GuardrailScope.LLM:
-            if include_pre:
-
-                async def _before_model_func(
-                    state: AgentState[Any], runtime: Runtime
-                ) -> None:
-                    messages = state.get("messages", [])
-                    mw._check_messages(
-                        list(messages),
-                        scope=GuardrailScope.LLM,
-                        stage=GuardrailExecutionStage.PRE,
-                        attachments=mw._attachments_for(
-                            scope=GuardrailScope.LLM,
-                            stage=GuardrailExecutionStage.PRE,
-                            state=state,
-                        ),
-                    )
-
-                _before_model_func.__name__ = f"{guardrail_name}_before_model"
-                register_guardrail_node(
-                    f"{_before_model_func.__name__}.before_model",
-                    GuardrailScope.LLM,
-                    GuardrailExecutionStage.PRE,
-                )
-                hooks.append(before_model(_before_model_func))
-
-            if include_post:
-
-                async def _after_model_func(
-                    state: AgentState[Any], runtime: Runtime
-                ) -> None:
-                    messages = state.get("messages", [])
-                    ai_messages = [m for m in messages if isinstance(m, AIMessage)]
-                    if ai_messages:
-                        mw._check_messages(
-                            [ai_messages[-1]],
-                            scope=GuardrailScope.LLM,
-                            stage=GuardrailExecutionStage.POST,
-                            input_text=mw._last_input_text(messages),
-                            attachments=mw._attachments_for(
-                                scope=GuardrailScope.LLM,
-                                stage=GuardrailExecutionStage.POST,
-                                state=state,
-                            ),
-                        )
-
-                _after_model_func.__name__ = f"{guardrail_name}_after_model"
-                register_guardrail_node(
-                    f"{_after_model_func.__name__}.after_model",
-                    GuardrailScope.LLM,
-                    GuardrailExecutionStage.POST,
-                )
-                hooks.append(after_model(_after_model_func))
+            hooks.append(
+                self._create_model_wrap_hook(guardrail_name, include_pre, include_post)
+            )
 
         return hooks
+
+    def _create_model_wrap_hook(
+        self, guardrail_name: str, include_pre: bool, include_post: bool
+    ) -> AgentMiddleware:
+        """Create a ``wrap_model_call`` hook that checks the model's input and output.
+
+        The checks run inside the model node, so their stage containers sit under
+        its span, like tool checks under ``tools``. An escalation interrupts that
+        node and LangGraph re-runs it to resume. When this guardrail escalates on
+        the output, the model call is a checkpointed task, so the resumed run
+        reviews the same answer instead of calling the model again.
+        """
+        guardrails_in_use()
+        mw = self
+        checkpoint_model_call = include_post and isinstance(self.action, EscalateAction)
+
+        async def _wrap_model_call_func(request: ModelRequest, handler: Any) -> Any:
+            if include_pre:
+                # The request's messages are the state's: edits persist as before.
+                mw._check_messages(
+                    cast(list[BaseMessage], request.messages),
+                    scope=GuardrailScope.LLM,
+                    stage=GuardrailExecutionStage.PRE,
+                    attachments=mw._attachments_for(
+                        scope=GuardrailScope.LLM,
+                        stage=GuardrailExecutionStage.PRE,
+                        state=request.state,
+                    ),
+                )
+            if checkpoint_model_call and _in_graph_run():
+                response = await _checkpointed_model_call(handler, request)
+            else:
+                response = await handler(request)
+            if include_post and (answer := _last_ai_message(response)) is not None:
+                mw._check_messages(
+                    [answer],
+                    scope=GuardrailScope.LLM,
+                    stage=GuardrailExecutionStage.POST,
+                    input_text=mw._last_input_text(request.messages),
+                    attachments=mw._attachments_for(
+                        scope=GuardrailScope.LLM,
+                        stage=GuardrailExecutionStage.POST,
+                        state={
+                            **(request.state or {}),
+                            "messages": [*request.messages, answer],
+                        },
+                    ),
+                )
+            return response
+
+        _wrap_model_call_func.__name__ = f"{guardrail_name}_wrap_model_call"
+        return wrap_model_call(_wrap_model_call_func)
 
     def _last_input_text(self, messages: Sequence[BaseMessage]) -> str | None:
         """Return the last HumanMessage text — the input for a POST check.
 
-        Used by ``after_*`` hooks to supply the original input alongside the
-        flagged output when escalating an output (POST) violation.
+        Used by output (POST) checks to supply the original input alongside the
+        flagged output when escalating an output violation.
         """
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):

@@ -28,7 +28,8 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
     """Middleware for intellectual property detection using UiPath guardrails.
 
     Supports AGENT and LLM scopes only (not TOOL). POST stage only — registers
-    only ``after_agent`` and ``after_model`` hooks.
+    an ``after_agent`` hook and a ``wrap_model_call`` hook that checks only the
+    model's output.
 
     Args:
         scopes: List of scopes where the guardrail applies (LLM, AGENT only).
@@ -86,11 +87,11 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
-        """Create middleware instances — POST only (after_agent, after_model).
+        """Create middleware instances — POST only (after_agent, model output).
 
         Built via the shared ``_build_message_hooks`` helper forced to ``POST``,
-        so IP only ever registers the ``after_*`` hooks (it validates generated
-        output, never input).
+        so IP only ever checks outputs (it validates generated output, never
+        input).
         """
         instances: list[AgentMiddleware] = []
         guardrail_name = self._name.replace(" ", "_")
