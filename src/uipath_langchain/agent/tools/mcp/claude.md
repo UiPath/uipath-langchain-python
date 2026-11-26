@@ -24,6 +24,8 @@ src/uipath_langchain/agent/tools/mcp/
 ├── __init__.py            # Public exports
 ├── mcp_client.py          # SessionInfoFactory, McpClient
 ├── mcp_tasks.py           # MCP Tasks extension: claim + poll loop
+├── mcp_task_suspension.py # com.uipath/tasks: suspend the run on a long task
+├── mcp_service_call.py    # call_mcp_tool: the same, for a coded agent
 ├── mcp_tool.py            # Tool factory functions
 ├── protocol_strategy.py   # Per-era negotiation/recovery policy
 ├── session_tools.py       # MCP session -> LangChain tool conversion
@@ -34,6 +36,8 @@ src/uipath_langchain/agent/tools/mcp/
 
 ```python
 from .mcp_client import McpClient, SessionInfoFactory
+from .mcp_service_call import call_mcp_tool
+from .mcp_task_suspension import SuspensionSettings
 from .mcp_tool import (
     create_mcp_tools_and_clients,
     open_mcp_tools,
@@ -449,6 +453,132 @@ diagnosable without letting a tool failure impersonate a transport failure.
 
 ---
 
+### mcp_task_suspension.py — Suspending the Run on a Long Task (`com.uipath/tasks`)
+
+`com.uipath/tasks` is the Tasks protocol under a UiPath name: same
+`resultType: "task"`, same `tasks/get`. A UiPath MCP server that serves it also
+names, in the task's `_meta["com.uipath/task"]`, the Orchestrator job behind the
+task (`jobKey`, `folderKey`). A run that is itself an Orchestrator job can then
+suspend on a Job-type resume trigger instead of staying awake to poll.
+
+`session_extension_kwargs()` declares the extension next to the standard one. It
+registers **no claim** for it: the task it answers with is the one
+`McpTasksExtension` already claims.
+
+The declaration lists the resume-trigger kinds a run can suspend on,
+`{"resumeTriggerTypes": ["Job"]}`, and the server names a job only to a client
+whose list includes `Job`. In the other direction, `task_job()` reads an
+annotation only at `version` 1 and only when `resumeTrigger.triggerType` is
+`Job`. A task annotated with any other trigger kind (one the server may add
+later, for a resume not implemented here) is polled, like a task with no
+annotation.
+
+**When it suspends.** Not at once: a resume costs a runtime start, so the task
+is polled first and the run suspends only if it is still working. One setting,
+on `SuspensionSettings`:
+
+| Setting | Flag (seconds) | Default | Meaning |
+|---------|----------------|---------|---------|
+| `min_polling_time_before_suspension` | `McpTasksMinPollingTimeBeforeSuspensionSeconds` | unset | Polled this long, then suspended if still working |
+
+The polling time is resolved per task by `polling_time_before_suspension()`:
+
+1. the caller's own setting above, when it is set (zero included);
+2. else the server's `suspendAfterMs` on the job annotation, bounded by the
+   poll budget (`McpTasksPollBudgetSeconds`) so the server cannot keep a run
+   awake longer than plain polling would;
+3. else 60 seconds.
+
+AgentHub fills `suspendAfterMs` from its own feature flag of the same name, so
+the usual way to tune this is on the server, per tenant. The flag on this side
+is an override for one run. A `suspendAfterMs` that is not a non-negative
+number is ignored; the job is still suspended on.
+
+A task with no annotation at all (a server without the extension) is polled
+exactly as before. Deciding from an estimate of the job's run time — never
+suspending on a short job, not polling a long one — is a follow-up
+(PRODEV-2089); the server sends no estimate today. `DisableMcpTasksSuspension` is the kill switch; as with
+polling, the rollout gate is the server's (`McpUiPathTasks` in AgentHub).
+
+**How it survives the resume.** On resume the tool node runs again from its
+first line, so `call_with_suspension` is a chain of `@durable_interrupt` steps:
+
+1. `submit` — sends `tools/call` once. For a task it saves the **task handle**
+   (task id, poll interval, the job annotation, the send time). That is all a
+   new process on a new connection needs to go on polling.
+2. `park` — only for a task that names a job. Polls for what is left of the
+   polling time, takes one last look at the task, and if it is still working
+   returns `WaitJobRaw` for the job. All of it is *inside* the step so that a
+   replay skips it together with the suspend.
+3. `collect` — polls the task to its end: after the resume (`poll_first=True`),
+   or from the start for a task that names no job.
+
+**Where the result is saved (`save_results`).** Whichever step ends the call
+saves the result with it, through `TaskCall.dump_result` / `load_result`. A
+coded node (`call_mcp_tool`) needs that: it can make this call and then suspend
+on something else, the node is replayed from its first line, and the replay must
+get the result back without sending the call or polling the task again — by
+then the server may no longer keep the task. A tool node runs one call and
+nothing after it, so `tool_fn` passes `save_results=False`: only the handle goes
+into the checkpoint and a result, which can be large, is not stored a second
+time. A replay that finds a step without its result fails with `STATE_ERROR`
+rather than sending the call.
+
+After the resume the task is read with `tasks/get`, `poll_first=True`. The
+trigger only says when to look; the result still comes through the server and
+its guardrail screening.
+
+Rules to keep when changing it:
+
+- **`WaitJobRaw`, not `WaitJob`.** The plain one reads the job's output on resume
+  and faults the run when the job did not succeed. The result must come from
+  `tasks/get`, which reports a faulted or stopped job the way the tool layer
+  expects.
+- **The schema check belongs to `submit`.** `_SessionTaskCall.submit` runs
+  `_refresh_tool_schema` itself. Run before the step, a resumed call would check
+  the schema again and could answer "retry" for a task whose job already ran.
+- **The annotation is server input that reaches a resume trigger.** `task_job`
+  accepts only a GUID `jobKey` *and* a GUID `folderKey`, on a `_meta` that is an
+  object; anything else yields no job, which costs the suspend and never the
+  call. The folder is required because the resume reads the job there; without
+  it the read would go to the run's own folder. The platform SDK parses the same
+  annotation as `McpTask.job` (from 0.3.19); switch to it when the floor allows.
+- **It suspends only in the tool's own node.** `tool_fn` asks
+  `runs_in_own_tool_node(tool)` (set by `UiPathToolNode`) and
+  `durable_call_in_play()`.
+  Reached from a bridge — the code interpreter runs tools inside the `eval`
+  tool's node — the task is polled. That is why MCP tools do **not** carry
+  `SUSPENDS_RUN` and stay available to such callers;
+  `test_suspends_run_metadata.py` checks the guard instead of the stamp.
+- **Step order is fixed.** `park` is reached only when the saved handle names a
+  job, so a replay takes the same path as the first pass.
+- **The kill switch never moves a call that is under way off these steps.**
+  Callers ask `durable_call_in_play()`, not `suspension_enabled()`: with the
+  switch on, a node being replayed with saved step values still goes through
+  `call_with_suspension`, because one of those values may be this call's task.
+  The plain path would send `tools/call` again for a job that is already
+  running. Inside the flow the switch only stops `park` from starting a new
+  suspend; it polls to the end instead.
+- **The poller giving up is not the polling time being over.** `_resolve_task`
+  raises as soon as its next poll would not fit — at once, when the server's
+  poll interval is longer than the polling time. `park` waits out what is left
+  and then looks once (`peek`) before it suspends.
+- **A step value that is not ours fails the call; it is never a reason to send
+  it.** `@durable_interrupt` counts its steps from the start of the node and
+  LangGraph's own `interrupt()` is not in that count, so a coded node that calls
+  `interrupt()` *before* `call_mcp_tool` cannot resume the call. It raises
+  `AgentRuntimeError(STATE_ERROR)`. The limit is the decorator's, shared by every
+  tool built on it, and is documented on `call_mcp_tool`.
+
+`TaskCall` is the seam between the flow and the client that carries the call.
+`_SessionTaskCall` (`mcp_tool.py`) drives `McpClient`; `_ServiceTaskCall`
+(`mcp_service_call.py`) drives the platform SDK's stateless `McpService` for
+`call_mcp_tool`, the coded-agent entry point. `McpService` declares
+`com.uipath/tasks` from `uipath-platform` 0.3.19; with an older one the server
+never names a job and `call_mcp_tool` polls.
+
+---
+
 ### session_tools.py — Session-to-LangChain Tool Conversion
 
 `load_mcp_tools(session)` paginates `tools/list` and returns `StructuredTool`s
@@ -529,6 +659,9 @@ MCP connections for tool invocations with **two distinct initialization phases**
 │  ──────────────                                             │
 │  + list_tools(force_refresh=False) -> ListToolsResult       │
 │  + call_tool(name, arguments) -> CallToolResult             │
+│  + submit_tool_call(name, arguments) -> result | task handle│
+│  + resolve_task(name, handle, budget_seconds, poll_first)   │
+│  + peek_task(name, handle) -> CallToolResult | None         │
 │  + dispose() -> None  # UiPathDisposableProtocol            │
 │  + get_session_id() -> str | None                           │
 │  + is_client_initialized: bool (property)                   │

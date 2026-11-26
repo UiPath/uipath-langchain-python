@@ -4,7 +4,9 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator
 
 from langchain_core.tools import BaseTool
+from mcp.client.extension import UnexpectedClaimedResult
 from mcp.shared.exceptions import MCPError
+from mcp.types import CallToolResult
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
@@ -14,6 +16,7 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils.durable_interrupt import runs_in_own_tool_node
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -26,6 +29,15 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from ..utils import sanitize_tool_name
 from .mcp_client import McpClient, SessionInfoFactory
+from .mcp_task_suspension import (
+    PollWindowElapsed,
+    Submission,
+    TaskJob,
+    call_with_suspension,
+    durable_call_in_play,
+    task_job,
+)
+from .mcp_tasks import McpTaskHandle, McpTaskPollBudgetExhausted
 from .protocol_strategy import ProtocolMode
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -417,6 +429,88 @@ def _dump_block(item: Any) -> Any:
     return item.model_dump(by_alias=True, mode="json", exclude_none=True)
 
 
+class _SessionTaskCall:
+    """One tool call over the managed MCP session, for the suspend flow.
+
+    The result type is ``CallToolResult``, or the ``str`` the schema check
+    answers with instead of calling the tool. The check is part of ``submit``
+    so that it shares the call's exactly-once step: run before it, a resumed
+    call would check the schema again and could answer "retry" for a task
+    whose job has already run.
+    """
+
+    def __init__(
+        self,
+        mcp_tool: AgentMcpTool,
+        client: McpClient,
+        arguments: dict[str, Any],
+        refresh_schema_before_call: bool,
+        tool_holder: dict[str, BaseTool] | None,
+    ) -> None:
+        self._mcp_tool = mcp_tool
+        self._client = client
+        self._arguments = arguments
+        self._refresh_schema_before_call = refresh_schema_before_call
+        self._tool_holder = tool_holder
+
+    async def submit(self) -> Submission[CallToolResult | str, McpTaskHandle]:
+        if self._refresh_schema_before_call:
+            retry_message = await _refresh_tool_schema(
+                self._mcp_tool, self._client, self._tool_holder
+            )
+            if retry_message is not None:
+                return Submission(result=retry_message)
+
+        submitted = await self._client.submit_tool_call(
+            self._mcp_tool.name, arguments=self._arguments
+        )
+        if isinstance(submitted, CallToolResult):
+            return Submission(result=submitted)
+        if not isinstance(submitted, McpTaskHandle):
+            raise UnexpectedClaimedResult(submitted)
+        return Submission(handle=submitted)
+
+    async def wait(
+        self, handle: McpTaskHandle, *, seconds: float | None, poll_first: bool
+    ) -> CallToolResult | str:
+        try:
+            return await self._client.resolve_task(
+                self._mcp_tool.name,
+                handle,
+                budget_seconds=seconds,
+                poll_first=poll_first,
+            )
+        except McpTaskPollBudgetExhausted as elapsed:
+            if seconds is None:
+                raise
+            raise PollWindowElapsed() from elapsed
+
+    async def peek(self, handle: McpTaskHandle) -> CallToolResult | str | None:
+        return await self._client.peek_task(self._mcp_tool.name, handle)
+
+    def dump_handle(self, handle: McpTaskHandle) -> dict[str, Any]:
+        return handle.model_dump(by_alias=True, mode="json", exclude_none=True)
+
+    def load_handle(self, saved: dict[str, Any]) -> McpTaskHandle:
+        return McpTaskHandle.model_validate(saved)
+
+    def dump_result(self, result: CallToolResult | str) -> Any:
+        # A string is the schema check's "retry" answer, not a tool result.
+        if isinstance(result, str):
+            return {"message": result}
+        return {
+            "result": result.model_dump(by_alias=True, mode="json", exclude_none=True)
+        }
+
+    def load_result(self, saved: Any) -> CallToolResult | str:
+        if "message" in saved:
+            return saved["message"]
+        return CallToolResult.model_validate(saved["result"])
+
+    def job(self, handle: McpTaskHandle) -> TaskJob | None:
+        return task_job(handle.meta)
+
+
 def build_mcp_tool(
     mcp_tool: AgentMcpTool,
     mcpClient: McpClient,
@@ -446,7 +540,35 @@ def build_mcp_tool(
 
         If a session disconnect error occurs (e.g., 404 or session terminated),
         the tool will retry once by re-initializing the session.
+
+        A call the server turns into a long task may suspend the run until the
+        Orchestrator job behind it ends (``mcp_task_suspension.py``). That
+        happens only in this tool's own node: reached any other way, the task
+        is polled, as it is when suspension is switched off.
         """
+        own_tool = (tool_holder or {}).get("tool")
+        if runs_in_own_tool_node(own_tool) and durable_call_in_play():
+            try:
+                outcome = await call_with_suspension(
+                    _SessionTaskCall(
+                        mcp_tool,
+                        mcpClient,
+                        kwargs,
+                        refresh_schema_before_call,
+                        tool_holder,
+                    ),
+                    tool_name=mcp_tool.name,
+                    # One call per tool node and nothing after it: the result
+                    # need not be saved to survive a replay.
+                    save_results=False,
+                )
+            except MCPError as e:
+                raise _map_mcp_error(e, mcp_tool.name, mcpClient.server_slug) from e
+            if isinstance(outcome, str):
+                return outcome
+            logger.info(f"Tool call successful for {mcp_tool.name}")
+            return _normalize_tool_result(outcome)
+
         if refresh_schema_before_call:
             retry_message = await _refresh_tool_schema(mcp_tool, mcpClient, tool_holder)
             if retry_message is not None:

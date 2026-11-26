@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from uipath.platform.resume_triggers import is_no_content_marker
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils.durable_interrupt import tool_node_scope
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -94,11 +95,14 @@ class UiPathToolNode(RunnableCallable):
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
 
-        if self.wrapper:
-            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
-            result = self.wrapper(*inputs)
-        else:
-            result = self.tool.invoke(call)
+        with tool_node_scope(self.tool):
+            if self.wrapper:
+                inputs = self._prepare_wrapper_inputs(
+                    self.wrapper, self.tool, call, state
+                )
+                result = self.wrapper(*inputs)
+            else:
+                result = self.tool.invoke(call)
         output = self._process_result(call, result)
         if conversational_confirmation:
             # HITL approved - apply confirmation metadata to tool result message
@@ -119,11 +123,14 @@ class UiPathToolNode(RunnableCallable):
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
 
-        if self.awrapper:
-            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
-            result = await self.awrapper(*inputs)
-        else:
-            result = await self.tool.ainvoke(call)
+        with tool_node_scope(self.tool):
+            if self.awrapper:
+                inputs = self._prepare_wrapper_inputs(
+                    self.awrapper, self.tool, call, state
+                )
+                result = await self.awrapper(*inputs)
+            else:
+                result = await self.tool.ainvoke(call)
         output = self._process_result(call, result)
         if conversational_confirmation:
             # HITL approved - apply confirmation metadata to tool result message

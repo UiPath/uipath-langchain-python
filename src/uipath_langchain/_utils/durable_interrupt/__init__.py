@@ -7,6 +7,7 @@ from .decorator import (
     suspends_run,
 )
 from .skip_interrupt import SkipInterruptValue
+from .tool_scope import runs_in_own_tool_node, tool_node_scope
 
 __all__ = [
     "SUSPENDS_RUN",
@@ -14,4 +15,6 @@ __all__ = [
     "SkipInterruptValue",
     "_durable_state",
     "suspends_run",
+    "runs_in_own_tool_node",
+    "tool_node_scope",
 ]
