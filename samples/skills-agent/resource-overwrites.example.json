@@ -1,0 +1,9 @@
+{
+  "runtime": {
+    "internalArguments": {
+      "resourceOverwrites": {
+        "skillBundle.ops": { "name": "ops", "folderPath": "Shared/Skills", "version": "1" }
+      }
+    }
+  }
+}
