@@ -10,7 +10,9 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import (
     AgentState,
     ExtendedModelResponse,
+    ModelFallbackMiddleware,
     ModelResponse,
+    ModelRetryMiddleware,
     wrap_model_call,
 )
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -24,7 +26,7 @@ from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
-from uipath.platform.guardrails.decorators import LogAction
+from uipath.platform.guardrails.decorators import BlockAction, LogAction
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.guardrails import EscalateAction, GuardrailExecutionStage
@@ -724,3 +726,50 @@ class TestInputChecks:
         assert len(logged) == 1
         assert model.calls == 1
         assert _texts(done["messages"]) == ["hello", "answer 1"]
+
+
+class TestRetryAndFallback:
+    """A Block acts outside the model call, where these middlewares can't catch it."""
+
+    @pytest.mark.parametrize(
+        "stage", [GuardrailExecutionStage.PRE, GuardrailExecutionStage.POST]
+    )
+    async def test_a_retry_middleware_does_not_swallow_a_block(
+        self, stage: GuardrailExecutionStage
+    ) -> None:
+        model = _model()
+        agent = create_agent(
+            model,
+            middleware=[
+                ModelRetryMiddleware(max_retries=2, initial_delay=0),
+                *_pii(stage, BlockAction()),
+            ],
+        )
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            with pytest.raises(AgentRuntimeError):
+                await agent.ainvoke({"messages": [HumanMessage("mail a@b.com")]})
+
+        assert model.calls == (0 if stage == GuardrailExecutionStage.PRE else 1)
+
+    async def test_a_fallback_middleware_does_not_route_around_a_block(self) -> None:
+        model, fallback = _model(), _model()
+        agent = create_agent(
+            model,
+            middleware=[
+                ModelFallbackMiddleware(fallback),
+                *_pii(GuardrailExecutionStage.POST, BlockAction()),
+            ],
+        )
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            with pytest.raises(AgentRuntimeError):
+                await agent.ainvoke({"messages": [HumanMessage("mail a@b.com")]})
+
+        assert fallback.calls == 0

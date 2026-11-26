@@ -738,7 +738,7 @@ Imported from `uipath.core.guardrails`.
 | Value | Description |
 |---|---|
 | `AGENT` | Hooks run at agent input/output boundary (`before_agent` / `after_agent`) |
-| `LLM` | Checks run inside every LLM call (`wrap_model_call`). An output check's action that can pause the run, such as an escalation, runs right after the call, so resuming does not call the model again |
+| `LLM` | Checks run around every LLM call (`wrap_model_call`). With a `LogAction` they run inside the call; with any other action (Block, Escalate, custom) the input check runs just before the call and the output action just after it, so a retry or fallback middleware can't catch a block and resuming an escalation doesn't call the model again |
 | `TOOL` | Hooks run around every tool call (`wrap_tool_call`) |
 
 ### GuardrailExecutionStage

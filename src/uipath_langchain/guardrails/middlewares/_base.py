@@ -24,6 +24,7 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.types import PrivateStateAttr
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
@@ -44,7 +45,6 @@ from uipath.platform.guardrails import (
     referenced_attachments,
 )
 from uipath.platform.guardrails.decorators import (
-    BlockAction,
     GuardrailExecutionStage,
     LogAction,
 )
@@ -137,6 +137,16 @@ class _PendingAnswers:
 
 
 _pending_answers = _PendingAnswers()
+
+
+def _pending_key(message_id: str) -> str:
+    """``message_id`` within the run's thread, so other runs don't share it."""
+    try:
+        thread = get_config().get("configurable", {}).get("thread_id")
+    except RuntimeError:
+        thread = None
+    return f"{thread}:{message_id}"
+
 
 _HOOK_STAGES = {
     (True, True): "pre_and_post",
@@ -799,20 +809,20 @@ class BuiltInGuardrailMiddlewareMixin:
     ) -> AgentMiddleware:
         """Create the hook that checks the model's input and output in the model node.
 
-        Actions other than the built-in Log and Block may pause the run. Such an
-        input check runs in the hook's ``before_model`` node, and such an output
-        action in its ``after_model`` node, so resuming re-runs neither the model
-        nor the other guardrails' checks.
+        Only the built-in Log acts there. Any other action may pause the run or
+        raise, and inside the model call a retry or fallback middleware could
+        catch that: its input check runs in the hook's ``before_model`` node and
+        its output action in the ``after_model`` node.
         """
         guardrails_in_use()
         mw = self
         # The stage keeps same-named PRE and POST guardrails distinct.
         stage = _HOOK_STAGES[(include_pre, include_post)]
         hook_name = f"{guardrail_name}_{stage}_wrap_model_call"
-        # Exactly the built-ins: a subclass may pause the run.
-        may_pause = type(self.action) not in (LogAction, BlockAction)
-        check_before_model = include_pre and may_pause
-        act_after_model = include_post and may_pause
+        # Exactly LogAction: a subclass may pause the run.
+        outside_model = type(self.action) is not LogAction
+        check_before_model = include_pre and outside_model
+        act_after_model = include_post and outside_model
 
         async def _wrap_model_call_func(request: ModelRequest, handler: Any) -> Any:
             if include_pre and not check_before_model:
@@ -852,7 +862,7 @@ class BuiltInGuardrailMiddlewareMixin:
         return hook_class(hook_name, _wrap_model_call_func, before, after)
 
     def _check_model_input(self, request: ModelRequest) -> None:
-        """Check the messages the model gets (Log and Block only: no edits)."""
+        """Check the messages the model gets (Log only: no edits, no raise)."""
         self._check_messages(
             cast(list[BaseMessage], request.messages),
             scope=GuardrailScope.LLM,
@@ -913,7 +923,9 @@ class BuiltInGuardrailMiddlewareMixin:
             # The full history: an earlier middleware may have trimmed the request.
             state={**state, "messages": [*state.get("messages", []), answer]},
         )
-        after_inner_action = answer.id is not None and answer.id in _pending_answers
+        after_inner_action = (
+            answer.id is not None and _pending_key(answer.id) in _pending_answers
+        )
         violation: dict[str, Any] | None = None
         if after_inner_action:
             violation = {}  # checked in this hook's node, after the inner action
@@ -931,7 +943,7 @@ class BuiltInGuardrailMiddlewareMixin:
             return _with_output_action(response, hook_name, None) if stale else response
         if answer.id is None:
             answer.id = str(uuid4())  # so the action's node finds it
-        _pending_answers.add(answer.id)
+        _pending_answers.add(_pending_key(answer.id))
         violation.update(message_id=answer.id, input_text=input_text)
         return _with_output_action(response, hook_name, violation)
 
@@ -972,7 +984,7 @@ class BuiltInGuardrailMiddlewareMixin:
         if not violation:
             return None
         done: dict[str, Any] = {_OUTPUT_ACTIONS_KEY: {hook_name: None}}
-        _pending_answers.discard(violation["message_id"])
+        _pending_answers.discard(_pending_key(violation["message_id"]))
         answer = next(
             (
                 message

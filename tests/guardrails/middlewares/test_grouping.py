@@ -42,7 +42,7 @@ from uipath.core.guardrails import (
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.platform.guardrails.decorators import BlockAction, LogAction
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from uipath_langchain.guardrails import EscalateAction, GuardrailExecutionStage
 from uipath_langchain.guardrails import escalate_action as escalate_module
 from uipath_langchain.guardrails.enums import PIIDetectionEntityType
@@ -397,13 +397,21 @@ class TestModel:
         assert len(_named(spans, "Agent input guardrail check")) == 1
         assert len(_named(spans, "LLM input guardrail check")) == 1
 
-    async def test_a_block_marks_the_container_as_failed(self, graph: _Graph) -> None:
-        pii = _pii(action=BlockAction())
+    async def test_a_check_that_stops_the_run_marks_the_container_as_failed(
+        self, graph: _Graph
+    ) -> None:
+        # Only Log acts in the model node; a policy block can still stop it there.
+        pii = _pii()
         hook = model_hook(pii)
         request = model_request()
+        blocked = AgentRuntimeError(
+            code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+            title="Blocked by policy",
+            detail="blocked",
+        )
 
         with (
-            patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
+            patch.object(pii, "_evaluate_guardrail", side_effect=blocked),
             graph.node("model") as model,
         ):
             run = self._model_run(graph, model)
