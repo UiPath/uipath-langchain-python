@@ -62,7 +62,7 @@ from uipath_langchain.guardrails.middlewares._attachments import (
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
 
-from ._llm_hooks import call_model_hook
+from ._llm_hooks import call_model_hook, model_hook, model_request
 
 _HELD_ID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
 _OTHER_ID = "0d9b3a52-6c1f-4e8b-a0f2-5b7c9d1e3f40"
@@ -601,6 +601,36 @@ class TestMessageHooks:
 
         (call,) = evaluate.call_args_list
         assert call.args[0] == "Analyzing the second file."
+        assert _forwarded(call) == [(_OTHER_ID, "cv.pdf", "application/pdf")]
+
+    async def test_llm_post_finds_files_held_outside_the_model_request(
+        self, evaluate: MagicMock
+    ) -> None:
+        # An earlier middleware trimmed the request: the message holding the
+        # file is only in the state.
+        held = HumanMessage(content=f"compare {_block(_wire(), _wire(_OTHER_ID))}")
+        latest = HumanMessage(content="and now?")
+        state: AgentState[Any] = {"messages": [held, latest]}
+        reply = AIMessage(
+            content="Analyzing the second file.",
+            tool_calls=[
+                {
+                    "name": "analyze",
+                    "args": {"attachments": [{"ID": _OTHER_ID}]},
+                    "id": "tc1",
+                }
+            ],
+        )
+
+        async def handler(request: Any) -> AIMessage:
+            return reply
+
+        middleware = _pii([GuardrailScope.LLM], stage=_POST)
+        await model_hook(middleware).awrap_model_call(
+            model_request([latest], state), handler
+        )
+
+        (call,) = evaluate.call_args_list
         assert _forwarded(call) == [(_OTHER_ID, "cv.pdf", "application/pdf")]
 
     async def test_agent_post_forwards_the_files_the_structured_response_references(

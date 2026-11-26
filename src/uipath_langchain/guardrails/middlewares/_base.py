@@ -727,9 +727,15 @@ class BuiltInGuardrailMiddlewareMixin:
                     attachments=mw._attachments_for(
                         scope=GuardrailScope.LLM,
                         stage=GuardrailExecutionStage.POST,
+                        # The state's own history, not the request's: an
+                        # earlier middleware may have trimmed the request,
+                        # and the files it held are still in the run.
                         state={
                             **(request.state or {}),
-                            "messages": [*request.messages, answer],
+                            "messages": [
+                                *(request.state or {}).get("messages", []),
+                                answer,
+                            ],
                         },
                     ),
                 )
