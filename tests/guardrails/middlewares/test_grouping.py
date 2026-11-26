@@ -397,15 +397,16 @@ class TestModel:
 
     async def test_a_block_marks_the_container_as_failed(self, graph: _Graph) -> None:
         pii = _pii(action=BlockAction())
+        hook = model_hook(pii)
+        request = model_request()
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
-            pytest.raises(AgentRuntimeError),
             graph.node("model") as model,
         ):
-            await model_hook(pii).awrap_model_call(
-                model_request(), self._model_run(graph, model)
-            )
+            run = self._model_run(graph, model)
+            with pytest.raises(AgentRuntimeError):
+                await hook.awrap_model_call(request, run)
         spans = graph.finish()
 
         [container] = _named(spans, "LLM input guardrail check")
