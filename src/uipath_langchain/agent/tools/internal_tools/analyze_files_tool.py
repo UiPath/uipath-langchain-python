@@ -413,18 +413,11 @@ def create_analyze_file_tool(
                         category=UiPathErrorCategory.SYSTEM,
                     ) from exc
 
-        try:
-            human_message = HumanMessage(content=analysis_task)
-            human_message_with_files = await add_files_to_message(
-                human_message, files, pdf_only_documents=pdf_only_documents
-            )
-        except ValueError as exc:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.FILE_ERROR,
-                title="File attachment too large",
-                detail=str(exc),
-                category=UiPathErrorCategory.USER,
-            ) from exc
+        human_message_with_files = await add_files_to_message(
+            HumanMessage(content=analysis_task),
+            files,
+            pdf_only_documents=pdf_only_documents,
+        )
 
         messages: list[AnyMessage] = [
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),

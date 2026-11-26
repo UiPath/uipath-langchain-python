@@ -526,6 +526,12 @@ async def _read_images(
                     "Image too large",
                     f"File '{file.name}': {exc}",
                 ) from exc
+            if not pages:
+                raise _input_error(
+                    config.llm_writes_images,
+                    "Empty image",
+                    f"File '{file.name}' has no content.",
+                )
             images.extend(
                 f"data:{page['mime_type']};base64,{page['base64']}" for page in pages
             )
@@ -545,6 +551,12 @@ async def _read_images(
                 "Image too large",
                 f"File '{file.name}': {exc}",
             ) from exc
+        if not data:
+            raise _input_error(
+                config.llm_writes_images,
+                "Empty image",
+                f"File '{file.name}' has no content.",
+            )
         images.append(f"data:{mime_type};base64,{data}")
     return images
 

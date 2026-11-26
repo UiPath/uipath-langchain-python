@@ -44,6 +44,16 @@ _RATE_LIMIT_DETAIL = (
 _Verdict = tuple[AgentRuntimeErrorCode, UiPathErrorCategory, str, str | None]
 _ResponseSignature = tuple[re.Pattern[str], _Verdict]
 
+_CONTENT_FILTER_VERDICT: _Verdict = (
+    AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST,
+    UiPathErrorCategory.USER,
+    "The model provider's content filter blocked the request",
+    "The provider's content policy rejected the input sent to the model. "
+    "Change the input that triggered it, or ask your administrator to "
+    "review the content filter settings for this model.",
+)
+_CONTENT_FILTER_CODES = frozenset({"content_filter", "responsibleaipolicyviolation"})
+
 _BAD_REQUEST_SIGNATURES: tuple[_ResponseSignature, ...] = (
     (
         re.compile(r"too many images in request"),
@@ -77,6 +87,7 @@ _BAD_REQUEST_SIGNATURES: tuple[_ResponseSignature, ...] = (
             "size or split it into smaller files, or use a different model.",
         ),
     ),
+    (re.compile(r"content management policy"), _CONTENT_FILTER_VERDICT),
 )
 
 _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
@@ -253,14 +264,6 @@ _CONTEXT_LIMIT_MARKERS = (
     "maximum number of tokens",
 )
 
-# Lowercased fragments of a content-safety rejection (Azure OpenAI's
-# ``content_filter``), which is about policy rather than the file's format.
-_CONTENT_FILTER_MARKERS = (
-    "content_filter",
-    "content management policy",
-    "responsibleaipolicyviolation",
-)
-
 
 def raise_for_file_analysis_http_error(
     error: UiPathAPIError, attachments: Sequence[str], *, all_pdf: bool = False
@@ -274,9 +277,9 @@ def raise_for_file_analysis_http_error(
     which points at model settings. A centralized guardrail block is a
     guardrail violation, not a file error. Any other status, a 400 carrying the
     gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
-    rejected the call), a content-filter rejection, and a 400 matching one of
-    the ``_BAD_REQUEST_SIGNATURES`` (which already names the file limit hit)
-    are mapped as usual by :func:`raise_for_provider_http_error`.
+    rejected the call), and a 400 matching one of the ``_BAD_REQUEST_SIGNATURES``
+    (which already names its cause) are mapped as usual by
+    :func:`raise_for_provider_http_error`.
 
     The provider's own message is matched for the context-window case but never
     copied into the error: it may carry customer content, and it is already
@@ -296,8 +299,7 @@ def raise_for_file_analysis_http_error(
     if (
         error.status_code != 400
         or _gateway_detail(error.body)
-        or _has_marker(fields, _CONTENT_FILTER_MARKERS)
-        or _match_signature(_BAD_REQUEST_SIGNATURES, error.body) is not None
+        or _match_bad_request(error.body) is not None
     ):
         raise_for_provider_http_error(error)
 
@@ -407,6 +409,30 @@ def _match_signature(
     return None
 
 
+def _error_codes(body: object) -> set[str]:
+    """The body's error codes, lowercased."""
+    if not isinstance(body, dict):
+        return set()
+    error = body.get("error")
+    inner = error.get("innererror") if isinstance(error, dict) else None
+    sources = (body, error, inner)
+    return {
+        code.strip().lower()
+        for source in sources
+        if isinstance(source, dict)
+        if isinstance(code := source.get("code"), str)
+    }
+
+
+def _match_bad_request(body: object) -> _Verdict | None:
+    """The verdict for a 400 body that names its own cause, else ``None``."""
+    if (verdict := _match_signature(_BAD_REQUEST_SIGNATURES, body)) is not None:
+        return verdict
+    if _error_codes(body) & _CONTENT_FILTER_CODES:
+        return _CONTENT_FILTER_VERDICT
+    return None
+
+
 def _forbidden_verdict(body: object) -> _Verdict:
     """The verdict for a 403, whose meaning is in the body rather than the status."""
     if not _is_license_error(body):
@@ -443,7 +469,7 @@ def _status_verdict(status_code: int, body: object) -> _Verdict:
         return _forbidden_verdict(body)
 
     if status_code == 400:
-        if (verdict := _match_signature(_BAD_REQUEST_SIGNATURES, body)) is not None:
+        if (verdict := _match_bad_request(body)) is not None:
             return verdict
         # The relayed provider message is deliberately not quoted from the
         # body: it may carry customer PII, and it is already recorded on the
