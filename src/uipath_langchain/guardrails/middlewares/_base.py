@@ -106,6 +106,13 @@ class _OutputActionState(AgentState[Any]):
 
 ModelHandler = Callable[[ModelRequest], Awaitable[Any]]
 
+#: A model hook's name part for the sides it checks: (input, output).
+_HOOK_STAGES = {
+    (True, True): "pre_and_post",
+    (True, False): "pre",
+    (False, True): "post",
+}
+
 
 class _ModelGuardrailHook(AgentMiddleware):
     """One guardrail's checks around the model call."""
@@ -779,72 +786,23 @@ class BuiltInGuardrailMiddlewareMixin:
         mw = self
         # The stage is in the name: two guardrails with the same name, one
         # checking the input and one the output, are still distinct hooks.
-        stage = (
-            "pre_and_post"
-            if include_pre and include_post
-            else ("pre" if include_pre else "post")
-        )
+        stage = _HOOK_STAGES[(include_pre, include_post)]
         hook_name = f"{guardrail_name}_{stage}_wrap_model_call"
-        output_action_after_model = include_post and not isinstance(
+        act_after_model = include_post and not isinstance(
             self.action, (LogAction, BlockAction)
         )
 
         async def _wrap_model_call_func(request: ModelRequest, handler: Any) -> Any:
             if include_pre:
-                messages = cast(list[BaseMessage], request.messages)
-                before = [message.content for message in messages]
-                mw._check_messages(
-                    messages,
-                    scope=GuardrailScope.LLM,
-                    stage=GuardrailExecutionStage.PRE,
-                    attachments=mw._attachments_for(
-                        scope=GuardrailScope.LLM,
-                        stage=GuardrailExecutionStage.PRE,
-                        state=request.state,
-                    ),
-                )
-                _apply_edits_to_state(messages, before, request.state)
+                mw._check_model_input(request)
             response = await handler(request)
-            answer = _last_ai_message(response) if include_post else None
-            if answer is None:
+            if not include_post:
                 return response
-            input_text = mw._last_input_text(request.messages)
-            attachments = mw._attachments_for(
-                scope=GuardrailScope.LLM,
-                stage=GuardrailExecutionStage.POST,
-                # The state's own history, not the request's: an earlier
-                # middleware may have trimmed the request, and the files it
-                # held are still in the run.
-                state={
-                    **(request.state or {}),
-                    "messages": [*(request.state or {}).get("messages", []), answer],
-                },
-            )
-            if not output_action_after_model:
-                mw._check_messages(
-                    [answer],
-                    scope=GuardrailScope.LLM,
-                    stage=GuardrailExecutionStage.POST,
-                    input_text=input_text,
-                    attachments=attachments,
-                )
-                return response
-            violation = mw._failed_output_check(answer, attachments)
-            if violation is None:
-                return response
-            if answer.id is None:
-                answer.id = str(uuid4())  # so the action's node finds it
-            violation.update(message_id=answer.id, input_text=input_text)
-            return ExtendedModelResponse(
-                model_response=(
-                    response
-                    if isinstance(response, ModelResponse)
-                    else ModelResponse(result=[response])
-                ),
-                command=Command(update={_OUTPUT_ACTIONS_KEY: {hook_name: violation}}),
+            return mw._check_model_output(
+                request, response, hook_name, act_after_model=act_after_model
             )
 
-        if not output_action_after_model:
+        if not act_after_model:
             return _ModelGuardrailHook(hook_name, _wrap_model_call_func)
 
         register_guardrail_node(
@@ -856,6 +814,70 @@ class BuiltInGuardrailMiddlewareMixin:
             hook_name,
             _wrap_model_call_func,
             lambda state: mw._run_output_action(state, hook_name),
+        )
+
+    def _check_model_input(self, request: ModelRequest) -> None:
+        """Check the messages the model gets; edits also reach the saved state."""
+        messages = cast(list[BaseMessage], request.messages)
+        before = [message.content for message in messages]
+        self._check_messages(
+            messages,
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.PRE,
+            attachments=self._attachments_for(
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.PRE,
+                state=request.state,
+            ),
+        )
+        _apply_edits_to_state(messages, before, request.state)
+
+    def _check_model_output(
+        self,
+        request: ModelRequest,
+        response: Any,
+        hook_name: str,
+        *,
+        act_after_model: bool,
+    ) -> Any:
+        """Check the model's answer and return the hook's response.
+
+        With ``act_after_model``, a failed check leaves its action for the
+        node after the model, in the response's state update.
+        """
+        answer = _last_ai_message(response)
+        if answer is None:
+            return response
+        input_text = self._last_input_text(request.messages)
+        state = request.state or {}
+        attachments = self._attachments_for(
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.POST,
+            # The state's own history, not the request's: an earlier middleware
+            # may have trimmed the request, and the files it held are still in
+            # the run.
+            state={**state, "messages": [*state.get("messages", []), answer]},
+        )
+        if not act_after_model:
+            self._check_messages(
+                [answer],
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.POST,
+                input_text=input_text,
+                attachments=attachments,
+            )
+            return response
+        violation = self._failed_output_check(answer, attachments)
+        if violation is None:
+            return response
+        if answer.id is None:
+            answer.id = str(uuid4())  # so the action's node finds it
+        violation.update(message_id=answer.id, input_text=input_text)
+        if not isinstance(response, ModelResponse):
+            response = ModelResponse(result=[response])
+        return ExtendedModelResponse(
+            model_response=response,
+            command=Command(update={_OUTPUT_ACTIONS_KEY: {hook_name: violation}}),
         )
 
     def _failed_output_check(
