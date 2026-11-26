@@ -512,7 +512,9 @@ class TestOutputActionPlacement:
         ):
             first = await agent.ainvoke({"messages": [HumanMessage("a day")]}, config)
             assert first["__interrupt__"]
-            reject = Command(resume={"action": "Reject", "data": {"Reason": "no"}})
+            reject: Command[Any] = Command(
+                resume={"action": "Reject", "data": {"Reason": "no"}}
+            )
             with pytest.raises(AgentRuntimeError):
                 await agent.ainvoke(reject, config)
             again = await agent.ainvoke(
