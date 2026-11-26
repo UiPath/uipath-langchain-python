@@ -304,6 +304,33 @@ class TestMissedOutputToolRetry:
         assert isinstance(seen[1].messages[-1], HumanMessage)
         assert seen[0].messages == []
 
+    @pytest.mark.parametrize("tool_name", ["end_execution", "final_answer"])
+    async def test_retry_names_the_output_tool(self, tool_name: str) -> None:
+        """A nudge that only says "call a tool" sends the model back to the last tool it used."""
+        middleware = _PayloadHandlerMiddleware()
+        request = _request(
+            GenericFakeChatModel(messages=iter([])),
+            response_format=ToolStrategy({"title": tool_name, "type": "object"}),
+        )
+        recovered = _response(AIMessage(content=""), structured={"result": "ok"})
+        seen: list[ModelRequest[Any]] = []
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            seen.append(request)
+            stalled = len(seen) % 2 == 1
+            return _response(AIMessage(content="text")) if stalled else recovered
+
+        async def ahandler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            return handler(request)
+
+        middleware.wrap_model_call(request, handler)
+        await middleware.awrap_model_call(request, ahandler)
+
+        nudges = [seen[1].messages[-1].content, seen[3].messages[-1].content]
+        assert (
+            nudges == [f"Call {tool_name} now with the final output of the task."] * 2
+        )
+
     async def test_async_retries_once_and_returns_the_recovered_response(
         self,
     ) -> None:
