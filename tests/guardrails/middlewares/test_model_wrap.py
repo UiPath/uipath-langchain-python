@@ -186,3 +186,43 @@ class TestChecks:
 
         assert model.calls == 1
         assert _texts(done["messages"])[-1] == "second review"
+
+    async def test_an_inner_input_edit_survives_an_outer_output_escalation(
+        self,
+    ) -> None:
+        # The outer guardrail escalates on the output, so its model call is
+        # checkpointed; that call also runs the inner guardrail's input check.
+        model = _model()
+        agent = create_agent(
+            model,
+            middleware=[
+                *_pii(GuardrailExecutionStage.POST, _escalate()),
+                *UiPathPIIDetectionMiddleware(
+                    name="Input PII",
+                    scopes=[GuardrailScope.LLM],
+                    action=_escalate(),
+                    entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+                    stage=GuardrailExecutionStage.PRE,
+                ),
+            ],
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "mixed"}}
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            await agent.ainvoke({"messages": [HumanMessage("mail a@b.com")]}, config)
+            output_review = await agent.ainvoke(
+                _approve("mail [redacted]", "ReviewedInputs"), config
+            )
+            assert output_review["__interrupt__"]
+            done = await agent.ainvoke(
+                _approve("reviewed answer", "ReviewedOutputs"), config
+            )
+
+        # The replayed call restores the input the model saw, not the original.
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["mail [redacted]", "reviewed answer"]

@@ -80,9 +80,17 @@ logger = logging.getLogger(__name__)
 
 
 @task
-async def _checkpointed_model_call(handler: Any, request: ModelRequest) -> Any:
-    """Call the model once per run: on resume, LangGraph replays the saved response."""
-    return await handler(request)
+async def _checkpointed_model_call(
+    handler: Any, request: ModelRequest
+) -> tuple[Any, list[Any]]:
+    """Call the model once per run: on resume, LangGraph replays the saved result.
+
+    Returns the response and the input messages' content as the model got it.
+    Hooks inside ``handler`` (another guardrail's input check) edit those
+    messages in place; a replay skips them, so the caller restores the edits.
+    """
+    response = await handler(request)
+    return response, [message.content for message in request.messages]
 
 
 def _in_graph_run() -> bool:
@@ -705,7 +713,9 @@ class BuiltInGuardrailMiddlewareMixin:
                     ),
                 )
             if checkpoint_model_call and _in_graph_run():
-                response = await _checkpointed_model_call(handler, request)
+                response, contents = await _checkpointed_model_call(handler, request)
+                for message, content in zip(request.messages, contents, strict=False):
+                    message.content = content
             else:
                 response = await handler(request)
             if include_post and (answer := _last_ai_message(response)) is not None:

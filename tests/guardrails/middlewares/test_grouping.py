@@ -881,17 +881,14 @@ class TestRealAgent:
             assert container.parent is not None
             assert by_id[container.parent.span_id].name == "model"
         # Input checks end before the model runs, output checks start after it.
+        # Compared by time, not by order: a coarse clock (Windows) can stamp a
+        # container and the model run with the same start time.
         for model in _named(spans, "model"):
-            children = sorted(
-                (
-                    s
-                    for s in spans
-                    if s.parent and s.parent.span_id == model.context.span_id
-                ),
-                key=lambda s: s.start_time or 0,
-            )
-            names = [s.name for s in children]
-            assert names[0] == "LLM input guardrail check"
+            children = [
+                s
+                for s in spans
+                if s.parent and s.parent.span_id == model.context.span_id
+            ]
             llm_run = next(s for s in children if s.name == "_ToolCallingModel")
             for container in children:
                 if container.name == "LLM input guardrail check":
