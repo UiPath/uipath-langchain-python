@@ -12,11 +12,12 @@ from langchain.agents.middleware import (
     ModelResponse,
     ToolErrorMiddleware,
 )
-from langchain.agents.structured_output import ToolStrategy
+from langchain.agents.structured_output import AutoStrategy, ToolStrategy
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.advanced.agent import (
@@ -271,11 +272,26 @@ class TestMissedOutputToolRetry:
     """A structured-output turn with no tool call is retried once, then fails."""
 
     @staticmethod
-    def _structured_request() -> ModelRequest[Any]:
+    def _structured_request(response_format: Any = None) -> ModelRequest[Any]:
         return _request(
             GenericFakeChatModel(messages=iter([])),
-            response_format=ToolStrategy({"title": "end", "type": "object"}),
+            response_format=response_format
+            or ToolStrategy({"title": "end", "type": "object"}),
         )
+
+    @staticmethod
+    def _stall_once(
+        seen: list[ModelRequest[Any]],
+    ) -> Callable[[ModelRequest[Any]], ModelResponse[Any]]:
+        recovered = _response(AIMessage(content=""), structured={"result": "ok"})
+
+        def handler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            seen.append(request)
+            if len(seen) == 1:
+                return _response(AIMessage(content="text"))
+            return recovered
+
+        return handler
 
     @pytest.mark.parametrize(
         "stalled",
@@ -303,6 +319,93 @@ class TestMissedOutputToolRetry:
         assert len(seen) == 2
         assert isinstance(seen[1].messages[-1], HumanMessage)
         assert seen[0].messages == []
+
+    @pytest.mark.parametrize("tool_name", ["end_execution", "final_answer"])
+    def test_retry_names_the_output_tool(self, tool_name: str) -> None:
+        """Told only to "call a tool", the model calls the last tool it used again.
+
+        The retry also fires mid-task, so it says to finish only once the task is done.
+        """
+        seen: list[ModelRequest[Any]] = []
+        request = self._structured_request(
+            ToolStrategy({"title": tool_name, "type": "object"})
+        )
+
+        _PayloadHandlerMiddleware().wrap_model_call(request, self._stall_once(seen))
+
+        assert seen[1].messages[-1].content == (
+            f"If the task is done, call {tool_name} now with the final output. "
+            "If not, call the tool for the next step."
+        )
+
+    async def test_async_retry_names_the_output_tool(self) -> None:
+        """The async wrapper has its own retry branch and must send the same nudge."""
+        seen: list[ModelRequest[Any]] = []
+        handler = self._stall_once(seen)
+        request = self._structured_request(
+            ToolStrategy({"title": "end_execution", "type": "object"})
+        )
+
+        async def ahandler(request: ModelRequest[Any]) -> ModelResponse[Any]:
+            return handler(request)
+
+        await _PayloadHandlerMiddleware().awrap_model_call(request, ahandler)
+
+        assert seen[1].messages[-1].content == (
+            "If the task is done, call end_execution now with the final output. "
+            "If not, call the tool for the next step."
+        )
+
+    def test_retry_names_every_output_tool_of_a_union(self) -> None:
+        """Naming only the first schema hides the other valid way to finish."""
+
+        class Approved(BaseModel):
+            reason: str
+
+        class Rejected(BaseModel):
+            reason: str
+
+        seen: list[ModelRequest[Any]] = []
+        request = self._structured_request(ToolStrategy(Approved | Rejected))
+
+        _PayloadHandlerMiddleware().wrap_model_call(request, self._stall_once(seen))
+
+        assert seen[1].messages[-1].content == (
+            "If the task is done, call Approved or Rejected now with the final "
+            "output. If not, call the tool for the next step."
+        )
+
+    def test_retry_keeps_the_conversation_and_adds_the_nudge_last(self) -> None:
+        """A retry that drops the history loses the task and the tool results."""
+        history: list[AnyMessage] = [
+            HumanMessage(content="Compute 2 + 2."),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "echo", "args": {"text": "4"}, "id": "1"}],
+            ),
+            ToolMessage(content="4", tool_call_id="1"),
+        ]
+        seen: list[ModelRequest[Any]] = []
+        request = self._structured_request().override(messages=history)
+
+        _PayloadHandlerMiddleware().wrap_model_call(request, self._stall_once(seen))
+
+        assert seen[0].messages == history
+        assert seen[1].messages[:-1] == history
+        assert isinstance(seen[1].messages[-1], HumanMessage)
+
+    def test_retry_without_a_tool_strategy_keeps_the_generic_nudge(self) -> None:
+        """A raw schema reaches middleware as an AutoStrategy, which has no tool names."""
+        seen: list[ModelRequest[Any]] = []
+        request = self._structured_request(
+            AutoStrategy({"title": "end", "type": "object"})
+        )
+
+        _PayloadHandlerMiddleware().wrap_model_call(request, self._stall_once(seen))
+
+        assert seen[1].messages[-1].content == (
+            "Call a tool to continue. Terminal tool calls must contain the final output."
+        )
 
     async def test_async_retries_once_and_returns_the_recovered_response(
         self,
