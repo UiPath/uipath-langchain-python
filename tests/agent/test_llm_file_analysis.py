@@ -148,7 +148,7 @@ def test_rejected_pdfs_are_not_told_to_convert_to_pdf() -> None:
     assert "password-protected" in info.detail
 
 
-def test_content_filter_rejection_uses_the_generic_mapping() -> None:
+def test_content_filter_rejection_is_not_a_file_error() -> None:
     """Azure OpenAI's content filter is about policy, not the file's format."""
     body: dict[str, object] = {
         "error": {
@@ -157,11 +157,12 @@ def test_content_filter_rejection_uses_the_generic_mapping() -> None:
             "Azure OpenAI's content management policy.",
         }
     }
-    raised = _raised(_api_error(400, body))
+    info = _raised(_api_error(400, body)).error_info
 
-    assert raised.error_info.code.endswith(
-        AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value
-    )
+    assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+    assert info.category == UiPathErrorCategory.USER
+    assert info.title == "The model provider's content filter blocked the request"
+    assert "Budget.csv" not in info.detail
 
 
 @pytest.mark.parametrize("detail", ["", "   "])

@@ -77,6 +77,19 @@ _BAD_REQUEST_SIGNATURES: tuple[_ResponseSignature, ...] = (
             "size or split it into smaller files, or use a different model.",
         ),
     ),
+    (
+        re.compile(
+            r"content_filter|content management policy|responsibleaipolicyviolation"
+        ),
+        (
+            AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST,
+            UiPathErrorCategory.USER,
+            "The model provider's content filter blocked the request",
+            "The provider's content policy rejected the input sent to the model. "
+            "Change the input that triggered it, or ask your administrator to "
+            "review the content filter settings for this model.",
+        ),
+    ),
 )
 
 _NOT_FOUND_SIGNATURES: tuple[_ResponseSignature, ...] = (
@@ -253,14 +266,6 @@ _CONTEXT_LIMIT_MARKERS = (
     "maximum number of tokens",
 )
 
-# Lowercased fragments of a content-safety rejection (Azure OpenAI's
-# ``content_filter``), which is about policy rather than the file's format.
-_CONTENT_FILTER_MARKERS = (
-    "content_filter",
-    "content management policy",
-    "responsibleaipolicyviolation",
-)
-
 
 def raise_for_file_analysis_http_error(
     error: UiPathAPIError, attachments: Sequence[str], *, all_pdf: bool = False
@@ -274,9 +279,9 @@ def raise_for_file_analysis_http_error(
     which points at model settings. A centralized guardrail block is a
     guardrail violation, not a file error. Any other status, a 400 carrying the
     gateway's own ProblemDetails ``detail`` (the gateway, not the provider,
-    rejected the call), a content-filter rejection, and a 400 matching one of
-    the ``_BAD_REQUEST_SIGNATURES`` (which already names the file limit hit)
-    are mapped as usual by :func:`raise_for_provider_http_error`.
+    rejected the call), and a 400 matching one of the ``_BAD_REQUEST_SIGNATURES``
+    (which already names its cause) are mapped as usual by
+    :func:`raise_for_provider_http_error`.
 
     The provider's own message is matched for the context-window case but never
     copied into the error: it may carry customer content, and it is already
@@ -296,7 +301,6 @@ def raise_for_file_analysis_http_error(
     if (
         error.status_code != 400
         or _gateway_detail(error.body)
-        or _has_marker(fields, _CONTENT_FILTER_MARKERS)
         or _match_signature(_BAD_REQUEST_SIGNATURES, error.body) is not None
     ):
         raise_for_provider_http_error(error)

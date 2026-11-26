@@ -367,6 +367,35 @@ _TOO_MANY_IMAGES_BODY: dict[str, object] = {
 }
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        {
+            "error": {
+                "code": "content_filter",
+                "message": "The response was filtered due to the prompt triggering "
+                "Azure OpenAI's content management policy. Please modify your "
+                "prompt and retry.",
+                "innererror": {"code": "ResponsibleAIPolicyViolation"},
+            }
+        },
+        {"error": {"code": "ResponsibleAIPolicyViolation", "message": "Blocked."}},
+    ],
+)
+def test_400_from_the_content_filter_names_the_content_filter(
+    body: dict[str, object],
+):
+    info = _raise(_api_error(400, body)).error_info
+
+    assert info.status == 400
+    assert info.category == UiPathErrorCategory.USER
+    assert info.code.endswith(AgentRuntimeErrorCode.LLM_PROVIDER_BAD_REQUEST.value)
+    assert info.title == "The model provider's content filter blocked the request"
+    assert "content policy" in info.detail
+    assert "model settings" not in info.detail
+    assert "modify your prompt" not in info.detail.lower()
+
+
 def test_400_with_too_many_images_maps_to_user_file_error():
     info = _raise(_api_error(400, _TOO_MANY_IMAGES_BODY)).error_info
 

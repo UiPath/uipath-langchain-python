@@ -1,8 +1,11 @@
 """LLM invocation with multimodal file attachments."""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, cast
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -11,12 +14,14 @@ from langchain_core.messages import (
     HumanMessage,
 )
 from langchain_core.messages.content import create_file_block, create_image_block
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils._attachments import (
     ATTACHMENT_ID_EXTRA,
     ATTACHMENT_NAME_EXTRA,
 )
 
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import (
     base_mime_type,
@@ -45,6 +50,40 @@ def file_part_filename(name: str, mime_type: str) -> str | None:
     if is_tiff(sent_mime_type) or is_image(sent_mime_type):
         return None
     return sanitize_filename(name)
+
+
+def _file_error(
+    title: str,
+    detail: str,
+    category: UiPathErrorCategory = UiPathErrorCategory.USER,
+    status: int | None = None,
+) -> AgentRuntimeError:
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.FILE_ERROR,
+        title=title,
+        detail=detail,
+        category=category,
+        status=status,
+    )
+
+
+@contextmanager
+def _download_errors(file_info: FileInfo) -> Iterator[None]:
+    try:
+        yield
+    except ValueError as exc:
+        raise _file_error(
+            "File attachment too large", f"File '{file_info.name}': {exc}"
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        raise _file_error(
+            "Attachment could not be downloaded",
+            f"Downloading '{file_info.name}' from storage failed with HTTP "
+            f"{status} ({exc.response.reason_phrase}).",
+            category=UiPathErrorCategory.SYSTEM,
+            status=status,
+        ) from exc
 
 
 async def build_file_content_blocks_for(
@@ -83,7 +122,9 @@ async def build_file_content_blocks_for(
         A list of DataContentBlock instances for the file.
 
     Raises:
-        ValueError: If the file exceeds the size limit for LLM payloads.
+        AgentRuntimeError: A ``FILE_ERROR`` if the file exceeds the size limit
+            for LLM payloads, is empty, is a TIFF that cannot be decoded, or
+            cannot be downloaded.
     """
     mime_type = normalize_mime_type(file_info.mime_type, file_info.name)
     if mime_type != file_info.mime_type:
@@ -96,15 +137,24 @@ async def build_file_content_blocks_for(
         )
 
     if is_tiff(mime_type):
-        try:
-            return await stream_tiff_to_content_blocks(file_info.url, max_size=max_size)
-        except ValueError as exc:
-            raise ValueError(f"File '{file_info.name}': {exc}") from exc
+        with _download_errors(file_info):
+            try:
+                return await stream_tiff_to_content_blocks(
+                    file_info.url, max_size=max_size
+                )
+            except OSError as exc:
+                raise _file_error(
+                    "Attachment could not be read",
+                    f"File '{file_info.name}' is not a valid TIFF image.",
+                ) from exc
 
-    try:
+    with _download_errors(file_info):
         base64_file = await download_file_base64(file_info.url, max_size=max_size)
-    except ValueError as exc:
-        raise ValueError(f"File '{file_info.name}': {exc}") from exc
+
+    if not base64_file:
+        raise _file_error(
+            "Attachment is empty", f"File '{file_info.name}' has no content."
+        )
 
     tags = (
         {
