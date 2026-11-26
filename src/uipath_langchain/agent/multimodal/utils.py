@@ -15,6 +15,10 @@ from uipath._utils._ssl_context import get_httpx_client_kwargs
 from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES
 
 
+class FileTooLargeError(ValueError):
+    """A file exceeds the size limit for LLM payloads."""
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize a filename to conform to provider document naming requirements.
 
@@ -258,7 +262,7 @@ async def encode_streamed_base64(
         The full base64-encoded string.
 
     Raises:
-        ValueError: If the total size exceeds max_size.
+        FileTooLargeError: If the total size exceeds max_size.
     """
     encoded_buf = bytearray()
     remainder = b""
@@ -267,7 +271,7 @@ async def encode_streamed_base64(
     async for chunk in chunks:
         total += len(chunk)
         if max_size > 0 and total > max_size:
-            raise ValueError(
+            raise FileTooLargeError(
                 f"File exceeds the {_format_mb(max_size, decimals=0)}"
                 f" limit for LLM payloads"
                 f" (downloaded {_format_mb(total)} so far)"
@@ -304,7 +308,7 @@ async def _stream_download(url: str, *, max_size: int = 0):
         The httpx response object, ready for streaming via aiter_bytes().
 
     Raises:
-        ValueError: If the file exceeds max_size (Content-Length check).
+        FileTooLargeError: If the file exceeds max_size (Content-Length check).
         httpx.HTTPStatusError: If the HTTP request fails.
     """
     async with httpx.AsyncClient(**get_httpx_client_kwargs()) as client:
@@ -322,7 +326,7 @@ async def _stream_download(url: str, *, max_size: int = 0):
                         content_length_value is not None
                         and content_length_value > max_size
                     ):
-                        raise ValueError(
+                        raise FileTooLargeError(
                             f"File is {_format_mb(content_length_value)}"
                             f" which exceeds the {_format_mb(max_size, decimals=0)}"
                             f" limit for Agent LLM payloads"
@@ -346,10 +350,11 @@ async def stream_tiff_to_content_blocks(
         max_size: Maximum allowed file size in bytes. 0 means unlimited.
 
     Returns:
-        A list of DataContentBlock instances, one per TIFF page.
+        A list of DataContentBlock instances, one per TIFF page. An empty
+        file has no pages.
 
     Raises:
-        ValueError: If the file exceeds max_size.
+        FileTooLargeError: If the file exceeds max_size.
         httpx.HTTPStatusError: If the HTTP request fails.
     """
     from langchain_core.messages.content import create_image_block
@@ -361,12 +366,15 @@ async def stream_tiff_to_content_blocks(
         async for chunk in response.aiter_bytes():
             total += len(chunk)
             if max_size > 0 and total > max_size:
-                raise ValueError(
+                raise FileTooLargeError(
                     f"File exceeds the {_format_mb(max_size, decimals=0)}"
                     f" limit for LLM payloads"
                     f" (downloaded {_format_mb(total)} so far)"
                 )
             buf.write(chunk)
+
+    if total == 0:
+        return []
 
     buf.seek(0)
     blocks: list[DataContentBlock] = []
@@ -387,7 +395,7 @@ async def download_file_base64(url: str, *, max_size: int = 0) -> str:
         max_size: Maximum allowed file size in bytes. 0 means unlimited.
 
     Raises:
-        ValueError: If the file exceeds max_size.
+        FileTooLargeError: If the file exceeds max_size.
         httpx.HTTPStatusError: If the HTTP request fails.
     """
     async with _stream_download(url, max_size=max_size) as response:
