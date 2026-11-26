@@ -7,6 +7,7 @@ masked LLM output behind a single :class:`PiiMasker` class.
 import base64
 import logging
 import re
+from dataclasses import replace
 from typing import Any
 
 from uipath.core.feature_flags import FeatureFlags
@@ -199,13 +200,8 @@ class PiiMasker:
             for idx, masked_file in enumerate(masked_files):
                 uploaded_id = await self._upload_masked_to_orchestrator(masked_file)
                 if uploaded_id:
-                    masked_files[idx] = FileInfo(
-                        url=masked_file.url,
-                        name=masked_file.name,
-                        mime_type=masked_file.mime_type,
-                        masked_attachment_url=masked_file.masked_attachment_url,
-                        attachment_id=masked_file.attachment_id,
-                        masked_attachment_id=uploaded_id,
+                    masked_files[idx] = replace(
+                        masked_file, masked_attachment_id=uploaded_id
                     )
         else:
             masked_files = files
@@ -258,12 +254,8 @@ class PiiMasker:
         The original ``url``, ``name``, and ``attachment_id`` are preserved so
         observability callers (LLMOps traces) can reference both versions.
         """
-        return FileInfo(
-            url=file.url,
-            name=file.name,
-            mime_type=file.mime_type,
-            masked_attachment_url=redacted_url,
-            attachment_id=file.attachment_id,
+        return replace(
+            file, masked_attachment_url=redacted_url, masked_attachment_id=None
         )
 
     async def _upload_masked_to_orchestrator(self, file: FileInfo) -> str | None:
