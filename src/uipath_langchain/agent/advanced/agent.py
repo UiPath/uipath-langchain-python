@@ -382,7 +382,18 @@ def _tool_error_content(exc: Exception, request: ToolCallRequest) -> str | None:
 _OUTPUT_TOOL_NUDGE = (
     "Call a tool to continue. Terminal tool calls must contain the final output."
 )
-_NAMED_OUTPUT_TOOL_NUDGE = "Call {names} now with the final output of the task."
+_NAMED_OUTPUT_TOOL_NUDGE = (
+    "If the task is done, call {names} now with the final output. "
+    "If not, call the tool for the next step."
+)
+
+
+def _output_tool_nudge(request: ModelRequest[Any]) -> str:
+    strategy = request.response_format
+    if not isinstance(strategy, ToolStrategy):
+        return _OUTPUT_TOOL_NUDGE
+    names = " or ".join(spec.name for spec in strategy.schema_specs)
+    return _NAMED_OUTPUT_TOOL_NUDGE.format(names=names)
 
 
 # A subagent returns only a text report, so a reference it produces never reaches
@@ -442,17 +453,9 @@ class _PayloadHandlerMiddleware(AgentMiddleware[AgentState[Any], Any]):
         return bool(messages) and not messages[-1].tool_calls
 
     @staticmethod
-    def _output_tool_nudge(request: ModelRequest[Any]) -> str:
-        strategy = request.response_format
-        if not isinstance(strategy, ToolStrategy):
-            return _OUTPUT_TOOL_NUDGE
-        names = " or ".join(spec.name for spec in strategy.schema_specs)
-        return _NAMED_OUTPUT_TOOL_NUDGE.format(names=names)
-
-    @staticmethod
     def _retry_request(request: ModelRequest[Any]) -> ModelRequest[Any]:
         # The stalled turn is not replayed: a reasoning-only turn can't be sent alone.
-        nudge = _PayloadHandlerMiddleware._output_tool_nudge(request)
+        nudge = _output_tool_nudge(request)
         return request.override(
             messages=[*request.messages, HumanMessage(content=nudge)]
         )
