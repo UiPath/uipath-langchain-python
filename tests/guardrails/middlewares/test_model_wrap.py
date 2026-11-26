@@ -669,10 +669,58 @@ class TestCopiesAndTrims:
             "_evaluate_guardrail",
             return_value=_FAILED,
         ):
-            await agent.ainvoke({"messages": [HumanMessage("meet Tuesday")]}, config)
-            await agent.ainvoke(
-                _approve("meet Wednesday [ctx]", "ReviewedInputs"), config
+            first = await agent.ainvoke(
+                {"messages": [HumanMessage("meet Tuesday")]}, config
             )
+            await agent.ainvoke(_approve("meet Wednesday", "ReviewedInputs"), config)
 
+        # The review runs on the saved message, before the copy is made.
+        [pending] = first["__interrupt__"]
+        assert "[ctx]" not in pending.value.data["Inputs"]
         saved = (await agent.aget_state(config)).values["messages"]
         assert _texts(saved) == ["meet Wednesday", "answer 1"]
+
+
+class TestInputChecks:
+    async def test_approving_a_later_input_check_runs_an_earlier_one_once(
+        self,
+    ) -> None:
+        logged: list[str] = []
+
+        def evaluate(self: Any, data: Any, *args: Any, **kwargs: Any) -> Any:
+            if self._name == "First":
+                logged.append(data)
+            return _FAILED
+
+        model = _model()
+        agent = create_agent(
+            model,
+            middleware=[
+                *UiPathPIIDetectionMiddleware(
+                    name="First",
+                    scopes=[GuardrailScope.LLM],
+                    action=LogAction(),
+                    entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+                    stage=GuardrailExecutionStage.PRE,
+                ),
+                *UiPathPIIDetectionMiddleware(
+                    name="Second",
+                    scopes=[GuardrailScope.LLM],
+                    action=_escalate(),
+                    entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+                    stage=GuardrailExecutionStage.PRE,
+                ),
+            ],
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "two-inputs"}}
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin, "_evaluate_guardrail", evaluate
+        ):
+            first = await agent.ainvoke({"messages": [HumanMessage("hi")]}, config)
+            assert first["__interrupt__"]
+            done = await agent.ainvoke(_approve("hello", "ReviewedInputs"), config)
+
+        assert len(logged) == 1
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["hello", "answer 1"]

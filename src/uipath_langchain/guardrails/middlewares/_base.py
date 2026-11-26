@@ -4,7 +4,6 @@ import ast
 import asyncio
 import json
 import logging
-import os
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Generator, Mapping
@@ -146,6 +145,9 @@ _HOOK_STAGES = {
 }
 
 
+StateHook = Callable[[Mapping[str, Any]], dict[str, Any] | None]
+
+
 class _ModelGuardrailHook(AgentMiddleware):
     """One guardrail's checks around the model call."""
 
@@ -153,10 +155,14 @@ class _ModelGuardrailHook(AgentMiddleware):
         self,
         name: str,
         wrap: Callable[[ModelRequest, ModelHandler], Awaitable[Any]],
+        before: StateHook | None = None,
+        after: StateHook | None = None,
     ) -> None:
         super().__init__()
         self._hook_name = name
         self._wrap = wrap
+        self._before = before
+        self._after = after
 
     @property
     def name(self) -> str:
@@ -168,25 +174,32 @@ class _ModelGuardrailHook(AgentMiddleware):
         return await self._wrap(request, handler)
 
 
-class _ModelGuardrailHookWithOutputAction(_ModelGuardrailHook):
-    """Checks around the model call; actions that may pause run in the node after it."""
+class _WithInputCheck(_ModelGuardrailHook):
+    """An input check whose action may pause the run, in the node before the model."""
+
+    async def abefore_model(
+        self, state: AgentState[Any], runtime: Runtime
+    ) -> dict[str, Any] | None:
+        """Check the input; resuming a paused action re-runs only this node."""
+        assert self._before is not None
+        return self._before(state)
+
+
+class _WithOutputAction(_ModelGuardrailHook):
+    """Output actions that may pause the run, in the node after the model."""
 
     state_schema = _OutputActionState
-
-    def __init__(
-        self,
-        name: str,
-        wrap: Callable[[ModelRequest, ModelHandler], Awaitable[Any]],
-        after: Callable[[Mapping[str, Any]], dict[str, Any] | None],
-    ) -> None:
-        super().__init__(name, wrap)
-        self._after = after
 
     async def aafter_model(
         self, state: AgentState[Any], runtime: Runtime
     ) -> dict[str, Any] | None:
         """Run the action the output check left for this node, if any."""
+        assert self._after is not None
         return self._after(state)
+
+
+class _WithInputCheckAndOutputAction(_WithInputCheck, _WithOutputAction):
+    """Both of the above."""
 
 
 def _with_output_action(
@@ -207,47 +220,6 @@ def _last_ai_message(response: Any) -> AIMessage | None:
         return response
     messages = getattr(response, "result", None) or []
     return next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-
-
-def _apply_edits_to_state(
-    messages: Sequence[BaseMessage],
-    before: Sequence[Any],
-    state: Mapping[str, Any] | None,
-) -> None:
-    """Apply input-check edits to the state messages (the model may get copies)."""
-    by_id = {
-        message.id: message
-        for message in (state or {}).get("messages", [])
-        if isinstance(message, BaseMessage) and message.id
-    }
-    for message, content in zip(messages, before, strict=False):
-        if message.content == content or not message.id:
-            continue
-        saved = by_id.get(message.id)
-        if saved is not None and saved is not message:
-            edited = _carry_edit(content, message.content, saved.content)
-            if edited is not None:
-                saved.content = edited
-
-
-def _carry_edit(before: Any, after: Any, saved: Any) -> str | None:
-    """``saved`` with the span that changed from ``before`` to ``after``.
-
-    Only that span: a copy may hold model-only context around the saved text.
-    ``None`` if the change reaches beyond the saved text.
-    """
-    if not all(isinstance(text, str) for text in (before, after, saved)):
-        return None
-    start = before.find(saved)
-    if start < 0:
-        return None
-    prefix = len(os.path.commonprefix([before, after]))
-    suffix = len(os.path.commonprefix([before[prefix:][::-1], after[prefix:][::-1]]))
-    end = start + len(saved)
-    if prefix < start or len(before) - suffix > end:
-        return None
-    changed = after[prefix : len(after) - suffix]
-    return saved[: prefix - start] + changed + saved[len(before) - suffix - start :]
 
 
 #: ``$guardrailType`` discriminator for built-in validator guardrails. Typed as
@@ -827,9 +799,10 @@ class BuiltInGuardrailMiddlewareMixin:
     ) -> AgentMiddleware:
         """Create the hook that checks the model's input and output in the model node.
 
-        Output actions other than the built-in Log and Block may pause the run, so
-        they run in the hook's ``after_model`` node: resuming then re-runs only
-        the action, not the model.
+        Actions other than the built-in Log and Block may pause the run. Such an
+        input check runs in the hook's ``before_model`` node, and such an output
+        action in its ``after_model`` node, so resuming re-runs neither the model
+        nor the other guardrails' checks.
         """
         guardrails_in_use()
         mw = self
@@ -837,13 +810,12 @@ class BuiltInGuardrailMiddlewareMixin:
         stage = _HOOK_STAGES[(include_pre, include_post)]
         hook_name = f"{guardrail_name}_{stage}_wrap_model_call"
         # Exactly the built-ins: a subclass may pause the run.
-        act_after_model = include_post and type(self.action) not in (
-            LogAction,
-            BlockAction,
-        )
+        may_pause = type(self.action) not in (LogAction, BlockAction)
+        check_before_model = include_pre and may_pause
+        act_after_model = include_post and may_pause
 
         async def _wrap_model_call_func(request: ModelRequest, handler: Any) -> Any:
-            if include_pre:
+            if include_pre and not check_before_model:
                 mw._check_model_input(request)
             response = await handler(request)
             if not include_post:
@@ -852,26 +824,37 @@ class BuiltInGuardrailMiddlewareMixin:
                 request, response, hook_name, act_after_model=act_after_model
             )
 
-        if not include_post:
-            return _ModelGuardrailHook(hook_name, _wrap_model_call_func)
+        before: StateHook | None = None
+        after: StateHook | None = None
+        if check_before_model:
+            register_guardrail_node(
+                f"{hook_name}.before_model",
+                GuardrailScope.LLM,
+                GuardrailExecutionStage.PRE,
+            )
+            before = mw._run_input_check
+        if include_post:
+            register_guardrail_node(
+                f"{hook_name}.after_model",
+                GuardrailScope.LLM,
+                GuardrailExecutionStage.POST,
+            )
 
-        register_guardrail_node(
-            f"{hook_name}.after_model",
-            GuardrailScope.LLM,
-            GuardrailExecutionStage.POST,
-        )
-        return _ModelGuardrailHookWithOutputAction(
-            hook_name,
-            _wrap_model_call_func,
-            lambda state: mw._run_output_action(state, hook_name),
-        )
+            def after(state: Mapping[str, Any]) -> dict[str, Any] | None:
+                return mw._run_output_action(state, hook_name)
+
+        hook_class = {
+            (False, False): _ModelGuardrailHook,
+            (True, False): _WithInputCheck,
+            (False, True): _WithOutputAction,
+            (True, True): _WithInputCheckAndOutputAction,
+        }[(before is not None, after is not None)]
+        return hook_class(hook_name, _wrap_model_call_func, before, after)
 
     def _check_model_input(self, request: ModelRequest) -> None:
-        """Check the messages the model gets; edits also reach the saved state."""
-        messages = cast(list[BaseMessage], request.messages)
-        before = [message.content for message in messages]
+        """Check the messages the model gets (Log and Block only: no edits)."""
         self._check_messages(
-            messages,
+            cast(list[BaseMessage], request.messages),
             scope=GuardrailScope.LLM,
             stage=GuardrailExecutionStage.PRE,
             attachments=self._attachments_for(
@@ -880,7 +863,28 @@ class BuiltInGuardrailMiddlewareMixin:
                 state=request.state,
             ),
         )
-        _apply_edits_to_state(messages, before, request.state)
+
+    def _run_input_check(self, state: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Check the saved messages before the model; return the edited ones."""
+        messages = list(state.get("messages", []))
+        checked = [message.model_copy() for message in messages]
+        self._check_messages(
+            checked,
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.PRE,
+            attachments=self._attachments_for(
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.PRE,
+                state=state,
+            ),
+            beside_node=True,
+        )
+        edited = [
+            copy
+            for copy, message in zip(checked, messages, strict=True)
+            if copy.content != message.content
+        ]
+        return {"messages": edited} if edited else None
 
     def _check_model_output(
         self,
@@ -1060,6 +1064,8 @@ class BuiltInGuardrailMiddlewareMixin:
         stage: GuardrailExecutionStage | None = None,
         input_text: str | None = None,
         attachments: list[GuardrailAttachment] | None = None,
+        *,
+        beside_node: bool = False,
     ) -> None:
         """Evaluate guardrail against message text; apply action on violation.
 
@@ -1075,7 +1081,7 @@ class BuiltInGuardrailMiddlewareMixin:
         payload = text or NO_TEXT_PLACEHOLDER
 
         with self._guardrail_errors():
-            with guardrail_stage(scope, stage):
+            with guardrail_stage(scope, stage, beside_node=beside_node):
                 result = self._evaluate_guardrail(
                     payload, attachments, enforcement=self._enforcement(scope, stage)
                 )
