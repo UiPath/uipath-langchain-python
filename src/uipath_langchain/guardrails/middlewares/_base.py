@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import logging
+import weakref
 from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any, Literal, NotRequired, Sequence, cast
@@ -105,6 +106,15 @@ class _OutputActionState(AgentState[Any]):
 
 
 ModelHandler = Callable[[ModelRequest], Awaitable[Any]]
+
+#: Model answers an output action was left for, by ``id``. Hooks further out
+#: check such an answer in their own node, after the action, so the checks still
+#: see it in order. Each hook runs in its own copy of the context (LangChain
+#: traces it), so a context variable would not reach the hooks further out.
+#: Weak values: an entry goes with its answer, so an ``id`` is never reused here.
+_answers_with_pending_action: "weakref.WeakValueDictionary[int, AIMessage]" = (
+    weakref.WeakValueDictionary()
+)
 
 #: A model hook's name part for the sides it checks: (input, output).
 _HOOK_STAGES = {
@@ -776,11 +786,14 @@ class BuiltInGuardrailMiddlewareMixin:
         The checks run inside the model node, so their stage containers sit under
         its span, like tool checks under ``tools``. An input check acts there
         too, before the model is called, so resuming its escalation calls the
-        model once. An output check acts there only if its action cannot pause
-        the run (log, block). Any other action, such as an escalation, runs in
-        the node after the model: the model node finishes first, so its answer
-        and every other middleware's work are saved, and resuming re-runs only
-        the action.
+        model once. An output check acts there only if its action is the
+        built-in Log or Block, which cannot pause the run. Any other action
+        (an escalation, a custom action, a subclass of Log or Block) runs in the
+        hook's node after the model: the model node finishes first, so its
+        answer and every other middleware's work are saved, and resuming re-runs
+        only the action. Once an action is left for later, the output checks of
+        the hooks further out move to their own nodes too, so each still sees
+        the answer as the actions before it left it.
         """
         guardrails_in_use()
         mw = self
@@ -788,8 +801,10 @@ class BuiltInGuardrailMiddlewareMixin:
         # checking the input and one the output, are still distinct hooks.
         stage = _HOOK_STAGES[(include_pre, include_post)]
         hook_name = f"{guardrail_name}_{stage}_wrap_model_call"
-        act_after_model = include_post and not isinstance(
-            self.action, (LogAction, BlockAction)
+        # Exactly the built-ins: a subclass may pause the run.
+        act_after_model = include_post and type(self.action) not in (
+            LogAction,
+            BlockAction,
         )
 
         async def _wrap_model_call_func(request: ModelRequest, handler: Any) -> Any:
@@ -802,7 +817,7 @@ class BuiltInGuardrailMiddlewareMixin:
                 request, response, hook_name, act_after_model=act_after_model
             )
 
-        if not act_after_model:
+        if not include_post:
             return _ModelGuardrailHook(hook_name, _wrap_model_call_func)
 
         register_guardrail_node(
@@ -843,7 +858,9 @@ class BuiltInGuardrailMiddlewareMixin:
         """Check the model's answer and return the hook's response.
 
         With ``act_after_model``, a failed check leaves its action for the
-        node after the model, in the response's state update.
+        hook's node after the model, in the response's state update. If a hook
+        further in already left an action for this answer, the check itself
+        waits for that node, since the action may change the answer.
         """
         answer = _last_ai_message(response)
         if answer is None:
@@ -858,7 +875,8 @@ class BuiltInGuardrailMiddlewareMixin:
             # the run.
             state={**state, "messages": [*state.get("messages", []), answer]},
         )
-        if not act_after_model:
+        after_inner_action = _answers_with_pending_action.get(id(answer)) is answer
+        if not act_after_model and not after_inner_action:
             self._check_messages(
                 [answer],
                 scope=GuardrailScope.LLM,
@@ -867,9 +885,14 @@ class BuiltInGuardrailMiddlewareMixin:
                 attachments=attachments,
             )
             return response
-        violation = self._failed_output_check(answer, attachments)
-        if violation is None:
-            return response
+        violation: dict[str, Any] | None
+        if after_inner_action:
+            violation = {}  # checked in this hook's node, after the inner action
+        else:
+            violation = self._failed_output_check(answer, attachments)
+            if violation is None:
+                return response
+        _answers_with_pending_action[id(answer)] = answer
         if answer.id is None:
             answer.id = str(uuid4())  # so the action's node finds it
         violation.update(message_id=answer.id, input_text=input_text)
@@ -909,10 +932,13 @@ class BuiltInGuardrailMiddlewareMixin:
     def _run_output_action(
         self, state: Mapping[str, Any], hook_name: str
     ) -> dict[str, Any] | None:
-        """Act on the output check ``hook_name`` failed in the model node.
+        """Act on the output check ``hook_name`` left for this node.
 
-        Returns the state update: the answer with the action's edit, and the
-        action no longer pending. Resuming a paused action re-runs only this.
+        The check failed in the model node, or waited for an action of a hook
+        further in. Returns the state update: the answer with the action's
+        edit, and the action no longer pending. Resuming a paused action re-runs
+        only this. An action left for an earlier answer, one a later model turn
+        replaced (after a rejected escalation, say), is dropped.
         """
         violation = (state.get(_OUTPUT_ACTIONS_KEY) or {}).get(hook_name)
         if not violation:
@@ -923,29 +949,14 @@ class BuiltInGuardrailMiddlewareMixin:
                 message
                 for message in reversed(state.get("messages", []))
                 if isinstance(message, AIMessage)
-                and message.id == violation["message_id"]
             ),
             None,
         )
-        if answer is None:
+        if answer is None or answer.id != violation["message_id"]:
             return done
-        if violation.get("has_text") and (
-            extract_text_from_messages([answer]) != violation["payload"]
-        ):
-            # Another guardrail's action edited the answer after it was
-            # checked: check what the answer says now.
-            rechecked = self._failed_output_check(
-                answer,
-                self._attachments_for(
-                    scope=GuardrailScope.LLM,
-                    stage=GuardrailExecutionStage.POST,
-                    state=state,
-                ),
-                beside_node=True,
-            )
-            if rechecked is None:
-                return done
-            violation = {**violation, **rechecked}
+        violation = self._violation_now(violation, answer, state)
+        if violation is None:
+            return done
         scope, stage = GuardrailScope.LLM, GuardrailExecutionStage.POST
         payload = violation["payload"]
         input_text = violation.get("input_text")
@@ -965,6 +976,34 @@ class BuiltInGuardrailMiddlewareMixin:
         if reviewed.content == answer.content:
             return done
         return {"messages": [reviewed], **done}
+
+    def _violation_now(
+        self,
+        violation: dict[str, Any],
+        answer: AIMessage,
+        state: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """The pending violation for the answer as it is now, or ``None``.
+
+        The check runs again when it waited for this node, or when another
+        guardrail's action edited the answer after it was checked.
+        """
+        checked = "result" in violation and not (
+            violation.get("has_text")
+            and extract_text_from_messages([answer]) != violation["payload"]
+        )
+        if checked:
+            return violation
+        rechecked = self._failed_output_check(
+            answer,
+            self._attachments_for(
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.POST,
+                state=state,
+            ),
+            beside_node=True,
+        )
+        return None if rechecked is None else {**violation, **rechecked}
 
     def _last_input_text(self, messages: Sequence[BaseMessage]) -> str | None:
         """Return the last HumanMessage text — the input for a POST check.

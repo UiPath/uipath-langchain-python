@@ -25,6 +25,7 @@ from uipath.core.guardrails import (
 )
 from uipath.platform.guardrails.decorators import LogAction
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.guardrails import EscalateAction, GuardrailExecutionStage
 from uipath_langchain.guardrails import escalate_action as escalate_module
 from uipath_langchain.guardrails.enums import PIIDetectionEntityType
@@ -435,3 +436,117 @@ class TestOutputActionResume:
 
         assert model.calls == 1
         assert _texts(done["messages"]) == ["hi", "reviewed answer"]
+
+
+class _PausingLog(LogAction):
+    """A Log subclass that pauses the run and uses the reviewer's text."""
+
+    def handle_validation_result(
+        self, result: Any, data: Any, guardrail_name: str
+    ) -> Any:
+        return interrupt({"review": data})
+
+
+class _Capitalize(GuardrailAction):
+    """A custom action that edits the answer without pausing."""
+
+    def handle_validation_result(
+        self, result: Any, data: Any, guardrail_name: str
+    ) -> Any:
+        return str(data).capitalize()
+
+
+def _llm_pii(name: str, action: GuardrailAction) -> list[Any]:
+    return list(
+        UiPathPIIDetectionMiddleware(
+            name=name,
+            scopes=[GuardrailScope.LLM],
+            action=action,
+            entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+            stage=GuardrailExecutionStage.POST,
+        )
+    )
+
+
+class TestOutputActionPlacement:
+    async def test_a_pausing_log_subclass_commits_the_answer_it_reviewed(
+        self,
+    ) -> None:
+        model = _model()
+        agent = create_agent(
+            model,
+            middleware=_pii(GuardrailExecutionStage.POST, _PausingLog()),
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "log-subclass"}}
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            first = await agent.ainvoke({"messages": [HumanMessage("hi")]}, config)
+            [pending] = first["__interrupt__"]
+            done = await agent.ainvoke(Command(resume="answer 1, reviewed"), config)
+
+        assert pending.value == {"review": "answer 1"}
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["hi", "answer 1, reviewed"]
+
+    async def test_a_later_answer_does_not_reopen_a_rejected_escalation(
+        self,
+    ) -> None:
+        model = _model()
+        agent = create_agent(
+            model,
+            middleware=_pii(GuardrailExecutionStage.POST, _escalate()),
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "rejected"}}
+
+        def evaluate(self: Any, data: Any, *args: Any, **kwargs: Any) -> Any:
+            return _FAILED if data == "answer 1" else _PASSED
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin, "_evaluate_guardrail", evaluate
+        ):
+            first = await agent.ainvoke({"messages": [HumanMessage("a day")]}, config)
+            assert first["__interrupt__"]
+            reject = Command(resume={"action": "Reject", "data": {"Reason": "no"}})
+            with pytest.raises(AgentRuntimeError):
+                await agent.ainvoke(reject, config)
+            again = await agent.ainvoke(
+                {"messages": [HumanMessage("another day")]}, config
+            )
+
+        # The new answer passed; the rejected one's action is not run again.
+        assert "__interrupt__" not in again
+        assert _texts(again["messages"])[-1] == "answer 2"
+
+    async def test_an_outer_check_sees_the_answer_an_inner_action_edited(
+        self,
+    ) -> None:
+        model = _model()
+        audited: list[str] = []
+
+        def evaluate(self: Any, data: Any, *args: Any, **kwargs: Any) -> Any:
+            if self._name == "Audit":
+                audited.append(data)
+                return _PASSED
+            return _FAILED if data == "answer 1" else _PASSED
+
+        agent = create_agent(
+            model,
+            middleware=[
+                *_llm_pii("Audit", LogAction()),
+                *_llm_pii("Formatter", _Capitalize()),
+            ],
+        )
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin, "_evaluate_guardrail", evaluate
+        ):
+            done = await agent.ainvoke({"messages": [HumanMessage("hi")]})
+
+        # The audit passes, but it still runs after the formatter's edit.
+        assert audited == ["Answer 1"]
+        assert _texts(done["messages"]) == ["hi", "Answer 1"]
