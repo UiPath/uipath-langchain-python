@@ -136,7 +136,7 @@ class TestHookWiring:
             scopes=[GuardrailScope.LLM],
             stage=GuardrailExecutionStage.PRE_AND_POST,
         )
-        assert _hook_names(middleware) == ["LLM_as_Judge_wrap_model_call"]
+        assert _hook_names(middleware) == ["LLM_as_Judge_pre_and_post_wrap_model_call"]
         assert llm_stages(middleware) == ["PRE", "POST"]
 
     def test_tool_scope_registers_single_wrap_hook(self) -> None:
@@ -161,7 +161,7 @@ class TestHookWiring:
         assert sorted(names) == [
             "LLM_as_Judge_after_agent",
             "LLM_as_Judge_before_agent",
-            "LLM_as_Judge_wrap_model_call",
+            "LLM_as_Judge_pre_and_post_wrap_model_call",
             "LLM_as_Judge_wrap_tool_call",
         ]
 

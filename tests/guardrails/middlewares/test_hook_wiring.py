@@ -62,7 +62,7 @@ class TestIntellectualPropertyHookWiring:
             entities=["Text"],
         )
         assert _hook_names(middleware) == [
-            "Intellectual_Property_Detection_wrap_model_call"
+            "Intellectual_Property_Detection_post_wrap_model_call"
         ]
         assert llm_stages(middleware) == ["POST"]
 
@@ -91,7 +91,7 @@ class TestIntellectualPropertyHookWiring:
         )
         assert _hook_names(middleware) == [
             "Intellectual_Property_Detection_after_agent",
-            "Intellectual_Property_Detection_wrap_model_call",
+            "Intellectual_Property_Detection_post_wrap_model_call",
         ]
         assert llm_stages(middleware) == ["POST"]
 
@@ -201,7 +201,9 @@ class TestPIIDetectionHookWiringStageGating:
         self, stage: GuardrailExecutionStage, checked: list[str]
     ) -> None:
         middleware = self._pii(GuardrailScope.LLM, stage)
-        assert _hook_names(middleware) == ["PII_Detection_wrap_model_call"]
+        assert _hook_names(middleware) == [
+            f"PII_Detection_{stage.name.lower()}_wrap_model_call"
+        ]
         assert llm_stages(middleware) == checked
 
 
@@ -244,7 +246,9 @@ class TestHarmfulContentHookWiring:
             action=_LOG,
             entities=[HarmfulContentEntity("Hate"), HarmfulContentEntity("Violence")],
         )
-        assert _hook_names(middleware) == ["Harmful_Content_Detection_wrap_model_call"]
+        assert _hook_names(middleware) == [
+            "Harmful_Content_Detection_pre_and_post_wrap_model_call"
+        ]
         assert llm_stages(middleware) == ["PRE", "POST"]
 
     def test_agent_scope_registers_before_and_after_agent(self) -> None:
@@ -275,7 +279,7 @@ class TestHarmfulContentHookWiring:
         assert _hook_names(middleware) == [
             "Harmful_Content_Detection_before_agent",
             "Harmful_Content_Detection_after_agent",
-            "Harmful_Content_Detection_wrap_model_call",
+            "Harmful_Content_Detection_pre_and_post_wrap_model_call",
         ]
         assert llm_stages(middleware) == ["PRE", "POST"]
 
@@ -327,5 +331,7 @@ class TestHarmfulContentHookWiringStageGating:
         self, stage: GuardrailExecutionStage, checked: list[str]
     ) -> None:
         middleware = self._hc(GuardrailScope.LLM, stage)
-        assert _hook_names(middleware) == ["Harmful_Content_Detection_wrap_model_call"]
+        assert _hook_names(middleware) == [
+            f"Harmful_Content_Detection_{stage.name.lower()}_wrap_model_call"
+        ]
         assert llm_stages(middleware) == checked

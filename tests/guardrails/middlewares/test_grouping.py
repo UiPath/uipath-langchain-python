@@ -13,6 +13,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
@@ -42,7 +43,8 @@ from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.platform.guardrails.decorators import BlockAction, LogAction
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError
-from uipath_langchain.guardrails import GuardrailExecutionStage
+from uipath_langchain.guardrails import EscalateAction, GuardrailExecutionStage
+from uipath_langchain.guardrails import escalate_action as escalate_module
 from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 from uipath_langchain.guardrails.middlewares import (
     UiPathDeterministicGuardrailMiddleware,
@@ -922,3 +924,48 @@ class TestRealAgent:
         containers = _named(spans, "LLM input guardrail check")
         assert len(containers) == 4
         assert all(_children(spans, c) for c in containers)
+
+    async def test_two_output_escalations_check_inside_the_model_span(
+        self, exporter: InMemorySpanExporter, instrumented: None
+    ) -> None:
+        escalations = [
+            hook
+            for name in ("PII", "Second PII")
+            for hook in _pii(
+                name=name,
+                stage=GuardrailExecutionStage.POST,
+                action=EscalateAction(app_name="app", app_folder_path="folder"),
+            )
+        ]
+        agent = create_agent(
+            GenericFakeChatModel(messages=iter([AIMessage("a@b.com")])),
+            middleware=escalations,
+            checkpointer=InMemorySaver(),
+        )
+        no_platform = MagicMock(tenant_name=None, base_url=None)
+        with (
+            patch.object(escalate_module, "UiPathConfig", no_platform),
+            patch.object(
+                _base.BuiltInGuardrailMiddlewareMixin,
+                "_evaluate_guardrail",
+                return_value=_FAILED,
+            ),
+        ):
+            first = await agent.ainvoke(
+                {"messages": [HumanMessage("hi")]},
+                {"configurable": {"thread_id": "trace"}},
+            )
+        assert first["__interrupt__"]
+        spans = list(exporter.get_finished_spans())
+        by_id = {s.context.span_id: s for s in spans}
+
+        self._assert_well_formed(spans)
+        parents = [
+            by_id[c.parent.span_id].name
+            for c in _named(spans, "LLM output guardrail check")
+            if c.parent is not None
+        ]
+        # Both checks share the model's container; the escalation they lead to
+        # runs in the hidden node after the model, its container beside it.
+        assert sorted(parents) == ["LangGraph", "model"]
+        assert not [s for s in spans if "checkpointed" in s.name]

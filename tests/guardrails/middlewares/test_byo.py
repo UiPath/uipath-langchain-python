@@ -164,7 +164,7 @@ class TestByoGuardrailHookWiring:
                 stage=GuardrailExecutionStage.PRE,
             )
         )
-        assert names == ["BYO_Guardrail_wrap_model_call"]
+        assert names == ["BYO_Guardrail_pre_wrap_model_call"]
         assert llm_stages(
             _byo(
                 name="BYO Guardrail",
@@ -181,7 +181,7 @@ class TestByoGuardrailHookWiring:
                 stage=GuardrailExecutionStage.POST,
             )
         )
-        assert names == ["BYO_Guardrail_wrap_model_call"]
+        assert names == ["BYO_Guardrail_post_wrap_model_call"]
         assert llm_stages(
             _byo(
                 name="BYO Guardrail",

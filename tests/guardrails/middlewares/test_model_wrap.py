@@ -7,10 +7,17 @@ from unittest.mock import patch
 
 import pytest
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    AgentState,
+    ExtendedModelResponse,
+    wrap_model_call,
+)
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import START, StateGraph
+from langgraph.types import Command, interrupt
 from uipath.core.guardrails import (
     GuardrailScope,
     GuardrailValidationResult,
@@ -226,3 +233,205 @@ class TestChecks:
         # The replayed call restores the input the model saw, not the original.
         assert model.calls == 1
         assert _texts(done["messages"]) == ["mail [redacted]", "reviewed answer"]
+
+
+class TestHookNames:
+    async def test_input_and_output_guardrails_with_one_name_build_an_agent(
+        self,
+    ) -> None:
+        # Both use the default name; the stage keeps their hooks distinct.
+        model = _model()
+        checked: list[str] = []
+
+        def evaluate(self: Any, data: Any, *args: Any, **kwargs: Any) -> Any:
+            checked.append(data)
+            return _PASSED
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin, "_evaluate_guardrail", evaluate
+        ):
+            agent = create_agent(
+                model,
+                middleware=[
+                    *_pii(GuardrailExecutionStage.PRE, LogAction()),
+                    *_pii(GuardrailExecutionStage.POST, LogAction()),
+                ],
+            )
+            await agent.ainvoke({"messages": [HumanMessage("mail a@b.com")]})
+
+        assert checked == ["mail a@b.com", "answer 1"]
+
+
+@wrap_model_call
+async def _copy_messages(request: Any, handler: Any) -> Any:
+    """Pass the model copies of the messages, as a middleware adding metadata does."""
+    copies = [
+        m.model_copy(update={"additional_kwargs": {"seen": True}})
+        for m in request.messages
+    ]
+    return await handler(request.override(messages=copies))
+
+
+class TestInputEdits:
+    async def test_an_input_review_edits_the_saved_message_behind_a_copy(
+        self,
+    ) -> None:
+        model = _model()
+        agent = create_agent(
+            model,
+            middleware=[
+                _copy_messages,
+                *_pii(GuardrailExecutionStage.PRE, _escalate()),
+            ],
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "copy"}}
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            await agent.ainvoke({"messages": [HumanMessage("meet Tuesday")]}, config)
+            await agent.ainvoke(_approve("meet Wednesday", "ReviewedInputs"), config)
+
+        saved = (await agent.aget_state(config)).values["messages"]
+        assert _texts(saved) == ["meet Wednesday", "answer 1"]
+
+
+class _ReviewAction(GuardrailAction):
+    """A custom action that pauses the run and uses the reviewer's text."""
+
+    def __init__(self) -> None:
+        self.reviewed: list[str] = []
+
+    def handle_validation_result(
+        self, result: Any, data: Any, guardrail_name: str
+    ) -> Any:
+        self.reviewed.append(data)
+        return interrupt({"review": data})
+
+
+def _failing_output(checked: list[str]) -> Any:
+    """Record what is checked; only the model's answers fail."""
+
+    def evaluate(self: Any, data: Any, *args: Any, **kwargs: Any) -> Any:
+        checked.append(data)
+        return _FAILED if str(data).startswith("answer") else _PASSED
+
+    return evaluate
+
+
+class TestOutputActionResume:
+    """An output check's action runs after the model node, so resuming it
+    re-runs only the action."""
+
+    async def test_a_custom_pausing_action_commits_the_answer_it_reviewed(
+        self,
+    ) -> None:
+        model = _model()
+        action = _ReviewAction()
+        agent = create_agent(
+            model,
+            middleware=_pii(GuardrailExecutionStage.POST, action),
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "custom"}}
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            first = await agent.ainvoke({"messages": [HumanMessage("hi")]}, config)
+            [pending] = first["__interrupt__"]
+            done = await agent.ainvoke(Command(resume="answer 1, reviewed"), config)
+
+        assert pending.value == {"review": "answer 1"}
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["hi", "answer 1, reviewed"]
+
+    async def test_resuming_does_not_check_the_input_again(self) -> None:
+        model = _model()
+        checked: list[str] = []
+        agent = create_agent(
+            model,
+            middleware=_pii(GuardrailExecutionStage.PRE_AND_POST, _escalate()),
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "both"}}
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            _failing_output(checked),
+        ):
+            await agent.ainvoke({"messages": [HumanMessage("hi")]}, config)
+            done = await agent.ainvoke(
+                _approve("reviewed answer", "ReviewedOutputs"), config
+            )
+
+        assert checked == ["hi", "answer 1"]
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["hi", "reviewed answer"]
+
+    async def test_an_inner_middleware_state_update_survives_the_resume(
+        self,
+    ) -> None:
+        @wrap_model_call
+        async def add_note(request: Any, handler: Any) -> Any:
+            response = await handler(request)
+            return ExtendedModelResponse(
+                model_response=response,
+                command=Command(update={"messages": [HumanMessage("note")]}),
+            )
+
+        model = _model()
+        config: Any = {"configurable": {"thread_id": "note"}}
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            agent = create_agent(
+                model,
+                middleware=[*_pii(GuardrailExecutionStage.POST, _escalate()), add_note],
+                checkpointer=saver,
+            )
+            with patch.object(
+                _base.BuiltInGuardrailMiddlewareMixin,
+                "_evaluate_guardrail",
+                return_value=_FAILED,
+            ):
+                await agent.ainvoke({"messages": [HumanMessage("hi")]}, config)
+                done = await agent.ainvoke(
+                    _approve("reviewed answer", "ReviewedOutputs"), config
+                )
+
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["hi", "reviewed answer", "note"]
+
+    async def test_an_agent_nested_in_a_parent_graph_resumes_on_the_same_answer(
+        self,
+    ) -> None:
+        model = _model()
+        agent = create_agent(
+            model, middleware=_pii(GuardrailExecutionStage.POST, _escalate())
+        )
+        parent = (
+            StateGraph(AgentState)
+            .add_node("agent", agent)
+            .add_edge(START, "agent")
+            .compile(checkpointer=InMemorySaver())
+        )
+        config: Any = {"configurable": {"thread_id": "nested"}}
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            first = await parent.ainvoke({"messages": [HumanMessage("hi")]}, config)
+            assert first["__interrupt__"]
+            done = await parent.ainvoke(
+                _approve("reviewed answer", "ReviewedOutputs"), config
+            )
+
+        assert model.calls == 1
+        assert _texts(done["messages"]) == ["hi", "reviewed answer"]

@@ -161,11 +161,18 @@ def _activate() -> None:
 
 @contextmanager
 def guardrail_stage(
-    scope: GuardrailScope | None, stage: GuardrailExecutionStage | None
+    scope: GuardrailScope | None,
+    stage: GuardrailExecutionStage | None,
+    *,
+    beside_node: bool = False,
 ) -> Generator[None]:
-    """Run one check inside its stage's shared container."""
+    """Run one check inside its stage's shared container.
+
+    ``beside_node`` puts an LLM check's container beside its node, as an agent
+    check's: the node after the model, where an output's action runs, is hidden.
+    """
     try:
-        container = _shared_container(scope, stage)
+        container = _shared_container(scope, stage, beside_node)
     except Exception:
         logger.warning("Could not group a guardrail check", exc_info=True)
         container = None
@@ -197,20 +204,24 @@ def guardrail_aware(
 
 
 def _shared_container(
-    scope: GuardrailScope | None, stage: GuardrailExecutionStage | None
+    scope: GuardrailScope | None,
+    stage: GuardrailExecutionStage | None,
+    beside_node: bool = False,
 ) -> _Container | None:
     """Get the stage's open container, or start one. ``None`` if not grouped."""
     stage_spans = _STAGES.get((scope, stage))  # type: ignore[arg-type]
     if not _state.enabled or stage_spans is None:
         return None
-    place = _container_place(scope)
+    place = _container_place(scope, beside_node)
     if place is None:
         return None
     node, parent = place
     return _open_container(stage_spans, parent, node)
 
 
-def _container_place(scope: GuardrailScope | None) -> tuple[Span, SpanContext] | None:
+def _container_place(
+    scope: GuardrailScope | None, beside_node: bool = False
+) -> tuple[Span, SpanContext] | None:
     """The check's node and the container's parent, if a container there would close.
 
     Tool and LLM checks run inside the ``tools`` and model nodes, so their
@@ -219,7 +230,7 @@ def _container_place(scope: GuardrailScope | None) -> tuple[Span, SpanContext] |
     node = UiPathSpanUtils.get_external_current_span()
     if node is None or not node.is_recording():
         return None  # a sampled-out node never reports its end
-    if scope in (GuardrailScope.TOOL, GuardrailScope.LLM):
+    if scope in (GuardrailScope.TOOL, GuardrailScope.LLM) and not beside_node:
         parent: SpanContext | None = node.get_span_context()
     else:
         parent = getattr(node, "parent", None)
