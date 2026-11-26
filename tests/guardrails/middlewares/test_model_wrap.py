@@ -10,6 +10,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import (
     AgentState,
     ExtendedModelResponse,
+    ModelResponse,
     wrap_model_call,
 )
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -31,6 +32,8 @@ from uipath_langchain.guardrails import escalate_action as escalate_module
 from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 from uipath_langchain.guardrails.middlewares import UiPathPIIDetectionMiddleware, _base
 from uipath_langchain.guardrails.models import GuardrailAction, PIIDetectionEntity
+
+from ._llm_hooks import model_hook, model_request
 
 _FAILED = GuardrailValidationResult(
     result=GuardrailValidationResultType.VALIDATION_FAILED, reason="found"
@@ -552,3 +555,124 @@ class TestOutputActionPlacement:
         # The audit passes, but it still runs after the formatter's edit.
         assert audited == ["Answer 1"]
         assert _texts(done["messages"]) == ["hi", "Answer 1"]
+
+
+class TestCopiesAndTrims:
+    async def test_a_new_turns_check_clears_an_earlier_turns_action(self) -> None:
+        # A model cache can answer a repeated prompt with the same message id,
+        # so the id alone can't tell a rejected answer from the new one.
+        hook = model_hook(_pii(GuardrailExecutionStage.POST, _escalate()))
+        earlier = {
+            "message_id": "cached",
+            "payload": "answer",
+            "has_text": True,
+            "result": _FAILED.model_dump(mode="json"),
+        }
+        messages = [HumanMessage("a day")]
+        state = {"messages": messages, _base._OUTPUT_ACTIONS_KEY: {hook.name: earlier}}
+
+        async def handler(request: Any) -> Any:
+            return ModelResponse(result=[AIMessage("answer", id="cached")])
+
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_PASSED,
+        ):
+            result = await hook.awrap_model_call(
+                model_request(messages, state), handler
+            )
+
+        assert result.command.update == {_base._OUTPUT_ACTIONS_KEY: {hook.name: None}}
+
+    async def test_an_outer_check_waits_behind_a_copy_of_the_reply(self) -> None:
+        @wrap_model_call
+        async def copy_reply(request: Any, handler: Any) -> Any:
+            response = await handler(request)
+            return ModelResponse(
+                result=[
+                    m.model_copy(update={"response_metadata": {"copied": True}})
+                    for m in response.result
+                ]
+            )
+
+        model = _model()
+        audited: list[str] = []
+
+        def evaluate(self: Any, data: Any, *args: Any, **kwargs: Any) -> Any:
+            if self._name == "Audit":
+                audited.append(data)
+                return _PASSED
+            return _FAILED if data == "answer 1" else _PASSED
+
+        agent = create_agent(
+            model,
+            middleware=[
+                *_llm_pii("Audit", LogAction()),
+                copy_reply,
+                *_llm_pii("Formatter", _Capitalize()),
+            ],
+        )
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin, "_evaluate_guardrail", evaluate
+        ):
+            done = await agent.ainvoke({"messages": [HumanMessage("hi")]})
+
+        assert audited == ["Answer 1"]
+        assert _texts(done["messages"]) == ["hi", "Answer 1"]
+
+    async def test_an_output_review_shows_the_question_of_a_trimmed_request(
+        self,
+    ) -> None:
+        @wrap_model_call
+        async def trim(request: Any, handler: Any) -> Any:
+            kept = [m for m in request.messages if not isinstance(m, HumanMessage)]
+            return await handler(request.override(messages=kept))
+
+        agent = create_agent(
+            _model(),
+            middleware=[trim, *_pii(GuardrailExecutionStage.POST, _escalate())],
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "trimmed"}}
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            first = await agent.ainvoke(
+                {"messages": [HumanMessage("what day is it")]}, config
+            )
+
+        [pending] = first["__interrupt__"]
+        assert "what day is it" in pending.value.data["Inputs"]
+
+    async def test_an_input_review_saves_no_model_only_context(self) -> None:
+        @wrap_model_call
+        async def add_context(request: Any, handler: Any) -> Any:
+            copies = [
+                m.model_copy(update={"content": f"{m.content} [ctx]"})
+                if isinstance(m, HumanMessage)
+                else m
+                for m in request.messages
+            ]
+            return await handler(request.override(messages=copies))
+
+        agent = create_agent(
+            _model(),
+            middleware=[add_context, *_pii(GuardrailExecutionStage.PRE, _escalate())],
+            checkpointer=InMemorySaver(),
+        )
+        config: Any = {"configurable": {"thread_id": "context"}}
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            await agent.ainvoke({"messages": [HumanMessage("meet Tuesday")]}, config)
+            await agent.ainvoke(
+                _approve("meet Wednesday [ctx]", "ReviewedInputs"), config
+            )
+
+        saved = (await agent.aget_state(config)).values["messages"]
+        assert _texts(saved) == ["meet Wednesday", "answer 1"]

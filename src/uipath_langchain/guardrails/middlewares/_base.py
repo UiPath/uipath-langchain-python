@@ -4,7 +4,9 @@ import ast
 import asyncio
 import json
 import logging
-import weakref
+import os
+import threading
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any, Literal, NotRequired, Sequence, cast
@@ -106,11 +108,36 @@ class _OutputActionState(AgentState[Any]):
 
 ModelHandler = Callable[[ModelRequest], Awaitable[Any]]
 
-#: Answers with an action left for later, by ``id``: outer checks wait for it.
-#: Not a ContextVar: LangChain runs each hook in a copied context.
-_answers_with_pending_action: "weakref.WeakValueDictionary[int, AIMessage]" = (
-    weakref.WeakValueDictionary()
-)
+
+class _PendingAnswers:
+    """Message ids of answers with an action left for later: outer checks wait.
+
+    By message id, which copies of the reply keep. Not a ContextVar: LangChain
+    runs each hook in a copied context. Bounded, in case a node never runs.
+    """
+
+    def __init__(self, size: int = 1024) -> None:
+        self._ids: OrderedDict[str, None] = OrderedDict()
+        self._size = size
+        self._lock = threading.Lock()
+
+    def add(self, message_id: str) -> None:
+        with self._lock:
+            self._ids[message_id] = None
+            self._ids.move_to_end(message_id)
+            while len(self._ids) > self._size:
+                self._ids.popitem(last=False)
+
+    def discard(self, message_id: str) -> None:
+        with self._lock:
+            self._ids.pop(message_id, None)
+
+    def __contains__(self, message_id: object) -> bool:
+        with self._lock:
+            return message_id in self._ids
+
+
+_pending_answers = _PendingAnswers()
 
 _HOOK_STAGES = {
     (True, True): "pre_and_post",
@@ -162,6 +189,18 @@ class _ModelGuardrailHookWithOutputAction(_ModelGuardrailHook):
         return self._after(state)
 
 
+def _with_output_action(
+    response: Any, hook_name: str, action: dict[str, Any] | None
+) -> ExtendedModelResponse[Any]:
+    """``response`` with ``hook_name``'s pending output action set (``None`` clears)."""
+    if not isinstance(response, ModelResponse):
+        response = ModelResponse(result=[response])
+    return ExtendedModelResponse(
+        model_response=response,
+        command=Command(update={_OUTPUT_ACTIONS_KEY: {hook_name: action}}),
+    )
+
+
 def _last_ai_message(response: Any) -> AIMessage | None:
     """The model's answer in a ``wrap_model_call`` handler's response."""
     if isinstance(response, AIMessage):
@@ -186,7 +225,29 @@ def _apply_edits_to_state(
             continue
         saved = by_id.get(message.id)
         if saved is not None and saved is not message:
-            saved.content = message.content
+            edited = _carry_edit(content, message.content, saved.content)
+            if edited is not None:
+                saved.content = edited
+
+
+def _carry_edit(before: Any, after: Any, saved: Any) -> str | None:
+    """``saved`` with the span that changed from ``before`` to ``after``.
+
+    Only that span: a copy may hold model-only context around the saved text.
+    ``None`` if the change reaches beyond the saved text.
+    """
+    if not all(isinstance(text, str) for text in (before, after, saved)):
+        return None
+    start = before.find(saved)
+    if start < 0:
+        return None
+    prefix = len(os.path.commonprefix([before, after]))
+    suffix = len(os.path.commonprefix([before[prefix:][::-1], after[prefix:][::-1]]))
+    end = start + len(saved)
+    if prefix < start or len(before) - suffix > end:
+        return None
+    changed = after[prefix : len(after) - suffix]
+    return saved[: prefix - start] + changed + saved[len(before) - suffix - start :]
 
 
 #: ``$guardrailType`` discriminator for built-in validator guardrails. Typed as
@@ -832,18 +893,29 @@ class BuiltInGuardrailMiddlewareMixin:
         """Check the answer; leave a failed check's action, or the check itself if an
         inner action is pending, for the hook's node."""
         answer = _last_ai_message(response)
+        state: Mapping[str, Any] = request.state or {}
+        # A new turn's check replaces an earlier one's action (an answer from the
+        # model cache can repeat its message id).
+        stale = hook_name in (state.get(_OUTPUT_ACTIONS_KEY) or {})
         if answer is None:
-            return response
-        input_text = self._last_input_text(request.messages)
-        state = request.state or {}
+            return _with_output_action(response, hook_name, None) if stale else response
+        # The question from the state if an earlier middleware trimmed the request.
+        input_text = self._last_input_text(request.messages) or self._last_input_text(
+            state.get("messages", [])
+        )
         attachments = self._attachments_for(
             scope=GuardrailScope.LLM,
             stage=GuardrailExecutionStage.POST,
             # The full history: an earlier middleware may have trimmed the request.
             state={**state, "messages": [*state.get("messages", []), answer]},
         )
-        after_inner_action = _answers_with_pending_action.get(id(answer)) is answer
-        if not act_after_model and not after_inner_action:
+        after_inner_action = answer.id is not None and answer.id in _pending_answers
+        violation: dict[str, Any] | None = None
+        if after_inner_action:
+            violation = {}  # checked in this hook's node, after the inner action
+        elif act_after_model:
+            violation = self._failed_output_check(answer, attachments)
+        else:
             self._check_messages(
                 [answer],
                 scope=GuardrailScope.LLM,
@@ -851,24 +923,13 @@ class BuiltInGuardrailMiddlewareMixin:
                 input_text=input_text,
                 attachments=attachments,
             )
-            return response
-        violation: dict[str, Any] | None
-        if after_inner_action:
-            violation = {}  # checked in this hook's node, after the inner action
-        else:
-            violation = self._failed_output_check(answer, attachments)
-            if violation is None:
-                return response
-        _answers_with_pending_action[id(answer)] = answer
+        if violation is None:
+            return _with_output_action(response, hook_name, None) if stale else response
         if answer.id is None:
             answer.id = str(uuid4())  # so the action's node finds it
+        _pending_answers.add(answer.id)
         violation.update(message_id=answer.id, input_text=input_text)
-        if not isinstance(response, ModelResponse):
-            response = ModelResponse(result=[response])
-        return ExtendedModelResponse(
-            model_response=response,
-            command=Command(update={_OUTPUT_ACTIONS_KEY: {hook_name: violation}}),
-        )
+        return _with_output_action(response, hook_name, violation)
 
     def _failed_output_check(
         self,
@@ -907,6 +968,7 @@ class BuiltInGuardrailMiddlewareMixin:
         if not violation:
             return None
         done: dict[str, Any] = {_OUTPUT_ACTIONS_KEY: {hook_name: None}}
+        _pending_answers.discard(violation["message_id"])
         answer = next(
             (
                 message
