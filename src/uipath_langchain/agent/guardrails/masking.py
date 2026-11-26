@@ -12,7 +12,14 @@ from typing import Any, Callable, Iterable, Mapping
 # scope keeps ``Email-1`` from ever appearing inside one of ours, and the run tag
 # keeps a run from restoring placeholders another run wrote, such as a parent
 # agent's placeholders in the input of an agent it calls as a tool.
-_PLACEHOLDER = re.compile(r"\[([A-Za-z0-9]+)-(Agent|Tool)-([0-9a-f]{6})-([0-9]+)\]")
+_BARE_PLACEHOLDER = r"([A-Za-z0-9]+)-(Agent|Tool)-([0-9a-f]{6})-([0-9]+)"
+_PLACEHOLDER = re.compile(rf"\[{_BARE_PLACEHOLDER}\]")
+# A model sometimes echoes a placeholder without its brackets; the run tag keeps the
+# bare form from matching ordinary text, and the lookarounds from matching inside a
+# longer token.
+_RESTORABLE = re.compile(
+    rf"\[{_BARE_PLACEHOLDER}\]|(?<![A-Za-z0-9-]){_BARE_PLACEHOLDER}(?![A-Za-z0-9-])"
+)
 
 
 def placeholder_label(category: str) -> str:
@@ -191,18 +198,19 @@ class Restorer:
         self._restored: Counter[str] = Counter()
 
     def restore_text(self, text: str) -> str:
-        """``text`` with every known placeholder replaced by its value."""
-        if not self._masked_values or "[" not in text:
+        """``text`` with every known placeholder, bracketed or not, replaced by its value."""
+        if not self._masked_values or ("-Agent-" not in text and "-Tool-" not in text):
             return text
-        return _PLACEHOLDER.sub(self._replace, text)
+        return _RESTORABLE.sub(self._replace, text)
 
     def counts(self) -> dict[str, int]:
         """How many placeholders of each category were restored."""
         return dict(self._restored)
 
     def _replace(self, match: re.Match[str]) -> str:
-        value = self._masked_values.get(match.group(0))
+        bare = match.group(0).strip("[]")
+        value = self._masked_values.get(f"[{bare}]")
         if value is None:
             return match.group(0)
-        self._restored[match.group(1)] += 1
+        self._restored[bare.split("-", 1)[0]] += 1
         return value

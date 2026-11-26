@@ -183,6 +183,34 @@ class TestRestorer:
         )
         assert restorer.counts() == {"Person": 1, "Email": 2}
 
+    def test_a_placeholder_echoed_without_brackets_is_restored(self):
+        restorer = Restorer(
+            {agent("Person", 1): "Jane Doe", agent("Email", 1): "jane@example.com"}
+        )
+        bare_person = agent("Person", 1).strip("[]")
+
+        restored = restorer.restore_text(
+            f"Thank you, {bare_person}! Your email is {agent('Email', 1)}."
+        )
+
+        assert restored == "Thank you, Jane Doe! Your email is jane@example.com."
+        assert restorer.counts() == {"Person": 1, "Email": 1}
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            f"x{agent('Person', 1).strip('[]')}",
+            f"{agent('Person', 1).strip('[]')}2",
+            f"{agent('Person', 1).strip('[]')}-b",
+            "Person-Agent-1a2b3c-1",
+        ],
+    )
+    def test_a_bare_placeholder_inside_a_longer_token_is_left_alone(self, text):
+        restorer = Restorer({agent("Person", 1): "Jane Doe"})
+
+        assert restorer.restore_text(text) == text
+        assert restorer.counts() == {}
+
     def test_a_restored_value_is_not_restored_again(self):
         restorer = Restorer(
             {agent("Person", 1): agent("Person", 2), agent("Person", 2): "Jane"}
