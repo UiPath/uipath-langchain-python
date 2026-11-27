@@ -4,7 +4,6 @@ import copy
 import json
 import logging
 import uuid
-from itertools import chain
 from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
@@ -379,28 +378,34 @@ def guardrail_references(*groups: Iterable[Any]) -> list[GuardrailAttachment]:
 
     The one ordering rule for every check. Candidates (``Attachment`` objects,
     attachment mentions or references) are read in order and the first valid one
-    of each id describes the file, so a later mention never relabels it. Files
-    with their own type come first; files given a fallback type
+    of each id describes the file, so a later group never relabels it; within one
+    group a description with a type replaces an earlier one without. Files with
+    their own type come first; files given a fallback type
     (:func:`with_guardrail_mime_type`) come after all of them, so a file this
     fallback makes visible never takes the place of a typed one. Each group keeps
     its order.
     """
-    seen: set[str] = set()
+    owner: dict[str, tuple[int, bool]] = {}
     declared: list[GuardrailAttachment] = []
     fallback: list[GuardrailAttachment] = []
-    for item in chain.from_iterable(groups):
-        if isinstance(item, GuardrailAttachment):
-            item = {
-                "ID": item.id,
-                "FullName": item.file_name,
-                "MimeType": item.mime_type,
-            }
-        typed = with_guardrail_mime_type(item)
-        for reference in to_references([typed]):
-            if reference.id in seen:
-                continue
-            seen.add(reference.id)
-            (declared if typed is item else fallback).append(reference)
+    for group, items in enumerate(groups):
+        for item in items:
+            if isinstance(item, GuardrailAttachment):
+                item = {
+                    "ID": item.id,
+                    "FullName": item.file_name,
+                    "MimeType": item.mime_type,
+                }
+            typed = with_guardrail_mime_type(item)
+            has_type = typed is item
+            for reference in to_references([typed]):
+                seen = owner.get(reference.id)
+                if seen is not None:
+                    if seen != (group, False) or not has_type:
+                        continue
+                    fallback[:] = [r for r in fallback if r.id != reference.id]
+                owner[reference.id] = (group, has_type)
+                (declared if has_type else fallback).append(reference)
     references = [*declared, *fallback]
     if len(references) > MAX_ATTACHMENTS:
         logger.warning(

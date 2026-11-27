@@ -588,6 +588,43 @@ class TestReferences:
             ("scan.imgx", "application/octet-stream")
         ]
 
+    def test_a_new_file_a_result_names_without_then_with_a_type_keeps_the_type(
+        self,
+    ) -> None:
+        result = {
+            "files": [
+                {"ID": _OTHER_ID, "FullName": "out"},
+                _wire(_THIRD_ID, "summary.pdf"),
+                _wire(_OTHER_ID, "out.pdf"),
+            ]
+        }
+
+        references = tool_result_references(result, {})
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("summary.pdf", "application/pdf"),
+            ("out.pdf", "application/pdf"),
+        ]
+
+    def test_a_held_untyped_file_keeps_its_description_when_a_result_types_it(
+        self,
+    ) -> None:
+        registry = _registry(_wire(_HELD_ID, name="scan.imgx", mime_type=""))
+        result = {
+            "files": [
+                {"ID": _HELD_ID},
+                _wire(_HELD_ID, name="harmless.txt", mime_type="text/plain"),
+            ]
+        }
+
+        references = tool_result_references(result, registry)
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("scan.imgx", "application/octet-stream")
+        ]
+
     def test_a_held_file_named_first_never_takes_the_slot_of_a_new_typed_file(
         self,
     ) -> None:
