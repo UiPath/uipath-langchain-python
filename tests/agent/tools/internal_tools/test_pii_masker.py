@@ -140,6 +140,87 @@ class TestPiiFileType:
         assert _pii_file_type(file) == expected
 
 
+_PNG_HEAD = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+
+class TestPiiFileTypeFromContent:
+    """A file declared with no useful type is typed by its first bytes."""
+
+    @pytest.mark.parametrize(
+        ("name", "mime_type", "head", "expected"),
+        [
+            ("receipt.imgx", "", _PNG_HEAD, "png"),
+            ("receipt", "application/octet-stream", b"\xff\xd8\xff\xe0", "jpeg"),
+            ("Budget.docx", "application/octet-stream", b"%PDF-1.7\n", "pdf"),
+            ("scan.imgx", "", b"II*\x00\x08\x00\x00\x00", "imgx"),
+            ("blob.imgx", "", b"\x7fELF\x02\x01", "imgx"),
+            ("receipt.imgx", "", b"", "imgx"),
+        ],
+    )
+    def test_uses_the_content_when_the_type_is_unknown(
+        self, name, mime_type, head, expected
+    ):
+        file = FileInfo(url="https://orig/x", name=name, mime_type=mime_type)
+
+        assert _pii_file_type(file, head) == expected
+
+    def test_declared_type_wins_over_the_content(self):
+        file = FileInfo(url="https://orig/x", name="report.xlsx", mime_type=_XLSX_MIME)
+
+        assert _pii_file_type(file, b"%PDF-1.7\n") == "xlsx"
+
+    async def test_apply_reads_only_the_head_of_an_unlabeled_file(self, httpx_mock):
+        httpx_mock.add_response(
+            url="https://orig/receipt.imgx", content=_PNG_HEAD + b"\x00" * 4096
+        )
+        client = _make_client(_make_pii_response())
+        files = [
+            FileInfo(
+                url="https://orig/receipt.imgx", name="receipt.imgx", mime_type=""
+            ),
+            FileInfo(url="https://orig/doc.pdf", name="doc.pdf", mime_type=""),
+        ]
+        httpx_mock.add_response(url="https://orig/doc.pdf", content=b"%PDF-1.7\n")
+
+        await PiiMasker(client, None).apply("original", files)
+
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
+        assert [f.file_type for f in request.files] == ["png", "pdf"]
+
+    async def test_apply_keeps_the_name_type_when_the_head_cannot_be_read(
+        self, httpx_mock
+    ):
+        httpx_mock.add_response(url="https://orig/receipt.imgx", status_code=403)
+        rejection = _make_pii_http_error(400, _file_type_rejected_body(index=0))
+        client = _make_client(_make_pii_response())
+        client.pii_detection.detect_pii_async = AsyncMock(side_effect=rejection)
+        files = [
+            FileInfo(url="https://orig/receipt.imgx", name="receipt.imgx", mime_type="")
+        ]
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await PiiMasker(client, None).apply("original", files)
+
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
+        assert request.files[0].file_type == "imgx"
+        assert (
+            exc_info.value.error_info.title == "File type not supported by PII masking"
+        )
+
+    async def test_apply_reads_nothing_for_a_labeled_file(self):
+        client = _make_client(_make_pii_response())
+        files = [
+            FileInfo(
+                url="https://orig/scan.png", name="scan.png", mime_type="image/png"
+            )
+        ]
+
+        await PiiMasker(client, None).apply("original", files)
+
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
+        assert request.files[0].file_type == "png"
+
+
 class TestIsPolicyEnabled:
     """Test cases for PiiMasker.is_policy_enabled."""
 

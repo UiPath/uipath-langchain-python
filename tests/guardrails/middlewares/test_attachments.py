@@ -1,5 +1,7 @@
 """Middleware guardrails forward references to the files the run holds."""
 
+import base64
+import io
 import json
 import logging
 import uuid
@@ -282,6 +284,88 @@ class TestBuildRegistry:
         assert list(registry) == [_HELD_ID]
         assert registry[_HELD_ID].mime_type == "application/pdf"
 
+    async def test_reads_the_pages_of_a_tiff_found_by_its_content(self) -> None:
+        from PIL import Image
+
+        buf = io.BytesIO()
+        frames = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2), "red")]
+        frames[0].save(buf, format="TIFF", save_all=True, append_images=frames[1:])
+        tiff = base64.b64encode(buf.getvalue()).decode()
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            return_value=tiff,
+        ):
+            blocks = await build_file_content_blocks_for(
+                FileInfo(
+                    url="https://blob.example.com/scan",
+                    name="scan.imgx",
+                    mime_type="",
+                    attachment_id=_HELD_ID,
+                )
+            )
+
+        registry = build_registry(
+            {"messages": [HumanMessage(content_blocks=[*blocks])]}
+        )
+
+        assert len(blocks) == 2
+        assert _summary(registry) == {_HELD_ID: ("scan.imgx", "image/tiff")}
+        assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
+            ("scan.imgx", "image/tiff")
+        ]
+
+    @pytest.mark.parametrize(
+        ("name", "declared", "data", "stored"),
+        [
+            pytest.param(
+                "receipt.imgx",
+                "",
+                b"\x89PNG\r\n\x1a\n" + b"\x00" * 16,
+                "image/png",
+                id="image",
+            ),
+            pytest.param("scan.imgx", "", b"%PDF-1.7\n%x", "application/pdf", id="pdf"),
+            pytest.param(
+                "scan.bin",
+                "application/octet-stream",
+                b"%PDF-1.7\n%x",
+                "application/pdf",
+                id="pdf-declared-octet-stream",
+            ),
+            pytest.param(
+                "client.ovpn", "", b"client\r\ndev tun\n", "text/plain", id="text"
+            ),
+            pytest.param(
+                "Budget.docx",
+                "",
+                b"%PDF-1.7\n%x",
+                "application/pdf",
+                id="pdf-under-a-known-extension",
+            ),
+        ],
+    )
+    async def test_reads_a_file_typed_by_its_content_as_its_content(
+        self, name: str, declared: str, data: bytes, stored: str
+    ) -> None:
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            return_value=base64.b64encode(data).decode(),
+        ):
+            blocks = await build_file_content_blocks_for(
+                FileInfo(
+                    url="https://blob/x",
+                    name=name,
+                    mime_type=declared,
+                    attachment_id=_HELD_ID,
+                )
+            )
+
+        registry = build_registry(
+            {"messages": [HumanMessage(content_blocks=[*blocks])]}
+        )
+
+        assert _summary(registry) == {_HELD_ID: (name, stored)}
+
     def test_reads_the_files_a_tool_returned(self) -> None:
         wire = ToolMessage(content=json.dumps({"file": _wire()}), tool_call_id="tc1")
         snake = ToolMessage(
@@ -322,6 +406,38 @@ class TestBuildRegistry:
         )
 
         assert _summary(registry) == {_HELD_ID: ("cv.pdf", "application/pdf")}
+
+    def test_an_attachment_stored_without_a_type_is_forwarded_typed(self) -> None:
+        stored = {
+            _HELD_ID: _wire(name="receipt.imgx", mime_type=""),
+            _OTHER_ID: _wire(_OTHER_ID, name="scan.png", mime_type=""),
+        }
+
+        registry = build_registry({"messages": [], JOB_ATTACHMENTS_STATE_KEY: stored})
+
+        assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
+            ("receipt.imgx", "application/octet-stream"),
+            ("scan.png", "image/png"),
+        ]
+
+    def test_a_fallback_type_never_displaces_a_typed_file(self) -> None:
+        ids = [str(uuid.uuid4()) for _ in range(6)]
+        stored = {ids[0]: _wire(ids[0], name="untyped.imgx", mime_type="")}
+        stored |= {i: _wire(i, name=f"{n}.pdf") for n, i in enumerate(ids[1:])}
+
+        registry = build_registry({"messages": [], JOB_ATTACHMENTS_STATE_KEY: stored})
+        expected = [f"{n}.pdf" for n in range(5)]
+
+        assert [r.file_name for r in registry_references(registry)] == expected
+        output = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "t", "args": {"f": [{"ID": i} for i in ids]}, "id": "c1"}
+            ],
+        )
+        references = output_references(output, registry)
+        assert references is not None
+        assert [r.file_name for r in references] == expected
 
     def test_an_earlier_source_is_never_overwritten(self) -> None:
         message = HumanMessage(
@@ -444,6 +560,157 @@ class TestReferences:
             return_value=None,
         ):
             assert tool_result_references({"files": []}, _registry(_wire())) is None
+
+    def test_a_new_untyped_tool_result_file_is_forwarded_after_typed_ones(
+        self,
+    ) -> None:
+        untyped = {"ID": _OTHER_ID, "FullName": "out.imgx"}
+        result = {"files": [untyped, _wire(_THIRD_ID, "summary.pdf")]}
+
+        references = tool_result_references(result, {})
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("summary.pdf", "application/pdf"),
+            ("out.imgx", "application/octet-stream"),
+        ]
+
+    def test_a_held_untyped_file_keeps_the_registry_metadata_when_a_result_types_it(
+        self,
+    ) -> None:
+        registry = _registry(_wire(_HELD_ID, name="scan.imgx", mime_type=""))
+        result = {"file": _wire(_HELD_ID, name="renamed.pdf")}
+
+        references = tool_result_references(result, registry)
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("scan.imgx", "application/octet-stream")
+        ]
+
+    def test_a_new_file_a_result_names_without_then_with_a_type_keeps_the_type(
+        self,
+    ) -> None:
+        result = {
+            "files": [
+                {"ID": _OTHER_ID, "FullName": "out"},
+                _wire(_THIRD_ID, "summary.pdf"),
+                _wire(_OTHER_ID, "out.pdf"),
+            ]
+        }
+
+        references = tool_result_references(result, {})
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("summary.pdf", "application/pdf"),
+            ("out.pdf", "application/pdf"),
+        ]
+
+    def test_a_held_untyped_file_keeps_its_description_when_a_result_types_it(
+        self,
+    ) -> None:
+        registry = _registry(_wire(_HELD_ID, name="scan.imgx", mime_type=""))
+        result = {
+            "files": [
+                {"ID": _HELD_ID},
+                _wire(_HELD_ID, name="harmless.txt", mime_type="text/plain"),
+            ]
+        }
+
+        references = tool_result_references(result, registry)
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("scan.imgx", "application/octet-stream")
+        ]
+
+    def test_a_held_file_named_first_never_takes_the_slot_of_a_new_typed_file(
+        self,
+    ) -> None:
+        registry = _registry(_wire(_HELD_ID, name="scan.imgx", mime_type=""))
+        new = [_wire(str(uuid.uuid4()), f"{i}.pdf") for i in range(5)]
+        result = {
+            "files": [_wire(_HELD_ID, name="scan.png", mime_type="image/png"), *new]
+        }
+
+        references = tool_result_references(result, registry)
+
+        assert references is not None
+        assert [r.file_name for r in references] == [f"{i}.pdf" for i in range(5)]
+
+    def test_a_tool_result_never_relabels_a_file_held_without_a_type(self) -> None:
+        uploaded = HumanMessage(
+            content=_block(_wire(_HELD_ID, name="secret.bin", mime_type=""))
+        )
+        relabel = ToolMessage(
+            content=json.dumps(
+                {"file": _wire(_HELD_ID, name="harmless.txt", mime_type="image/png")}
+            ),
+            tool_call_id="tc1",
+        )
+
+        registry = build_registry({"messages": [uploaded, relabel]})
+
+        assert _summary(registry) == {_HELD_ID: ("secret.bin", "")}
+        assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
+            ("secret.bin", "application/octet-stream")
+        ]
+
+    def test_a_held_untyped_file_a_tool_types_stays_after_the_typed_files(
+        self,
+    ) -> None:
+        typed = [_wire(str(uuid.uuid4()), f"{i}.pdf") for i in range(5)]
+        uploaded = HumanMessage(
+            content=_block(_wire(_HELD_ID, name="x.bin", mime_type=""), *typed)
+        )
+        relabel = ToolMessage(
+            content=json.dumps({"file": _wire(_HELD_ID, "x.png", "image/png")}),
+            tool_call_id="tc1",
+        )
+
+        registry = build_registry({"messages": [uploaded, relabel]})
+
+        assert [r.file_name for r in registry_references(registry)] == [
+            f"{i}.pdf" for i in range(5)
+        ]
+
+    def test_a_file_returned_without_a_type_gives_way_to_the_same_file_with_one(
+        self,
+    ) -> None:
+        untyped = ToolMessage(
+            content=json.dumps({"file": {"ID": _OTHER_ID, "FullName": "out.imgx"}}),
+            tool_call_id="tc1",
+        )
+        typed = ToolMessage(
+            content=json.dumps({"file": _wire(_OTHER_ID, name="out.pdf")}),
+            tool_call_id="tc2",
+        )
+
+        registry = build_registry({"messages": [untyped, typed]})
+
+        assert _summary(registry) == {_OTHER_ID: ("out.pdf", "application/pdf")}
+
+    def test_a_new_untyped_tool_result_file_reaches_the_next_model_check(
+        self,
+    ) -> None:
+        returned = ToolMessage(
+            content=json.dumps({"file": {"ID": _OTHER_ID, "FullName": "out.imgx"}}),
+            tool_call_id="tc1",
+        )
+        registry = build_registry({"messages": [returned]})
+        output = AIMessage(
+            content="",
+            tool_calls=[{"name": "t", "args": {"f": {"ID": _OTHER_ID}}, "id": "c1"}],
+        )
+
+        references = output_references(output, registry)
+
+        assert registry[_OTHER_ID].mime_type == ""
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("out.imgx", "application/octet-stream")
+        ]
 
     def test_tool_result_references_cap_at_five(self) -> None:
         result = {"files": [_wire(str(uuid.uuid4()), f"{i}.pdf") for i in range(7)]}

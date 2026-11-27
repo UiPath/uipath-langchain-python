@@ -47,6 +47,8 @@ from uipath_langchain.guardrails import (
 )
 from uipath_langchain.guardrails._langchain_adapter import (
     LangChainGuardrailAdapter,
+    _agent_input_attachments,
+    _agent_output_attachments,
     _apply_agent_input_guardrail,
     _apply_agent_output_guardrail,
     _apply_llm_post,
@@ -574,6 +576,93 @@ class TestLLMScope:
 # ---------------------------------------------------------------------------
 # Agent scope
 # ---------------------------------------------------------------------------
+
+
+class TestFallbackTypedFilesComeLast:
+    """A held file given a fallback type never displaces a typed state file."""
+
+    @staticmethod
+    def _held() -> list[dict[str, str]]:
+        typed = [
+            _wire(f"00000000-0000-4000-8000-00000000000{i}", f"{i}.pdf")
+            for i in range(4)
+        ]
+        return [*typed, _wire(_UNKNOWN_ID, "x.bin", "")]
+
+    def test_input(self) -> None:
+        state = Attachment.model_validate(_wire(_TYPED_ID, "state.pdf"))
+        attachments = _agent_input_attachments(
+            {"messages": [HumanMessage(_block(*self._held()))], "report": state}
+        )
+
+        assert attachments is not None
+        assert [a.file_name for a in attachments] == [
+            "0.pdf",
+            "1.pdf",
+            "2.pdf",
+            "3.pdf",
+            "state.pdf",
+        ]
+
+    def test_output(self) -> None:
+        held = self._held()
+        state = Attachment.model_validate(_wire(_TYPED_ID, "state.pdf"))
+        message = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "t", "args": {"f": [{"ID": a["ID"]} for a in held]}, "id": "c"}
+            ],
+        )
+        attachments = _agent_output_attachments(
+            {"messages": [HumanMessage(_block(*held)), message], "report": state},
+            message,
+        )
+
+        assert attachments is not None
+        assert [a.file_name for a in attachments] == [
+            "0.pdf",
+            "1.pdf",
+            "2.pdf",
+            "3.pdf",
+            "state.pdf",
+        ]
+
+
+class TestHeldFilesKeepTheirDescription:
+    """A state key never re-describes a file the run already holds."""
+
+    @pytest.mark.parametrize(
+        "uploaded",
+        [
+            pytest.param(
+                HumanMessage(_block(_wire(_HELD_ID, "user.bin", ""))), id="block"
+            ),
+            pytest.param(
+                HumanMessage(
+                    content="hi",
+                    additional_kwargs={
+                        "attachments": [
+                            {"id": _HELD_ID, "full_name": "user.bin", "mime_type": ""}
+                        ]
+                    },
+                ),
+                id="conversation",
+            ),
+        ],
+    )
+    def test_input_state_key_cannot_relabel_a_held_untyped_file(
+        self, uploaded: HumanMessage
+    ) -> None:
+        relabel = _wire(_HELD_ID, "evil.txt", "text/plain")
+
+        attachments = _agent_input_attachments(
+            {"messages": [uploaded], "report": relabel}
+        )
+
+        assert attachments is not None
+        assert [(a.file_name, a.mime_type) for a in attachments] == [
+            ("user.bin", "application/octet-stream")
+        ]
 
 
 class TestAgentScope:

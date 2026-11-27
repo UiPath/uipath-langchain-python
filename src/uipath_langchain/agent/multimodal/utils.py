@@ -132,22 +132,61 @@ def is_pdf(mime_type: str) -> bool:
 _PDF_SIGNATURE = b"%PDF-"
 
 
-def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
-    """True when a file declared with no useful type is a PDF by its content.
+# Enough leading bytes for every signature below.
+CONTENT_HEAD_BYTES = 16
 
-    Connectors that cannot name a type label files ``application/octet-stream``
-    (or nothing at all) and often drop the extension or keep the source file's
-    one, so neither :func:`normalize_mime_type` nor the provider can tell it is
-    a PDF. Pass the declared type, not the normalized one. Only the leading
-    signature bytes are decoded.
+
+def is_unlabeled(mime_type: str) -> bool:
+    """True when the declared type says nothing about the content."""
+    return base_mime_type(mime_type) in _UNLABELED_MIME_TYPES
+
+
+def content_mime_type(mime_type: str, filename: str, head: bytes) -> str:
+    """The type a file really is, from its declared type, its name and its first bytes.
+
+    The single answer for every tool that sends or scans an attachment. The
+    extension repairs a wrong or missing declared type (:func:`normalize_mime_type`).
+    A file declared with no useful type whose bytes are a PDF is a PDF whatever its
+    extension, as connectors keep the source file's name; one whose extension is
+    unknown too has the image type its signature names. ``head`` is the first
+    :data:`CONTENT_HEAD_BYTES` bytes, or the whole file; an empty head leaves the
+    normalized type. Text is not decided here: it needs the whole file
+    (:func:`is_unlabeled_text`).
     """
-    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
-        return False
+    if is_unlabeled(mime_type) and head.startswith(_PDF_SIGNATURE):
+        return "application/pdf"
+    normalized = normalize_mime_type(mime_type, filename)
+    if is_unlabeled(normalized) and (image_type := _signature_image_type(head)):
+        return image_type
+    return normalized
+
+
+def base64_head(base64_data: str) -> bytes:
+    """The first :data:`CONTENT_HEAD_BYTES` bytes of base64 data, or fewer."""
     try:
-        head = base64.b64decode(base64_data[:8])
+        return base64.b64decode(base64_data[: (CONTENT_HEAD_BYTES + 2) // 3 * 4])
     except ValueError:
-        return False
-    return head.startswith(_PDF_SIGNATURE)
+        return b""
+
+
+# WebP is checked apart: a RIFF container is also WAV or AVI.
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"II*\x00", "image/tiff"),
+    (b"MM\x00*", "image/tiff"),
+)
+
+
+def _signature_image_type(head: bytes) -> str | None:
+    for signature, image_type in _IMAGE_SIGNATURES:
+        if head.startswith(signature):
+            return image_type
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 # C0 controls and DEL, except the ones real text holds: TAB, LF, VT, FF, CR and
@@ -164,7 +203,7 @@ def is_unlabeled_text(mime_type: str, base64_data: str) -> bool:
     decodes almost any NUL-free bytes and no label vouches for the content, so
     more than 1% control characters marks the file as not text.
     """
-    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
+    if not is_unlabeled(mime_type):
         return False
     try:
         text = decode_text(base64_data)
@@ -386,9 +425,6 @@ async def stream_tiff_to_content_blocks(
         FileTooLargeError: If the file exceeds max_size.
         httpx.HTTPStatusError: If the HTTP request fails.
     """
-    from langchain_core.messages.content import create_image_block
-    from PIL import Image, ImageSequence
-
     async with _stream_download(url, max_size=max_size) as response:
         buf = io.BytesIO()
         total = 0
@@ -406,6 +442,14 @@ async def stream_tiff_to_content_blocks(
         return []
 
     buf.seek(0)
+    return tiff_to_content_blocks(buf)
+
+
+def tiff_to_content_blocks(buf: io.BytesIO) -> list[DataContentBlock]:
+    """Convert each page of the TIFF in ``buf`` to a PNG image content block."""
+    from langchain_core.messages.content import create_image_block
+    from PIL import Image, ImageSequence
+
     blocks: list[DataContentBlock] = []
     with Image.open(buf) as img:
         for frame in ImageSequence.Iterator(img):
@@ -414,6 +458,21 @@ async def stream_tiff_to_content_blocks(
             png_b64 = base64.b64encode(png_buf.getvalue()).decode("ascii")
             blocks.append(create_image_block(base64=png_b64, mime_type="image/png"))
     return blocks
+
+
+async def read_file_head(url: str, size: int = CONTENT_HEAD_BYTES) -> bytes:
+    """Download only the first ``size`` bytes of a file, or fewer if it is shorter.
+
+    Raises:
+        httpx.HTTPStatusError: If the HTTP request fails.
+    """
+    head = bytearray()
+    async with _stream_download(url) as response:
+        async for chunk in response.aiter_bytes():
+            head += chunk
+            if len(head) >= size:
+                break
+    return bytes(head[:size])
 
 
 async def download_file_base64(url: str, *, max_size: int = 0) -> str:

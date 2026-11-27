@@ -19,7 +19,9 @@ Both return one of three answers, which the validate API reads differently:
   without judging the text.
 * a list: the files to inspect.
 
-The runtime forwards id, file name and mime type only; the backend's feature flag
+The runtime forwards id, file name and mime type only (a file uploaded with no type
+is forwarded as its extension's type or ``application/octet-stream``, which the
+backend resolves from the content); the backend's feature flag
 decides whether they are used at all, the backend decides which validators and file
 types it can inspect, and it resolves the id through Orchestrator. The scan and the
 reference rules live in ``uipath.platform.guardrails.attachments``, shared with the
@@ -37,10 +39,13 @@ from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
     GuardrailAttachment,
     detection_scope_includes_files,
-    referenced_attachments,
-    to_references,
 )
 from uipath.platform.guardrails.attachments import MAX_ATTACHMENTS
+
+from uipath_langchain.agent.attachments.job_attachments import (
+    guardrail_references,
+    referenced_guardrail_attachments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +77,7 @@ async def resolve_guardrail_attachments(
         return None
     if not job_attachments:
         return []
-    return to_references(job_attachments.values())
+    return guardrail_references(job_attachments.values())
 
 
 def resolve_referenced_attachments(
@@ -96,4 +101,4 @@ def resolve_referenced_attachments(
         return None
     if data is None:
         return []
-    return referenced_attachments(data, job_attachments or {})
+    return referenced_guardrail_attachments(data, job_attachments or {})

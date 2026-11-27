@@ -21,13 +21,15 @@ from uipath_langchain.agent.multimodal.invoke import (
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
     accepts_only_pdf_documents,
+    base64_head,
+    content_mime_type,
     decode_text,
     download_file_base64,
     encode_streamed_base64,
     is_text,
-    is_unlabeled_pdf,
     is_unlabeled_text,
     normalize_mime_type,
+    read_file_head,
 )
 
 FILE_URL = "https://blob.storage.example.com/file.pdf"
@@ -684,13 +686,20 @@ class TestBuildFileContentBlocksFor:
         ("notes.txt", "text/plain", "notes-txt"),
         ("scan.png", "image/png", None),
         ("fax.tif", "image/tiff", None),
-        ("photo.jpg", "application/octet-stream", None),
+        ("photo.jpg", "image/jpeg", None),
+        ("receipt.imgx", "image/png", None),
+        ("photo.jpg", "application/pdf", "photo-jpg"),
+        ("blob.bin", "application/octet-stream", "blob-bin"),
     ],
 )
 def test_file_part_filename_matches_what_is_sent(
     name: str, mime_type: str, expected: str | None
 ) -> None:
     assert file_part_filename(name, mime_type) == expected
+
+
+def test_file_part_filename_keeps_its_keyword_names() -> None:
+    assert file_part_filename(name="scan.png", mime_type="image/png") is None
 
 
 _ATTACHMENT_ID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
@@ -727,35 +736,66 @@ class TestAttachmentTags:
 
         assert "extras" not in block
 
-    async def test_leaves_tiff_pages_untagged(self, httpx_mock: HTTPXMock) -> None:
-        httpx_mock.add_response(url=FILE_URL, content=_make_tiff(num_pages=2))
-        file_info = FileInfo(
-            url=FILE_URL,
-            name="scan.tiff",
-            mime_type="image/tiff",
-            attachment_id=_ATTACHMENT_ID,
-        )
-
-        blocks = await build_file_content_blocks_for(file_info)
-
-        assert all("extras" not in block for block in blocks)
-
     @pytest.mark.parametrize(
-        "name,mime_type", [("cv.pdf", "application/pdf"), ("photo.png", "image/png")]
+        ("name", "mime_type"),
+        [("scan.tiff", "image/tiff"), ("scan.tif", ""), ("scan", "")],
     )
-    async def test_tags_never_reach_the_provider_payload(
-        self, httpx_mock: HTTPXMock, name: str, mime_type: str
+    async def test_tags_every_tiff_page_as_the_stored_tiff(
+        self, name: str, mime_type: str
     ) -> None:
-        httpx_mock.add_response(url=FILE_URL, content=b"bytes")
         file_info = FileInfo(
             url=FILE_URL, name=name, mime_type=mime_type, attachment_id=_ATTACHMENT_ID
         )
-        (block,) = await build_file_content_blocks_for(file_info)
+        tiff = _make_tiff(num_pages=2)
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        with (
+            patch(_DOWNLOAD, return_value=_b64(tiff)),
+            patch(stream, side_effect=lambda *a, **k: _pages(tiff)),
+        ):
+            blocks = await build_file_content_blocks_for(file_info)
 
-        for api in ("chat/completions", "responses"):
-            payload = json.dumps(convert_to_openai_data_block(dict(block), api=api))
-            assert "uipath_" not in payload
-            assert _ATTACHMENT_ID not in payload
+        assert len(blocks) == 2
+        for block in blocks:
+            assert block["mime_type"] == "image/png"
+            assert block.get("extras") == {
+                "uipath_attachment_id": _ATTACHMENT_ID,
+                "uipath_file_name": name,
+                "uipath_file_mime_type": "image/tiff",
+            }
+
+    @pytest.mark.parametrize(
+        ("name", "mime_type", "data"),
+        [
+            ("cv.pdf", "application/pdf", b"bytes"),
+            ("photo.png", "image/png", b"bytes"),
+            ("receipt.imgx", "", b"\x89PNG\r\n\x1a\n" + b"\x00" * 16),
+            ("scan", "", b"tiff"),
+        ],
+    )
+    async def test_tags_never_reach_the_provider_payload(
+        self, name: str, mime_type: str, data: bytes
+    ) -> None:
+        file_info = FileInfo(
+            url=FILE_URL, name=name, mime_type=mime_type, attachment_id=_ATTACHMENT_ID
+        )
+        content = _make_tiff(num_pages=2) if data == b"tiff" else data
+        with patch(_DOWNLOAD, return_value=_b64(content)):
+            blocks = await build_file_content_blocks_for(file_info)
+
+        assert blocks
+        for block in blocks:
+            for api in ("chat/completions", "responses"):
+                payload = json.dumps(convert_to_openai_data_block(dict(block), api=api))
+                assert "uipath_" not in payload
+                assert _ATTACHMENT_ID not in payload
+
+
+def _pages(tiff: bytes) -> list[Any]:
+    from uipath_langchain.agent.multimodal.utils import tiff_to_content_blocks
+
+    return tiff_to_content_blocks(io.BytesIO(tiff))
 
 
 class TestAcceptsOnlyPdfDocuments:
@@ -811,25 +851,31 @@ class TestAcceptsOnlyPdfDocuments:
         assert not accepts_only_pdf_documents(object())
 
 
-class TestIsUnlabeledPdf:
+def _sniffed(mime_type: str, data: str, name: str = "file.imgx") -> str:
+    return content_mime_type(mime_type, name, base64_head(data))
+
+
+class TestContentMimeTypeForPdf:
     @pytest.mark.parametrize(
         "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
     )
     def test_pdf_bytes_with_a_useless_type(self, mime_type: str) -> None:
         data = base64.b64encode(b"%PDF-1.7\n...").decode()
-        assert is_unlabeled_pdf(mime_type, data)
+        assert _sniffed(mime_type, data) == "application/pdf"
 
     def test_declared_type_is_trusted(self) -> None:
         data = base64.b64encode(b"%PDF-1.7\n...").decode()
-        assert not is_unlabeled_pdf("text/csv", data)
+        assert _sniffed("text/csv", data) == "text/csv"
 
     def test_other_bytes(self) -> None:
         data = base64.b64encode(b"PK\x03\x04zip").decode()
-        assert not is_unlabeled_pdf("application/octet-stream", data)
+        assert _sniffed("application/octet-stream", data) == "application/octet-stream"
 
     def test_short_or_invalid_data(self) -> None:
-        assert not is_unlabeled_pdf("application/octet-stream", "")
-        assert not is_unlabeled_pdf("application/octet-stream", "!!!")
+        assert _sniffed("application/octet-stream", "") == "application/octet-stream"
+        assert _sniffed("application/octet-stream", "!!!") == (
+            "application/octet-stream"
+        )
 
 
 class TestIsUnlabeledText:
@@ -867,8 +913,102 @@ class TestIsUnlabeledText:
         assert not is_unlabeled_text("application/octet-stream", "abc")
 
 
+_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+_IMAGE_HEADERS = [
+    (_PNG, "image/png"),
+    (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00", "image/jpeg"),
+    (b"GIF87a\x01\x00\x01\x00", "image/gif"),
+    (b"GIF89a\x01\x00\x01\x00", "image/gif"),
+    (b"RIFF\x24\x00\x00\x00WEBPVP8 ", "image/webp"),
+    (b"II*\x00\x08\x00\x00\x00", "image/tiff"),
+    (b"MM\x00*\x00\x00\x00\x08", "image/tiff"),
+]
+
+
+class TestContentMimeTypeForImages:
+    @pytest.mark.parametrize(
+        "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
+    )
+    @pytest.mark.parametrize(("header", "expected"), _IMAGE_HEADERS)
+    def test_image_bytes_with_a_useless_type(
+        self, mime_type: str, header: bytes, expected: str
+    ) -> None:
+        data = base64.b64encode(header + b"\x00" * 32).decode()
+        assert _sniffed(mime_type, data) == expected
+
+    @pytest.mark.parametrize("mime_type", ["image/png", "application/pdf"])
+    def test_declared_type_is_trusted(self, mime_type: str) -> None:
+        assert _sniffed(mime_type, base64.b64encode(_PNG).decode()) == mime_type
+
+    def test_a_known_extension_keeps_its_type(self) -> None:
+        data = base64.b64encode(_PNG).decode()
+        assert _sniffed("", data, name="Budget.csv") == "text/csv"
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            b"RIFF\x24\x00\x00\x00WAVEfmt ",
+            b"RIFF\x24\x00\x00\x00AVI LIST",
+            b"client\r\ndev tun\n",
+        ],
+    )
+    def test_other_bytes(self, data: bytes) -> None:
+        encoded = base64.b64encode(data).decode()
+        assert _sniffed("application/octet-stream", encoded) == (
+            "application/octet-stream"
+        )
+
+    def test_empty_short_or_invalid_data(self) -> None:
+        short = base64.b64encode(_PNG[:7]).decode()
+        for data in ("", "!!!", "abc", short):
+            assert _sniffed("", data) == ""
+
+
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
+
+
+_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+class TestContentMimeType:
+    @pytest.mark.parametrize(
+        ("mime_type", "name", "head", "expected"),
+        [
+            ("", "receipt.imgx", _PNG, "image/png"),
+            ("application/octet-stream", "scan", b"II*\x00\x08\x00", "image/tiff"),
+            ("", "Budget.docx", b"%PDF-1.7\n", "application/pdf"),
+            ("application/octet-stream", "photo.png", b"%PDF-1.7\n", "application/pdf"),
+            ("", "Budget.docx", _PNG, _DOCX),
+            ("", "receipt.imgx", b"\x7fELF\x02", ""),
+            ("application/octet-stream", "blob.bin", b"", "application/octet-stream"),
+            ("image/png", "scan.png", b"%PDF-1.7\n", "image/png"),
+            ("text/plain; charset=utf-8", "a.ovpn", _PNG, "text/plain; charset=utf-8"),
+            ("application/vnd.ms-excel", "Budget.csv", _PNG, "text/csv"),
+        ],
+    )
+    def test_type(self, mime_type: str, name: str, head: bytes, expected: str) -> None:
+        assert content_mime_type(mime_type, name, head) == expected
+
+
+class TestReadFileHead:
+    async def test_reads_only_the_first_bytes(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=FILE_URL, stream=_ChunkedStream([_PNG[:4], _PNG[4:], b"\x00" * 4096])
+        )
+
+        assert await read_file_head(FILE_URL) == _PNG[:16]
+
+    async def test_short_file(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"%PDF")
+
+        assert await read_file_head(FILE_URL) == b"%PDF"
+
+    async def test_http_error_is_raised(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=FILE_URL, status_code=404)
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await read_file_head(FILE_URL)
 
 
 class TestDecodeText:
@@ -1117,6 +1257,135 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
         with patch(_DOWNLOAD, return_value=_b64(b"plain words")):
             blocks = await build_file_content_blocks_for(file)
 
+        assert blocks[0]["mime_type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("pdf_only_documents", [True, False])
+    @pytest.mark.parametrize(("header", "expected"), _IMAGE_HEADERS[:-2])
+    async def test_unlabeled_image_is_sent_as_an_image(
+        self, mime_type: str, pdf_only_documents: bool, header: bytes, expected: str
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="receipt.imgx",
+            mime_type=mime_type,
+            attachment_id=_ATTACHMENT_ID,
+        )
+        data = _b64(header + b"\x00" * 32)
+        with patch(_DOWNLOAD, return_value=data):
+            blocks = await build_file_content_blocks_for(
+                file, pdf_only_documents=pdf_only_documents
+            )
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
+        assert blocks[0]["mime_type"] == expected
+        assert blocks[0]["base64"] == data
+        extras: Any = blocks[0].get("extras")
+        assert extras["uipath_attachment_id"] == _ATTACHMENT_ID
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("name", ["receipt-tiff.imgx", "scan"])
+    async def test_unlabeled_tiff_is_sent_as_png_pages(
+        self, mime_type: str, name: str
+    ) -> None:
+        file = FileInfo(url="https://blob/x", name=name, mime_type=mime_type)
+        tiff = _make_tiff(num_pages=3)
+        with patch(_DOWNLOAD, return_value=_b64(tiff)) as download:
+            blocks = await build_file_content_blocks_for(file)
+
+        download.assert_awaited_once()
+        assert len(blocks) == 3
+        for block in blocks:
+            assert block["type"] == "image"
+            assert block["mime_type"] == "image/png"
+            assert Image.open(io.BytesIO(base64.b64decode(block["base64"]))).format == (
+                "PNG"
+            )
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("name", ["scan.tif", "scan.tiff"])
+    async def test_unlabeled_pdf_named_like_a_tiff_is_sent_as_pdf(
+        self, mime_type: str, name: str
+    ) -> None:
+        file = FileInfo(url="https://blob/x", name=name, mime_type=mime_type)
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        with (
+            patch(_DOWNLOAD, return_value=_b64(b"%PDF-1.7\n%binary")),
+            patch(stream) as streamed,
+        ):
+            (block,) = await build_file_content_blocks_for(file)
+
+        streamed.assert_not_called()
+        assert block["type"] == "file"
+        assert block["mime_type"] == "application/pdf"
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    async def test_unlabeled_tiff_named_like_one_is_downloaded_once(
+        self, mime_type: str
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="scan.tif",
+            mime_type=mime_type,
+            attachment_id=_ATTACHMENT_ID,
+        )
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        with (
+            patch(_DOWNLOAD, return_value=_b64(_make_tiff(num_pages=2))) as download,
+            patch(stream) as streamed,
+        ):
+            blocks = await build_file_content_blocks_for(file)
+
+        download.assert_awaited_once()
+        streamed.assert_not_called()
+        assert [block["mime_type"] for block in blocks] == ["image/png", "image/png"]
+        assert all(
+            block["extras"]["uipath_file_mime_type"] == "image/tiff" for block in blocks
+        )
+
+    async def test_labeled_tiff_still_streams(self) -> None:
+        file = FileInfo(url="https://blob/x", name="scan.imgx", mime_type="image/tiff")
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        page = {"type": "image", "base64": "UDE=", "mime_type": "image/png"}
+        with (
+            patch(_DOWNLOAD) as download,
+            patch(stream, return_value=[page]) as streamed,
+        ):
+            blocks = await build_file_content_blocks_for(file)
+
+        download.assert_not_called()
+        streamed.assert_awaited_once()
+        assert blocks == [page]
+
+    async def test_unlabeled_tiff_that_does_not_decode_is_a_file_error(self) -> None:
+        file = FileInfo(url="https://blob/x", name="scan.imgx", mime_type="")
+        with patch(_DOWNLOAD, return_value=_b64(b"II*\x00garbage-after-the-magic")):
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await build_file_content_blocks_for(file)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be read"
+        assert "'scan.imgx' is not a valid TIFF image" in info.detail
+
+    async def test_unlabeled_image_keeps_its_extension_type(self) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="Budget.docx",
+            mime_type="application/octet-stream",
+        )
+        with patch(_DOWNLOAD, return_value=_b64(_PNG + b"\x00" * 32)):
+            blocks = await build_file_content_blocks_for(file)
+
+        assert blocks[0]["type"] == "file"
         assert blocks[0]["mime_type"] == (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )

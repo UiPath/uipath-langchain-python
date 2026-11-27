@@ -220,7 +220,20 @@ def test_named_file_limit_keeps_its_specific_error(message: str, title: str) -> 
     assert info.title == title
 
 
-def test_centralized_guardrail_block_is_not_a_file_error() -> None:
+@pytest.mark.parametrize(
+    ("error_body", "headers"),
+    [
+        pytest.param(None, {"X-UiPath-LlmGateway-ErrorCode": "3040"}, id="header"),
+        pytest.param(
+            {"type": None, "code": None, "param": None},
+            {},
+            id="raw-passthrough-no-code",
+        ),
+    ],
+)
+def test_centralized_guardrail_block_is_not_a_file_error(
+    error_body: dict[str, object] | None, headers: dict[str, str]
+) -> None:
     """The gateway's AI Trust Layer policy blocked the request, not the model."""
     message = (
         "Request rejected due to Centralized guardrails harmful_content: Content "
@@ -231,8 +244,8 @@ def test_centralized_guardrail_block_is_not_a_file_error() -> None:
     response = httpx.Response(
         400,
         request=httpx.Request("POST", "https://llm-gateway/completions"),
-        json={"error": {"message": message}},
-        headers={"X-UiPath-LlmGateway-ErrorCode": "3040"},
+        json={"error": {"message": message, **(error_body or {})}},
+        headers=headers,
     )
     raised = _raised(UiPathAPIError.from_response(response))
 

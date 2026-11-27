@@ -159,12 +159,17 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
             SpanAttachment(
                 id=att_id,
                 file_name=name,
-                mime_type=file.mime_type,
+                mime_type=_sent_mime_type(file),
                 provider=AttachmentProvider.ORCHESTRATOR,
                 direction=AttachmentDirection.IN,
             )
         )
     return json.dumps([att.model_dump(by_alias=True) for att in attachments])
+
+
+def _sent_mime_type(file: FileInfo) -> str:
+    """The type ``file`` was sent to the model as, or would be by its name."""
+    return file.sent_mime_type or normalize_mime_type(file.mime_type, file.name)
 
 
 def _llm_call_attachment_ids(
@@ -191,7 +196,7 @@ def _llm_call_attachment_ids(
 
     for file in files:
         att_id, name = _sent_attachment(file)
-        filename = file_part_filename(name, file.mime_type)
+        filename = file_part_filename(name, _sent_mime_type(file))
         if att_id and filename is not None:
             add(filename, att_id)
     for key, att_id in _image_part_keys(message):
@@ -275,17 +280,18 @@ def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) 
 
     for file in files:
         original_id = _original_attachment_id(file)
+        mime_type = _declared_or_guessed_mime_type(file)
         attachments.append(
             SpanAttachment(
                 id=original_id,
                 file_name=file.name,
-                mime_type=file.mime_type,
+                mime_type=mime_type,
                 provider=AttachmentProvider.ORCHESTRATOR,
                 direction=AttachmentDirection.IN,
             )
         )
         input_files.append(
-            {"id": original_id, "fileName": file.name, "mimeType": file.mime_type}
+            {"id": original_id, "fileName": file.name, "mimeType": mime_type}
         )
 
         if file.masked_attachment_url:
@@ -299,13 +305,13 @@ def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) 
                 SpanAttachment(
                     id=masked_id,
                     file_name=masked_name,
-                    mime_type=file.mime_type,
+                    mime_type=mime_type,
                     provider=AttachmentProvider.ORCHESTRATOR,
                     direction=AttachmentDirection.OUT,
                 )
             )
             output_files.append(
-                {"id": masked_id, "fileName": masked_name, "mimeType": file.mime_type}
+                {"id": masked_id, "fileName": masked_name, "mimeType": mime_type}
             )
 
     _set_span_attachments(span, attachments)
@@ -427,7 +433,7 @@ def create_analyze_file_tool(
         config = config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
         # Described by the type the file is sent as, not the one it was declared as.
-        sent_types = [normalize_mime_type(f.mime_type, f.name) for f in files]
+        sent_types = [_sent_mime_type(f) for f in files]
         attachment_names = [
             describe_attachment(f.name, mime_type)
             for f, mime_type in zip(files, sent_types, strict=True)
@@ -555,11 +561,7 @@ async def resolve_attachments_to_file_infos(
             raise
 
         input_mime_type = _attachment_field(attachment, "MimeType")
-        mime_type = (
-            input_mime_type
-            if input_mime_type
-            else (mimetypes.guess_type(blob_info.name)[0] or "")
-        )
+        mime_type = input_mime_type or _guessed_mime_type(blob_info.name)
 
         file_info = FileInfo(
             url=blob_info.uri,
@@ -570,6 +572,24 @@ async def resolve_attachments_to_file_infos(
         file_infos.append(file_info)
 
     return file_infos
+
+
+def _guessed_mime_type(name: str) -> str:
+    """The type of a file declared without one, from its name.
+
+    Empty when the guess is the type :func:`normalize_mime_type` gives the
+    extension anyway, so the file stays unlabeled and its content can still
+    name its type (a PDF that kept its source name ``Budget.docx``).
+    """
+    guessed = mimetypes.guess_type(name)[0] or ""
+    by_extension = normalize_mime_type("", name)
+    if by_extension and normalize_mime_type(guessed, name) == by_extension:
+        return ""
+    return guessed
+
+
+def _declared_or_guessed_mime_type(file: FileInfo) -> str:
+    return file.mime_type or (mimetypes.guess_type(file.name)[0] or "")
 
 
 async def _resolve_job_attachment_arguments(
@@ -597,6 +617,7 @@ async def add_files_to_message(
     Returns:
         New message of the same type with file content blocks appended. An image
         part names, in its extras, the Orchestrator attachment its bytes came from.
+        Each file's ``sent_mime_type`` is set to the type it is sent as.
     """
     if not files:
         return message
@@ -616,6 +637,7 @@ async def add_files_to_message(
         blocks = await build_file_content_blocks_for(
             llm_file, pdf_only_documents=pdf_only_documents
         )
+        file.sent_mime_type = llm_file.sent_mime_type
         sent_id, _ = _sent_attachment(file)
         if sent_id:
             for block in blocks:

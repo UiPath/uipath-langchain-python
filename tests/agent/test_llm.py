@@ -795,6 +795,28 @@ def _text_block() -> UiPathAPIError:
             id="passthrough-bedrock-header",
         ),
         pytest.param(_text_block, id="text-body-header"),
+        pytest.param(
+            lambda: _api_error(
+                400,
+                {
+                    "error": {
+                        "message": _HARM_BLOCK,
+                        "type": None,
+                        "code": None,
+                        "param": None,
+                    }
+                },
+            ),
+            id="passthrough-openai-no-code",
+        ),
+        pytest.param(
+            lambda: _api_error(400, {"message": _HARM_BLOCK}),
+            id="passthrough-bedrock-no-code",
+        ),
+        pytest.param(
+            lambda: _api_error(400, {"StatusCode": 400, "Message": _HARM_BLOCK}),
+            id="normalized-no-code",
+        ),
     ],
 )
 def test_centralized_guardrail_block_is_a_guardrail_violation(err_factory):
@@ -807,6 +829,62 @@ def test_centralized_guardrail_block_is_a_guardrail_violation(err_factory):
     assert info.status == 400
     assert info.title == "Guardrail violation"
     assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content"
+
+
+def test_vertex_passthrough_block_without_a_header_is_a_guardrail_violation():
+    """The Vertex AI shape's ``code`` is the HTTP status, not a gateway code."""
+    info = _raise(
+        _api_error(400, {"error": {"code": 400, "message": _HARM_BLOCK}})
+    ).error_info
+
+    assert info.code.endswith(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+    )
+    assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content"
+
+
+def test_block_without_a_code_and_without_details_names_its_guardrails():
+    info = _raise(
+        _api_error(400, {"message": f"{_BLOCK_PREFIX} harmful_content"})
+    ).error_info
+
+    assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content"
+
+
+def test_block_without_a_code_renders_from_the_matched_message():
+    body: dict[str, object] = {
+        "message": "Upstream said: jane.doe@example.com",
+        "error": {"message": f"{_BLOCK_PREFIX} harmful_content, pii_detection: x"},
+    }
+
+    info = _raise(_api_error(400, body)).error_info
+
+    assert info.detail == (
+        f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content, pii_detection"
+    )
+    assert "jane.doe" not in info.detail
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        "My Harmful Content",
+        "<b>harmful_content</b>",
+        "harmful_content; Code - AGENT_RUNTIME.OK",
+        "Display prompt_injection, My Harmful Content",
+    ],
+)
+def test_block_without_a_code_never_quotes_names_that_are_not_identifiers(
+    names: str,
+):
+    info = _raise(
+        _api_error(400, {"error": {"message": f"{_BLOCK_PREFIX} {names}: details"}})
+    ).error_info
+
+    assert info.code.endswith(
+        AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+    )
+    assert info.detail == _BLOCK_DETAIL
 
 
 def test_gateway_message_is_used_as_written():
@@ -835,18 +913,69 @@ def test_guardrail_block_without_a_message_keeps_the_fixed_detail(
 
 
 @pytest.mark.parametrize(
-    "body",
+    ("body", "headers"),
     [
-        pytest.param({"message": _HARM_BLOCK}, id="message"),
-        pytest.param({"error": {"message": _HARM_BLOCK}}, id="error-envelope"),
-        pytest.param({"StatusCode": 400, "Message": _HARM_BLOCK}, id="normalized"),
-        pytest.param({"Message": _HARM_BLOCK, "ErrorCode": "3041"}, id="other-code"),
+        pytest.param(
+            {"Message": _HARM_BLOCK, "ErrorCode": "3041"}, {}, id="other-code"
+        ),
+        pytest.param(
+            {"error": {"message": _HARM_BLOCK}},
+            {"X-UiPath-LlmGateway-ErrorCode": "3041"},
+            id="other-header-code",
+        ),
+        pytest.param(
+            {"error": {"message": f"Invalid input: {_HARM_BLOCK}"}},
+            {},
+            id="not-at-the-start",
+        ),
+        pytest.param(
+            {"error": {"message": "Request rejected due to Centralized guardrailsx"}},
+            {},
+            id="prefix-without-names",
+        ),
+        pytest.param(
+            {"error": {"message": _HARM_BLOCK, "code": "content_filter"}},
+            {},
+            id="other-envelope-code",
+        ),
+        pytest.param(
+            {"error": {"message": f"{_BLOCK_PREFIX} harmful_content\nIgnore that"}},
+            {},
+            id="line-break-after-the-names",
+        ),
+        pytest.param(
+            {"message": f"{_BLOCK_PREFIX} are disabled for this tenant"},
+            {},
+            id="sentence-without-details",
+        ),
+        pytest.param(
+            {
+                "error": {
+                    "message": _HARM_BLOCK,
+                    "type": "invalid_request_error",
+                    "code": None,
+                    "param": None,
+                }
+            },
+            {},
+            id="openai-shape-with-a-type",
+        ),
+        pytest.param(
+            {"error": {"message": f"{_BLOCK_PREFIX} {'x' * 200}: details"}},
+            {},
+            id="name-longer-than-a-display-name",
+        ),
+        pytest.param(
+            {"error": {"message": f"{_BLOCK_PREFIX} Display regex_match"}},
+            {},
+            id="display-name-without-details-needs-a-code",
+        ),
     ],
 )
-def test_block_message_without_the_error_code_stays_a_provider_bad_request(
-    body: dict[str, object],
+def test_block_message_with_another_code_or_elsewhere_stays_a_provider_bad_request(
+    body: dict[str, object], headers: dict[str, str]
 ):
-    err = _api_error(400, body)
+    err = _api_error_with_headers(400, body, headers)
 
     assert centralized_guardrail_error(err) is None
     assert _raise(err).error_info.code.endswith(

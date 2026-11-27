@@ -19,20 +19,23 @@ from uipath.platform.guardrails import (
     discover_attachments,
     iter_attachment_mentions,
     mention_id,
-    referenced_attachments,
     to_references,
 )
 
 from uipath_langchain._utils._attachments import (
     ATTACHMENT_ID_EXTRA,
+    ATTACHMENT_MIME_TYPE_EXTRA,
     ATTACHMENT_NAME_EXTRA,
     ATTACHMENTS_BLOCK_PREFIX,
     ATTACHMENTS_BLOCK_SUFFIX,
 )
 from uipath_langchain.agent.attachments.job_attachments import (
+    guardrail_references,
+    held_attachments,
     parse_attachments_from_conversation_messages,
     parse_tool_content,
 )
+from uipath_langchain.agent.attachments.mime_types import with_guardrail_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,8 @@ def build_registry(state: Mapping[str, Any] | None) -> dict[str, Attachment]:
     one found: the attachments of conversational HumanMessages, every
     ``<uip:attachments>`` block in Human and Tool message text, file and image blocks
     tagged with an attachment id, the files tool results describe with a name and a
-    type, and the ``uipath__job_attachments`` state an advanced agent keeps.
+    type, the ``uipath__job_attachments`` state an advanced agent keeps, and last the
+    files tool results name without a type, held with an empty one.
 
     Args:
         state: The agent state, or any mapping with ``messages``; may be None.
@@ -68,18 +72,11 @@ def build_registry(state: Mapping[str, Any] | None) -> dict[str, Attachment]:
             if isinstance(message, BaseMessage)
         ]
         for source in _MESSAGE_SOURCES:
-            for message in messages:
-                try:
-                    _add(registry, source(message))
-                except Exception:
-                    logger.warning(
-                        "Could not read the attachments of a %s; skipping it.",
-                        type(message).__name__,
-                        exc_info=True,
-                    )
+            _add_from_messages(registry, source, messages)
         stored = state.get(JOB_ATTACHMENTS_STATE_KEY)
         if isinstance(stored, Mapping):
             _add(registry, _validated(stored.values()))
+        _add_from_messages(registry, _untyped_tool_result_attachments, messages)
     except Exception:
         logger.warning(
             "Could not read the run's attachments; the guardrail sees only those "
@@ -90,23 +87,25 @@ def build_registry(state: Mapping[str, Any] | None) -> dict[str, Attachment]:
 
 
 def registry_references(
-    registry: Mapping[str, Attachment],
+    registry: Mapping[str, Attachment], *extra: Iterable[Any]
 ) -> list[GuardrailAttachment]:
     """Return references for every attachment the run holds, for an input check.
 
     Args:
         registry: The run's attachments, as :func:`build_registry` returns them.
+        *extra: Further candidates, such as the attachments a state key carries,
+            ordered after the held files (see :func:`guardrail_references`).
 
     Returns:
         Up to five references.
     """
-    return to_references(registry.values())
+    return guardrail_references(registry.values(), *extra)
 
 
 def output_references(
     message: AIMessage | None,
     registry: Mapping[str, Attachment],
-    *,
+    *extra: Iterable[Any],
     structured_response: Any = None,
 ) -> list[GuardrailAttachment] | None:
     """Return references for the held attachments an output names.
@@ -118,6 +117,8 @@ def output_references(
         message: The model's or the agent's last message; None reads only the
             structured response.
         registry: The run's attachments, as :func:`build_registry` returns them.
+        *extra: Further candidates, such as the attachments the output returns,
+            ordered after the held files (see :func:`guardrail_references`).
         structured_response: The agent's structured response, if any.
 
     Returns:
@@ -125,9 +126,8 @@ def output_references(
         check says nothing about files and the text is evaluated as before.
     """
     if message is None:
-        return referenced_attachments(
-            {"structured_response": structured_response}, registry
-        )
+        held = held_attachments({"structured_response": structured_response}, registry)
+        return None if held is None else guardrail_references(held, *extra)
     try:
         output = {
             "tool_calls": [call.get("args") for call in message.tool_calls],
@@ -141,7 +141,8 @@ def output_references(
             exc_info=True,
         )
         return None
-    return referenced_attachments(output, registry)
+    held = held_attachments(output, registry)
+    return None if held is None else guardrail_references(held, *extra)
 
 
 def tool_result_references(
@@ -149,8 +150,10 @@ def tool_result_references(
 ) -> list[GuardrailAttachment] | None:
     """Return references for the files a tool result names or returns.
 
-    Held files keep the registry's name and type; a file the result describes with
-    its own name and type is new output of the tool and is forwarded as described.
+    Held files keep the registry's name and type, whatever the result says about
+    them; a file the result describes with its own name is new output of the tool and
+    is forwarded as described, or with a fallback type when it names none (see
+    :func:`guardrail_references`).
 
     Args:
         result_data: The tool's parsed result.
@@ -160,11 +163,31 @@ def tool_result_references(
         Up to five references, held files first; ``None`` when the result cannot
         be scanned.
     """
-    held = referenced_attachments(result_data, registry)
-    described = discover_attachments(result_data)
-    if held is None or described is None:
+    held = held_attachments(result_data, registry)
+    if held is None or discover_attachments(result_data) is None:
         return None
-    return to_references(_as_mention(reference) for reference in [*held, *described])
+    new = (
+        mention
+        for mention in iter_attachment_mentions(result_data)
+        if mention_id(mention) not in registry
+    )
+    return guardrail_references(held, new)
+
+
+def _add_from_messages(
+    registry: dict[str, Attachment],
+    source: Callable[[BaseMessage], Iterable[Attachment]],
+    messages: list[BaseMessage],
+) -> None:
+    for message in messages:
+        try:
+            _add(registry, source(message))
+        except Exception:
+            logger.warning(
+                "Could not read the attachments of a %s; skipping it.",
+                type(message).__name__,
+                exc_info=True,
+            )
 
 
 def _add(registry: dict[str, Attachment], attachments: Iterable[Attachment]) -> None:
@@ -236,9 +259,11 @@ def _tagged_block_attachments(message: BaseMessage) -> Iterator[Attachment]:
         extras = part.get("extras")
         if not isinstance(extras, Mapping) or not extras.get(ATTACHMENT_ID_EXTRA):
             continue
-        mime_type = part.get("mime_type")
-        if not mime_type:
-            continue
+        mime_type = extras.get(ATTACHMENT_MIME_TYPE_EXTRA)
+        if not isinstance(mime_type, str):
+            mime_type = part.get("mime_type")
+            if not mime_type:
+                continue
         name = (
             extras.get(ATTACHMENT_NAME_EXTRA)
             or part.get("filename")
@@ -263,6 +288,17 @@ def _tool_result_attachments(message: BaseMessage) -> Iterator[Attachment]:
         return
     for mention in iter_attachment_mentions(parse_tool_content(message.content)):
         yield from _validated(map(_as_mention, to_references([mention])))
+
+
+def _untyped_tool_result_attachments(message: BaseMessage) -> Iterator[Attachment]:
+    if not isinstance(message, ToolMessage):
+        return
+    for mention in iter_attachment_mentions(parse_tool_content(message.content)):
+        typed = with_guardrail_mime_type(mention)
+        if typed is mention:
+            continue
+        for reference in to_references([typed]):
+            yield from _validated([{**_as_mention(reference), "MimeType": ""}])
 
 
 def _as_mention(reference: GuardrailAttachment) -> dict[str, str]:

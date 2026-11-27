@@ -1,5 +1,7 @@
 """LLM invocation with multimodal file attachments."""
 
+import base64
+import io
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,6 +20,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils._attachments import (
     ATTACHMENT_ID_EXTRA,
+    ATTACHMENT_MIME_TYPE_EXTRA,
     ATTACHMENT_NAME_EXTRA,
 )
 
@@ -25,18 +28,21 @@ from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import (
     FileTooLargeError,
+    base64_head,
     base_mime_type,
+    content_mime_type,
     decode_text,
     download_file_base64,
     is_image,
     is_pdf,
     is_text,
     is_tiff,
-    is_unlabeled_pdf,
+    is_unlabeled,
     is_unlabeled_text,
     normalize_mime_type,
     sanitize_filename,
     stream_tiff_to_content_blocks,
+    tiff_to_content_blocks,
 )
 
 logger = logging.getLogger("uipath")
@@ -45,13 +51,14 @@ _GONE_STATUSES = frozenset({404, 410})
 
 
 def file_part_filename(name: str, mime_type: str) -> str | None:
-    """Return the ``filename`` a file is sent to the model with.
+    """Return the ``filename`` a file sent as ``mime_type`` carries.
 
-    Mirrors :func:`build_file_content_blocks_for`: images and TIFF pages go out as
+    ``mime_type`` is the type the file is sent as, :attr:`FileInfo.sent_mime_type`,
+    which
+    :func:`build_file_content_blocks_for` sets. Images and TIFF pages go out as
     image blocks, which carry no filename, so they return ``None``.
     """
-    sent_mime_type = normalize_mime_type(mime_type, name)
-    if is_tiff(sent_mime_type) or is_image(sent_mime_type):
+    if is_tiff(mime_type) or is_image(mime_type):
         return None
     return sanitize_filename(name)
 
@@ -110,24 +117,51 @@ def _download_errors(file_info: FileInfo) -> Iterator[None]:
         ) from exc
 
 
+@contextmanager
+def _tiff_errors(file_info: FileInfo) -> Iterator[None]:
+    try:
+        yield
+    except (httpx.HTTPError, FileTooLargeError):
+        raise
+    except Exception as exc:
+        raise _file_error(
+            "Attachment could not be read",
+            f"File '{file_info.name}' is not a valid TIFF image.",
+        ) from exc
+
+
+def _tagged_tiff_pages(
+    file_info: FileInfo, pages: list[DataContentBlock]
+) -> list[DataContentBlock]:
+    # A page is a PNG; the guardrail registry describes the stored TIFF.
+    if file_info.attachment_id:
+        for page in pages:
+            cast(dict[str, Any], page).setdefault("extras", {}).update(
+                {
+                    ATTACHMENT_ID_EXTRA: str(file_info.attachment_id),
+                    ATTACHMENT_NAME_EXTRA: file_info.name,
+                    ATTACHMENT_MIME_TYPE_EXTRA: "image/tiff",
+                }
+            )
+    return pages
+
+
 async def _tiff_content_blocks(
     file_info: FileInfo, max_size: int
 ) -> list[DataContentBlock]:
-    with _download_errors(file_info):
-        try:
-            pages = await stream_tiff_to_content_blocks(
-                file_info.url, max_size=max_size
-            )
-        except (httpx.HTTPError, FileTooLargeError):
-            raise
-        except Exception as exc:
-            raise _file_error(
-                "Attachment could not be read",
-                f"File '{file_info.name}' is not a valid TIFF image.",
-            ) from exc
+    with _download_errors(file_info), _tiff_errors(file_info):
+        pages = await stream_tiff_to_content_blocks(file_info.url, max_size=max_size)
     if not pages:
         raise _empty_file_error(file_info)
-    return pages
+    return _tagged_tiff_pages(file_info, pages)
+
+
+def _downloaded_tiff_content_blocks(
+    file_info: FileInfo, base64_file: str
+) -> list[DataContentBlock]:
+    with _tiff_errors(file_info):
+        pages = tiff_to_content_blocks(io.BytesIO(base64.b64decode(base64_file)))
+    return _tagged_tiff_pages(file_info, pages)
 
 
 async def build_file_content_blocks_for(
@@ -138,14 +172,16 @@ async def build_file_content_blocks_for(
 ) -> list[DataContentBlock]:
     """Build LangChain content blocks for a single file attachment.
 
-    The declared MIME type is first reconciled with the filename extension
-    (see :func:`normalize_mime_type`), so a ``.csv`` labeled
-    ``application/vnd.ms-excel`` by a Windows uploader is sent as ``text/csv``
-    instead of being parsed by the provider as a corrupt binary workbook. A
-    file declared ``application/octet-stream`` (or with no type) whose bytes
-    are a PDF is sent as ``application/pdf``, whatever its extension; one whose
-    type is still unknown after normalization (``client.ovpn``) and whose bytes
-    are text is sent as ``text/plain``.
+    Sets ``file_info.sent_mime_type`` to the type the file is sent as.
+
+    The file is sent with the type :func:`content_mime_type` gives it: the
+    declared MIME type reconciled with the filename extension, so a ``.csv``
+    labeled ``application/vnd.ms-excel`` by a Windows uploader is sent as
+    ``text/csv`` instead of being parsed by the provider as a corrupt binary
+    workbook, and for a file declared with no useful type, the PDF or image
+    type its bytes name (a TIFF is converted as below). One whose type is
+    still unknown (``client.ovpn``) is sent as ``text/plain`` if its bytes are
+    text.
     Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
@@ -172,6 +208,15 @@ async def build_file_content_blocks_for(
             for LLM payloads, is empty, is a TIFF that cannot be decoded, or
             cannot be downloaded.
     """
+    blocks, file_info.sent_mime_type = await _build_file_content_blocks(
+        file_info, max_size=max_size, pdf_only_documents=pdf_only_documents
+    )
+    return blocks
+
+
+async def _build_file_content_blocks(
+    file_info: FileInfo, *, max_size: int, pdf_only_documents: bool
+) -> tuple[list[DataContentBlock], str]:
     mime_type = normalize_mime_type(file_info.mime_type, file_info.name)
     if mime_type != file_info.mime_type:
         logger.info(
@@ -182,8 +227,9 @@ async def build_file_content_blocks_for(
             mime_type,
         )
 
-    if is_tiff(mime_type):
-        return await _tiff_content_blocks(file_info, max_size)
+    # Only a declared type vouches for a TIFF before its bytes are read.
+    if is_tiff(mime_type) and not is_unlabeled(file_info.mime_type):
+        return await _tiff_content_blocks(file_info, max_size), mime_type
 
     with _download_errors(file_info):
         base64_file = await download_file_base64(file_info.url, max_size=max_size)
@@ -200,31 +246,27 @@ async def build_file_content_blocks_for(
         else {}
     )
 
-    # The declared type, not the extension's: a converted PDF can keep its
-    # source name (``Budget.docx``), which normalization would trust.
-    if is_unlabeled_pdf(file_info.mime_type, base64_file):
+    content_type = content_mime_type(
+        file_info.mime_type, file_info.name, base64_head(base64_file)
+    )
+    if content_type == mime_type and is_unlabeled_text(mime_type, base64_file):
+        content_type = "text/plain"
+    if content_type != mime_type:
         logger.info(
-            "Attachment '%s' was declared as %r; sending it as 'application/pdf' "
-            "based on its content",
+            "Attachment '%s' was declared as %r; sending it as %r based on its content",
             file_info.name,
             file_info.mime_type,
+            content_type,
         )
-        mime_type = "application/pdf"
-    elif is_unlabeled_text(mime_type, base64_file):
-        logger.info(
-            "Attachment '%s' was declared as %r; sending it as 'text/plain' "
-            "based on its content",
-            file_info.name,
-            file_info.mime_type,
-        )
-        mime_type = "text/plain"
+        mime_type = content_type
+
+    if is_tiff(mime_type):
+        return _downloaded_tiff_content_blocks(file_info, base64_file), mime_type
 
     if is_image(mime_type):
-        return [
-            create_image_block(
-                base64=base64_file, mime_type=base_mime_type(mime_type), **tags
-            )
-        ]
+        image_type = base_mime_type(mime_type)
+        image = create_image_block(base64=base64_file, mime_type=image_type, **tags)
+        return [image], image_type
 
     if is_pdf(mime_type):
         # Providers match the media type exactly: parameters such as
@@ -240,16 +282,16 @@ async def build_file_content_blocks_for(
                 "source": {"type": "text", "media_type": "text/plain", "data": text},
                 "title": file_info.name or "document",
             }
-            return [cast(DataContentBlock, document)]
+            return [cast(DataContentBlock, document)], mime_type
 
-    return [
-        create_file_block(
-            base64=base64_file,
-            mime_type=mime_type or "application/octet-stream",
-            filename=file_part_filename(file_info.name, file_info.mime_type),
-            **tags,
-        )
-    ]
+    mime_type = mime_type or "application/octet-stream"
+    block = create_file_block(
+        base64=base64_file,
+        mime_type=mime_type,
+        filename=file_part_filename(file_info.name, mime_type),
+        **tags,
+    )
+    return [block], mime_type
 
 
 async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBlock]:

@@ -31,7 +31,7 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.multimodal import FileInfo
+from uipath_langchain.agent.multimodal import FileInfo, normalize_mime_type
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
@@ -419,6 +419,42 @@ class TestCreateAnalyzeFileTool:
         assert info.category == UiPathErrorCategory.USER
         assert info.detail.endswith("Centralized guardrails harmful_content")
         assert "test.pdf" not in info.detail
+
+    async def test_raw_passthrough_guardrail_block_without_a_code_is_a_violation(
+        self, resource_config, mock_llm
+    ):
+        """The OpenAI passthrough body has ``"code": null`` and no header arrives."""
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={
+                "error": {
+                    "message": "Request rejected due to Centralized guardrails "
+                    "harmful_content: Content safety violations detected: Violence "
+                    "found with a severity level of 4 >= configured threshold of 2 "
+                    "(inspected together with the attached file attachment-1-1.png)",
+                    "type": None,
+                    "code": None,
+                    "param": None,
+                }
+            },
+        )
+        error = UiPathAPIError.from_response(response)
+        file = FileInfo(
+            url="https://example.com/t.imgx", name="threat-note.imgx", mime_type=""
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error, file)
+
+        info = exc_info.value.error_info
+        assert info.code.endswith(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+        )
+        assert info.title == "Guardrail violation"
+        assert info.detail.endswith("Centralized guardrails harmful_content")
+        assert "attachment-1-1" not in info.detail
 
     async def test_raw_provider_400_names_the_attached_file(
         self, resource_config, mock_llm
@@ -841,7 +877,7 @@ class TestResolveJobAttachmentArguments:
 
         assert len(result) == 0
 
-    async def test_resolve_attachment_with_missing_mime_type_guesses_from_filename(
+    async def test_resolve_attachment_with_missing_mime_type_leaves_it_to_the_extension(
         self, mock_uipath_client
     ):
         """Test resolving attachment with missing MimeType guesses from blob name."""
@@ -868,9 +904,10 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
-        assert result[0].mime_type == "application/pdf"
+        assert result[0].mime_type == ""
+        assert normalize_mime_type("", result[0].name) == "application/pdf"
 
-    async def test_resolve_attachment_with_none_mime_type_guesses_from_filename(
+    async def test_resolve_attachment_with_none_mime_type_leaves_it_to_the_extension(
         self, mock_uipath_client
     ):
         """Test that a None MimeType attribute is handled by guessing from filename."""
@@ -900,9 +937,10 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
-        assert result[0].mime_type == "image/png"
+        assert result[0].mime_type == ""
+        assert normalize_mime_type("", result[0].name) == "image/png"
 
-    async def test_resolve_attachment_with_empty_mime_type_guesses_from_filename(
+    async def test_resolve_attachment_with_empty_mime_type_leaves_it_to_the_extension(
         self, mock_uipath_client
     ):
         """Test that an empty string MimeType is handled by guessing from filename."""
@@ -932,7 +970,50 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
-        assert result[0].mime_type == "image/jpeg"
+        assert result[0].mime_type == ""
+        assert normalize_mime_type("", result[0].name) == "image/jpeg"
+
+    @pytest.mark.parametrize(
+        ("name", "guessed"),
+        [("archive.zip", "application/zip"), ("feed.xml", "text/xml")],
+    )
+    async def test_resolve_attachment_with_no_mime_type_keeps_a_guess_the_extension_lacks(
+        self, mock_uipath_client, name, guessed
+    ):
+        """A guess the extension table would not give is kept as before."""
+        mock_attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName=name, MimeType=""
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(uri=f"https://blob/{name}", name=name)
+        )
+
+        with patch(
+            "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.mimetypes.guess_type",
+            return_value=(guessed, None),
+        ):
+            result = await _resolve_job_attachment_arguments([mock_attachment])
+
+        assert result[0].mime_type == guessed
+
+    async def test_an_untyped_pdf_that_kept_its_source_name_is_sent_as_pdf(
+        self, mock_uipath_client
+    ):
+        mock_attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="Budget.docx", MimeType=""
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(uri="https://blob/budget", name="Budget.docx")
+        )
+        [file] = await _resolve_job_attachment_arguments([mock_attachment])
+
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            AsyncMock(return_value=base64.b64encode(b"%PDF-1.7\n%x").decode()),
+        ):
+            await add_files_to_message(HumanMessage(content="t"), [file])
+
+        assert file.sent_mime_type == "application/pdf"
 
     async def test_resolve_attachment_with_no_mime_type_and_unknown_extension(
         self, mock_uipath_client
@@ -1639,6 +1720,121 @@ class TestConfigWithLlmCallAttachments:
         assert attachments[0]["fileName"] == "pii_masked_doc.pdf"
 
 
+_PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode()
+
+
+class TestSentTypeInTracesAndErrors:
+    """A file sniffed as an image is described by the type it is sent as."""
+
+    @pytest.fixture
+    def mock_llm(self):
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content="Analyzed result"))
+        llm.model_copy = Mock(return_value=llm)
+        return llm
+
+    @pytest.fixture
+    def resource_config(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "analysisTask": {"type": "string"},
+                "attachments": {"type": "array", "items": {"type": "object"}},
+            },
+        }
+        return AgentInternalToolResourceConfig(
+            name="analyze_files",
+            description="Analyze files",
+            input_schema=schema,
+            output_schema={"type": "object", "properties": {}},
+            properties=AgentInternalAnalyzeFilesToolProperties(
+                tool_type=AgentInternalToolType.ANALYZE_FILES
+            ),
+        )
+
+    async def _run(self, resource_config, mock_llm, file: FileInfo):
+        with (
+            patch(
+                "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments",
+                AsyncMock(return_value=[file]),
+            ),
+            patch(
+                "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+                AsyncMock(return_value=_PNG_B64),
+            ),
+            patch(
+                "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+            ),
+        ):
+            tool = create_analyze_file_tool(resource_config, mock_llm)
+            assert tool.coroutine is not None
+            return await tool.coroutine(
+                analysisTask="Summarize",
+                attachments=[
+                    MockAttachment(
+                        ID=str(uuid.uuid4()), FullName=file.name, MimeType=""
+                    )
+                ],
+            )
+
+    @staticmethod
+    def _file() -> FileInfo:
+        return FileInfo(
+            url="https://blob/threat-note.imgx",
+            name="threat-note.imgx",
+            mime_type="",
+            attachment_id=str(uuid.uuid4()),
+        )
+
+    async def test_llm_call_attachments_carry_the_sent_type(
+        self, resource_config, mock_llm
+    ):
+        await self._run(resource_config, mock_llm, self._file())
+
+        config = mock_llm.ainvoke.call_args.kwargs["config"]
+        payload = json.loads(config["metadata"][LLM_CALL_ATTACHMENTS_METADATA_KEY])
+        assert payload[0]["mimeType"] == "image/png"
+
+    async def test_error_names_the_sent_type(self, resource_config, mock_llm):
+        response = httpx.Response(
+            400,
+            request=httpx.Request("POST", "http://llm-gateway/completions"),
+            json={"error": {"message": "Invalid image."}},
+        )
+        mock_llm.ainvoke.side_effect = UiPathAPIError.from_response(response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._run(resource_config, mock_llm, self._file())
+
+        detail = exc_info.value.error_info.detail
+        assert "'threat-note.imgx' (image/png)" in detail
+        assert "no file type" not in detail
+
+    async def test_add_files_to_message_records_the_sent_type_of_a_masked_copy(
+        self,
+    ):
+        file = FileInfo(
+            url="https://blob/r.imgx",
+            name="r.imgx",
+            mime_type="",
+            attachment_id="id-r",
+            masked_attachment_url="https://blob/r-masked",
+            masked_attachment_id="id-r-masked",
+        )
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            AsyncMock(return_value=_PNG_B64),
+        ):
+            message = await add_files_to_message(HumanMessage(content="t"), [file])
+
+        assert file.sent_mime_type == "image/png"
+        assert _llm_call_attachment_ids([file], message) == {
+            f"sha256:{hashlib.sha256(base64.b64decode(_PNG_B64)).hexdigest()}": (
+                "id-r-masked"
+            )
+        }
+
+
 class TestAnalyzeFileToolPassesAttachmentsViaConfig:
     """End-to-end: tool injects attachments metadata into the config given to ainvoke."""
 
@@ -1825,6 +2021,34 @@ class TestLlmCallAttachmentIds:
         ]
 
         assert _llm_call_attachment_ids(files, _TASK) == {}
+
+    def test_an_image_found_by_its_content_has_no_filename_key(self) -> None:
+        files = [
+            FileInfo(
+                url="https://example.com/receipt",
+                name="receipt.imgx",
+                mime_type="",
+                attachment_id="id-image",
+                sent_mime_type="image/png",
+            ),
+            FileInfo(
+                url="https://example.com/notes",
+                name="receipt-imgx",
+                mime_type="text/plain",
+                attachment_id="id-notes",
+            ),
+        ]
+        message = HumanMessage(
+            content_blocks=[
+                {"type": "text", "text": "task"},
+                _image_part(b"receipt", "id-image"),
+            ]
+        )
+
+        assert _llm_call_attachment_ids(files, message) == {
+            "receipt-imgx": "id-notes",
+            _content_key(b"receipt"): "id-image",
+        }
 
     def test_keys_each_image_part_by_the_sha256_of_its_bytes(self) -> None:
         message = HumanMessage(

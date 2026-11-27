@@ -2,8 +2,9 @@
 
 import copy
 import json
+import logging
 import uuid
-from typing import Any, NamedTuple, Sequence
+from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -16,11 +17,21 @@ from uipath.platform.errors import (
     EnrichedException,
     SecretMissingError,
 )
+from uipath.platform.guardrails import (
+    GuardrailAttachment,
+    iter_attachment_mentions,
+    mention_id,
+    referenced_attachments,
+    to_references,
+)
+from uipath.platform.guardrails.attachments import MAX_ATTACHMENTS
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode, raise_for_enriched
-from .mime_types import guess_mime_type
+from .mime_types import guess_mime_type, with_guardrail_mime_type
 from .pydantic_json import extract_values_by_paths, get_json_paths_by_type
+
+logger = logging.getLogger(__name__)
 
 _JOB_ATTACHMENT_ERRORS: dict[
     tuple[int, str | None], tuple[str, UiPathErrorCategory]
@@ -360,3 +371,73 @@ def parse_attachments_from_conversation_messages(
                 )
 
     return attachments
+
+
+def guardrail_references(*groups: Iterable[Any]) -> list[GuardrailAttachment]:
+    """References for a guardrail to inspect, at most ``MAX_ATTACHMENTS``.
+
+    The one ordering rule for every check. Candidates (``Attachment`` objects,
+    attachment mentions or references) are read in order and the first valid one
+    of each id describes the file, so a later group never relabels it; within one
+    group a description with a type replaces an earlier one without. Files with
+    their own type come first; files given a fallback type
+    (:func:`with_guardrail_mime_type`) come after all of them, so a file this
+    fallback makes visible never takes the place of a typed one. Each group keeps
+    its order.
+    """
+    owner: dict[str, tuple[int, bool]] = {}
+    declared: list[GuardrailAttachment] = []
+    fallback: list[GuardrailAttachment] = []
+    for group, items in enumerate(groups):
+        for item in items:
+            if isinstance(item, GuardrailAttachment):
+                item = {
+                    "ID": item.id,
+                    "FullName": item.file_name,
+                    "MimeType": item.mime_type,
+                }
+            typed = with_guardrail_mime_type(item)
+            has_type = typed is item
+            for reference in to_references([typed]):
+                seen = owner.get(reference.id)
+                if seen is not None:
+                    if seen != (group, False) or not has_type:
+                        continue
+                    fallback[:] = [r for r in fallback if r.id != reference.id]
+                owner[reference.id] = (group, has_type)
+                (declared if has_type else fallback).append(reference)
+    references = [*declared, *fallback]
+    if len(references) > MAX_ATTACHMENTS:
+        logger.warning(
+            "Forwarding %d of %d attachment references; the validate API accepts "
+            "at most %d per evaluation, so the rest are not inspected.",
+            MAX_ATTACHMENTS,
+            len(references),
+            MAX_ATTACHMENTS,
+        )
+    return references[:MAX_ATTACHMENTS]
+
+
+def held_attachments(
+    data: Any, registry: Mapping[str, Attachment]
+) -> list[Attachment] | None:
+    """The registry's attachments ``data`` mentions, in mention order.
+
+    ``None`` when ``data`` cannot be scanned, as :func:`referenced_attachments`.
+    """
+    if referenced_attachments(data, registry) is None:
+        return None
+    held: list[Attachment] = []
+    for mention in iter_attachment_mentions(data):
+        key = mention_id(mention)
+        if key is not None and key in registry:
+            held.append(registry[key])
+    return held
+
+
+def referenced_guardrail_attachments(
+    data: Any, registry: Mapping[str, Attachment]
+) -> list[GuardrailAttachment] | None:
+    """:func:`guardrail_references` for the held attachments ``data`` mentions."""
+    held = held_attachments(data, registry)
+    return None if held is None else guardrail_references(held)

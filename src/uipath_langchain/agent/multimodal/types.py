@@ -27,3 +27,5 @@ class FileInfo:
     masked_attachment_url: str | None = None
     attachment_id: str | None = None
     masked_attachment_id: str | None = None
+    sent_mime_type: str | None = None
+    """The type the file was sent to the model as, once it has been."""
