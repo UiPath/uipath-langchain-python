@@ -150,6 +150,35 @@ def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
     return head.startswith(_PDF_SIGNATURE)
 
 
+# C0 controls and DEL, except the ones real text holds: TAB, LF, VT, FF, CR and
+# ESC (ANSI colour codes in logs). The same rule as the Agents backend sniffer.
+_DISALLOWED_CONTROLS = re.compile(r"[\x00-\x08\x0e-\x1a\x1c-\x1f\x7f]")
+
+
+def is_unlabeled_text(mime_type: str, base64_data: str) -> bool:
+    """True when a file sent with no useful type is text by its content.
+
+    A file with an extension the uploader does not know (``.ovpn``) arrives
+    with no type, and providers reject ``application/octet-stream``.
+    Pass the normalized type, so a known extension keeps its own. Windows-1252
+    decodes almost any NUL-free bytes and no label vouches for the content, so
+    more than 1% control characters marks the file as not text.
+    """
+    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
+        return False
+    try:
+        text = decode_text(base64_data)
+    except ValueError:
+        return False
+    if not text:
+        return False
+    limit = len(text) // 100
+    for count, _ in enumerate(_DISALLOWED_CONTROLS.finditer(text), 1):
+        if count > limit:
+            return False
+    return True
+
+
 # Chat model classes that format messages for the Anthropic Messages API, which
 # accepts a base64 ``document`` only as ``application/pdf``. Matched by name
 # along the MRO so the optional provider packages are never imported here.

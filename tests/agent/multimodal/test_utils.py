@@ -26,6 +26,7 @@ from uipath_langchain.agent.multimodal.utils import (
     encode_streamed_base64,
     is_text,
     is_unlabeled_pdf,
+    is_unlabeled_text,
     normalize_mime_type,
 )
 
@@ -345,9 +346,9 @@ class TestBuildFileContentBlocksFor:
     async def test_empty_mime_type_defaults_to_octet_stream(
         self, httpx_mock: HTTPXMock
     ) -> None:
-        """An attachment with no MIME type defaults to octet-stream and is passed
-        through as a file block (delegated to the LLM)."""
-        content = b"data"
+        """A binary attachment with no MIME type defaults to octet-stream and is
+        passed through as a file block (delegated to the LLM)."""
+        content = b"\x00\x01\x02"
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="blob.bin", mime_type="")
 
@@ -831,6 +832,41 @@ class TestIsUnlabeledPdf:
         assert not is_unlabeled_pdf("application/octet-stream", "!!!")
 
 
+class TestIsUnlabeledText:
+    @pytest.mark.parametrize(
+        "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
+    )
+    def test_text_bytes_with_a_useless_type(self, mime_type: str) -> None:
+        data = base64.b64encode(b"client\r\ndev tun\n\tremote vpn 1194\f").decode()
+        assert is_unlabeled_text(mime_type, data)
+
+    @pytest.mark.parametrize("mime_type", ["text/csv", "application/pdf"])
+    def test_declared_type_is_trusted(self, mime_type: str) -> None:
+        data = base64.b64encode(b"a,b\n").decode()
+        assert not is_unlabeled_text(mime_type, data)
+
+    def test_nul_bytes(self) -> None:
+        data = base64.b64encode(b"client\x00dev tun\n").decode()
+        assert not is_unlabeled_text("application/octet-stream", data)
+
+    def test_control_heavy_bytes(self) -> None:
+        data = base64.b64encode(b"\x01\x02\x03\x7fabcdefgh" * 10).decode()
+        assert not is_unlabeled_text("application/octet-stream", data)
+
+    def test_a_few_control_characters_are_tolerated(self) -> None:
+        log = b"\x1b[31mERROR\x1b[0m disk full\x07\n" + b"x" * 200
+        assert is_unlabeled_text("", base64.b64encode(log).decode())
+
+    def test_utf16_with_a_bom(self) -> None:
+        data = base64.b64encode("client\ndev tun\n".encode("utf-16")).decode()
+        assert is_unlabeled_text("", data)
+
+    def test_empty_or_invalid_data(self) -> None:
+        assert not is_unlabeled_text("application/octet-stream", "")
+        assert not is_unlabeled_text("application/octet-stream", "!!!")
+        assert not is_unlabeled_text("application/octet-stream", "abc")
+
+
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
 
@@ -899,6 +935,9 @@ _CSV_DOCUMENT = {
     "source": {"type": "text", "media_type": "text/plain", "data": "a,b\n"},
     "title": "Budget.csv",
 }
+
+
+_OVPN = b"client\r\ndev tun\r\nproto udp\r\nremote vpn.example.com 1194\r\n"
 
 
 class TestBuildFileContentBlocksForPdfOnlyModels:
@@ -1041,6 +1080,60 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
         assert blocks[0]["mime_type"] == (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    async def test_unlabeled_text_is_sent_as_text_plain(self, mime_type: str) -> None:
+        file = FileInfo(url="https://blob/x", name="client.ovpn", mime_type=mime_type)
+        with patch(_DOWNLOAD, return_value=_b64(_OVPN)):
+            blocks = await build_file_content_blocks_for(file)
+
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "text/plain"
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    async def test_unlabeled_text_becomes_a_text_document(self, mime_type: str) -> None:
+        file = FileInfo(url="https://blob/x", name="client.ovpn", mime_type=mime_type)
+        with patch(_DOWNLOAD, return_value=_b64(_OVPN)):
+            blocks = await build_file_content_blocks_for(file, pdf_only_documents=True)
+
+        assert blocks == [
+            {
+                "type": "document",
+                "source": {
+                    "type": "text",
+                    "media_type": "text/plain",
+                    "data": _OVPN.decode(),
+                },
+                "title": "client.ovpn",
+            }
+        ]
+
+    async def test_unlabeled_text_keeps_its_extension_type(self) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="Budget.docx",
+            mime_type="application/octet-stream",
+        )
+        with patch(_DOWNLOAD, return_value=_b64(b"plain words")):
+            blocks = await build_file_content_blocks_for(file)
+
+        assert blocks[0]["mime_type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("pdf_only_documents", [True, False])
+    async def test_unlabeled_binary_stays_octet_stream(
+        self, mime_type: str, pdf_only_documents: bool
+    ) -> None:
+        file = FileInfo(url="https://blob/x", name="blob.bin", mime_type=mime_type)
+        with patch(_DOWNLOAD, return_value=_b64(b"\x7fELF\x02\x01\x01\x00\x00")):
+            blocks = await build_file_content_blocks_for(
+                file, pdf_only_documents=pdf_only_documents
+            )
+
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "application/octet-stream"
 
     async def test_text_document_reaches_anthropic_unchanged(self) -> None:
         from langchain_anthropic.chat_models import _format_messages
