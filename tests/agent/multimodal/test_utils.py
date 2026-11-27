@@ -1270,6 +1270,65 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
                 "PNG"
             )
 
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("name", ["scan.tif", "scan.tiff"])
+    async def test_unlabeled_pdf_named_like_a_tiff_is_sent_as_pdf(
+        self, mime_type: str, name: str
+    ) -> None:
+        file = FileInfo(url="https://blob/x", name=name, mime_type=mime_type)
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        with (
+            patch(_DOWNLOAD, return_value=_b64(b"%PDF-1.7\n%binary")),
+            patch(stream) as streamed,
+        ):
+            (block,) = await build_file_content_blocks_for(file)
+
+        streamed.assert_not_called()
+        assert block["type"] == "file"
+        assert block["mime_type"] == "application/pdf"
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    async def test_unlabeled_tiff_named_like_one_is_downloaded_once(
+        self, mime_type: str
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="scan.tif",
+            mime_type=mime_type,
+            attachment_id=_ATTACHMENT_ID,
+        )
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        with (
+            patch(_DOWNLOAD, return_value=_b64(_make_tiff(num_pages=2))) as download,
+            patch(stream) as streamed,
+        ):
+            blocks = await build_file_content_blocks_for(file)
+
+        download.assert_awaited_once()
+        streamed.assert_not_called()
+        assert [block["mime_type"] for block in blocks] == ["image/png", "image/png"]
+        assert all("extras" not in block for block in blocks)
+
+    async def test_labeled_tiff_still_streams(self) -> None:
+        file = FileInfo(url="https://blob/x", name="scan.imgx", mime_type="image/tiff")
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        page = {"type": "image", "base64": "UDE=", "mime_type": "image/png"}
+        with (
+            patch(_DOWNLOAD) as download,
+            patch(stream, return_value=[page]) as streamed,
+        ):
+            blocks = await build_file_content_blocks_for(file)
+
+        download.assert_not_called()
+        streamed.assert_awaited_once()
+        assert blocks == [page]
+
     async def test_unlabeled_tiff_that_does_not_decode_is_a_file_error(self) -> None:
         file = FileInfo(url="https://blob/x", name="scan.imgx", mime_type="")
         with patch(_DOWNLOAD, return_value=_b64(b"II*\x00garbage-after-the-magic")):

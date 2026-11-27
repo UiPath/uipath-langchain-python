@@ -36,6 +36,7 @@ from .utils import (
     is_pdf,
     is_text,
     is_tiff,
+    is_unlabeled,
     is_unlabeled_text,
     normalize_mime_type,
     sanitize_filename,
@@ -207,7 +208,8 @@ async def _build_file_content_blocks(
             mime_type,
         )
 
-    if is_tiff(mime_type):
+    # Only a declared type vouches for a TIFF before its bytes are read.
+    if is_tiff(mime_type) and not is_unlabeled(file_info.mime_type):
         return await _tiff_content_blocks(file_info, max_size), mime_type
 
     with _download_errors(file_info):
@@ -225,6 +227,7 @@ async def _build_file_content_blocks(
         else {}
     )
 
+    type_by_name = mime_type
     content_type = content_mime_type(
         file_info.mime_type, file_info.name, base64_head(base64_file)
     )
@@ -241,9 +244,10 @@ async def _build_file_content_blocks(
 
     if is_tiff(mime_type):
         pages = _downloaded_tiff_content_blocks(file_info, base64_file)
-        for page in pages:
-            page_extras = cast(dict[str, Any], page).setdefault("extras", {})
-            page_extras.update(tags)
+        if not is_tiff(type_by_name):
+            for page in pages:
+                page_extras = cast(dict[str, Any], page).setdefault("extras", {})
+                page_extras.update(tags)
         return pages, mime_type
 
     if is_image(mime_type):
