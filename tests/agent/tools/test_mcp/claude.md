@@ -138,6 +138,15 @@ tests/agent/tools/test_mcp/
 │   │   suspended on its MCP tool and finished by a second process
 │   └── the interrupt through the real trigger handler: a JOB_RAW Job trigger
 │
+├── test_mcp_task_watch.py     # com.uipath/tasks on a Remote server's task
+│   ├── the Api annotation and the watch on a reply (pure functions)
+│   ├── what is declared: Api only for a job that opted in
+│   ├── call_with_suspension in a real graph (WatchedCall): suspend on a
+│   │   watch, a second watch after a wake, no watch, the round limit
+│   ├── watch_claimed_task against a recorded session: the request _meta
+│   └── the interrupt through the real trigger handler: an API trigger
+│       and a timer
+│
 ├── test_session_info.py       # SessionInfo + SessionInfoFactory contract
 │
 ├── test_session_tools.py      # load_mcp_tools discovery/invocation/errors

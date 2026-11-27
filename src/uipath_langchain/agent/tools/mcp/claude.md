@@ -570,6 +570,49 @@ Rules to keep when changing it:
   `AgentRuntimeError(STATE_ERROR)`. The limit is the decorator's, shared by every
   tool built on it, and is documented on `call_mcp_tool`.
 
+#### A Remote server's task: suspending through a watch
+
+A Remote MCP server's upstream can run tasks of its own. There is no
+Orchestrator job behind one, so AgentHub annotates it with an `Api` trigger
+(`resumeTrigger.triggerType == "Api"`, no `jobKey`) and the run suspends on an
+**API trigger** that AgentHub fires. Opt-in: `EnableMcpTasksApiSuspension`
+(default `false`), and only when the run is itself a job (`own_job()`: a GUID
+`UIPATH_JOB_KEY` and `UIPATH_FOLDER_KEY`). `tasks_capability()` lists `Api` only
+then, so a server never holds a reply for a caller that would not suspend.
+
+The flow, after `submit`, for a task whose handle carries the `Api` annotation
+(`task_watch_terms`), is a bounded loop of `park_on_watch` steps:
+
+1. The first round polls for the polling time, as `park` does.
+2. `TaskCall.watch(handle, job_key=…, folder_key=…)` sends one `tasks/get` whose
+   `params._meta["com.uipath/task"].watch` names the run's own job. It answers
+   the task's result (ended), a `TaskWatch(watch_id, expires_in)` (still
+   working, and AgentHub is now watching it), or `None` (still working,
+   unwatched).
+3. On a `TaskWatch` the step returns a **list** of two interrupt values, which
+   the runtime turns into sibling triggers: `{"com.uipath/task": {"watchId": …}}`
+   (an API trigger; the server delivers only to a trigger whose request carries
+   the watch id) and `WaitUntil(now + expires_in)`. The first to fire resumes.
+4. After a resume the next round asks again: the result, or a new watch.
+
+Rules to keep:
+
+- **The timer is not optional.** A watch runs on credentials AgentHub captured
+  from this run's own request and ends when they would (`expires_in`). The
+  delivery can also fail. The timer is what guarantees the run wakes.
+- **The resume value is never read.** Server payload or timer, the next round
+  reads the task with `tasks/get`.
+- **`None` means poll.** No watch (a server with guardrails, a relay, a job the
+  caller cannot see) leaves the task to `collect`, exactly as without the
+  feature. So does `MAX_WATCHES_PER_CALL` rounds, and the flag being switched
+  off while suspended.
+- **`watch` and `watch_terms` are optional on a `TaskCall`.** `_SessionTaskCall`
+  has them. `_ServiceTaskCall` does not yet (`McpService.get_task` cannot send
+  request `_meta`), so `call_mcp_tool` polls a Remote server's task.
+- **Not in a conversational or a debug run.** Those runtimes treat an API
+  trigger as a prompt for a person. Nothing here detects them; the flag is the
+  guard, so leave it off for such agents.
+
 `TaskCall` is the seam between the flow and the client that carries the call.
 `_SessionTaskCall` (`mcp_tool.py`) drives `McpClient`; `_ServiceTaskCall`
 (`mcp_service_call.py`) drives the platform SDK's stateless `McpService` for
@@ -662,6 +705,7 @@ MCP connections for tool invocations with **two distinct initialization phases**
 │  + submit_tool_call(name, arguments) -> result | task handle│
 │  + resolve_task(name, handle, budget_seconds, poll_first)   │
 │  + peek_task(name, handle) -> CallToolResult | None         │
+│  + watch_task(name, handle, job_key, folder_key)            │
 │  + dispose() -> None  # UiPathDisposableProtocol            │
 │  + get_session_id() -> str | None                           │
 │  + is_client_initialized: bool (property)                   │

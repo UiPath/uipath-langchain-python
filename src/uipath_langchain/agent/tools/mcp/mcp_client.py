@@ -24,11 +24,13 @@ from uipath.runtime.base import UiPathDisposableProtocol
 
 from uipath_langchain._utils import get_execution_folder_path
 
+from .mcp_task_suspension import TaskWatch
 from .mcp_tasks import (
     McpTaskHandle,
     peek_claimed_task,
     resolve_claimed_result,
     session_extension_kwargs,
+    watch_claimed_task,
 )
 from .protocol_strategy import (
     ProtocolMode,
@@ -661,6 +663,19 @@ class McpClient(UiPathDisposableProtocol):
         """Ask for a task once: its result, or ``None`` while it is still working."""
         session = await self._ensure_session()
         return await peek_claimed_task(session, name, handle)
+
+    async def watch_task(
+        self, name: str, handle: McpTaskHandle, *, job_key: str, folder_key: str
+    ) -> CallToolResult | TaskWatch | None:
+        """Ask for a task once, and for a watch on it if it is still working.
+
+        Returns the task's result, the watch the server started for the job
+        named, or ``None`` when the task is still working and unwatched.
+        """
+        session = await self._ensure_session()
+        return await watch_claimed_task(
+            session, name, handle, job_key=job_key, folder_key=folder_key
+        )
 
     async def dispose(self) -> None:
         """Dispose of the client and release all resources.
