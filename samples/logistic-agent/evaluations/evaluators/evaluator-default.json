@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "DefaultContainsEvaluator",
+  "description": "Checks if the output contains expected text",
+  "evaluatorTypeId": "uipath-contains",
+  "evaluatorConfig": {
+    "name": "Default Contains Evaluator",
+    "targetOutputKey": "output",
+    "negated": false,
+    "ignoreCase": false,
+    "defaultEvaluationCriteria": {
+      "searchText": "expected text"
+    }
+  }
+}
