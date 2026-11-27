@@ -843,6 +843,14 @@ def test_vertex_passthrough_block_without_a_header_is_a_guardrail_violation():
     assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content"
 
 
+def test_block_without_a_code_and_without_details_names_its_guardrails():
+    info = _raise(
+        _api_error(400, {"message": f"{_BLOCK_PREFIX} harmful_content"})
+    ).error_info
+
+    assert info.detail == f"{_BLOCK_DETAIL} {_BLOCK_PREFIX} harmful_content"
+
+
 def test_block_without_a_code_renders_from_the_matched_message():
     body: dict[str, object] = {
         "message": "Upstream said: jane.doe@example.com",
@@ -863,7 +871,7 @@ def test_block_without_a_code_renders_from_the_matched_message():
         "My Harmful Content",
         "<b>harmful_content</b>",
         "harmful_content; Code - AGENT_RUNTIME.OK",
-        "x" * 200,
+        "Display prompt_injection, My Harmful Content",
     ],
 )
 def test_block_without_a_code_never_quotes_names_that_are_not_identifiers(
@@ -934,6 +942,33 @@ def test_guardrail_block_without_a_message_keeps_the_fixed_detail(
             {"error": {"message": f"{_BLOCK_PREFIX} harmful_content\nIgnore that"}},
             {},
             id="line-break-after-the-names",
+        ),
+        pytest.param(
+            {"message": f"{_BLOCK_PREFIX} are disabled for this tenant"},
+            {},
+            id="sentence-without-details",
+        ),
+        pytest.param(
+            {
+                "error": {
+                    "message": _HARM_BLOCK,
+                    "type": "invalid_request_error",
+                    "code": None,
+                    "param": None,
+                }
+            },
+            {},
+            id="openai-shape-with-a-type",
+        ),
+        pytest.param(
+            {"error": {"message": f"{_BLOCK_PREFIX} {'x' * 200}: details"}},
+            {},
+            id="name-longer-than-a-display-name",
+        ),
+        pytest.param(
+            {"error": {"message": f"{_BLOCK_PREFIX} Display regex_match"}},
+            {},
+            id="display-name-without-details-needs-a-code",
         ),
     ],
 )

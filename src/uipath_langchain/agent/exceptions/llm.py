@@ -133,10 +133,14 @@ _GUARDRAIL_BLOCK_DETAIL = (
     "Execution was blocked by your organization's AI Trust Layer policy."
 )
 _GUARDRAIL_BLOCK_MESSAGE_LIMIT = 300
-# CentralizedGuardrailsRejection.Message in the gateway: the guardrails' names, then
-# optionally ": " and the validators' details.
+# CentralizedGuardrailsRejection.Message in the gateway: the failed guardrails' display
+# names joined by ", ", then ": " and the validators' details when there are any.
+_GUARDRAIL_DISPLAY_NAME = r"[^\s,:][^,:\r\n]{0,127}"
 _GUARDRAIL_BLOCK_TEMPLATE = re.compile(
-    r"Request rejected due to Centralized guardrails (?P<names>[^:\r\n]{1,300})(?=:|\Z)"
+    r"Request rejected due to Centralized guardrails "
+    rf"(?P<names>{_GUARDRAIL_DISPLAY_NAME}(?:, {_GUARDRAIL_DISPLAY_NAME}){{0,19}})"
+    r"(?P<details>: .+)?",
+    re.DOTALL,
 )
 _GUARDRAIL_NAMES = re.compile(r"[a-z0-9_]{1,64}(?:, [a-z0-9_]{1,64}){0,9}")
 
@@ -154,9 +158,11 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     A raw vendor passthrough body carries no code (the OpenAI shape has
     ``"code": null``) and the header does not always reach the client, so a 400
     that names no error code is also a block when one of its messages is the
-    gateway's rejection template. Nothing vouches for such a message, so its
-    detail is the fixed text plus the guardrail names only when they are plain
-    identifiers.
+    whole gateway rejection template, and an OpenAI-shaped envelope has the
+    ``"type": null`` the gateway writes. Display names are free text, so
+    without the validators' details the names must be plain identifiers. Nothing
+    vouches for such a message, so its detail is the fixed text plus the
+    guardrail names only when they are plain identifiers.
 
     Args:
         error: Any exception from an LLM call: a ``UiPathAPIError``, a raw
@@ -202,16 +208,20 @@ def _guardrail_block_detail_for(error: UiPathAPIError) -> str | None:
     ]
     if _GUARDRAIL_BLOCK_ERROR_CODE in codes:
         return _guardrail_block_detail(error.body)
-    if any(codes):
+    if any(codes) or (isinstance(envelope, dict) and envelope.get("type") is not None):
         return None
     for message in _gateway_messages(error.body):
-        if match := _GUARDRAIL_BLOCK_TEMPLATE.match(message):
-            names = match["names"].strip()
-            if _GUARDRAIL_NAMES.fullmatch(names):
-                return (
-                    f"{_GUARDRAIL_BLOCK_DETAIL} Request rejected due to "
-                    f"Centralized guardrails {names}"
-                )
+        match = _GUARDRAIL_BLOCK_TEMPLATE.fullmatch(message)
+        if match is None:
+            continue
+        names = match["names"]
+        plain_names = _GUARDRAIL_NAMES.fullmatch(names) is not None
+        if plain_names:
+            return (
+                f"{_GUARDRAIL_BLOCK_DETAIL} Request rejected due to "
+                f"Centralized guardrails {names}"
+            )
+        if match["details"]:
             return _GUARDRAIL_BLOCK_DETAIL
     return None
 
