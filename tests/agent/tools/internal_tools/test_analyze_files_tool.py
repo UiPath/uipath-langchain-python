@@ -420,6 +420,42 @@ class TestCreateAnalyzeFileTool:
         assert info.detail.endswith("Centralized guardrails harmful_content")
         assert "test.pdf" not in info.detail
 
+    async def test_raw_passthrough_guardrail_block_without_a_code_is_a_violation(
+        self, resource_config, mock_llm
+    ):
+        """The OpenAI passthrough body has ``"code": null`` and no header arrives."""
+        request = httpx.Request("POST", "http://llm-gateway/completions")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={
+                "error": {
+                    "message": "Request rejected due to Centralized guardrails "
+                    "harmful_content: Content safety violations detected: Violence "
+                    "found with a severity level of 4 >= configured threshold of 2 "
+                    "(inspected together with the attached file attachment-1-1.png)",
+                    "type": None,
+                    "code": None,
+                    "param": None,
+                }
+            },
+        )
+        error = UiPathAPIError.from_response(response)
+        file = FileInfo(
+            url="https://example.com/t.imgx", name="threat-note.imgx", mime_type=""
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._invoke_with_llm_error(resource_config, mock_llm, error, file)
+
+        info = exc_info.value.error_info
+        assert info.code.endswith(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION.value
+        )
+        assert info.title == "Guardrail violation"
+        assert info.detail.endswith("Centralized guardrails harmful_content")
+        assert "attachment-1-1" not in info.detail
+
     async def test_raw_provider_400_names_the_attached_file(
         self, resource_config, mock_llm
     ):

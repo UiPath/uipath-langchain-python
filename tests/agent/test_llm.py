@@ -795,6 +795,28 @@ def _text_block() -> UiPathAPIError:
             id="passthrough-bedrock-header",
         ),
         pytest.param(_text_block, id="text-body-header"),
+        pytest.param(
+            lambda: _api_error(
+                400,
+                {
+                    "error": {
+                        "message": _HARM_BLOCK,
+                        "type": None,
+                        "code": None,
+                        "param": None,
+                    }
+                },
+            ),
+            id="passthrough-openai-no-code",
+        ),
+        pytest.param(
+            lambda: _api_error(400, {"message": _HARM_BLOCK}),
+            id="passthrough-bedrock-no-code",
+        ),
+        pytest.param(
+            lambda: _api_error(400, {"StatusCode": 400, "Message": _HARM_BLOCK}),
+            id="normalized-no-code",
+        ),
     ],
 )
 def test_centralized_guardrail_block_is_a_guardrail_violation(err_factory):
@@ -835,18 +857,32 @@ def test_guardrail_block_without_a_message_keeps_the_fixed_detail(
 
 
 @pytest.mark.parametrize(
-    "body",
+    ("body", "headers"),
     [
-        pytest.param({"message": _HARM_BLOCK}, id="message"),
-        pytest.param({"error": {"message": _HARM_BLOCK}}, id="error-envelope"),
-        pytest.param({"StatusCode": 400, "Message": _HARM_BLOCK}, id="normalized"),
-        pytest.param({"Message": _HARM_BLOCK, "ErrorCode": "3041"}, id="other-code"),
+        pytest.param(
+            {"Message": _HARM_BLOCK, "ErrorCode": "3041"}, {}, id="other-code"
+        ),
+        pytest.param(
+            {"error": {"message": _HARM_BLOCK}},
+            {"X-UiPath-LlmGateway-ErrorCode": "3041"},
+            id="other-header-code",
+        ),
+        pytest.param(
+            {"error": {"message": f"Invalid input: {_HARM_BLOCK}"}},
+            {},
+            id="not-at-the-start",
+        ),
+        pytest.param(
+            {"error": {"message": "Request rejected due to Centralized guardrailsx"}},
+            {},
+            id="prefix-without-names",
+        ),
     ],
 )
-def test_block_message_without_the_error_code_stays_a_provider_bad_request(
-    body: dict[str, object],
+def test_block_message_with_another_code_or_elsewhere_stays_a_provider_bad_request(
+    body: dict[str, object], headers: dict[str, str]
 ):
-    err = _api_error(400, body)
+    err = _api_error_with_headers(400, body, headers)
 
     assert centralized_guardrail_error(err) is None
     assert _raise(err).error_info.code.endswith(

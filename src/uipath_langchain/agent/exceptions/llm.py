@@ -7,7 +7,8 @@ a ``UiPathError`` carrying a semantic ``error_code`` (handled by
 ``raise_for_provider_http_error``). Both are mapped to ``AgentRuntimeError`` so
 upstream handling can categorise without provider-specific logic. A request the
 LLM gateway's centralized (AI Trust Layer) guardrails blocked is recognised
-first, by the gateway's error code (``centralized_guardrail_error``).
+first, by the gateway's error code or its fixed rejection message
+(``centralized_guardrail_error``).
 """
 
 import re
@@ -132,6 +133,8 @@ _GUARDRAIL_BLOCK_DETAIL = (
     "Execution was blocked by your organization's AI Trust Layer policy."
 )
 _GUARDRAIL_BLOCK_MESSAGE_LIMIT = 300
+# CentralizedGuardrailsRejection.Message in the gateway, followed by the guardrails' names.
+_GUARDRAIL_BLOCK_MESSAGE_PREFIX = "Request rejected due to Centralized guardrails "
 
 
 def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | None:
@@ -140,7 +143,10 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     The AI Trust Layer policy of the organization is enforced by the LLM gateway
     on every LLM call, and a blocked call is answered 400 with gateway error
     code 3040, in the ``X-UiPath-LlmGateway-ErrorCode`` header or in the body.
-    Neither retrying nor changing the model settings helps, so this is a
+    A raw vendor passthrough body carries no code (the OpenAI shape has
+    ``"code": null``) and the header does not always reach the client, so a 400
+    that names no gateway error code is also a block when its message starts
+    with the gateway's fixed rejection text. Neither retrying nor changing the model settings helps, so this is a
     ``TERMINATION_GUARDRAIL_VIOLATION``. Its detail carries the gateway's own
     message up to the validators' details, which can quote the request.
 
@@ -156,7 +162,7 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     api_error = as_uipath_error(error) if isinstance(error, Exception) else None
     if not isinstance(api_error, UiPathAPIError) or api_error.status_code != 400:
         return None
-    if not _has_guardrail_block_error_code(api_error):
+    if not _is_guardrail_block(api_error):
         return None
 
     blocked = AgentRuntimeError(
@@ -170,20 +176,33 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     return blocked
 
 
-def _has_guardrail_block_error_code(error: UiPathAPIError) -> bool:
+def _is_guardrail_block(error: UiPathAPIError) -> bool:
     body = error.body if isinstance(error.body, dict) else {}
     envelope = body.get("error")
-    codes = (
-        body.get("ErrorCode"),
-        envelope.get("code") if isinstance(envelope, dict) else None,
-        error.response.headers.get(_GUARDRAIL_BLOCK_ERROR_CODE_HEADER),
+    gateway_codes = [
+        _error_code_text(code)
+        for code in (
+            body.get("ErrorCode"),
+            error.response.headers.get(_GUARDRAIL_BLOCK_ERROR_CODE_HEADER),
+        )
+    ]
+    envelope_code = _error_code_text(
+        envelope.get("code") if isinstance(envelope, dict) else None
     )
+    if _GUARDRAIL_BLOCK_ERROR_CODE in (*gateway_codes, envelope_code):
+        return True
+    if any(gateway_codes):
+        return False
     return any(
-        isinstance(code, (int, str))
-        and not isinstance(code, bool)
-        and str(code).strip() == _GUARDRAIL_BLOCK_ERROR_CODE
-        for code in codes
+        message.startswith(_GUARDRAIL_BLOCK_MESSAGE_PREFIX)
+        for message in _gateway_messages(error.body)
     )
+
+
+def _error_code_text(code: object) -> str | None:
+    if not isinstance(code, (int, str)) or isinstance(code, bool):
+        return None
+    return str(code).strip() or None
 
 
 def _guardrail_block_detail(body: object) -> str:
