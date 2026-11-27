@@ -10,6 +10,7 @@ from uipath.platform.attachments import Attachment
 from uipath.platform.guardrails import BuiltInValidatorGuardrail
 from uipath.platform.guardrails.guardrails import EnumParameterValue
 
+from uipath_langchain.agent.attachments.job_attachments import guardrail_references
 from uipath_langchain.agent.guardrails.attachment_refs import (
     _MAX_ATTACHMENTS,
     resolve_guardrail_attachments,
@@ -115,6 +116,30 @@ class TestFallbackTypeNeverDisplacesATypedFile:
         assert [(r.file_name, r.mime_type) for r in result] == [
             ("0.csv", "text/csv"),
             ("untyped.imgx", "application/octet-stream"),
+        ]
+
+
+class TestGuardrailReferencesGroups:
+    """An earlier group's description of an id wins over a later group's."""
+
+    def test_a_later_group_never_relabels_an_untyped_file(self):
+        held = Attachment(id=uuid.UUID(_UUID), full_name="user.bin", mime_type="")
+        relabel = {"ID": _UUID, "FullName": "evil.txt", "MimeType": "text/plain"}
+
+        references = guardrail_references([held], [relabel])
+
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("user.bin", "application/octet-stream")
+        ]
+
+    def test_within_a_group_a_typed_description_replaces_an_untyped_one(self):
+        untyped = {"ID": _UUID, "FullName": "out"}
+        typed = {"ID": _UUID, "FullName": "out.pdf", "MimeType": "application/pdf"}
+
+        references = guardrail_references([untyped, typed])
+
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("out.pdf", "application/pdf")
         ]
 
 

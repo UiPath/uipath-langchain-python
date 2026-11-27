@@ -628,6 +628,43 @@ class TestFallbackTypedFilesComeLast:
         ]
 
 
+class TestHeldFilesKeepTheirDescription:
+    """A state key never re-describes a file the run already holds."""
+
+    @pytest.mark.parametrize(
+        "uploaded",
+        [
+            pytest.param(
+                HumanMessage(_block(_wire(_HELD_ID, "user.bin", ""))), id="block"
+            ),
+            pytest.param(
+                HumanMessage(
+                    content="hi",
+                    additional_kwargs={
+                        "attachments": [
+                            {"id": _HELD_ID, "full_name": "user.bin", "mime_type": ""}
+                        ]
+                    },
+                ),
+                id="conversation",
+            ),
+        ],
+    )
+    def test_input_state_key_cannot_relabel_a_held_untyped_file(
+        self, uploaded: HumanMessage
+    ) -> None:
+        relabel = _wire(_HELD_ID, "evil.txt", "text/plain")
+
+        attachments = _agent_input_attachments(
+            {"messages": [uploaded], "report": relabel}
+        )
+
+        assert attachments is not None
+        assert [(a.file_name, a.mime_type) for a in attachments] == [
+            ("user.bin", "application/octet-stream")
+        ]
+
+
 class TestAgentScope:
     @_AGENT_KINDS
     def test_input_forwards_typed_attachments_with_the_block_files(
