@@ -875,6 +875,8 @@ _IMAGE_HEADERS = [
     (b"GIF87a\x01\x00\x01\x00", "image/gif"),
     (b"GIF89a\x01\x00\x01\x00", "image/gif"),
     (b"RIFF\x24\x00\x00\x00WEBPVP8 ", "image/webp"),
+    (b"II*\x00\x08\x00\x00\x00", "image/tiff"),
+    (b"MM\x00*\x00\x00\x00\x08", "image/tiff"),
 ]
 
 
@@ -1170,7 +1172,7 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
 
     @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
     @pytest.mark.parametrize("pdf_only_documents", [True, False])
-    @pytest.mark.parametrize(("header", "expected"), _IMAGE_HEADERS)
+    @pytest.mark.parametrize(("header", "expected"), _IMAGE_HEADERS[:-2])
     async def test_unlabeled_image_is_sent_as_an_image(
         self, mime_type: str, pdf_only_documents: bool, header: bytes, expected: str
     ) -> None:
@@ -1192,6 +1194,35 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
         assert blocks[0]["base64"] == data
         extras: Any = blocks[0].get("extras")
         assert extras["uipath_attachment_id"] == _ATTACHMENT_ID
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("name", ["receipt-tiff.imgx", "scan"])
+    async def test_unlabeled_tiff_is_sent_as_png_pages(
+        self, mime_type: str, name: str
+    ) -> None:
+        file = FileInfo(url="https://blob/x", name=name, mime_type=mime_type)
+        tiff = _make_tiff(num_pages=3)
+        with patch(_DOWNLOAD, return_value=_b64(tiff)) as download:
+            blocks = await build_file_content_blocks_for(file)
+
+        download.assert_awaited_once()
+        assert len(blocks) == 3
+        for block in blocks:
+            assert block["type"] == "image"
+            assert block["mime_type"] == "image/png"
+            assert Image.open(io.BytesIO(base64.b64decode(block["base64"]))).format == (
+                "PNG"
+            )
+
+    async def test_unlabeled_tiff_that_does_not_decode_is_a_file_error(self) -> None:
+        file = FileInfo(url="https://blob/x", name="scan.imgx", mime_type="")
+        with patch(_DOWNLOAD, return_value=_b64(b"II*\x00garbage-after-the-magic")):
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await build_file_content_blocks_for(file)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be read"
+        assert "'scan.imgx' is not a valid TIFF image" in info.detail
 
     async def test_unlabeled_image_keeps_its_extension_type(self) -> None:
         file = FileInfo(

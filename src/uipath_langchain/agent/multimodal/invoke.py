@@ -1,5 +1,7 @@
 """LLM invocation with multimodal file attachments."""
 
+import base64
+import io
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -37,6 +39,7 @@ from .utils import (
     normalize_mime_type,
     sanitize_filename,
     stream_tiff_to_content_blocks,
+    tiff_to_content_blocks,
     unlabeled_image_type,
 )
 
@@ -111,24 +114,34 @@ def _download_errors(file_info: FileInfo) -> Iterator[None]:
         ) from exc
 
 
+@contextmanager
+def _tiff_errors(file_info: FileInfo) -> Iterator[None]:
+    try:
+        yield
+    except (httpx.HTTPError, FileTooLargeError):
+        raise
+    except Exception as exc:
+        raise _file_error(
+            "Attachment could not be read",
+            f"File '{file_info.name}' is not a valid TIFF image.",
+        ) from exc
+
+
 async def _tiff_content_blocks(
     file_info: FileInfo, max_size: int
 ) -> list[DataContentBlock]:
-    with _download_errors(file_info):
-        try:
-            pages = await stream_tiff_to_content_blocks(
-                file_info.url, max_size=max_size
-            )
-        except (httpx.HTTPError, FileTooLargeError):
-            raise
-        except Exception as exc:
-            raise _file_error(
-                "Attachment could not be read",
-                f"File '{file_info.name}' is not a valid TIFF image.",
-            ) from exc
+    with _download_errors(file_info), _tiff_errors(file_info):
+        pages = await stream_tiff_to_content_blocks(file_info.url, max_size=max_size)
     if not pages:
         raise _empty_file_error(file_info)
     return pages
+
+
+def _downloaded_tiff_content_blocks(
+    file_info: FileInfo, base64_file: str
+) -> list[DataContentBlock]:
+    with _tiff_errors(file_info):
+        return tiff_to_content_blocks(io.BytesIO(base64.b64decode(base64_file)))
 
 
 async def build_file_content_blocks_for(
@@ -146,8 +159,8 @@ async def build_file_content_blocks_for(
     file declared ``application/octet-stream`` (or with no type) whose bytes
     are a PDF is sent as ``application/pdf``, whatever its extension; one whose
     type is still unknown after normalization (``client.ovpn``) is sent with
-    the image type its signature names, or as ``text/plain`` if its bytes are
-    text.
+    the image type its signature names (a TIFF is converted as below), or as
+    ``text/plain`` if its bytes are text.
     Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
@@ -228,6 +241,9 @@ async def build_file_content_blocks_for(
             file_info.mime_type,
         )
         mime_type = "text/plain"
+
+    if is_tiff(mime_type):
+        return _downloaded_tiff_content_blocks(file_info, base64_file)
 
     if is_image(mime_type):
         return [

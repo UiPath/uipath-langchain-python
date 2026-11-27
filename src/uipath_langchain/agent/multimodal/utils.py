@@ -156,6 +156,8 @@ _IMAGE_SIGNATURES = (
     (b"\xff\xd8\xff", "image/jpeg"),
     (b"GIF87a", "image/gif"),
     (b"GIF89a", "image/gif"),
+    (b"II*\x00", "image/tiff"),
+    (b"MM\x00*", "image/tiff"),
 )
 
 
@@ -166,7 +168,7 @@ def unlabeled_image_type(mime_type: str, base64_data: str) -> str | None:
     arrives with no type, and providers reject ``application/octet-stream``.
     Pass the normalized type, so a known extension keeps its own. Only the
     leading signature bytes are decoded. Returns ``None`` when the file is not
-    a PNG, JPEG, GIF or WebP image.
+    a PNG, JPEG, GIF, WebP or TIFF image.
     """
     if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
         return None
@@ -418,9 +420,6 @@ async def stream_tiff_to_content_blocks(
         FileTooLargeError: If the file exceeds max_size.
         httpx.HTTPStatusError: If the HTTP request fails.
     """
-    from langchain_core.messages.content import create_image_block
-    from PIL import Image, ImageSequence
-
     async with _stream_download(url, max_size=max_size) as response:
         buf = io.BytesIO()
         total = 0
@@ -438,6 +437,14 @@ async def stream_tiff_to_content_blocks(
         return []
 
     buf.seek(0)
+    return tiff_to_content_blocks(buf)
+
+
+def tiff_to_content_blocks(buf: io.BytesIO) -> list[DataContentBlock]:
+    """Convert each page of the TIFF in ``buf`` to a PNG image content block."""
+    from langchain_core.messages.content import create_image_block
+    from PIL import Image, ImageSequence
+
     blocks: list[DataContentBlock] = []
     with Image.open(buf) as img:
         for frame in ImageSequence.Iterator(img):
