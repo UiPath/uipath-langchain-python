@@ -97,6 +97,7 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
 # reads this and stamps it on the llmCall span as the ``attachments`` attribute.
 LLM_CALL_ATTACHMENTS_METADATA_KEY = "uipath_llm_call_attachments"
 
+
 def _is_analysis_task_configured(resource: AgentInternalToolResourceConfig) -> bool:
     for path in resource.argument_properties:
         try:

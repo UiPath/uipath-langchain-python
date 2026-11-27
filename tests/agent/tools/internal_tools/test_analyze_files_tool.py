@@ -576,9 +576,7 @@ class TestCreateAnalyzeFileTool:
         self, mock_get_wrapper, resource_config, mock_llm, path
     ):
         resource_config.argument_properties = {
-            path: AgentToolStaticArgumentProperties(
-                value="", is_sensitive=False
-            )
+            path: AgentToolStaticArgumentProperties(value="", is_sensitive=False)
         }
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
