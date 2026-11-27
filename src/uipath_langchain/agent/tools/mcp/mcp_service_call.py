@@ -31,13 +31,19 @@ from uipath.platform.orchestrator.mcp_tasks import (
 )
 
 from .mcp_task_suspension import (
+    API_TRIGGER_TYPE,
     PollWindowElapsed,
     Submission,
     SuspensionSettings,
     TaskJob,
+    TaskWatch,
+    TaskWatchTerms,
     call_with_suspension,
     durable_call_in_play,
     task_job,
+    task_watch,
+    task_watch_terms,
+    tasks_capability,
 )
 from .mcp_tasks import task_poll_budget_seconds
 
@@ -62,17 +68,26 @@ class _ServiceTaskCall:
         folder_path: str | None,
     ) -> None:
         self._mcp = sdk.mcp
+        # ``watch_task_async`` is in uipath-platform from 0.3.22. With an older
+        # one the Api kind is not declared, so the server never annotates a
+        # Remote server's task and it is polled.
+        self._can_watch = hasattr(self._mcp, "watch_task_async")
         self._slug = slug
         self._tool_name = tool_name
         self._arguments = arguments
         self._folder_path = folder_path
 
     async def submit(self) -> Submission[dict[str, Any], McpTask]:
+        declared: dict[str, Any] = {}
+        kinds = tasks_capability()["resumeTriggerTypes"]
+        if self._can_watch and API_TRIGGER_TYPE in kinds:
+            declared["resume_trigger_types"] = kinds
         outcome = await self._mcp.call_tool_async(
             self._slug,
             self._tool_name,
             self._arguments,
             folder_path=self._folder_path,
+            **declared,
         )
         if outcome.task is None:
             return Submission(result=outcome.result)
@@ -145,6 +160,36 @@ class _ServiceTaskCall:
 
     def job(self, handle: McpTask) -> TaskJob | None:
         return task_job((handle.model_extra or {}).get("_meta"))
+
+    def watch_terms(self, handle: McpTask) -> TaskWatchTerms | None:
+        if not self._can_watch:
+            return None
+        return task_watch_terms((handle.model_extra or {}).get("_meta"))
+
+    async def watch(
+        self, handle: McpTask, *, job_key: str, folder_key: str
+    ) -> dict[str, Any] | TaskWatch | None:
+        try:
+            snapshot = await self._mcp.watch_task_async(
+                handle, job_key=job_key, folder_key=folder_key
+            )
+        except _POLL_FAILURES:
+            # A look that failed says nothing about the task, and started no
+            # watch that is known of: the task is polled, and the waiter tells
+            # a passing failure from a final one.
+            logger.warning(
+                f"Could not ask for a watch on the MCP task for tool "
+                f"'{self._tool_name}'; polling on",
+                exc_info=True,
+            )
+            return None
+        if snapshot.status == McpTaskStatus.WORKING or not isinstance(
+            snapshot.status, McpTaskStatus
+        ):
+            return task_watch((snapshot.model_extra or {}).get("_meta"))
+        # Settled: the waiter returns the result, or raises what the task
+        # ended with, without polling again.
+        return await self._mcp.wait_for_task_async(snapshot, timeout=0)
 
 
 async def call_mcp_tool(

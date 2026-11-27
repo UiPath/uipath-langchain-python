@@ -47,9 +47,12 @@ from pydantic import Field, ValidationError
 from uipath.core.feature_flags import FeatureFlags
 
 from .mcp_task_suspension import (
-    UIPATH_TASKS_CAPABILITY,
     UIPATH_TASKS_EXTENSION_ID,
+    TaskWatch,
     suspension_enabled,
+    task_watch,
+    tasks_capability,
+    watch_request,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -484,6 +487,54 @@ async def peek_claimed_task(
     return final
 
 
+async def watch_claimed_task(
+    session: ClientSession,
+    tool_name: str,
+    handle: McpTaskHandle,
+    *,
+    job_key: str,
+    folder_key: str,
+) -> CallToolResult | TaskWatch | None:
+    """One ``tasks/get`` that also asks the server to watch the task.
+
+    Returns:
+        The task's validated result when it has ended; the watch the server
+        started when it is still working; ``None`` when it is still working
+        and the server started none, or when the look failed in a way a later
+        poll may not.
+
+    Raises:
+        MCPError: As :func:`peek_claimed_task`.
+    """
+    ctx = ClaimContext(session=session, tool_name=tool_name, read_timeout_seconds=None)
+    try:
+        snapshot = await session.send_request(
+            GetTaskRequest(
+                params=GetTaskRequestParams(
+                    task_id=handle.task_id,
+                    _meta=watch_request(job_key, folder_key),
+                )
+            ),
+            McpTaskSnapshot,
+            request_read_timeout_seconds=MAX_POLL_REQUEST_SECONDS,
+        )
+    except MCPError as poll_error:
+        if poll_error.code in (INTERNAL_ERROR, REQUEST_TIMEOUT):
+            logger.warning(
+                f"Transient failure reading MCP task {_task_ref(handle.task_id)} "
+                f"for tool '{tool_name}': {poll_error}"
+            )
+            return None
+        raise
+
+    final = _settled_result(handle, ctx, snapshot)
+    if final is None:
+        return task_watch(snapshot.meta)
+    if not final.is_error:
+        await session.validate_tool_result(tool_name, final)
+    return final
+
+
 def session_extension_kwargs() -> dict[str, Any]:
     """``ClientSession`` kwargs declaring Tasks, or nothing when opted out.
 
@@ -503,7 +554,7 @@ def session_extension_kwargs() -> dict[str, Any]:
         # own -- the task it answers with is the one claimed above -- so it is
         # declared with the trigger kinds a run can suspend on, and nothing
         # more. A server that serves it names the job behind the task.
-        extensions[UIPATH_TASKS_EXTENSION_ID] = dict(UIPATH_TASKS_CAPABILITY)
+        extensions[UIPATH_TASKS_EXTENSION_ID] = tasks_capability()
     return {
         "extensions": extensions,
         "result_claims": {extension.identifier: extension.claims()},

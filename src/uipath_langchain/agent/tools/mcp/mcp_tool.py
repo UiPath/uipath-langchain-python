@@ -33,9 +33,12 @@ from .mcp_task_suspension import (
     PollWindowElapsed,
     Submission,
     TaskJob,
+    TaskWatch,
+    TaskWatchTerms,
     call_with_suspension,
     durable_call_in_play,
     task_job,
+    task_watch_terms,
 )
 from .mcp_tasks import McpTaskHandle, McpTaskPollBudgetExhausted
 from .protocol_strategy import ProtocolMode
@@ -509,6 +512,16 @@ class _SessionTaskCall:
 
     def job(self, handle: McpTaskHandle) -> TaskJob | None:
         return task_job(handle.meta)
+
+    def watch_terms(self, handle: McpTaskHandle) -> TaskWatchTerms | None:
+        return task_watch_terms(handle.meta)
+
+    async def watch(
+        self, handle: McpTaskHandle, *, job_key: str, folder_key: str
+    ) -> CallToolResult | str | TaskWatch | None:
+        return await self._client.watch_task(
+            self._mcp_tool.name, handle, job_key=job_key, folder_key=folder_key
+        )
 
 
 def build_mcp_tool(

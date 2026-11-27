@@ -63,13 +63,14 @@ import math
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Generic, Mapping, Protocol, TypeVar
 
 import anyio
 from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph.config import get_config
 from uipath.core.feature_flags import FeatureFlags
-from uipath.platform.common import WaitJobRaw
+from uipath.platform.common import UiPathConfig, WaitJobRaw, WaitUntil
 from uipath.platform.orchestrator.job import Job
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -96,9 +97,30 @@ UIPATH_TASK_ANNOTATION_VERSION = 1
 #: kinds later; a task annotated with one of those is polled.
 JOB_TRIGGER_TYPE = "Job"
 
+#: The resume-trigger kind for a task the server does not run itself: a Remote
+#: MCP server's own task. There is no Orchestrator job to wait on, so the run
+#: suspends on an API trigger, which AgentHub fires when the task has ended.
+API_TRIGGER_TYPE = "Api"
+
+#: Under ``com.uipath/task``: on a ``tasks/get`` request, the ask that the
+#: server watch the task for this run's job; on the reply, the watch it started.
+WATCH_KEY = "watch"
+
+#: Under ``com.uipath/task`` in the API trigger's request: the watch the run is
+#: suspended on. The server delivers only to a trigger that carries it.
+WATCH_ID_KEY = "watchId"
+
 #: The ``com.uipath/tasks`` declaration: the trigger kinds this client handles.
 #: A server names a job only to a client whose list includes ``Job``.
 UIPATH_TASKS_CAPABILITY: dict[str, Any] = {"resumeTriggerTypes": [JOB_TRIGGER_TYPE]}
+
+#: Opt-in; set it to ``true`` to also suspend on a Remote server's task.
+API_SUSPENSION_FLAG = "EnableMcpTasksApiSuspension"
+
+#: How many times one call suspends on a watch. A watch ends when the
+#: credentials it runs on would, so a long task takes several; this bounds a
+#: task that never ends. After the last one the task is polled like any other.
+MAX_WATCHES_PER_CALL = 48
 
 #: Kill switch; set it to ``true`` to keep polling and never suspend.
 SUSPENSION_KILL_SWITCH = "DisableMcpTasksSuspension"
@@ -153,6 +175,33 @@ class TaskJob:
     job_key: str
     folder_key: str
     suspend_after: float | None = None
+
+
+@dataclass(frozen=True)
+class TaskWatchTerms:
+    """That a task can be suspended on through a watch, from its annotation.
+
+    Attributes:
+        suspend_after: Seconds. How long the server suggests polling the task
+            before suspending (``suspendAfterMs``), or ``None``.
+    """
+
+    suspend_after: float | None = None
+
+
+@dataclass(frozen=True)
+class TaskWatch:
+    """A watch the server started on a task, from a ``tasks/get`` reply.
+
+    Attributes:
+        watch_id: Names the watch. The run suspends with it, and the server
+            wakes only a run that did.
+        expires_in: Seconds. How long the watch runs. The run wakes itself
+            then, whether or not the server has woken it.
+    """
+
+    watch_id: str
+    expires_in: float
 
 
 def _as_seconds(milliseconds: Any) -> float | None:
@@ -231,6 +280,100 @@ def task_job(meta: Any) -> TaskJob | None:
     return TaskJob(job_key, folder_key, _as_seconds(annotation.get("suspendAfterMs")))
 
 
+def _annotation(meta: Any, trigger_type: str) -> Mapping[str, Any] | None:
+    """The ``com.uipath/task`` annotation, if it is one this client reads."""
+    if not isinstance(meta, Mapping):
+        return None
+    annotation = meta.get(UIPATH_TASK_META_KEY)
+    if not isinstance(annotation, Mapping):
+        return None
+    version = annotation.get("version")
+    if type(version) is not int or version != UIPATH_TASK_ANNOTATION_VERSION:
+        return None
+    trigger = annotation.get("resumeTrigger")
+    if not isinstance(trigger, Mapping) or trigger.get("triggerType") != trigger_type:
+        return None
+    return annotation
+
+
+def task_watch_terms(meta: Any) -> TaskWatchTerms | None:
+    """Read an ``Api`` annotation off a task's ``_meta``.
+
+    The same rule as :func:`task_job`: anything that is not exactly what is
+    expected yields ``None``, and the task is polled.
+    """
+    annotation = _annotation(meta, API_TRIGGER_TYPE)
+    if annotation is None:
+        return None
+    return TaskWatchTerms(_as_seconds(annotation.get("suspendAfterMs")))
+
+
+def task_watch(meta: Any) -> TaskWatch | None:
+    """Read the watch the server started off a ``tasks/get`` reply's ``_meta``.
+
+    ``None`` when the reply names none, or one that cannot be used: an id that
+    is not a GUID, or a lifetime that is not a positive number. The run then
+    keeps polling; it never suspends on a watch it cannot name or time.
+    """
+    annotation = _annotation(meta, API_TRIGGER_TYPE)
+    if annotation is None:
+        return None
+    watch = annotation.get(WATCH_KEY)
+    if not isinstance(watch, Mapping):
+        return None
+    watch_id = _as_key(watch.get("id"))
+    expires_in = _as_seconds(watch.get("expiresInMs"))
+    if watch_id is None or expires_in is None or not 0 < expires_in < math.inf:
+        return None
+    return TaskWatch(watch_id, expires_in)
+
+
+def watch_request(job_key: str, folder_key: str) -> dict[str, Any]:
+    """The ``_meta`` of a ``tasks/get`` that asks the server for a watch."""
+    return {
+        UIPATH_TASK_META_KEY: {
+            WATCH_KEY: {"jobKey": job_key, "folderKey": folder_key},
+        }
+    }
+
+
+def api_suspension_enabled() -> bool:
+    """Whether a run may suspend on a Remote server's task (default: no).
+
+    Set the ``EnableMcpTasksApiSuspension`` flag to ``true`` -- programmatically
+    or via ``UIPATH_FEATURE_EnableMcpTasksApiSuspension``. It only has an
+    effect where suspension itself is on (:func:`suspension_enabled`).
+    """
+    return suspension_enabled() and FeatureFlags.is_flag_enabled(
+        API_SUSPENSION_FLAG, default=False
+    )
+
+
+def tasks_capability() -> dict[str, Any]:
+    """The ``com.uipath/tasks`` declaration for this run.
+
+    ``Api`` is listed only when the run could act on it, so a server never
+    holds a reply to annotate it for a caller that would not suspend.
+    """
+    kinds = [JOB_TRIGGER_TYPE]
+    if api_suspension_enabled() and own_job() is not None:
+        kinds.append(API_TRIGGER_TYPE)
+    return {"resumeTriggerTypes": kinds}
+
+
+def own_job() -> tuple[str, str] | None:
+    """This run's own Orchestrator job and its folder, as GUID strings.
+
+    The server wakes this job, in this folder. ``None`` outside a job (a local
+    run), where there is nothing to wake and so nothing to suspend.
+    """
+    job_key = _as_key(UiPathConfig.job_key)
+    folder_key = _as_key(UiPathConfig.folder_key)
+    if job_key is None or folder_key is None:
+        return None
+    return job_key, folder_key
+
+
 def suspension_enabled() -> bool:
     """Whether a task call may suspend the run (default: yes).
 
@@ -263,8 +406,10 @@ def suspension_settings() -> SuspensionSettings:
     )
 
 
-def polling_time_before_suspension(settings: SuspensionSettings, job: TaskJob) -> float:
-    """How long to poll a task, in seconds, before suspending on its job.
+def polling_time_before_suspension(
+    settings: SuspensionSettings, job: TaskJob | TaskWatchTerms
+) -> float:
+    """How long to poll a task, in seconds, before suspending on it.
 
     The caller's own setting comes first, so that one run can be tuned without
     the server. Then the server's suggestion for this task, which it knows
@@ -364,6 +509,25 @@ class TaskCall(Protocol[ResultT, HandleT]):
     def job(self, handle: HandleT) -> TaskJob | None:
         """The job behind the task, when the server named one."""
 
+    # Optional, for a client that can suspend on a Remote server's task:
+    #
+    #   def watch_terms(self, handle) -> TaskWatchTerms | None
+    #       That the task can be watched, from its annotation.
+    #   async def watch(self, handle, *, job_key, folder_key) -> ResultT | TaskWatch | None
+    #       One ``tasks/get`` that asks for a watch: the task's result when it
+    #       has ended, the watch the server started, or ``None`` when it is
+    #       still working and unwatched.
+    #
+    # A call without them is never suspended on a watch.
+
+
+def _watch_terms_of(call: Any, handle: Any) -> TaskWatchTerms | None:
+    """The call's watch terms, for a client that can ask for a watch."""
+    if getattr(call, "watch", None) is None:
+        return None
+    read_terms = getattr(call, "watch_terms", None)
+    return read_terms(handle) if read_terms is not None else None
+
 
 @dataclass
 class _Saved(SkipInterruptValue):
@@ -395,6 +559,23 @@ def _wait_on_job(job: TaskJob) -> WaitJobRaw:
         job=Job(key=job.job_key, folder_key=job.folder_key, id=0),
         process_folder_key=job.folder_key,
     )
+
+
+def _wait_on_watch(watch: TaskWatch) -> list[Any]:
+    """The interrupt that suspends the run until the server's watch wakes it.
+
+    Two triggers, and the first to fire resumes the run. The API trigger's
+    request carries the watch id, which is how the server finds this run's
+    trigger among a job's. The timer is set to when the watch ends: a watch
+    that could not deliver, or whose credentials ran out, never strands the
+    run. Either way the run then reads the task itself.
+    """
+    return [
+        {UIPATH_TASK_META_KEY: {WATCH_ID_KEY: watch.watch_id}},
+        WaitUntil(
+            resume_time=datetime.now(timezone.utc) + timedelta(seconds=watch.expires_in)
+        ),
+    ]
 
 
 async def call_with_suspension(
@@ -531,6 +712,70 @@ async def call_with_suspension(
         if (_read_payload(parked) or {}).get("kind") == "finished":
             return result_of(parked)
         resumed = True
+
+    # A task the server does not run itself (a Remote server's) names no job.
+    # It is suspended on through a watch instead: the server is asked to watch
+    # the task and wake this run's job. Decided from what ``submit`` saved and
+    # from the run's own identity, so a replay takes the same path.
+    terms = None if job is not None else _watch_terms_of(call, handle)
+    owner = own_job() if terms is not None else None
+    if terms is not None and owner is not None:
+        job_key, folder_key = owner
+        watch_polling_ends_at = float(
+            submitted["submitted_at"]
+        ) + polling_time_before_suspension(settings, terms)
+
+        for round_number in range(MAX_WATCHES_PER_CALL):
+
+            @durable_interrupt
+            async def park_on_watch(first: bool = round_number == 0) -> Any:
+                if not api_suspension_enabled():
+                    # Switched off since the call was sent: no new suspend.
+                    return _Saved({"kind": "unwatched"})
+
+                if first:
+                    # Polled first, as for a job. After a resume there is
+                    # nothing to wait out: the watch has just ended.
+                    remaining = watch_polling_ends_at - time.time()
+                    if remaining > 0:
+                        try:
+                            return finished(
+                                await call.wait(
+                                    handle, seconds=remaining, poll_first=False
+                                )
+                            )
+                        except PollWindowElapsed:
+                            remaining = watch_polling_ends_at - time.time()
+                            if remaining > 0:
+                                await anyio.sleep(remaining)
+
+                # One ``tasks/get`` does both: it reads the task, and asks for
+                # a watch if it is still working.
+                outcome = await call.watch(  # type: ignore[attr-defined]
+                    handle, job_key=job_key, folder_key=folder_key
+                )
+                if outcome is None:
+                    # Still working and the server started no watch (it cannot
+                    # for this server, or this job): polled to its end.
+                    return _Saved({"kind": "unwatched"})
+                if isinstance(outcome, TaskWatch):
+                    logger.info(
+                        f"MCP task for tool '{tool_name}' is still working; "
+                        f"suspending the run on watch {outcome.watch_id} for up to "
+                        f"{outcome.expires_in:.0f}s"
+                    )
+                    return _wait_on_watch(outcome)
+                return finished(outcome)
+
+            watched = await park_on_watch()
+            kind = (_read_payload(watched) or {}).get("kind")
+            if kind == "finished":
+                return result_of(watched)
+            if kind == "unwatched":
+                break
+            # Woken by the server or by the timer. Which one does not matter:
+            # the next round reads the task and, if it still works, asks again.
+            resumed = True
 
     @durable_interrupt
     async def collect() -> _Saved:
