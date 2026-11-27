@@ -309,29 +309,43 @@ class TestBuildRegistry:
         )
 
         assert len(blocks) == 2
-        assert _summary(registry) == {_HELD_ID: ("scan.imgx", "")}
+        assert _summary(registry) == {_HELD_ID: ("scan.imgx", "image/tiff")}
         assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
-            ("scan.imgx", "application/octet-stream")
+            ("scan.imgx", "image/tiff")
         ]
 
     @pytest.mark.parametrize(
-        ("name", "data", "stored"),
+        ("name", "declared", "data", "stored"),
         [
             pytest.param(
-                "receipt.imgx", b"\x89PNG\r\n\x1a\n" + b"\x00" * 16, "", id="image"
+                "receipt.imgx",
+                "",
+                b"\x89PNG\r\n\x1a\n" + b"\x00" * 16,
+                "image/png",
+                id="image",
             ),
-            pytest.param("scan.imgx", b"%PDF-1.7\n%x", "", id="pdf"),
-            pytest.param("client.ovpn", b"client\r\ndev tun\n", "", id="text"),
+            pytest.param("scan.imgx", "", b"%PDF-1.7\n%x", "application/pdf", id="pdf"),
+            pytest.param(
+                "scan.bin",
+                "application/octet-stream",
+                b"%PDF-1.7\n%x",
+                "application/pdf",
+                id="pdf-declared-octet-stream",
+            ),
+            pytest.param(
+                "client.ovpn", "", b"client\r\ndev tun\n", "text/plain", id="text"
+            ),
             pytest.param(
                 "Budget.docx",
+                "",
                 b"%PDF-1.7\n%x",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/pdf",
                 id="pdf-under-a-known-extension",
             ),
         ],
     )
-    async def test_reads_a_file_typed_by_its_content_as_stored(
-        self, name: str, data: bytes, stored: str
+    async def test_reads_a_file_typed_by_its_content_as_its_content(
+        self, name: str, declared: str, data: bytes, stored: str
     ) -> None:
         with patch(
             "uipath_langchain.agent.multimodal.invoke.download_file_base64",
@@ -341,7 +355,7 @@ class TestBuildRegistry:
                 FileInfo(
                     url="https://blob/x",
                     name=name,
-                    mime_type="",
+                    mime_type=declared,
                     attachment_id=_HELD_ID,
                 )
             )

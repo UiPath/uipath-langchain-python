@@ -242,16 +242,14 @@ async def _build_file_content_blocks(
             content_type,
         )
         mime_type = content_type
-        if tags:
-            # The guardrail registry describes the stored file, not this part.
-            tags[ATTACHMENT_MIME_TYPE_EXTRA] = type_by_name
 
     if is_tiff(mime_type):
         pages = _downloaded_tiff_content_blocks(file_info, base64_file)
-        if not is_tiff(type_by_name):
+        if not is_tiff(type_by_name) and tags:
+            # A page is a PNG; the guardrail registry describes the stored TIFF.
             for page in pages:
                 page_extras = cast(dict[str, Any], page).setdefault("extras", {})
-                page_extras.update(tags)
+                page_extras.update(tags, **{ATTACHMENT_MIME_TYPE_EXTRA: "image/tiff"})
         return pages, mime_type
 
     if is_image(mime_type):
