@@ -11,7 +11,9 @@ import pytest
 from langchain_core.messages import HumanMessage, convert_to_openai_data_block
 from PIL import Image
 from pytest_httpx import HTTPXMock
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.multimodal.invoke import (
     build_file_content_blocks_for,
     file_part_filename,
@@ -278,8 +280,12 @@ class TestBuildFileContentBlocksFor:
         httpx_mock.add_response(url=FILE_URL, content=oversized_content)
         file_info = FileInfo(url=FILE_URL, name="huge.pdf", mime_type="application/pdf")
 
-        with pytest.raises(ValueError, match="exceeds"):
+        with pytest.raises(AgentRuntimeError, match="exceeds") as exc_info:
             await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "File attachment too large"
+        assert info.category == UiPathErrorCategory.USER
 
     async def test_rejects_file_exceeding_custom_limit(
         self, httpx_mock: HTTPXMock
@@ -289,7 +295,7 @@ class TestBuildFileContentBlocksFor:
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="big.png", mime_type="image/png")
 
-        with pytest.raises(ValueError, match="exceeds"):
+        with pytest.raises(AgentRuntimeError, match="exceeds"):
             await build_file_content_blocks_for(file_info, max_size=10)
 
     async def test_file_within_custom_limit_succeeds(
@@ -352,15 +358,118 @@ class TestBuildFileContentBlocksFor:
         assert blocks[0]["mime_type"] == "application/octet-stream"
 
     async def test_error_includes_filename(self, httpx_mock: HTTPXMock) -> None:
-        """ValueError from download includes the filename for debuggability."""
+        """A download error names the file."""
         content = b"x" * 200
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(
             url=FILE_URL, name="report.pdf", mime_type="application/pdf"
         )
 
-        with pytest.raises(ValueError, match="report.pdf"):
+        with pytest.raises(AgentRuntimeError, match="report.pdf"):
             await build_file_content_blocks_for(file_info, max_size=100)
+
+    @pytest.mark.parametrize(
+        "name, mime_type",
+        [
+            ("empty.pdf", "application/pdf"),
+            ("empty.tif", "image/tiff"),
+            ("empty.tiff", "image/tiff"),
+            ("empty.tif", "image/x-tiff"),
+            ("empty.tiff", ""),
+        ],
+    )
+    async def test_empty_file_is_a_user_file_error(
+        self, httpx_mock: HTTPXMock, name: str, mime_type: str
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"")
+        file_info = FileInfo(url=FILE_URL, name=name, mime_type=mime_type)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment is empty"
+        assert info.category == UiPathErrorCategory.USER
+        assert f"'{name}'" in info.detail
+
+    @pytest.mark.parametrize(
+        "status_code, category",
+        [
+            (403, UiPathErrorCategory.SYSTEM),
+            (404, UiPathErrorCategory.USER),
+            (410, UiPathErrorCategory.USER),
+            (500, UiPathErrorCategory.SYSTEM),
+            (503, UiPathErrorCategory.SYSTEM),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "name, mime_type", [("doc.pdf", "application/pdf"), ("scan.tiff", "image/tiff")]
+    )
+    async def test_failed_download_is_a_file_error_with_the_status(
+        self,
+        httpx_mock: HTTPXMock,
+        status_code: int,
+        category: UiPathErrorCategory,
+        name: str,
+        mime_type: str,
+    ) -> None:
+        httpx_mock.add_response(
+            url=FILE_URL,
+            status_code=status_code,
+            text="The specified blob does not exist.",
+        )
+        file_info = FileInfo(url=FILE_URL, name=name, mime_type=mime_type)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be downloaded"
+        assert info.category == category
+        assert info.status == status_code
+        assert f"'{name}'" in info.detail
+        assert f"HTTP {status_code}" in info.detail
+        assert FILE_URL not in info.detail
+        assert isinstance(exc_info.value.__cause__, httpx.HTTPStatusError)
+
+    async def test_download_error_without_a_reason_phrase_has_no_empty_parentheses(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, status_code=499)
+        file_info = FileInfo(url=FILE_URL, name="doc.pdf", mime_type="application/pdf")
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        assert "()" not in exc_info.value.error_info.detail
+        assert "HTTP 499." in exc_info.value.error_info.detail
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ReadTimeout("timed out"),
+            httpx.ConnectError("refused"),
+            httpx.RemoteProtocolError("peer closed connection"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "name, mime_type", [("doc.pdf", "application/pdf"), ("scan.tiff", "image/tiff")]
+    )
+    async def test_transport_failure_is_a_system_file_error(
+        self, httpx_mock: HTTPXMock, error: Exception, name: str, mime_type: str
+    ) -> None:
+        httpx_mock.add_exception(error, url=FILE_URL)
+        file_info = FileInfo(url=FILE_URL, name=name, mime_type=mime_type)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be downloaded"
+        assert info.category == UiPathErrorCategory.SYSTEM
+        assert f"'{name}'" in info.detail
+        assert type(error).__name__ in info.detail
+        assert exc_info.value.__cause__ is error
 
     async def test_csv_declared_as_excel_is_sent_as_text_csv(
         self, httpx_mock: HTTPXMock
@@ -473,7 +582,7 @@ class TestBuildFileContentBlocksFor:
         httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
         file_info = FileInfo(url=FILE_URL, name="big.tiff", mime_type="image/tiff")
 
-        with pytest.raises(ValueError, match="exceeds"):
+        with pytest.raises(AgentRuntimeError, match="exceeds"):
             await build_file_content_blocks_for(file_info, max_size=10)
 
     async def test_tiff_error_includes_filename(self, httpx_mock: HTTPXMock) -> None:
@@ -481,8 +590,77 @@ class TestBuildFileContentBlocksFor:
         httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
         file_info = FileInfo(url=FILE_URL, name="report.tiff", mime_type="image/tiff")
 
-        with pytest.raises(ValueError, match="report.tiff"):
+        with pytest.raises(AgentRuntimeError, match="report.tiff"):
             await build_file_content_blocks_for(file_info, max_size=10)
+
+    async def test_tiff_that_cannot_be_decoded_is_a_user_file_error(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"not a tiff")
+        file_info = FileInfo(url=FILE_URL, name="scan.tiff", mime_type="image/tiff")
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be read"
+        assert info.category == UiPathErrorCategory.USER
+        assert "'scan.tiff'" in info.detail
+
+    @pytest.mark.parametrize("cut", [8, 40, 100])
+    async def test_truncated_tiff_is_a_user_file_error(
+        self, httpx_mock: HTTPXMock, cut: int
+    ) -> None:
+        tiff_bytes = _make_tiff(num_pages=2, width=16, height=16)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes[:cut])
+        file_info = FileInfo(url=FILE_URL, name="scan.tiff", mime_type="image/tiff")
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be read"
+        assert info.category == UiPathErrorCategory.USER
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            TypeError("bad tag"),
+            KeyError("compression"),
+            SyntaxError("bad tag data"),
+            ValueError("tile cannot extend outside image"),
+            Image.DecompressionBombError("too many pixels"),
+        ],
+    )
+    async def test_any_tiff_decode_failure_is_a_user_file_error(
+        self, httpx_mock: HTTPXMock, error: Exception
+    ) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=_make_tiff())
+        file_info = FileInfo(url=FILE_URL, name="scan.tiff", mime_type="image/tiff")
+
+        with patch.object(Image, "open", side_effect=error):
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await build_file_content_blocks_for(file_info)
+
+        info = exc_info.value.error_info
+        assert info.title == "Attachment could not be read"
+        assert info.category == UiPathErrorCategory.USER
+        assert "'scan.tiff'" in info.detail
+        assert exc_info.value.__cause__ is error
+
+    async def test_tiff_decompression_bomb_is_a_user_file_error(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        bomb = io.BytesIO()
+        Image.new("1", (20000, 20000)).save(bomb, format="TIFF", compression="group4")
+        httpx_mock.add_response(url=FILE_URL, content=bomb.getvalue())
+        file_info = FileInfo(url=FILE_URL, name="bomb.tiff", mime_type="image/tiff")
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await build_file_content_blocks_for(file_info)
+
+        assert exc_info.value.error_info.title == "Attachment could not be read"
+        assert isinstance(exc_info.value.__cause__, Image.DecompressionBombError)
 
     async def test_tiff_png_blocks_contain_valid_base64(
         self, httpx_mock: HTTPXMock

@@ -493,6 +493,54 @@ async def test_each_tiff_page_reaches_decisions_as_a_png(
     ]
 
 
+async def test_an_empty_tiff_is_a_tool_error(decisions_client: Any) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(
+        url="https://blob/scan.tiff", name="scan.tiff", mime_type="image/tiff"
+    )
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(
+            f"{PACKAGE}.tool.stream_tiff_to_content_blocks",
+            AsyncMock(return_value=[]),
+        ),
+    ):
+        message = await _tool_message(
+            tool,
+            {"input": "text", "images": [{**ATTACHMENT, "FullName": "scan.tiff"}]},
+        )
+
+    assert message.status == "error"
+    assert "'scan.tiff'" in message.content
+    assert "has no content" in message.content
+    decisions_client.acreate.assert_not_awaited()
+
+
+async def test_an_empty_image_is_a_tool_error(decisions_client: Any) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(
+        url="https://blob/receipt.png", name="receipt.png", mime_type="image/png"
+    )
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(f"{PACKAGE}.tool.download_file_base64", AsyncMock(return_value="")),
+    ):
+        message = await _tool_message(tool, {"input": "text", "images": [ATTACHMENT]})
+
+    assert message.status == "error"
+    assert "'receipt.png'" in message.content
+    assert "has no content" in message.content
+    decisions_client.acreate.assert_not_awaited()
+
+
 async def test_a_file_that_is_not_an_image_is_a_tool_error(
     decisions_client: Any,
 ) -> None:
