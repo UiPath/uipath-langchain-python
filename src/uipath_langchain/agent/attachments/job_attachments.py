@@ -368,6 +368,19 @@ def parse_attachments_from_conversation_messages(
     return attachments
 
 
+def split_by_guardrail_type(attachments: Iterable[Any]) -> tuple[list[Any], list[Any]]:
+    """The attachments with their own type, then those given a fallback one.
+
+    See :func:`with_guardrail_mime_type`; each group keeps its order.
+    """
+    declared: list[Any] = []
+    fallback: list[Any] = []
+    for attachment in attachments:
+        typed = with_guardrail_mime_type(attachment)
+        (declared if typed is attachment else fallback).append(typed)
+    return declared, fallback
+
+
 def guardrail_references(attachments: Iterable[Any]) -> list[GuardrailAttachment]:
     """References for a guardrail to inspect, at most ``MAX_ATTACHMENTS``.
 
@@ -375,18 +388,17 @@ def guardrail_references(attachments: Iterable[Any]) -> list[GuardrailAttachment
     (:func:`with_guardrail_mime_type`), after every file that has its own, so it
     never takes the place of one that used to be inspected.
     """
-    declared: list[Any] = []
-    fallback: list[Any] = []
-    for attachment in attachments:
-        typed = with_guardrail_mime_type(attachment)
-        (declared if typed is attachment else fallback).append(typed)
+    declared, fallback = split_by_guardrail_type(attachments)
     return to_references([*declared, *fallback])
 
 
-def referenced_guardrail_attachments(
+def referenced_guardrail_attachment_groups(
     data: Any, registry: Mapping[str, Attachment]
-) -> list[GuardrailAttachment] | None:
-    """:func:`referenced_attachments`, ordered as :func:`guardrail_references`."""
+) -> tuple[list[GuardrailAttachment], list[GuardrailAttachment]] | None:
+    """:func:`referenced_attachments` for files with their own type, then the rest.
+
+    ``None`` when ``data`` cannot be scanned.
+    """
     declared = {
         key: attachment
         for key, attachment in registry.items()
@@ -398,9 +410,18 @@ def referenced_guardrail_attachments(
         if key not in declared
     }
     held = referenced_attachments(data, declared)
-    if held is None or not fallback:
-        return held
-    typed = referenced_attachments(data, fallback)
-    if typed is None:
+    typed = referenced_attachments(data, fallback) if fallback else []
+    if held is None or typed is None:
         return None
+    return held, typed
+
+
+def referenced_guardrail_attachments(
+    data: Any, registry: Mapping[str, Attachment]
+) -> list[GuardrailAttachment] | None:
+    """:func:`referenced_attachments`, ordered as :func:`guardrail_references`."""
+    groups = referenced_guardrail_attachment_groups(data, registry)
+    if groups is None:
+        return None
+    held, typed = groups
     return [*held, *typed][:MAX_ATTACHMENTS]

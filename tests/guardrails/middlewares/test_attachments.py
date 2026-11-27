@@ -505,6 +505,41 @@ class TestReferences:
         ):
             assert tool_result_references({"files": []}, _registry(_wire())) is None
 
+    def test_a_new_untyped_tool_result_file_is_forwarded_after_typed_ones(
+        self,
+    ) -> None:
+        untyped = {"ID": _OTHER_ID, "FullName": "out.imgx"}
+        result = {"files": [untyped, _wire(_THIRD_ID, "summary.pdf")]}
+
+        references = tool_result_references(result, {})
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("summary.pdf", "application/pdf"),
+            ("out.imgx", "application/octet-stream"),
+        ]
+
+    def test_a_new_untyped_tool_result_file_reaches_the_next_model_check(
+        self,
+    ) -> None:
+        returned = ToolMessage(
+            content=json.dumps({"file": {"ID": _OTHER_ID, "FullName": "out.imgx"}}),
+            tool_call_id="tc1",
+        )
+        registry = build_registry({"messages": [returned]})
+        output = AIMessage(
+            content="",
+            tool_calls=[{"name": "t", "args": {"f": {"ID": _OTHER_ID}}, "id": "c1"}],
+        )
+
+        references = output_references(output, registry)
+
+        assert registry[_OTHER_ID].mime_type == ""
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("out.imgx", "application/octet-stream")
+        ]
+
     def test_tool_result_references_cap_at_five(self) -> None:
         result = {"files": [_wire(str(uuid.uuid4()), f"{i}.pdf") for i in range(7)]}
 

@@ -32,8 +32,11 @@ from uipath_langchain.agent.attachments.job_attachments import (
     guardrail_references,
     parse_attachments_from_conversation_messages,
     parse_tool_content,
+    referenced_guardrail_attachment_groups,
     referenced_guardrail_attachments,
+    split_by_guardrail_type,
 )
+from uipath_langchain.agent.attachments.mime_types import with_guardrail_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +154,8 @@ def tool_result_references(
     """Return references for the files a tool result names or returns.
 
     Held files keep the registry's name and type; a file the result describes with
-    its own name and type is new output of the tool and is forwarded as described.
+    its own name is new output of the tool and is forwarded as described, or with a
+    fallback type when it names none. Files with their own type come first.
 
     Args:
         result_data: The tool's parsed result.
@@ -161,11 +165,22 @@ def tool_result_references(
         Up to five references, held files first; ``None`` when the result cannot
         be scanned.
     """
-    held = referenced_guardrail_attachments(result_data, registry)
+    groups = referenced_guardrail_attachment_groups(result_data, registry)
     described = discover_attachments(result_data)
-    if held is None or described is None:
+    if groups is None or described is None:
         return None
-    return to_references(_as_mention(reference) for reference in [*held, *described])
+    held, held_untyped = groups
+    _, described_untyped = split_by_guardrail_type(
+        iter_attachment_mentions(result_data)
+    )
+    return to_references(
+        [
+            *map(_as_mention, held),
+            *map(_as_mention, described),
+            *map(_as_mention, held_untyped),
+            *described_untyped,
+        ]
+    )
 
 
 def _add(registry: dict[str, Attachment], attachments: Iterable[Attachment]) -> None:
@@ -263,7 +278,12 @@ def _tool_result_attachments(message: BaseMessage) -> Iterator[Attachment]:
     if not isinstance(message, ToolMessage):
         return
     for mention in iter_attachment_mentions(parse_tool_content(message.content)):
-        yield from _validated(map(_as_mention, to_references([mention])))
+        typed = with_guardrail_mime_type(mention)
+        for reference in to_references([typed]):
+            stored = _as_mention(reference)
+            if typed is not mention:
+                stored["MimeType"] = ""
+            yield from _validated([stored])
 
 
 def _as_mention(reference: GuardrailAttachment) -> dict[str, str]:
