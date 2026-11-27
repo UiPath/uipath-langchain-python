@@ -133,8 +133,12 @@ _GUARDRAIL_BLOCK_DETAIL = (
     "Execution was blocked by your organization's AI Trust Layer policy."
 )
 _GUARDRAIL_BLOCK_MESSAGE_LIMIT = 300
-# CentralizedGuardrailsRejection.Message in the gateway, followed by the guardrails' names.
-_GUARDRAIL_BLOCK_MESSAGE_PREFIX = "Request rejected due to Centralized guardrails "
+# CentralizedGuardrailsRejection.Message in the gateway: the guardrails' names, then
+# optionally ": " and the validators' details.
+_GUARDRAIL_BLOCK_TEMPLATE = re.compile(
+    r"Request rejected due to Centralized guardrails (?P<names>[^:\r\n]{1,300})(?=:|\Z)"
+)
+_GUARDRAIL_NAMES = re.compile(r"[a-z0-9_]{1,64}(?:, [a-z0-9_]{1,64}){0,9}")
 
 
 def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | None:
@@ -143,12 +147,16 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     The AI Trust Layer policy of the organization is enforced by the LLM gateway
     on every LLM call, and a blocked call is answered 400 with gateway error
     code 3040, in the ``X-UiPath-LlmGateway-ErrorCode`` header or in the body.
-    A raw vendor passthrough body carries no code (the OpenAI shape has
-    ``"code": null``) and the header does not always reach the client, so a 400
-    that names no gateway error code is also a block when its message starts
-    with the gateway's fixed rejection text. Neither retrying nor changing the model settings helps, so this is a
+    Neither retrying nor changing the model settings helps, so this is a
     ``TERMINATION_GUARDRAIL_VIOLATION``. Its detail carries the gateway's own
     message up to the validators' details, which can quote the request.
+
+    A raw vendor passthrough body carries no code (the OpenAI shape has
+    ``"code": null``) and the header does not always reach the client, so a 400
+    that names no error code is also a block when one of its messages is the
+    gateway's rejection template. Nothing vouches for such a message, so its
+    detail is the fixed text plus the guardrail names only when they are plain
+    identifiers.
 
     Args:
         error: Any exception from an LLM call: a ``UiPathAPIError``, a raw
@@ -162,13 +170,14 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     api_error = as_uipath_error(error) if isinstance(error, Exception) else None
     if not isinstance(api_error, UiPathAPIError) or api_error.status_code != 400:
         return None
-    if not _is_guardrail_block(api_error):
+    detail = _guardrail_block_detail_for(api_error)
+    if detail is None:
         return None
 
     blocked = AgentRuntimeError(
         code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
         title="Guardrail violation",
-        detail=_guardrail_block_detail(api_error.body),
+        detail=detail,
         category=UiPathErrorCategory.USER,
         status=api_error.status_code,
     )
@@ -176,27 +185,35 @@ def centralized_guardrail_error(error: BaseException) -> AgentRuntimeError | Non
     return blocked
 
 
-def _is_guardrail_block(error: UiPathAPIError) -> bool:
+def _guardrail_block_detail_for(error: UiPathAPIError) -> str | None:
+    """The detail of a centralized block, or ``None`` when ``error`` is not one."""
     body = error.body if isinstance(error.body, dict) else {}
     envelope = body.get("error")
-    gateway_codes = [
-        _error_code_text(code)
-        for code in (
-            body.get("ErrorCode"),
-            error.response.headers.get(_GUARDRAIL_BLOCK_ERROR_CODE_HEADER),
-        )
-    ]
     envelope_code = _error_code_text(
         envelope.get("code") if isinstance(envelope, dict) else None
     )
-    if _GUARDRAIL_BLOCK_ERROR_CODE in (*gateway_codes, envelope_code):
-        return True
-    if any(gateway_codes):
-        return False
-    return any(
-        message.startswith(_GUARDRAIL_BLOCK_MESSAGE_PREFIX)
-        for message in _gateway_messages(error.body)
-    )
+    codes = [
+        _error_code_text(body.get("ErrorCode")),
+        _error_code_text(
+            error.response.headers.get(_GUARDRAIL_BLOCK_ERROR_CODE_HEADER)
+        ),
+        # The Vertex AI shape carries the HTTP status as its code.
+        None if envelope_code == str(error.status_code) else envelope_code,
+    ]
+    if _GUARDRAIL_BLOCK_ERROR_CODE in codes:
+        return _guardrail_block_detail(error.body)
+    if any(codes):
+        return None
+    for message in _gateway_messages(error.body):
+        if match := _GUARDRAIL_BLOCK_TEMPLATE.match(message):
+            names = match["names"].strip()
+            if _GUARDRAIL_NAMES.fullmatch(names):
+                return (
+                    f"{_GUARDRAIL_BLOCK_DETAIL} Request rejected due to "
+                    f"Centralized guardrails {names}"
+                )
+            return _GUARDRAIL_BLOCK_DETAIL
+    return None
 
 
 def _error_code_text(code: object) -> str | None:
