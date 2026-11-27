@@ -12,7 +12,7 @@ import httpx
 from langchain_core.messages import DataContentBlock
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
-from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES, FileInfo
+from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES
 
 
 class FileTooLargeError(ValueError):
@@ -501,22 +501,6 @@ async def read_file_head(url: str, size: int = CONTENT_HEAD_BYTES) -> bytes:
             if len(head) >= size:
                 break
     return bytes(head[:size])
-
-
-async def file_content_mime_type(file_info: FileInfo) -> str:
-    """:func:`content_mime_type` for a file not downloaded yet.
-
-    Reads the head of the file only when its declared type says nothing.
-
-    Raises:
-        httpx.HTTPError: If the head of the file cannot be downloaded.
-    """
-    head = (
-        await read_file_head(file_info.url)
-        if is_unlabeled(file_info.mime_type)
-        else b""
-    )
-    return content_mime_type(file_info.mime_type, file_info.name, head)
 
 
 async def download_file_base64(url: str, *, max_size: int = 0) -> str:
