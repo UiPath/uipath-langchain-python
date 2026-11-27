@@ -563,3 +563,129 @@ async def test_the_suspend_becomes_an_api_trigger_and_a_timer() -> None:
     assert api.api_resume.request == {"com.uipath/task": {"watchId": WATCH_ID}}
     assert timer.trigger_type == UiPathResumeTriggerType.TIMER
     assert timer.resume_time is not None
+
+
+# --- a coded agent: call_mcp_tool over the platform SDK ---------------------------
+
+
+class WatchingMcp:
+    """The parts of ``McpService`` a coded call uses, with ``watch_task_async``."""
+
+    def __init__(self, watched: Any) -> None:
+        self.watched = watched
+        self.declared: list[Any] = []
+        self.asked: list[tuple[str, str]] = []
+
+    async def call_tool_async(
+        self, slug: str, tool: str, arguments: Any, **kwargs: Any
+    ) -> Any:
+        from uipath.platform.orchestrator.mcp_tasks import McpToolCallOutcome
+
+        self.declared.append(kwargs.get("resume_trigger_types"))
+        return McpToolCallOutcome(task=service_task("working", api_annotation()))
+
+    async def watch_task_async(
+        self, task: Any, *, job_key: str, folder_key: str
+    ) -> Any:
+        self.asked.append((job_key, folder_key))
+        if isinstance(self.watched, Exception):
+            raise self.watched
+        return self.watched
+
+    async def wait_for_task_async(
+        self, task: Any, *, timeout: float | None = None
+    ) -> Any:
+        return {"content": [{"type": "text", "text": "done"}]}
+
+
+def service_task(status: str, meta: Any = None) -> Any:
+    from uipath.platform.orchestrator.mcp_tasks import McpTask
+
+    payload: dict[str, Any] = {"taskId": "task-1", "status": status}
+    if meta is not None:
+        payload["_meta"] = meta
+    task = McpTask.model_validate(payload)
+    task.server_url = "https://agenthub.test/mcp"
+    return task
+
+
+def service_call(mcp: Any) -> Any:
+    from types import SimpleNamespace
+
+    from uipath_langchain.agent.tools.mcp.mcp_service_call import _ServiceTaskCall
+
+    return _ServiceTaskCall(SimpleNamespace(mcp=mcp), "remote", "research", {}, None)
+
+
+async def test_a_coded_call_declares_api_and_asks_for_a_watch(as_a_job: None) -> None:
+    mcp = WatchingMcp(
+        service_task(
+            "working", api_annotation(watch={"id": WATCH_ID, "expiresInMs": 600000})
+        )
+    )
+    call = service_call(mcp)
+
+    submission = await call.submit()
+    assert mcp.declared == [["Job", "Api"]]
+    assert call.watch_terms(submission.handle) == TaskWatchTerms(60.0)
+
+    watch = await call.watch(submission.handle, job_key=JOB_KEY, folder_key=FOLDER_KEY)
+
+    assert watch == TaskWatch(WATCH_ID, 600.0)
+    assert mcp.asked == [(JOB_KEY, FOLDER_KEY)]
+
+
+async def test_a_coded_call_that_finds_the_task_ended_returns_its_result(
+    as_a_job: None,
+) -> None:
+    call = service_call(WatchingMcp(service_task("completed")))
+    handle = service_task("working", api_annotation())
+
+    result = await call.watch(handle, job_key=JOB_KEY, folder_key=FOLDER_KEY)
+
+    assert result == {"content": [{"type": "text", "text": "done"}]}
+
+
+async def test_a_coded_call_whose_ask_fails_starts_no_suspend(as_a_job: None) -> None:
+    import httpx
+
+    call = service_call(WatchingMcp(httpx.ConnectError("no route")))
+    handle = service_task("working", api_annotation())
+
+    assert await call.watch(handle, job_key=JOB_KEY, folder_key=FOLDER_KEY) is None
+
+
+async def test_a_coded_call_without_the_opt_in_declares_nothing_new() -> None:
+    mcp = WatchingMcp(None)
+
+    await service_call(mcp).submit()
+
+    # The SDK's own default declaration, untouched.
+    assert mcp.declared == [None]
+
+
+async def test_with_an_sdk_that_cannot_watch_a_coded_call_is_polled(
+    as_a_job: None,
+) -> None:
+    """uipath-platform before 0.3.22: no ``watch_task_async``."""
+
+    class OlderMcp:
+        def __init__(self) -> None:
+            self.kwargs: list[dict[str, Any]] = []
+
+        async def call_tool_async(
+            self, slug: str, tool: str, arguments: Any, **kwargs: Any
+        ) -> Any:
+            from uipath.platform.orchestrator.mcp_tasks import McpToolCallOutcome
+
+            self.kwargs.append(kwargs)
+            return McpToolCallOutcome(task=service_task("working", api_annotation()))
+
+    mcp = OlderMcp()
+    call = service_call(mcp)
+
+    submission = await call.submit()
+
+    # No keyword the older SDK does not take, and no watch terms: polled.
+    assert mcp.kwargs == [{"folder_path": None}]
+    assert call.watch_terms(submission.handle) is None

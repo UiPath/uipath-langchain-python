@@ -607,8 +607,10 @@ Rules to keep:
   feature. So does `MAX_WATCHES_PER_CALL` rounds, and the flag being switched
   off while suspended.
 - **`watch` and `watch_terms` are optional on a `TaskCall`.** `_SessionTaskCall`
-  has them. `_ServiceTaskCall` does not yet (`McpService.get_task` cannot send
-  request `_meta`), so `call_mcp_tool` polls a Remote server's task.
+  has them. So does `_ServiceTaskCall`, through `McpService.watch_task_async`,
+  which is in `uipath-platform` from 0.3.22: with an older one it does not
+  declare `Api`, reports no watch terms, and `call_mcp_tool` polls a Remote
+  server's task. The check is `hasattr`, so the floor need not move.
 - **Not in a conversational or a debug run.** Those runtimes treat an API
   trigger as a prompt for a person. Nothing here detects them; the flag is the
   guard, so leave it off for such agents.
