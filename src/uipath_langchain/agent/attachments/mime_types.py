@@ -2,6 +2,9 @@
 
 import mimetypes
 from pathlib import Path
+from typing import Any
+
+from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.multimodal.utils import normalize_mime_type
 
@@ -24,3 +27,19 @@ def guess_mime_type(file_name: str) -> str:
         return _EXTRA_MIME_TYPES[suffix]
     guessed, _ = mimetypes.guess_type(file_name)
     return normalize_mime_type(guessed or _DEFAULT_MIME_TYPE, file_name)
+
+
+def with_guardrail_mime_type(attachment: Any) -> Any:
+    """The attachment with a type a guardrail reference can carry.
+
+    A file uploaded with no type keeps an empty one, and a reference without a
+    type is dropped (``uipath.platform.guardrails.to_references``), so a
+    files-only guardrail would pass without seeing it. It is given its
+    extension's type, else ``application/octet-stream``, which the Agents
+    backend resolves from the content. Anything but an ``Attachment`` is
+    returned as it is.
+    """
+    if not isinstance(attachment, Attachment) or attachment.mime_type:
+        return attachment
+    mime_type = normalize_mime_type("", attachment.full_name) or _DEFAULT_MIME_TYPE
+    return attachment.model_copy(update={"mime_type": mime_type})

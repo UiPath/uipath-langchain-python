@@ -33,6 +33,7 @@ from uipath_langchain.agent.attachments.job_attachments import (
     parse_attachments_from_conversation_messages,
     parse_tool_content,
 )
+from uipath_langchain.agent.attachments.mime_types import with_guardrail_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,7 @@ def _add(registry: dict[str, Attachment], attachments: Iterable[Attachment]) -> 
     for attachment in attachments:
         key = mention_id(attachment)
         if key is not None:
-            registry.setdefault(key, attachment)
+            registry.setdefault(key, with_guardrail_mime_type(attachment))
 
 
 def _validated(candidates: Iterable[Any]) -> Iterator[Attachment]:

@@ -114,14 +114,26 @@ class TestResolveGuardrailAttachments:
         assert result is not None
         assert [r.mime_type for r in result] == [mime]
 
-    @pytest.mark.parametrize("mime,name", [("", "a.csv"), ("text/csv", "")])
-    async def test_skips_attachment_missing_name_or_type(self, monkeypatch, mime, name):
-        """The validate API requires both; forwarding an empty one would 400 the call."""
+    async def test_skips_attachment_missing_name(self, monkeypatch):
+        """The validate API requires a name; forwarding an empty one would 400 the call."""
         result = await resolve_guardrail_attachments(
-            _registry(mime=mime, name=name), _judge()
+            _registry(mime="text/csv", name=""), _judge()
         )
 
         assert result == []
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [("a.csv", "text/csv"), ("receipt.imgx", "application/octet-stream")],
+    )
+    async def test_forwards_attachment_uploaded_without_a_type(self, name, expected):
+        """The backend resolves ``application/octet-stream`` from the content."""
+        result = await resolve_guardrail_attachments(
+            _registry(mime="", name=name), _judge()
+        )
+
+        assert result is not None
+        assert [(r.file_name, r.mime_type) for r in result] == [(name, expected)]
 
     async def test_skips_attachment_with_non_uuid_id(self, monkeypatch):
         """The validate API requires a GUID; a malformed id must not reach it, and this
@@ -249,6 +261,16 @@ class TestResolveReferencedAttachments:
         assert [r.model_dump(by_alias=True) for r in result] == [
             {"id": _UUID, "fileName": "a.csv", "mimeType": "text/csv"}
         ]
+
+    async def test_resolves_an_attachment_held_without_a_type(self):
+        result = resolve_referenced_attachments(
+            {"attachment": {"ID": _UUID}},
+            _registry(mime="", name="receipt.imgx"),
+            _judge(),
+        )
+
+        assert result is not None
+        assert [r.mime_type for r in result] == ["application/octet-stream"]
 
     async def test_forwards_nothing_when_the_call_names_no_file(self):
         """The run holds a file, but this call does not touch it: forwarding it would

@@ -321,6 +321,19 @@ class TestBuildRegistry:
 
         assert _summary(registry) == {_HELD_ID: ("cv.pdf", "application/pdf")}
 
+    def test_an_attachment_stored_without_a_type_is_forwarded_typed(self) -> None:
+        stored = {
+            _HELD_ID: _wire(name="receipt.imgx", mime_type=""),
+            _OTHER_ID: _wire(_OTHER_ID, name="scan.png", mime_type=""),
+        }
+
+        registry = build_registry({"messages": [], JOB_ATTACHMENTS_STATE_KEY: stored})
+
+        assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
+            ("receipt.imgx", "application/octet-stream"),
+            ("scan.png", "image/png"),
+        ]
+
     def test_an_earlier_source_is_never_overwritten(self) -> None:
         message = HumanMessage(
             content=_block(_wire(name="from-block.pdf")),
