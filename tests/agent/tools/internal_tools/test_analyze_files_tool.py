@@ -1675,6 +1675,121 @@ class TestConfigWithLlmCallAttachments:
         assert attachments[0]["fileName"] == "pii_masked_doc.pdf"
 
 
+_PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode()
+
+
+class TestSentTypeInTracesAndErrors:
+    """A file sniffed as an image is described by the type it is sent as."""
+
+    @pytest.fixture
+    def mock_llm(self):
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content="Analyzed result"))
+        llm.model_copy = Mock(return_value=llm)
+        return llm
+
+    @pytest.fixture
+    def resource_config(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "analysisTask": {"type": "string"},
+                "attachments": {"type": "array", "items": {"type": "object"}},
+            },
+        }
+        return AgentInternalToolResourceConfig(
+            name="analyze_files",
+            description="Analyze files",
+            input_schema=schema,
+            output_schema={"type": "object", "properties": {}},
+            properties=AgentInternalAnalyzeFilesToolProperties(
+                tool_type=AgentInternalToolType.ANALYZE_FILES
+            ),
+        )
+
+    async def _run(self, resource_config, mock_llm, file: FileInfo):
+        with (
+            patch(
+                "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments",
+                AsyncMock(return_value=[file]),
+            ),
+            patch(
+                "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+                AsyncMock(return_value=_PNG_B64),
+            ),
+            patch(
+                "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+            ),
+        ):
+            tool = create_analyze_file_tool(resource_config, mock_llm)
+            assert tool.coroutine is not None
+            return await tool.coroutine(
+                analysisTask="Summarize",
+                attachments=[
+                    MockAttachment(
+                        ID=str(uuid.uuid4()), FullName=file.name, MimeType=""
+                    )
+                ],
+            )
+
+    @staticmethod
+    def _file() -> FileInfo:
+        return FileInfo(
+            url="https://blob/threat-note.imgx",
+            name="threat-note.imgx",
+            mime_type="",
+            attachment_id=str(uuid.uuid4()),
+        )
+
+    async def test_llm_call_attachments_carry_the_sent_type(
+        self, resource_config, mock_llm
+    ):
+        await self._run(resource_config, mock_llm, self._file())
+
+        config = mock_llm.ainvoke.call_args.kwargs["config"]
+        payload = json.loads(config["metadata"][LLM_CALL_ATTACHMENTS_METADATA_KEY])
+        assert payload[0]["mimeType"] == "image/png"
+
+    async def test_error_names_the_sent_type(self, resource_config, mock_llm):
+        response = httpx.Response(
+            400,
+            request=httpx.Request("POST", "http://llm-gateway/completions"),
+            json={"error": {"message": "Invalid image."}},
+        )
+        mock_llm.ainvoke.side_effect = UiPathAPIError.from_response(response)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await self._run(resource_config, mock_llm, self._file())
+
+        detail = exc_info.value.error_info.detail
+        assert "'threat-note.imgx' (image/png)" in detail
+        assert "no file type" not in detail
+
+    async def test_add_files_to_message_records_the_sent_type_of_a_masked_copy(
+        self,
+    ):
+        file = FileInfo(
+            url="https://blob/r.imgx",
+            name="r.imgx",
+            mime_type="",
+            attachment_id="id-r",
+            masked_attachment_url="https://blob/r-masked",
+            masked_attachment_id="id-r-masked",
+        )
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            AsyncMock(return_value=_PNG_B64),
+        ):
+            message = await add_files_to_message(HumanMessage(content="t"), [file])
+
+        assert file.sent_mime_type == "image/png"
+        assert _llm_call_attachment_ids([file], message) == {
+            f"sha256:{hashlib.sha256(base64.b64decode(_PNG_B64)).hexdigest()}": (
+                "id-r-masked"
+            )
+        }
+
+
 class TestAnalyzeFileToolPassesAttachmentsViaConfig:
     """End-to-end: tool injects attachments metadata into the config given to ainvoke."""
 
@@ -1869,6 +1984,7 @@ class TestLlmCallAttachmentIds:
                 name="receipt.imgx",
                 mime_type="",
                 attachment_id="id-image",
+                sent_mime_type="image/png",
             ),
             FileInfo(
                 url="https://example.com/notes",

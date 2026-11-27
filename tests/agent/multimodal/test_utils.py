@@ -687,7 +687,10 @@ class TestBuildFileContentBlocksFor:
         ("notes.txt", "text/plain", "notes-txt"),
         ("scan.png", "image/png", None),
         ("fax.tif", "image/tiff", None),
-        ("photo.jpg", "application/octet-stream", None),
+        ("photo.jpg", "image/jpeg", None),
+        ("receipt.imgx", "image/png", None),
+        ("photo.jpg", "application/pdf", "photo-jpg"),
+        ("blob.bin", "application/octet-stream", "blob-bin"),
     ],
 )
 def test_file_part_filename_matches_what_is_sent(

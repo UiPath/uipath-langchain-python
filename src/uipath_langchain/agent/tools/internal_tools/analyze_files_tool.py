@@ -159,12 +159,17 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
             SpanAttachment(
                 id=att_id,
                 file_name=name,
-                mime_type=file.mime_type,
+                mime_type=_sent_mime_type(file),
                 provider=AttachmentProvider.ORCHESTRATOR,
                 direction=AttachmentDirection.IN,
             )
         )
     return json.dumps([att.model_dump(by_alias=True) for att in attachments])
+
+
+def _sent_mime_type(file: FileInfo) -> str:
+    """The type ``file`` was sent to the model as, or would be by its name."""
+    return file.sent_mime_type or normalize_mime_type(file.mime_type, file.name)
 
 
 def _llm_call_attachment_ids(
@@ -189,15 +194,12 @@ def _llm_call_attachment_ids(
         if ids.setdefault(key, att_id) != att_id:
             ambiguous.add(key)
 
-    image_keys = list(_image_part_keys(message))
-    # An image recognized by its content is sent as an image part, with no filename.
-    image_ids = {att_id for _, att_id in image_keys}
     for file in files:
         att_id, name = _sent_attachment(file)
-        filename = file_part_filename(name, file.mime_type)
-        if att_id and filename is not None and att_id not in image_ids:
+        filename = file_part_filename(name, _sent_mime_type(file))
+        if att_id and filename is not None:
             add(filename, att_id)
-    for key, att_id in image_keys:
+    for key, att_id in _image_part_keys(message):
         add(key, att_id)
     linked = {key: att_id for key, att_id in ids.items() if key not in ambiguous}
     content_keys = [key for key in linked if key.startswith(_CONTENT_KEY_PREFIX)]
@@ -430,7 +432,7 @@ def create_analyze_file_tool(
         config = config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
         # Described by the type the file is sent as, not the one it was declared as.
-        sent_types = [normalize_mime_type(f.mime_type, f.name) for f in files]
+        sent_types = [_sent_mime_type(f) for f in files]
         attachment_names = [
             describe_attachment(f.name, mime_type)
             for f, mime_type in zip(files, sent_types, strict=True)
@@ -600,6 +602,7 @@ async def add_files_to_message(
     Returns:
         New message of the same type with file content blocks appended. An image
         part names, in its extras, the Orchestrator attachment its bytes came from.
+        Each file's ``sent_mime_type`` is set to the type it is sent as.
     """
     if not files:
         return message
@@ -619,6 +622,7 @@ async def add_files_to_message(
         blocks = await build_file_content_blocks_for(
             llm_file, pdf_only_documents=pdf_only_documents
         )
+        file.sent_mime_type = llm_file.sent_mime_type
         sent_id, _ = _sent_attachment(file)
         if sent_id:
             for block in blocks:
