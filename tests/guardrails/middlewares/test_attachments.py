@@ -521,6 +521,19 @@ class TestReferences:
             ("out.imgx", "application/octet-stream"),
         ]
 
+    def test_a_held_untyped_file_keeps_the_registry_metadata_when_a_result_types_it(
+        self,
+    ) -> None:
+        registry = _registry(_wire(_HELD_ID, name="scan.imgx", mime_type=""))
+        result = {"file": _wire(_HELD_ID, name="renamed.pdf")}
+
+        references = tool_result_references(result, registry)
+
+        assert references is not None
+        assert [(r.file_name, r.mime_type) for r in references] == [
+            ("scan.imgx", "application/octet-stream")
+        ]
+
     def test_a_new_untyped_tool_result_file_reaches_the_next_model_check(
         self,
     ) -> None:

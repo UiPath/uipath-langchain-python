@@ -170,15 +170,18 @@ def tool_result_references(
     if groups is None or described is None:
         return None
     held, held_untyped = groups
-    _, described_untyped = split_by_guardrail_type(
-        iter_attachment_mentions(result_data)
+    new = [reference for reference in described if reference.id not in registry]
+    _, new_untyped = split_by_guardrail_type(
+        mention
+        for mention in iter_attachment_mentions(result_data)
+        if mention_id(mention) not in registry
     )
     return to_references(
         [
             *map(_as_mention, held),
-            *map(_as_mention, described),
+            *map(_as_mention, new),
             *map(_as_mention, held_untyped),
-            *described_untyped,
+            *new_untyped,
         ]
     )
 
