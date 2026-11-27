@@ -4,7 +4,7 @@ Guardrails inspect inputs and outputs for policy violations — PII, harmful con
 
 The UiPath LangChain SDK exposes two complementary patterns:
 
-- **Middleware** — a LangChain-native approach. Guardrail classes are passed as a list to `create_agent(..., middleware=[...])`. Each class registers hooks (`before_agent`, `after_agent`, `before_model`, `after_model`, `wrap_tool_call`) automatically for the configured scope.
+- **Middleware** — a LangChain-native approach. Guardrail classes are passed as a list to `create_agent(..., middleware=[...])`. Each class registers hooks (`before_agent`, `after_agent`, `wrap_model_call`, `wrap_tool_call`) automatically for the configured scope.
 - **Decorator** — the same `@guardrail` API from the core SDK, extended to understand LangChain/LangGraph objects. Scope is inferred automatically from the decorated target type.
 
 For the full list of validators, actions, execution stages, and the low-level API, see the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/).
@@ -265,10 +265,10 @@ Which files each hook forwards:
 
 | Hook | Forwards |
 |---|---|
-| `before_agent`, `before_model` | Every file the run holds |
+| `before_agent`, `wrap_model_call`, PRE | Every file the run holds |
 | `wrap_tool_call`, PRE | The files the tool arguments name, if the run holds them |
 | `wrap_tool_call`, POST | The files the tool result names: held ones, and new ones it describes with a name and a type |
-| `after_model` | The held files the model's message names, in its content or its tool calls |
+| `wrap_model_call`, POST | The held files the model's message names, in its content or its tool calls |
 | `after_agent` | The held files the final message or the structured response names |
 
 Notes:
@@ -738,7 +738,7 @@ Imported from `uipath.core.guardrails`.
 | Value | Description |
 |---|---|
 | `AGENT` | Hooks run at agent input/output boundary (`before_agent` / `after_agent`) |
-| `LLM` | Hooks run around every LLM call (`before_model` / `after_model`) |
+| `LLM` | Checks run around every LLM call (`wrap_model_call`). With a `LogAction` they run inside the call; with any other action (Block, Escalate, custom) the input check runs just before the call and the output action just after it, so a retry or fallback middleware can't catch a block and resuming an escalation doesn't call the model again |
 | `TOOL` | Hooks run around every tool call (`wrap_tool_call`) |
 
 ### GuardrailExecutionStage

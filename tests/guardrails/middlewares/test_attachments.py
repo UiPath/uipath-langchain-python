@@ -62,6 +62,8 @@ from uipath_langchain.guardrails.middlewares._attachments import (
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
 
+from ._llm_hooks import call_model_hook, model_hook, model_request
+
 _HELD_ID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
 _OTHER_ID = "0d9b3a52-6c1f-4e8b-a0f2-5b7c9d1e3f40"
 _THIRD_ID = "3c5e7a91-2b4d-4f6a-8c0e-1d3f5a7b9c20"
@@ -477,9 +479,7 @@ class TestMessageHooks:
         text = f"compare {_block(_wire(), _wire(_OTHER_ID, 'b.csv', 'text/csv'))}"
         middleware = _pii([GuardrailScope.LLM], stage=_PRE)
 
-        await _hook(middleware, "before_model").abefore_model(
-            {"messages": [HumanMessage(content=text)]}, MagicMock()
-        )
+        await call_model_hook(middleware, {"messages": [HumanMessage(content=text)]})
 
         (call,) = evaluate.call_args_list
         assert call.args[0] == text
@@ -583,24 +583,54 @@ class TestMessageHooks:
         state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content=f"compare {_block(_wire(), _wire(_OTHER_ID))}"),
-                AIMessage(
-                    content="Analyzing the second file.",
-                    tool_calls=[
-                        {
-                            "name": "analyze",
-                            "args": {"attachments": [{"ID": _OTHER_ID}]},
-                            "id": "tc1",
-                        }
-                    ],
-                ),
             ]
         }
+        reply = AIMessage(
+            content="Analyzing the second file.",
+            tool_calls=[
+                {
+                    "name": "analyze",
+                    "args": {"attachments": [{"ID": _OTHER_ID}]},
+                    "id": "tc1",
+                }
+            ],
+        )
         middleware = _pii([GuardrailScope.LLM], stage=_POST)
 
-        await _hook(middleware, "after_model").aafter_model(state, MagicMock())
+        await call_model_hook(middleware, state, reply)
 
         (call,) = evaluate.call_args_list
         assert call.args[0] == "Analyzing the second file."
+        assert _forwarded(call) == [(_OTHER_ID, "cv.pdf", "application/pdf")]
+
+    async def test_llm_post_finds_files_held_outside_the_model_request(
+        self, evaluate: MagicMock
+    ) -> None:
+        # An earlier middleware trimmed the request: the message holding the
+        # file is only in the state.
+        held = HumanMessage(content=f"compare {_block(_wire(), _wire(_OTHER_ID))}")
+        latest = HumanMessage(content="and now?")
+        state: AgentState[Any] = {"messages": [held, latest]}
+        reply = AIMessage(
+            content="Analyzing the second file.",
+            tool_calls=[
+                {
+                    "name": "analyze",
+                    "args": {"attachments": [{"ID": _OTHER_ID}]},
+                    "id": "tc1",
+                }
+            ],
+        )
+
+        async def handler(request: Any) -> AIMessage:
+            return reply
+
+        middleware = _pii([GuardrailScope.LLM], stage=_POST)
+        await model_hook(middleware).awrap_model_call(
+            model_request([latest], state), handler
+        )
+
+        (call,) = evaluate.call_args_list
         assert _forwarded(call) == [(_OTHER_ID, "cv.pdf", "application/pdf")]
 
     async def test_agent_post_forwards_the_files_the_structured_response_references(
@@ -867,8 +897,14 @@ _FAILED = GuardrailValidationResult(
     result=GuardrailValidationResultType.VALIDATION_FAILED, reason="email found"
 )
 _MESSAGE_HOOKS = [
-    pytest.param(GuardrailScope.AGENT, "before_agent", "abefore_agent", id="agent"),
-    pytest.param(GuardrailScope.LLM, "before_model", "abefore_model", id="llm"),
+    pytest.param(
+        GuardrailScope.AGENT,
+        lambda middleware, state: _hook(middleware, "before_agent").abefore_agent(
+            state, MagicMock()
+        ),
+        id="agent",
+    ),
+    pytest.param(GuardrailScope.LLM, call_model_hook, id="llm"),
 ]
 
 
@@ -876,22 +912,21 @@ class TestAttachmentRejection:
     """A validate call whose attachment references the backend rejects (HTTP 400)
     is re-evaluated on the text alone, so a file never disables the guardrail."""
 
-    @pytest.mark.parametrize(("scope", "suffix", "method"), _MESSAGE_HOOKS)
+    @pytest.mark.parametrize(("scope", "run_input_check"), _MESSAGE_HOOKS)
     async def test_message_hook_applies_the_text_only_verdict(
         self,
         evaluate: MagicMock,
         caplog: pytest.LogCaptureFixture,
         scope: GuardrailScope,
-        suffix: str,
-        method: str,
+        run_input_check: Any,
     ) -> None:
         evaluate.side_effect = _reject_files_then(_FAILED)
         text = f"mail me at a@b.com {_block(_wire())}"
         middleware = _pii([scope], stage=_PRE, action=BlockAction())
 
         with pytest.raises(AgentRuntimeError) as exc_info:
-            await getattr(_hook(middleware, suffix), method)(
-                {"messages": [HumanMessage(content=text)]}, MagicMock()
+            await run_input_check(
+                middleware, {"messages": [HumanMessage(content=text)]}
             )
 
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
@@ -933,9 +968,8 @@ class TestAttachmentRejection:
         middleware = _pii([GuardrailScope.LLM], stage=_PRE, action=LogAction())
 
         with pytest.raises(AgentRuntimeError) as exc_info:
-            await _hook(middleware, "before_model").abefore_model(
-                {"messages": [HumanMessage(content=content)]},
-                MagicMock(),
+            await call_model_hook(
+                middleware, {"messages": [HumanMessage(content=content)]}
             )
 
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
@@ -963,8 +997,8 @@ class TestAttachmentRejection:
         middleware = _pii([GuardrailScope.LLM], stage=_PRE, action=BlockAction())
 
         with caplog.at_level(logging.ERROR):
-            await _hook(middleware, "before_model").abefore_model(
-                {"messages": [HumanMessage(content=content)]}, MagicMock()
+            await call_model_hook(
+                middleware, {"messages": [HumanMessage(content=content)]}
             )
 
         assert evaluate.call_count == 1

@@ -30,6 +30,8 @@ from uipath.platform.guardrails.guardrails import (
 from uipath_langchain.guardrails.enums import GuardrailExecutionStage
 from uipath_langchain.guardrails.middlewares import UiPathByoGuardrailMiddleware
 
+from ._llm_hooks import llm_stages
+
 _LOG = LogAction()
 _BLOCK = BlockAction()
 
@@ -154,7 +156,7 @@ class TestByoGuardrailHookWiring:
             "BYO_Guardrail_before_agent",
         ]
 
-    def test_llm_pre_registers_only_before_model(self) -> None:
+    def test_llm_pre_checks_only_the_input(self) -> None:
         names = _hook_names(
             _byo(
                 name="BYO Guardrail",
@@ -162,9 +164,16 @@ class TestByoGuardrailHookWiring:
                 stage=GuardrailExecutionStage.PRE,
             )
         )
-        assert names == ["BYO_Guardrail_before_model"]
+        assert names == ["BYO_Guardrail_pre_wrap_model_call"]
+        assert llm_stages(
+            _byo(
+                name="BYO Guardrail",
+                scopes=[GuardrailScope.LLM],
+                stage=GuardrailExecutionStage.PRE,
+            )
+        ) == ["PRE"]
 
-    def test_llm_post_registers_only_after_model(self) -> None:
+    def test_llm_post_checks_only_the_output(self) -> None:
         names = _hook_names(
             _byo(
                 name="BYO Guardrail",
@@ -172,14 +181,21 @@ class TestByoGuardrailHookWiring:
                 stage=GuardrailExecutionStage.POST,
             )
         )
-        assert names == ["BYO_Guardrail_after_model"]
+        assert names == ["BYO_Guardrail_post_wrap_model_call"]
+        assert llm_stages(
+            _byo(
+                name="BYO Guardrail",
+                scopes=[GuardrailScope.LLM],
+                stage=GuardrailExecutionStage.POST,
+            )
+        ) == ["POST"]
 
     def test_tool_scope_registers_one_wrap_tool_call_hook(self) -> None:
         names = _hook_names(_byo(scopes=[GuardrailScope.TOOL], tools=["my_tool"]))
         assert len(names) == 1, f"Expected 1 hook, got: {names}"
         assert "wrap_tool_call" in names[0]
 
-    def test_all_scopes_register_five_hooks(self) -> None:
+    def test_all_scopes_register_four_hooks(self) -> None:
         names = _hook_names(
             _byo(
                 scopes=[
@@ -190,9 +206,10 @@ class TestByoGuardrailHookWiring:
                 tools=["my_tool"],
             )
         )
-        assert len(names) == 5
-        assert sum(1 for n in names if "before" in n) == 2
-        assert sum(1 for n in names if "after" in n) == 2
+        assert len(names) == 4
+        assert sum(1 for n in names if "before_agent" in n) == 1
+        assert sum(1 for n in names if "after_agent" in n) == 1
+        assert sum(1 for n in names if "wrap_model_call" in n) == 1
         assert sum(1 for n in names if "wrap_tool_call" in n) == 1
 
 

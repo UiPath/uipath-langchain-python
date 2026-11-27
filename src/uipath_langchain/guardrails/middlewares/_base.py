@@ -4,20 +4,27 @@ import ast
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
-from typing import Any, Literal, Sequence
+import threading
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable, Generator, Mapping
+from contextlib import contextmanager
+from typing import Annotated, Any, Literal, NotRequired, Sequence, cast
+from uuid import uuid4
 
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
     after_agent,
-    after_model,
     before_agent,
-    before_model,
     wrap_tool_call,
 )
+from langchain.agents.middleware.types import PrivateStateAttr
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
@@ -37,7 +44,10 @@ from uipath.platform.guardrails import (
     detection_scope_includes_files,
     referenced_attachments,
 )
-from uipath.platform.guardrails.decorators import GuardrailExecutionStage
+from uipath.platform.guardrails.decorators import (
+    GuardrailExecutionStage,
+    LogAction,
+)
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
 from uipath_langchain.agent.exceptions import (
@@ -74,6 +84,153 @@ from ._utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_OUTPUT_ACTIONS_KEY = "uipath_guardrail_output_actions"
+
+
+def _merge_output_actions(
+    current: dict[str, Any] | None, update: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Merge pending output actions by hook name; a ``None`` entry removes one."""
+    merged = {**(current or {}), **(update or {})}
+    return {name: action for name, action in merged.items() if action is not None}
+
+
+class _OutputActionState(AgentState[Any]):
+    """Agent state with the output actions waiting for their node."""
+
+    uipath_guardrail_output_actions: NotRequired[
+        Annotated[dict[str, Any], PrivateStateAttr, _merge_output_actions]
+    ]
+
+
+ModelHandler = Callable[[ModelRequest], Awaitable[Any]]
+
+
+class _PendingAnswers:
+    """Message ids of answers with an action left for later: outer checks wait.
+
+    By message id, which copies of the reply keep. Not a ContextVar: LangChain
+    runs each hook in a copied context. Bounded, in case a node never runs.
+    """
+
+    def __init__(self, size: int = 1024) -> None:
+        self._ids: OrderedDict[str, None] = OrderedDict()
+        self._size = size
+        self._lock = threading.Lock()
+
+    def add(self, message_id: str) -> None:
+        with self._lock:
+            self._ids[message_id] = None
+            self._ids.move_to_end(message_id)
+            while len(self._ids) > self._size:
+                self._ids.popitem(last=False)
+
+    def discard(self, message_id: str) -> None:
+        with self._lock:
+            self._ids.pop(message_id, None)
+
+    def __contains__(self, message_id: object) -> bool:
+        with self._lock:
+            return message_id in self._ids
+
+
+_pending_answers = _PendingAnswers()
+
+
+def _pending_key(message_id: str) -> str:
+    """``message_id`` within the run's thread, so other runs don't share it."""
+    try:
+        thread = get_config().get("configurable", {}).get("thread_id")
+    except RuntimeError:
+        thread = None
+    return f"{thread}:{message_id}"
+
+
+_HOOK_STAGES = {
+    (True, True): "pre_and_post",
+    (True, False): "pre",
+    (False, True): "post",
+}
+
+
+StateHook = Callable[[Mapping[str, Any]], dict[str, Any] | None]
+
+
+class _ModelGuardrailHook(AgentMiddleware):
+    """One guardrail's checks around the model call."""
+
+    def __init__(
+        self,
+        name: str,
+        wrap: Callable[[ModelRequest, ModelHandler], Awaitable[Any]],
+        before: StateHook | None = None,
+        after: StateHook | None = None,
+    ) -> None:
+        super().__init__()
+        self._hook_name = name
+        self._wrap = wrap
+        self._before = before
+        self._after = after
+
+    @property
+    def name(self) -> str:
+        """The hook's name, unique per guardrail and stage."""
+        return self._hook_name
+
+    async def awrap_model_call(self, request: ModelRequest, handler: Any) -> Any:
+        """Check the model's input and output around ``handler``."""
+        return await self._wrap(request, handler)
+
+
+class _WithInputCheck(_ModelGuardrailHook):
+    """An input check whose action may pause the run, in the node before the model."""
+
+    async def abefore_model(
+        self, state: AgentState[Any], runtime: Runtime
+    ) -> dict[str, Any] | None:
+        """Check the input; resuming a paused action re-runs only this node."""
+        assert self._before is not None
+        return self._before(state)
+
+
+class _WithOutputAction(_ModelGuardrailHook):
+    """Output actions that may pause the run, in the node after the model."""
+
+    state_schema = _OutputActionState
+
+    async def aafter_model(
+        self, state: AgentState[Any], runtime: Runtime
+    ) -> dict[str, Any] | None:
+        """Run the action the output check left for this node, if any."""
+        assert self._after is not None
+        return self._after(state)
+
+
+class _WithInputCheckAndOutputAction(_WithInputCheck, _WithOutputAction):
+    """Both of the above."""
+
+
+def _with_output_action(
+    response: Any, hook_name: str, action: dict[str, Any] | None
+) -> ExtendedModelResponse[Any]:
+    """``response`` with ``hook_name``'s pending output action set (``None`` clears)."""
+    if not isinstance(response, ModelResponse):
+        response = ModelResponse(result=[response])
+    return ExtendedModelResponse(
+        model_response=response,
+        command=Command(update={_OUTPUT_ACTIONS_KEY: {hook_name: action}}),
+    )
+
+
+def _last_ai_message(response: Any) -> AIMessage | None:
+    """The model's answer in a ``wrap_model_call`` handler's response."""
+    if isinstance(response, AIMessage):
+        return response
+    messages = getattr(response, "result", None) or []
+    return next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+
 
 #: ``$guardrailType`` discriminator for built-in validator guardrails. Typed as
 #: a ``Literal`` so it satisfies ``BuiltInValidatorGuardrail.guardrail_type``.
@@ -563,13 +720,12 @@ class BuiltInGuardrailMiddlewareMixin:
         stage: GuardrailExecutionStage,
         guardrail_name: str,
     ) -> list[AgentMiddleware]:
-        """Build stage-gated before/after message hooks for an AGENT or LLM scope.
+        """Build stage-gated message hooks for an AGENT or LLM scope.
 
-        ``PRE`` registers only the ``before_*`` hook, ``POST`` only the
-        ``after_*`` hook, and ``PRE_AND_POST`` both — so a guardrail validates
-        (and acts, e.g. escalates) at a single checkpoint instead of twice per
-        run. Shared by the message-based middlewares (PII / harmful content /
-        intellectual property) so their hook wiring can't drift apart.
+        AGENT: ``PRE`` registers only ``before_agent``, ``POST`` only
+        ``after_agent``, and ``PRE_AND_POST`` both. LLM: one model hook that
+        checks the input, the output or both. Shared by the message-based
+        middlewares (PII / harmful content / intellectual property).
         """
         include_pre = stage in (
             GuardrailExecutionStage.PRE,
@@ -617,7 +773,7 @@ class BuiltInGuardrailMiddlewareMixin:
                     # not the whole conversation, so the flagged content maps back
                     # to a single message (an escalation's ReviewedOutputs edit can
                     # be applied) and the original input is carried separately as
-                    # input_text. Mirrors the LLM-scope after_model behavior.
+                    # input_text. Mirrors the LLM-scope output check.
                     messages = state.get("messages", [])
                     ai_messages = [m for m in messages if isinstance(m, AIMessage)]
                     if ai_messages:
@@ -642,71 +798,276 @@ class BuiltInGuardrailMiddlewareMixin:
                 hooks.append(after_agent(_after_agent_func))
 
         elif scope == GuardrailScope.LLM:
-            if include_pre:
-
-                async def _before_model_func(
-                    state: AgentState[Any], runtime: Runtime
-                ) -> None:
-                    messages = state.get("messages", [])
-                    mw._check_messages(
-                        list(messages),
-                        scope=GuardrailScope.LLM,
-                        stage=GuardrailExecutionStage.PRE,
-                        attachments=mw._attachments_for(
-                            scope=GuardrailScope.LLM,
-                            stage=GuardrailExecutionStage.PRE,
-                            state=state,
-                        ),
-                    )
-
-                _before_model_func.__name__ = f"{guardrail_name}_before_model"
-                register_guardrail_node(
-                    f"{_before_model_func.__name__}.before_model",
-                    GuardrailScope.LLM,
-                    GuardrailExecutionStage.PRE,
-                )
-                hooks.append(before_model(_before_model_func))
-
-            if include_post:
-
-                async def _after_model_func(
-                    state: AgentState[Any], runtime: Runtime
-                ) -> None:
-                    messages = state.get("messages", [])
-                    ai_messages = [m for m in messages if isinstance(m, AIMessage)]
-                    if ai_messages:
-                        mw._check_messages(
-                            [ai_messages[-1]],
-                            scope=GuardrailScope.LLM,
-                            stage=GuardrailExecutionStage.POST,
-                            input_text=mw._last_input_text(messages),
-                            attachments=mw._attachments_for(
-                                scope=GuardrailScope.LLM,
-                                stage=GuardrailExecutionStage.POST,
-                                state=state,
-                            ),
-                        )
-
-                _after_model_func.__name__ = f"{guardrail_name}_after_model"
-                register_guardrail_node(
-                    f"{_after_model_func.__name__}.after_model",
-                    GuardrailScope.LLM,
-                    GuardrailExecutionStage.POST,
-                )
-                hooks.append(after_model(_after_model_func))
+            hooks.append(
+                self._create_model_wrap_hook(guardrail_name, include_pre, include_post)
+            )
 
         return hooks
+
+    def _create_model_wrap_hook(
+        self, guardrail_name: str, include_pre: bool, include_post: bool
+    ) -> AgentMiddleware:
+        """Create the hook that checks the model's input and output in the model node.
+
+        Only the built-in Log acts there. Any other action may pause the run or
+        raise, and inside the model call a retry or fallback middleware could
+        catch that: its input check runs in the hook's ``before_model`` node and
+        its output action in the ``after_model`` node.
+        """
+        guardrails_in_use()
+        mw = self
+        # The stage keeps same-named PRE and POST guardrails distinct.
+        stage = _HOOK_STAGES[(include_pre, include_post)]
+        hook_name = f"{guardrail_name}_{stage}_wrap_model_call"
+        # Exactly LogAction: a subclass may pause the run.
+        outside_model = type(self.action) is not LogAction
+        check_before_model = include_pre and outside_model
+        act_after_model = include_post and outside_model
+
+        async def _wrap_model_call_func(request: ModelRequest, handler: Any) -> Any:
+            if include_pre and not check_before_model:
+                mw._check_model_input(request)
+            response = await handler(request)
+            if not include_post:
+                return response
+            return mw._check_model_output(
+                request, response, hook_name, act_after_model=act_after_model
+            )
+
+        before: StateHook | None = None
+        after: StateHook | None = None
+        if check_before_model:
+            register_guardrail_node(
+                f"{hook_name}.before_model",
+                GuardrailScope.LLM,
+                GuardrailExecutionStage.PRE,
+            )
+            before = mw._run_input_check
+        if include_post:
+            register_guardrail_node(
+                f"{hook_name}.after_model",
+                GuardrailScope.LLM,
+                GuardrailExecutionStage.POST,
+            )
+
+            def after(state: Mapping[str, Any]) -> dict[str, Any] | None:
+                return mw._run_output_action(state, hook_name)
+
+        hook_class = {
+            (False, False): _ModelGuardrailHook,
+            (True, False): _WithInputCheck,
+            (False, True): _WithOutputAction,
+            (True, True): _WithInputCheckAndOutputAction,
+        }[(before is not None, after is not None)]
+        return hook_class(hook_name, _wrap_model_call_func, before, after)
+
+    def _check_model_input(self, request: ModelRequest) -> None:
+        """Check the messages the model gets (Log only: no edits, no raise)."""
+        self._check_messages(
+            cast(list[BaseMessage], request.messages),
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.PRE,
+            attachments=self._attachments_for(
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.PRE,
+                state=request.state,
+            ),
+        )
+
+    def _run_input_check(self, state: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Check the saved messages before the model; return the edited ones."""
+        messages = list(state.get("messages", []))
+        checked = [message.model_copy() for message in messages]
+        self._check_messages(
+            checked,
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.PRE,
+            attachments=self._attachments_for(
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.PRE,
+                state=state,
+            ),
+            beside_node=True,
+        )
+        edited = [
+            copy
+            for copy, message in zip(checked, messages, strict=True)
+            if copy.content != message.content
+        ]
+        return {"messages": edited} if edited else None
+
+    def _check_model_output(
+        self,
+        request: ModelRequest,
+        response: Any,
+        hook_name: str,
+        *,
+        act_after_model: bool,
+    ) -> Any:
+        """Check the answer; leave a failed check's action, or the check itself if an
+        inner action is pending, for the hook's node."""
+        answer = _last_ai_message(response)
+        state: Mapping[str, Any] = request.state or {}
+        # A new turn's check replaces an earlier one's action (an answer from the
+        # model cache can repeat its message id).
+        stale = hook_name in (state.get(_OUTPUT_ACTIONS_KEY) or {})
+        if answer is None:
+            return _with_output_action(response, hook_name, None) if stale else response
+        # The question from the state if an earlier middleware trimmed the request.
+        input_text = self._last_input_text(request.messages) or self._last_input_text(
+            state.get("messages", [])
+        )
+        attachments = self._attachments_for(
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.POST,
+            # The full history: an earlier middleware may have trimmed the request.
+            state={**state, "messages": [*state.get("messages", []), answer]},
+        )
+        after_inner_action = (
+            answer.id is not None and _pending_key(answer.id) in _pending_answers
+        )
+        violation: dict[str, Any] | None = None
+        if after_inner_action:
+            violation = {}  # checked in this hook's node, after the inner action
+        elif act_after_model:
+            violation = self._failed_output_check(answer, attachments)
+        else:
+            self._check_messages(
+                [answer],
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.POST,
+                input_text=input_text,
+                attachments=attachments,
+            )
+        if violation is None:
+            return _with_output_action(response, hook_name, None) if stale else response
+        if answer.id is None:
+            answer.id = str(uuid4())  # so the action's node finds it
+        _pending_answers.add(_pending_key(answer.id))
+        violation.update(message_id=answer.id, input_text=input_text)
+        return _with_output_action(response, hook_name, violation)
+
+    def _failed_output_check(
+        self,
+        answer: AIMessage,
+        attachments: list[GuardrailAttachment] | None,
+        *,
+        beside_node: bool = False,
+    ) -> dict[str, Any] | None:
+        """Check the model's answer; if it fails, what its action's node needs."""
+        text = extract_text_from_messages([answer])
+        if not text and not attachments:
+            return None
+        payload = text or NO_TEXT_PLACEHOLDER
+        scope, stage = GuardrailScope.LLM, GuardrailExecutionStage.POST
+        with self._guardrail_errors():
+            with guardrail_stage(scope, stage, beside_node=beside_node):
+                result = self._evaluate_guardrail(
+                    payload, attachments, enforcement=self._enforcement(scope, stage)
+                )
+            if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
+                return {
+                    "result": result.model_dump(mode="json"),
+                    "payload": payload,
+                    "has_text": bool(text),
+                }
+        return None
+
+    def _run_output_action(
+        self, state: Mapping[str, Any], hook_name: str
+    ) -> dict[str, Any] | None:
+        """Run the output action left for this node and return the state update.
+
+        Dropped if a later model turn replaced its answer.
+        """
+        violation = (state.get(_OUTPUT_ACTIONS_KEY) or {}).get(hook_name)
+        if not violation:
+            return None
+        done: dict[str, Any] = {_OUTPUT_ACTIONS_KEY: {hook_name: None}}
+        _pending_answers.discard(_pending_key(violation["message_id"]))
+        answer = next(
+            (
+                message
+                for message in reversed(state.get("messages", []))
+                if isinstance(message, AIMessage)
+            ),
+            None,
+        )
+        if answer is None or answer.id != violation["message_id"]:
+            return done
+        violation = self._violation_now(violation, answer, state)
+        if violation is None:
+            return done
+        scope, stage = GuardrailScope.LLM, GuardrailExecutionStage.POST
+        payload = violation["payload"]
+        input_text = violation.get("input_text")
+        reviewed = answer.model_copy()
+        with self._guardrail_errors():
+            with guardrail_stage(scope, stage, beside_node=True):
+                modified_text = self._handle_validation_result(
+                    GuardrailValidationResult.model_validate(violation["result"]),
+                    payload,
+                    scope=scope,
+                    stage=stage,
+                    component=component_label(scope),
+                    input_payload=json.dumps(input_text) if input_text else None,
+                )
+            if violation.get("has_text"):
+                _apply_text_modification([reviewed], payload, modified_text)
+        if reviewed.content == answer.content:
+            return done
+        return {"messages": [reviewed], **done}
+
+    def _violation_now(
+        self,
+        violation: dict[str, Any],
+        answer: AIMessage,
+        state: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """The violation for the answer as it is now; re-checks it if it changed."""
+        checked = "result" in violation and not (
+            violation.get("has_text")
+            and extract_text_from_messages([answer]) != violation["payload"]
+        )
+        if checked:
+            return violation
+        rechecked = self._failed_output_check(
+            answer,
+            self._attachments_for(
+                scope=GuardrailScope.LLM,
+                stage=GuardrailExecutionStage.POST,
+                state=state,
+            ),
+            beside_node=True,
+        )
+        return None if rechecked is None else {**violation, **rechecked}
 
     def _last_input_text(self, messages: Sequence[BaseMessage]) -> str | None:
         """Return the last HumanMessage text — the input for a POST check.
 
-        Used by ``after_*`` hooks to supply the original input alongside the
-        flagged output when escalating an output (POST) violation.
+        Used by output (POST) checks to supply the original input alongside the
+        flagged output when escalating an output violation.
         """
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
                 return extract_text_from_messages([msg]) or None
         return None
+
+    @contextmanager
+    def _guardrail_errors(self) -> Generator[None]:
+        """Let a block, a runtime error or a pause through; log anything else."""
+        try:
+            yield
+        except GuardrailBlockException as exc:
+            raise convert_block_exception(exc) from exc
+        except AgentRuntimeError:
+            raise
+        except GraphBubbleUp:
+            # LangGraph control-flow signals (e.g. interrupt() from an
+            # escalation action). Must bubble up so the run can suspend.
+            raise
+        except Exception:
+            logger.exception(f"Error evaluating guardrail '{self._name}'")
 
     def _check_messages(
         self,
@@ -715,6 +1076,8 @@ class BuiltInGuardrailMiddlewareMixin:
         stage: GuardrailExecutionStage | None = None,
         input_text: str | None = None,
         attachments: list[GuardrailAttachment] | None = None,
+        *,
+        beside_node: bool = False,
     ) -> None:
         """Evaluate guardrail against message text; apply action on violation.
 
@@ -729,8 +1092,8 @@ class BuiltInGuardrailMiddlewareMixin:
             return
         payload = text or NO_TEXT_PLACEHOLDER
 
-        try:
-            with guardrail_stage(scope, stage):
+        with self._guardrail_errors():
+            with guardrail_stage(scope, stage, beside_node=beside_node):
                 result = self._evaluate_guardrail(
                     payload, attachments, enforcement=self._enforcement(scope, stage)
                 )
@@ -744,13 +1107,3 @@ class BuiltInGuardrailMiddlewareMixin:
                 )
             if text:
                 _apply_text_modification(messages, text, modified_text)
-        except GuardrailBlockException as exc:
-            raise convert_block_exception(exc) from exc
-        except AgentRuntimeError:
-            raise
-        except GraphBubbleUp:
-            # LangGraph control-flow signals (e.g. interrupt() from an
-            # escalation action). Must bubble up so the run can suspend.
-            raise
-        except Exception:
-            logger.exception(f"Error evaluating guardrail '{self._name}'")
