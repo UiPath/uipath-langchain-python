@@ -21,16 +21,15 @@ from uipath_langchain.agent.multimodal.invoke import (
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
     accepts_only_pdf_documents,
+    base64_head,
     content_mime_type,
     decode_text,
     download_file_base64,
     encode_streamed_base64,
     is_text,
-    is_unlabeled_pdf,
     is_unlabeled_text,
     normalize_mime_type,
     read_file_head,
-    unlabeled_image_type,
 )
 
 FILE_URL = "https://blob.storage.example.com/file.pdf"
@@ -817,25 +816,31 @@ class TestAcceptsOnlyPdfDocuments:
         assert not accepts_only_pdf_documents(object())
 
 
-class TestIsUnlabeledPdf:
+def _sniffed(mime_type: str, data: str, name: str = "file.imgx") -> str:
+    return content_mime_type(mime_type, name, base64_head(data))
+
+
+class TestContentMimeTypeForPdf:
     @pytest.mark.parametrize(
         "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
     )
     def test_pdf_bytes_with_a_useless_type(self, mime_type: str) -> None:
         data = base64.b64encode(b"%PDF-1.7\n...").decode()
-        assert is_unlabeled_pdf(mime_type, data)
+        assert _sniffed(mime_type, data) == "application/pdf"
 
     def test_declared_type_is_trusted(self) -> None:
         data = base64.b64encode(b"%PDF-1.7\n...").decode()
-        assert not is_unlabeled_pdf("text/csv", data)
+        assert _sniffed("text/csv", data) == "text/csv"
 
     def test_other_bytes(self) -> None:
         data = base64.b64encode(b"PK\x03\x04zip").decode()
-        assert not is_unlabeled_pdf("application/octet-stream", data)
+        assert _sniffed("application/octet-stream", data) == "application/octet-stream"
 
     def test_short_or_invalid_data(self) -> None:
-        assert not is_unlabeled_pdf("application/octet-stream", "")
-        assert not is_unlabeled_pdf("application/octet-stream", "!!!")
+        assert _sniffed("application/octet-stream", "") == "application/octet-stream"
+        assert _sniffed("application/octet-stream", "!!!") == (
+            "application/octet-stream"
+        )
 
 
 class TestIsUnlabeledText:
@@ -885,7 +890,7 @@ _IMAGE_HEADERS = [
 ]
 
 
-class TestUnlabeledImageType:
+class TestContentMimeTypeForImages:
     @pytest.mark.parametrize(
         "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
     )
@@ -894,11 +899,15 @@ class TestUnlabeledImageType:
         self, mime_type: str, header: bytes, expected: str
     ) -> None:
         data = base64.b64encode(header + b"\x00" * 32).decode()
-        assert unlabeled_image_type(mime_type, data) == expected
+        assert _sniffed(mime_type, data) == expected
 
     @pytest.mark.parametrize("mime_type", ["image/png", "application/pdf"])
     def test_declared_type_is_trusted(self, mime_type: str) -> None:
-        assert unlabeled_image_type(mime_type, base64.b64encode(_PNG).decode()) is None
+        assert _sniffed(mime_type, base64.b64encode(_PNG).decode()) == mime_type
+
+    def test_a_known_extension_keeps_its_type(self) -> None:
+        data = base64.b64encode(_PNG).decode()
+        assert _sniffed("", data, name="Budget.csv") == "text/csv"
 
     @pytest.mark.parametrize(
         "data",
@@ -906,19 +915,18 @@ class TestUnlabeledImageType:
             b"RIFF\x24\x00\x00\x00WAVEfmt ",
             b"RIFF\x24\x00\x00\x00AVI LIST",
             b"client\r\ndev tun\n",
-            b"%PDF-1.7\n%binary",
         ],
     )
     def test_other_bytes(self, data: bytes) -> None:
         encoded = base64.b64encode(data).decode()
-        assert unlabeled_image_type("application/octet-stream", encoded) is None
+        assert _sniffed("application/octet-stream", encoded) == (
+            "application/octet-stream"
+        )
 
     def test_empty_short_or_invalid_data(self) -> None:
         short = base64.b64encode(_PNG[:7]).decode()
-        assert unlabeled_image_type("application/octet-stream", "") is None
-        assert unlabeled_image_type("application/octet-stream", "!!!") is None
-        assert unlabeled_image_type("application/octet-stream", "abc") is None
-        assert unlabeled_image_type("application/octet-stream", short) is None
+        for data in ("", "!!!", "abc", short):
+            assert _sniffed("", data) == ""
 
 
 def _b64(data: bytes) -> str:

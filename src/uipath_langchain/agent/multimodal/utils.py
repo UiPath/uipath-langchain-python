@@ -169,20 +169,6 @@ def base64_head(base64_data: str) -> bytes:
         return b""
 
 
-def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
-    """True when a file declared with no useful type is a PDF by its content.
-
-    Connectors that cannot name a type label files ``application/octet-stream``
-    (or nothing at all) and often drop the extension or keep the source file's
-    one, so neither :func:`normalize_mime_type` nor the provider can tell it is
-    a PDF. Pass the declared type, not the normalized one. Only the leading
-    signature bytes are decoded.
-    """
-    return is_unlabeled(mime_type) and base64_head(base64_data).startswith(
-        _PDF_SIGNATURE
-    )
-
-
 # WebP is checked apart: a RIFF container is also WAV or AVI.
 _IMAGE_SIGNATURES = (
     (b"\x89PNG\r\n\x1a\n", "image/png"),
@@ -192,20 +178,6 @@ _IMAGE_SIGNATURES = (
     (b"II*\x00", "image/tiff"),
     (b"MM\x00*", "image/tiff"),
 )
-
-
-def unlabeled_image_type(mime_type: str, base64_data: str) -> str | None:
-    """The image type of a file sent with no useful type, read from its content.
-
-    An image with an extension the uploader does not know (``receipt.imgx``)
-    arrives with no type, and providers reject ``application/octet-stream``.
-    Pass the normalized type, so a known extension keeps its own. Only the
-    leading signature bytes are decoded. Returns ``None`` when the file is not
-    a PNG, JPEG, GIF, WebP or TIFF image.
-    """
-    if not is_unlabeled(mime_type):
-        return None
-    return _signature_image_type(base64_head(base64_data))
 
 
 def _signature_image_type(head: bytes) -> str | None:
