@@ -1,5 +1,7 @@
 """Middleware guardrails forward references to the files the run holds."""
 
+import base64
+import io
 import json
 import logging
 import uuid
@@ -279,6 +281,34 @@ class TestBuildRegistry:
 
         assert list(registry) == [_HELD_ID]
         assert registry[_HELD_ID].mime_type == "application/pdf"
+
+    async def test_reads_the_pages_of_a_tiff_found_by_its_content(self) -> None:
+        from PIL import Image
+
+        buf = io.BytesIO()
+        frames = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2), "red")]
+        frames[0].save(buf, format="TIFF", save_all=True, append_images=frames[1:])
+        tiff = base64.b64encode(buf.getvalue()).decode()
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            return_value=tiff,
+        ):
+            blocks = await build_file_content_blocks_for(
+                FileInfo(
+                    url="https://blob.example.com/scan",
+                    name="scan.imgx",
+                    mime_type="",
+                    attachment_id=_HELD_ID,
+                )
+            )
+
+        registry = build_registry(
+            {"messages": [HumanMessage(content_blocks=[*blocks])]}
+        )
+
+        assert len(blocks) == 2
+        assert list(registry) == [_HELD_ID]
+        assert registry[_HELD_ID].full_name == "scan.imgx"
 
     def test_reads_the_files_a_tool_returned(self) -> None:
         wire = ToolMessage(content=json.dumps({"file": _wire()}), tool_call_id="tc1")

@@ -240,7 +240,11 @@ async def _build_file_content_blocks(
         mime_type = content_type
 
     if is_tiff(mime_type):
-        return _downloaded_tiff_content_blocks(file_info, base64_file), mime_type
+        pages = _downloaded_tiff_content_blocks(file_info, base64_file)
+        for page in pages:
+            page_extras = cast(dict[str, Any], page).setdefault("extras", {})
+            page_extras.update(tags)
+        return pages, mime_type
 
     if is_image(mime_type):
         image_type = base_mime_type(mime_type)
