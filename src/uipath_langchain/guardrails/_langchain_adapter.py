@@ -13,10 +13,8 @@ The adapter is auto-registered when ``uipath_langchain.guardrails`` is imported.
 import asyncio
 import json
 import logging
-from collections.abc import Iterable
 from contextvars import ContextVar
 from functools import wraps
-from itertools import chain
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -32,7 +30,6 @@ from uipath.core.guardrails import (
 )
 from uipath.platform.guardrails import GuardrailAttachment
 from uipath.platform.guardrails.attachments import (
-    MAX_ATTACHMENTS,
     discover_attachments,
 )
 from uipath.platform.guardrails.decorators._core import (
@@ -181,41 +178,21 @@ def _forwards_attachments(evaluator: _EvaluatorFn) -> bool:
     return getattr(evaluator, "forwards_attachments", True) is not False
 
 
-def _union(
-    *groups: Iterable[GuardrailAttachment] | None,
-) -> list[GuardrailAttachment] | None:
-    """Merge reference lists, keeping the first of each id, up to the API limit.
-
-    ``None`` when any part could not be scanned, so the check says nothing about
-    files rather than forwarding a partial set.
-    """
-    if any(group is None for group in groups):
-        return None
-    unique: dict[str, GuardrailAttachment] = {}
-    for reference in chain.from_iterable(group for group in groups if group):
-        unique.setdefault(reference.id, reference)
-    return list(unique.values())[:MAX_ATTACHMENTS]
-
-
 def _agent_input_attachments(
     input: dict[str, Any],
 ) -> list[GuardrailAttachment] | None:
     """Return the files the run holds plus the attachments typed state keys carry."""
     state_keys = {key: value for key, value in input.items() if key != "messages"}
-    return _union(
-        registry_references(build_registry(input)), discover_attachments(state_keys)
-    )
+    carried = discover_attachments(state_keys)
+    if carried is None:
+        return None
+    return registry_references(build_registry(input), carried)
 
 
 def _agent_output_attachments(
     output: dict[str, Any], message: AIMessage | None
 ) -> list[GuardrailAttachment] | None:
     """Return the held files the output names plus the attachments it returns."""
-    named = output_references(
-        message,
-        build_registry(output),
-        structured_response=output.get("structured_response"),
-    )
     returned = discover_attachments(
         {
             key: value
@@ -223,7 +200,14 @@ def _agent_output_attachments(
             if key not in _NOT_AGENT_OUTPUT_KEYS
         }
     )
-    return _union(named, returned)
+    if returned is None:
+        return None
+    return output_references(
+        message,
+        build_registry(output),
+        returned,
+        structured_response=output.get("structured_response"),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,8 @@ from uipath_langchain.guardrails import (
 )
 from uipath_langchain.guardrails._langchain_adapter import (
     LangChainGuardrailAdapter,
+    _agent_input_attachments,
+    _agent_output_attachments,
     _apply_agent_input_guardrail,
     _apply_agent_output_guardrail,
     _apply_llm_post,
@@ -574,6 +576,56 @@ class TestLLMScope:
 # ---------------------------------------------------------------------------
 # Agent scope
 # ---------------------------------------------------------------------------
+
+
+class TestFallbackTypedFilesComeLast:
+    """A held file given a fallback type never displaces a typed state file."""
+
+    @staticmethod
+    def _held() -> list[dict[str, str]]:
+        typed = [
+            _wire(f"00000000-0000-4000-8000-00000000000{i}", f"{i}.pdf")
+            for i in range(4)
+        ]
+        return [*typed, _wire(_UNKNOWN_ID, "x.bin", "")]
+
+    def test_input(self) -> None:
+        state = Attachment.model_validate(_wire(_TYPED_ID, "state.pdf"))
+        attachments = _agent_input_attachments(
+            {"messages": [HumanMessage(_block(*self._held()))], "report": state}
+        )
+
+        assert attachments is not None
+        assert [a.file_name for a in attachments] == [
+            "0.pdf",
+            "1.pdf",
+            "2.pdf",
+            "3.pdf",
+            "state.pdf",
+        ]
+
+    def test_output(self) -> None:
+        held = self._held()
+        state = Attachment.model_validate(_wire(_TYPED_ID, "state.pdf"))
+        message = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "t", "args": {"f": [{"ID": a["ID"]} for a in held]}, "id": "c"}
+            ],
+        )
+        attachments = _agent_output_attachments(
+            {"messages": [HumanMessage(_block(*held)), message], "report": state},
+            message,
+        )
+
+        assert attachments is not None
+        assert [a.file_name for a in attachments] == [
+            "0.pdf",
+            "1.pdf",
+            "2.pdf",
+            "3.pdf",
+            "state.pdf",
+        ]
 
 
 class TestAgentScope:

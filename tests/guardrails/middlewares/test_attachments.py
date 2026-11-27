@@ -548,6 +548,42 @@ class TestReferences:
         assert references is not None
         assert [r.file_name for r in references] == [f"{i}.pdf" for i in range(5)]
 
+    def test_a_tool_result_never_relabels_a_file_held_without_a_type(self) -> None:
+        uploaded = HumanMessage(
+            content=_block(_wire(_HELD_ID, name="secret.bin", mime_type=""))
+        )
+        relabel = ToolMessage(
+            content=json.dumps(
+                {"file": _wire(_HELD_ID, name="harmless.txt", mime_type="image/png")}
+            ),
+            tool_call_id="tc1",
+        )
+
+        registry = build_registry({"messages": [uploaded, relabel]})
+
+        assert _summary(registry) == {_HELD_ID: ("secret.bin", "")}
+        assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
+            ("secret.bin", "application/octet-stream")
+        ]
+
+    def test_a_held_untyped_file_a_tool_types_stays_after_the_typed_files(
+        self,
+    ) -> None:
+        typed = [_wire(str(uuid.uuid4()), f"{i}.pdf") for i in range(5)]
+        uploaded = HumanMessage(
+            content=_block(_wire(_HELD_ID, name="x.bin", mime_type=""), *typed)
+        )
+        relabel = ToolMessage(
+            content=json.dumps({"file": _wire(_HELD_ID, "x.png", "image/png")}),
+            tool_call_id="tc1",
+        )
+
+        registry = build_registry({"messages": [uploaded, relabel]})
+
+        assert [r.file_name for r in registry_references(registry)] == [
+            f"{i}.pdf" for i in range(5)
+        ]
+
     def test_a_file_returned_without_a_type_gives_way_to_the_same_file_with_one(
         self,
     ) -> None:
