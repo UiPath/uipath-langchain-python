@@ -650,6 +650,31 @@ async def test_an_unlabeled_file_that_is_not_an_image_is_a_tool_error(
     decisions_client.acreate.assert_not_awaited()
 
 
+async def test_an_untyped_file_with_a_known_non_image_extension_is_not_downloaded(
+    decisions_client: Any,
+) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/r.docx", name="report.docx", mime_type="")
+    download = AsyncMock(return_value=_PNG_B64)
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(f"{PACKAGE}.tool.download_file_base64", download),
+    ):
+        message = await _tool_message(
+            tool,
+            {"input": "text", "images": [{**ATTACHMENT, "FullName": "report.docx"}]},
+        )
+
+    download.assert_not_awaited()
+    assert message.status == "error"
+    assert "'report.docx'" in message.content
+    assert "is not an image" in message.content
+
+
 async def test_empty_input_without_images_is_a_tool_error(
     decisions_client: Any,
 ) -> None:

@@ -538,7 +538,7 @@ async def _read_images(
                 raise _empty_image_error(config, file.name)
             images.extend(_page_data_urls(pages))
             continue
-        if not is_image(mime_type) and not is_unlabeled(file.mime_type):
+        if not is_image(mime_type) and not is_unlabeled(mime_type):
             raise _unsupported_image_error(provider, config, file.name, mime_type)
         try:
             data = await download_file_base64(file.url, max_size=MAX_FILE_SIZE_BYTES)
