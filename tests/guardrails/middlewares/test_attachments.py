@@ -309,8 +309,48 @@ class TestBuildRegistry:
         )
 
         assert len(blocks) == 2
-        assert list(registry) == [_HELD_ID]
-        assert registry[_HELD_ID].full_name == "scan.imgx"
+        assert _summary(registry) == {_HELD_ID: ("scan.imgx", "")}
+        assert [(r.file_name, r.mime_type) for r in registry_references(registry)] == [
+            ("scan.imgx", "application/octet-stream")
+        ]
+
+    @pytest.mark.parametrize(
+        ("name", "data", "stored"),
+        [
+            pytest.param(
+                "receipt.imgx", b"\x89PNG\r\n\x1a\n" + b"\x00" * 16, "", id="image"
+            ),
+            pytest.param("scan.imgx", b"%PDF-1.7\n%x", "", id="pdf"),
+            pytest.param("client.ovpn", b"client\r\ndev tun\n", "", id="text"),
+            pytest.param(
+                "Budget.docx",
+                b"%PDF-1.7\n%x",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                id="pdf-under-a-known-extension",
+            ),
+        ],
+    )
+    async def test_reads_a_file_typed_by_its_content_as_stored(
+        self, name: str, data: bytes, stored: str
+    ) -> None:
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            return_value=base64.b64encode(data).decode(),
+        ):
+            blocks = await build_file_content_blocks_for(
+                FileInfo(
+                    url="https://blob/x",
+                    name=name,
+                    mime_type="",
+                    attachment_id=_HELD_ID,
+                )
+            )
+
+        registry = build_registry(
+            {"messages": [HumanMessage(content_blocks=[*blocks])]}
+        )
+
+        assert _summary(registry) == {_HELD_ID: (name, stored)}
 
     def test_reads_the_files_a_tool_returned(self) -> None:
         wire = ToolMessage(content=json.dumps({"file": _wire()}), tool_call_id="tc1")

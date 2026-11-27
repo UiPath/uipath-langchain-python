@@ -20,6 +20,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils._attachments import (
     ATTACHMENT_ID_EXTRA,
+    ATTACHMENT_MIME_TYPE_EXTRA,
     ATTACHMENT_NAME_EXTRA,
 )
 
@@ -241,6 +242,9 @@ async def _build_file_content_blocks(
             content_type,
         )
         mime_type = content_type
+        if tags:
+            # The guardrail registry describes the stored file, not this part.
+            tags[ATTACHMENT_MIME_TYPE_EXTRA] = type_by_name
 
     if is_tiff(mime_type):
         pages = _downloaded_tiff_content_blocks(file_info, base64_file)

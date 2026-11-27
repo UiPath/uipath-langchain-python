@@ -9,6 +9,8 @@ ATTACHMENTS_BLOCK_SUFFIX = "</uip:attachments>"
 # ``extras`` keys naming the attachment an SDK-built file or image block came from
 ATTACHMENT_ID_EXTRA = "uipath_attachment_id"
 ATTACHMENT_NAME_EXTRA = "uipath_file_name"
+# the stored file's type, when the block was sent with a type read from its content
+ATTACHMENT_MIME_TYPE_EXTRA = "uipath_file_mime_type"
 
 # the model copies these straight into tool arguments, which are validated
 # against JOB_ATTACHMENT_DEFINITION

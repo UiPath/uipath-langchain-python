@@ -24,6 +24,7 @@ from uipath.platform.guardrails import (
 
 from uipath_langchain._utils._attachments import (
     ATTACHMENT_ID_EXTRA,
+    ATTACHMENT_MIME_TYPE_EXTRA,
     ATTACHMENT_NAME_EXTRA,
     ATTACHMENTS_BLOCK_PREFIX,
     ATTACHMENTS_BLOCK_SUFFIX,
@@ -258,9 +259,11 @@ def _tagged_block_attachments(message: BaseMessage) -> Iterator[Attachment]:
         extras = part.get("extras")
         if not isinstance(extras, Mapping) or not extras.get(ATTACHMENT_ID_EXTRA):
             continue
-        mime_type = part.get("mime_type")
-        if not mime_type:
-            continue
+        mime_type = extras.get(ATTACHMENT_MIME_TYPE_EXTRA)
+        if not isinstance(mime_type, str):
+            mime_type = part.get("mime_type")
+            if not mime_type:
+                continue
         name = (
             extras.get(ATTACHMENT_NAME_EXTRA)
             or part.get("filename")
