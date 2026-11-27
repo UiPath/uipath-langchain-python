@@ -280,17 +280,18 @@ def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) 
 
     for file in files:
         original_id = _original_attachment_id(file)
+        mime_type = _declared_or_guessed_mime_type(file)
         attachments.append(
             SpanAttachment(
                 id=original_id,
                 file_name=file.name,
-                mime_type=file.mime_type,
+                mime_type=mime_type,
                 provider=AttachmentProvider.ORCHESTRATOR,
                 direction=AttachmentDirection.IN,
             )
         )
         input_files.append(
-            {"id": original_id, "fileName": file.name, "mimeType": file.mime_type}
+            {"id": original_id, "fileName": file.name, "mimeType": mime_type}
         )
 
         if file.masked_attachment_url:
@@ -304,13 +305,13 @@ def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) 
                 SpanAttachment(
                     id=masked_id,
                     file_name=masked_name,
-                    mime_type=file.mime_type,
+                    mime_type=mime_type,
                     provider=AttachmentProvider.ORCHESTRATOR,
                     direction=AttachmentDirection.OUT,
                 )
             )
             output_files.append(
-                {"id": masked_id, "fileName": masked_name, "mimeType": file.mime_type}
+                {"id": masked_id, "fileName": masked_name, "mimeType": mime_type}
             )
 
     _set_span_attachments(span, attachments)
@@ -560,11 +561,7 @@ async def resolve_attachments_to_file_infos(
             raise
 
         input_mime_type = _attachment_field(attachment, "MimeType")
-        mime_type = (
-            input_mime_type
-            if input_mime_type
-            else (mimetypes.guess_type(blob_info.name)[0] or "")
-        )
+        mime_type = input_mime_type or _guessed_mime_type(blob_info.name)
 
         file_info = FileInfo(
             url=blob_info.uri,
@@ -575,6 +572,24 @@ async def resolve_attachments_to_file_infos(
         file_infos.append(file_info)
 
     return file_infos
+
+
+def _guessed_mime_type(name: str) -> str:
+    """The type of a file declared without one, from its name.
+
+    Empty when the guess is the type :func:`normalize_mime_type` gives the
+    extension anyway, so the file stays unlabeled and its content can still
+    name its type (a PDF that kept its source name ``Budget.docx``).
+    """
+    guessed = mimetypes.guess_type(name)[0] or ""
+    by_extension = normalize_mime_type("", name)
+    if by_extension and normalize_mime_type(guessed, name) == by_extension:
+        return ""
+    return guessed
+
+
+def _declared_or_guessed_mime_type(file: FileInfo) -> str:
+    return file.mime_type or (mimetypes.guess_type(file.name)[0] or "")
 
 
 async def _resolve_job_attachment_arguments(

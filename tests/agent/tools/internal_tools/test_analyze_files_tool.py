@@ -31,7 +31,7 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.multimodal import FileInfo
+from uipath_langchain.agent.multimodal import FileInfo, normalize_mime_type
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
@@ -877,7 +877,7 @@ class TestResolveJobAttachmentArguments:
 
         assert len(result) == 0
 
-    async def test_resolve_attachment_with_missing_mime_type_guesses_from_filename(
+    async def test_resolve_attachment_with_missing_mime_type_leaves_it_to_the_extension(
         self, mock_uipath_client
     ):
         """Test resolving attachment with missing MimeType guesses from blob name."""
@@ -904,9 +904,10 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
-        assert result[0].mime_type == "application/pdf"
+        assert result[0].mime_type == ""
+        assert normalize_mime_type("", result[0].name) == "application/pdf"
 
-    async def test_resolve_attachment_with_none_mime_type_guesses_from_filename(
+    async def test_resolve_attachment_with_none_mime_type_leaves_it_to_the_extension(
         self, mock_uipath_client
     ):
         """Test that a None MimeType attribute is handled by guessing from filename."""
@@ -936,9 +937,10 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
-        assert result[0].mime_type == "image/png"
+        assert result[0].mime_type == ""
+        assert normalize_mime_type("", result[0].name) == "image/png"
 
-    async def test_resolve_attachment_with_empty_mime_type_guesses_from_filename(
+    async def test_resolve_attachment_with_empty_mime_type_leaves_it_to_the_extension(
         self, mock_uipath_client
     ):
         """Test that an empty string MimeType is handled by guessing from filename."""
@@ -968,7 +970,50 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
-        assert result[0].mime_type == "image/jpeg"
+        assert result[0].mime_type == ""
+        assert normalize_mime_type("", result[0].name) == "image/jpeg"
+
+    @pytest.mark.parametrize(
+        ("name", "guessed"),
+        [("archive.zip", "application/zip"), ("feed.xml", "text/xml")],
+    )
+    async def test_resolve_attachment_with_no_mime_type_keeps_a_guess_the_extension_lacks(
+        self, mock_uipath_client, name, guessed
+    ):
+        """A guess the extension table would not give is kept as before."""
+        mock_attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName=name, MimeType=""
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(uri=f"https://blob/{name}", name=name)
+        )
+
+        with patch(
+            "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.mimetypes.guess_type",
+            return_value=(guessed, None),
+        ):
+            result = await _resolve_job_attachment_arguments([mock_attachment])
+
+        assert result[0].mime_type == guessed
+
+    async def test_an_untyped_pdf_that_kept_its_source_name_is_sent_as_pdf(
+        self, mock_uipath_client
+    ):
+        mock_attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="Budget.docx", MimeType=""
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=MockBlobInfo(uri="https://blob/budget", name="Budget.docx")
+        )
+        [file] = await _resolve_job_attachment_arguments([mock_attachment])
+
+        with patch(
+            "uipath_langchain.agent.multimodal.invoke.download_file_base64",
+            AsyncMock(return_value=base64.b64encode(b"%PDF-1.7\n%x").decode()),
+        ):
+            await add_files_to_message(HumanMessage(content="t"), [file])
+
+        assert file.sent_mime_type == "application/pdf"
 
     async def test_resolve_attachment_with_no_mime_type_and_unknown_extension(
         self, mock_uipath_client
