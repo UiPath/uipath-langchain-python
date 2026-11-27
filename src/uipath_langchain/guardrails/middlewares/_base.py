@@ -35,11 +35,13 @@ from uipath.platform.guardrails import (
     DetectionScope,
     GuardrailAttachment,
     detection_scope_includes_files,
-    referenced_attachments,
 )
 from uipath.platform.guardrails.decorators import GuardrailExecutionStage
 from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 
+from uipath_langchain.agent.attachments.job_attachments import (
+    referenced_guardrail_attachments,
+)
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     centralized_guardrail_error,
@@ -338,7 +340,7 @@ class BuiltInGuardrailMiddlewareMixin:
             registry = build_registry(state)
             if scope == GuardrailScope.TOOL:
                 if stage == GuardrailExecutionStage.PRE:
-                    return referenced_attachments(tool_args, registry)
+                    return referenced_guardrail_attachments(tool_args, registry)
                 return tool_result_references(tool_result, registry)
             if stage == GuardrailExecutionStage.PRE:
                 return registry_references(registry)

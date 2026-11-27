@@ -72,6 +72,52 @@ def _registry(mime: str = "text/csv", name: str = "a.csv") -> dict[str, Attachme
     return {_UUID: Attachment(id=uuid.UUID(_UUID), full_name=name, mime_type=mime)}
 
 
+def _untyped_first_registry() -> dict[str, Attachment]:
+    """One file uploaded without a type, then five files with one."""
+    names = ["untyped.imgx", *(f"{i}.csv" for i in range(5))]
+    registry: dict[str, Attachment] = {}
+    for name in names:
+        attachment_id = str(uuid.uuid4())
+        registry[attachment_id] = Attachment(
+            id=uuid.UUID(attachment_id),
+            full_name=name,
+            mime_type="" if name == "untyped.imgx" else "text/csv",
+        )
+    return registry
+
+
+class TestFallbackTypeNeverDisplacesATypedFile:
+    async def test_whole_registry(self):
+        result = await resolve_guardrail_attachments(
+            _untyped_first_registry(), _judge()
+        )
+
+        assert result is not None
+        assert [r.file_name for r in result] == [f"{i}.csv" for i in range(5)]
+
+    async def test_referenced_files(self):
+        registry = _untyped_first_registry()
+        data = {"files": [{"ID": key} for key in registry]}
+
+        result = resolve_referenced_attachments(data, registry, _judge())
+
+        assert result is not None
+        assert [r.file_name for r in result] == [f"{i}.csv" for i in range(5)]
+
+    async def test_untyped_files_follow_in_their_own_order(self):
+        registry = _untyped_first_registry()
+        keys = list(registry)
+        data = {"files": [{"ID": keys[0]}, {"ID": keys[1]}]}
+
+        result = resolve_referenced_attachments(data, registry, _judge())
+
+        assert result is not None
+        assert [(r.file_name, r.mime_type) for r in result] == [
+            ("0.csv", "text/csv"),
+            ("untyped.imgx", "application/octet-stream"),
+        ]
+
+
 class TestResolveGuardrailAttachments:
     async def test_resolves_text_attachment(self, monkeypatch):
         result = await resolve_guardrail_attachments(_registry(), _judge())

@@ -39,12 +39,13 @@ from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
     GuardrailAttachment,
     detection_scope_includes_files,
-    referenced_attachments,
-    to_references,
 )
 from uipath.platform.guardrails.attachments import MAX_ATTACHMENTS
 
-from uipath_langchain.agent.attachments.mime_types import with_guardrail_mime_type
+from uipath_langchain.agent.attachments.job_attachments import (
+    guardrail_references,
+    referenced_guardrail_attachments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ async def resolve_guardrail_attachments(
         return None
     if not job_attachments:
         return []
-    return to_references(map(with_guardrail_mime_type, job_attachments.values()))
+    return guardrail_references(job_attachments.values())
 
 
 def resolve_referenced_attachments(
@@ -100,8 +101,4 @@ def resolve_referenced_attachments(
         return None
     if data is None:
         return []
-    registry = {
-        key: with_guardrail_mime_type(attachment)
-        for key, attachment in (job_attachments or {}).items()
-    }
-    return referenced_attachments(data, registry)
+    return referenced_guardrail_attachments(data, job_attachments or {})

@@ -334,6 +334,25 @@ class TestBuildRegistry:
             ("scan.png", "image/png"),
         ]
 
+    def test_a_fallback_type_never_displaces_a_typed_file(self) -> None:
+        ids = [str(uuid.uuid4()) for _ in range(6)]
+        stored = {ids[0]: _wire(ids[0], name="untyped.imgx", mime_type="")}
+        stored |= {i: _wire(i, name=f"{n}.pdf") for n, i in enumerate(ids[1:])}
+
+        registry = build_registry({"messages": [], JOB_ATTACHMENTS_STATE_KEY: stored})
+        expected = [f"{n}.pdf" for n in range(5)]
+
+        assert [r.file_name for r in registry_references(registry)] == expected
+        output = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "t", "args": {"f": [{"ID": i} for i in ids]}, "id": "c1"}
+            ],
+        )
+        references = output_references(output, registry)
+        assert references is not None
+        assert [r.file_name for r in references] == expected
+
     def test_an_earlier_source_is_never_overwritten(self) -> None:
         message = HumanMessage(
             content=_block(_wire(name="from-block.pdf")),

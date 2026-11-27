@@ -19,7 +19,6 @@ from uipath.platform.guardrails import (
     discover_attachments,
     iter_attachment_mentions,
     mention_id,
-    referenced_attachments,
     to_references,
 )
 
@@ -30,10 +29,11 @@ from uipath_langchain._utils._attachments import (
     ATTACHMENTS_BLOCK_SUFFIX,
 )
 from uipath_langchain.agent.attachments.job_attachments import (
+    guardrail_references,
     parse_attachments_from_conversation_messages,
     parse_tool_content,
+    referenced_guardrail_attachments,
 )
-from uipath_langchain.agent.attachments.mime_types import with_guardrail_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ def registry_references(
     Returns:
         Up to five references.
     """
-    return to_references(registry.values())
+    return guardrail_references(registry.values())
 
 
 def output_references(
@@ -126,7 +126,7 @@ def output_references(
         check says nothing about files and the text is evaluated as before.
     """
     if message is None:
-        return referenced_attachments(
+        return referenced_guardrail_attachments(
             {"structured_response": structured_response}, registry
         )
     try:
@@ -142,7 +142,7 @@ def output_references(
             exc_info=True,
         )
         return None
-    return referenced_attachments(output, registry)
+    return referenced_guardrail_attachments(output, registry)
 
 
 def tool_result_references(
@@ -161,7 +161,7 @@ def tool_result_references(
         Up to five references, held files first; ``None`` when the result cannot
         be scanned.
     """
-    held = referenced_attachments(result_data, registry)
+    held = referenced_guardrail_attachments(result_data, registry)
     described = discover_attachments(result_data)
     if held is None or described is None:
         return None
@@ -172,7 +172,7 @@ def _add(registry: dict[str, Attachment], attachments: Iterable[Attachment]) -> 
     for attachment in attachments:
         key = mention_id(attachment)
         if key is not None:
-            registry.setdefault(key, with_guardrail_mime_type(attachment))
+            registry.setdefault(key, attachment)
 
 
 def _validated(candidates: Iterable[Any]) -> Iterator[Attachment]:

@@ -3,7 +3,7 @@
 import copy
 import json
 import uuid
-from typing import Any, NamedTuple, Sequence
+from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -16,10 +16,16 @@ from uipath.platform.errors import (
     EnrichedException,
     SecretMissingError,
 )
+from uipath.platform.guardrails import (
+    GuardrailAttachment,
+    referenced_attachments,
+    to_references,
+)
+from uipath.platform.guardrails.attachments import MAX_ATTACHMENTS
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode, raise_for_enriched
-from .mime_types import guess_mime_type
+from .mime_types import guess_mime_type, with_guardrail_mime_type
 from .pydantic_json import extract_values_by_paths, get_json_paths_by_type
 
 _JOB_ATTACHMENT_ERRORS: dict[
@@ -360,3 +366,41 @@ def parse_attachments_from_conversation_messages(
                 )
 
     return attachments
+
+
+def guardrail_references(attachments: Iterable[Any]) -> list[GuardrailAttachment]:
+    """References for a guardrail to inspect, at most ``MAX_ATTACHMENTS``.
+
+    A file uploaded without a type is forwarded with a fallback one
+    (:func:`with_guardrail_mime_type`), after every file that has its own, so it
+    never takes the place of one that used to be inspected.
+    """
+    declared: list[Any] = []
+    fallback: list[Any] = []
+    for attachment in attachments:
+        typed = with_guardrail_mime_type(attachment)
+        (declared if typed is attachment else fallback).append(typed)
+    return to_references([*declared, *fallback])
+
+
+def referenced_guardrail_attachments(
+    data: Any, registry: Mapping[str, Attachment]
+) -> list[GuardrailAttachment] | None:
+    """:func:`referenced_attachments`, ordered as :func:`guardrail_references`."""
+    declared = {
+        key: attachment
+        for key, attachment in registry.items()
+        if with_guardrail_mime_type(attachment) is attachment
+    }
+    fallback = {
+        key: with_guardrail_mime_type(attachment)
+        for key, attachment in registry.items()
+        if key not in declared
+    }
+    held = referenced_attachments(data, declared)
+    if held is None or not fallback:
+        return held
+    typed = referenced_attachments(data, fallback)
+    if typed is None:
+        return None
+    return [*held, *typed][:MAX_ATTACHMENTS]
