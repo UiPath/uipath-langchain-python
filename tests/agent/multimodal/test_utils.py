@@ -732,35 +732,66 @@ class TestAttachmentTags:
 
         assert "extras" not in block
 
-    async def test_leaves_tiff_pages_untagged(self, httpx_mock: HTTPXMock) -> None:
-        httpx_mock.add_response(url=FILE_URL, content=_make_tiff(num_pages=2))
-        file_info = FileInfo(
-            url=FILE_URL,
-            name="scan.tiff",
-            mime_type="image/tiff",
-            attachment_id=_ATTACHMENT_ID,
-        )
-
-        blocks = await build_file_content_blocks_for(file_info)
-
-        assert all("extras" not in block for block in blocks)
-
     @pytest.mark.parametrize(
-        "name,mime_type", [("cv.pdf", "application/pdf"), ("photo.png", "image/png")]
+        ("name", "mime_type"),
+        [("scan.tiff", "image/tiff"), ("scan.tif", ""), ("scan", "")],
     )
-    async def test_tags_never_reach_the_provider_payload(
-        self, httpx_mock: HTTPXMock, name: str, mime_type: str
+    async def test_tags_every_tiff_page_as_the_stored_tiff(
+        self, name: str, mime_type: str
     ) -> None:
-        httpx_mock.add_response(url=FILE_URL, content=b"bytes")
         file_info = FileInfo(
             url=FILE_URL, name=name, mime_type=mime_type, attachment_id=_ATTACHMENT_ID
         )
-        (block,) = await build_file_content_blocks_for(file_info)
+        tiff = _make_tiff(num_pages=2)
+        stream = (
+            "uipath_langchain.agent.multimodal.invoke.stream_tiff_to_content_blocks"
+        )
+        with (
+            patch(_DOWNLOAD, return_value=_b64(tiff)),
+            patch(stream, side_effect=lambda *a, **k: _pages(tiff)),
+        ):
+            blocks = await build_file_content_blocks_for(file_info)
 
-        for api in ("chat/completions", "responses"):
-            payload = json.dumps(convert_to_openai_data_block(dict(block), api=api))
-            assert "uipath_" not in payload
-            assert _ATTACHMENT_ID not in payload
+        assert len(blocks) == 2
+        for block in blocks:
+            assert block["mime_type"] == "image/png"
+            assert block.get("extras") == {
+                "uipath_attachment_id": _ATTACHMENT_ID,
+                "uipath_file_name": name,
+                "uipath_file_mime_type": "image/tiff",
+            }
+
+    @pytest.mark.parametrize(
+        ("name", "mime_type", "data"),
+        [
+            ("cv.pdf", "application/pdf", b"bytes"),
+            ("photo.png", "image/png", b"bytes"),
+            ("receipt.imgx", "", b"\x89PNG\r\n\x1a\n" + b"\x00" * 16),
+            ("scan", "", b"tiff"),
+        ],
+    )
+    async def test_tags_never_reach_the_provider_payload(
+        self, name: str, mime_type: str, data: bytes
+    ) -> None:
+        file_info = FileInfo(
+            url=FILE_URL, name=name, mime_type=mime_type, attachment_id=_ATTACHMENT_ID
+        )
+        content = _make_tiff(num_pages=2) if data == b"tiff" else data
+        with patch(_DOWNLOAD, return_value=_b64(content)):
+            blocks = await build_file_content_blocks_for(file_info)
+
+        assert blocks
+        for block in blocks:
+            for api in ("chat/completions", "responses"):
+                payload = json.dumps(convert_to_openai_data_block(dict(block), api=api))
+                assert "uipath_" not in payload
+                assert _ATTACHMENT_ID not in payload
+
+
+def _pages(tiff: bytes) -> list[Any]:
+    from uipath_langchain.agent.multimodal.utils import tiff_to_content_blocks
+
+    return tiff_to_content_blocks(io.BytesIO(tiff))
 
 
 class TestAcceptsOnlyPdfDocuments:
@@ -1311,7 +1342,9 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
         download.assert_awaited_once()
         streamed.assert_not_called()
         assert [block["mime_type"] for block in blocks] == ["image/png", "image/png"]
-        assert all("extras" not in block for block in blocks)
+        assert all(
+            block["extras"]["uipath_file_mime_type"] == "image/tiff" for block in blocks
+        )
 
     async def test_labeled_tiff_still_streams(self) -> None:
         file = FileInfo(url="https://blob/x", name="scan.imgx", mime_type="image/tiff")

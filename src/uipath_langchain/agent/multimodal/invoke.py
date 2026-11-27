@@ -129,6 +129,22 @@ def _tiff_errors(file_info: FileInfo) -> Iterator[None]:
         ) from exc
 
 
+def _tagged_tiff_pages(
+    file_info: FileInfo, pages: list[DataContentBlock]
+) -> list[DataContentBlock]:
+    # A page is a PNG; the guardrail registry describes the stored TIFF.
+    if file_info.attachment_id:
+        for page in pages:
+            cast(dict[str, Any], page).setdefault("extras", {}).update(
+                {
+                    ATTACHMENT_ID_EXTRA: str(file_info.attachment_id),
+                    ATTACHMENT_NAME_EXTRA: file_info.name,
+                    ATTACHMENT_MIME_TYPE_EXTRA: "image/tiff",
+                }
+            )
+    return pages
+
+
 async def _tiff_content_blocks(
     file_info: FileInfo, max_size: int
 ) -> list[DataContentBlock]:
@@ -136,14 +152,15 @@ async def _tiff_content_blocks(
         pages = await stream_tiff_to_content_blocks(file_info.url, max_size=max_size)
     if not pages:
         raise _empty_file_error(file_info)
-    return pages
+    return _tagged_tiff_pages(file_info, pages)
 
 
 def _downloaded_tiff_content_blocks(
     file_info: FileInfo, base64_file: str
 ) -> list[DataContentBlock]:
     with _tiff_errors(file_info):
-        return tiff_to_content_blocks(io.BytesIO(base64.b64decode(base64_file)))
+        pages = tiff_to_content_blocks(io.BytesIO(base64.b64decode(base64_file)))
+    return _tagged_tiff_pages(file_info, pages)
 
 
 async def build_file_content_blocks_for(
@@ -228,7 +245,6 @@ async def _build_file_content_blocks(
         else {}
     )
 
-    type_by_name = mime_type
     content_type = content_mime_type(
         file_info.mime_type, file_info.name, base64_head(base64_file)
     )
@@ -244,13 +260,7 @@ async def _build_file_content_blocks(
         mime_type = content_type
 
     if is_tiff(mime_type):
-        pages = _downloaded_tiff_content_blocks(file_info, base64_file)
-        if not is_tiff(type_by_name) and tags:
-            # A page is a PNG; the guardrail registry describes the stored TIFF.
-            for page in pages:
-                page_extras = cast(dict[str, Any], page).setdefault("extras", {})
-                page_extras.update(tags, **{ATTACHMENT_MIME_TYPE_EXTRA: "image/tiff"})
-        return pages, mime_type
+        return _downloaded_tiff_content_blocks(file_info, base64_file), mime_type
 
     if is_image(mime_type):
         image_type = base_mime_type(mime_type)
