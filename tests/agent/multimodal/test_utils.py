@@ -698,6 +698,10 @@ def test_file_part_filename_matches_what_is_sent(
     assert file_part_filename(name, mime_type) == expected
 
 
+def test_file_part_filename_keeps_its_keyword_names() -> None:
+    assert file_part_filename(name="scan.png", mime_type="image/png") is None
+
+
 _ATTACHMENT_ID = "7f2c1e44-0b3a-4a1e-9d55-2f9a1c3b8e10"
 
 

@@ -50,14 +50,15 @@ logger = logging.getLogger("uipath")
 _GONE_STATUSES = frozenset({404, 410})
 
 
-def file_part_filename(name: str, sent_mime_type: str) -> str | None:
-    """Return the ``filename`` a file sent as ``sent_mime_type`` carries.
+def file_part_filename(name: str, mime_type: str) -> str | None:
+    """Return the ``filename`` a file sent as ``mime_type`` carries.
 
-    ``sent_mime_type`` is :attr:`FileInfo.sent_mime_type`, which
+    ``mime_type`` is the type the file is sent as, :attr:`FileInfo.sent_mime_type`,
+    which
     :func:`build_file_content_blocks_for` sets. Images and TIFF pages go out as
     image blocks, which carry no filename, so they return ``None``.
     """
-    if is_tiff(sent_mime_type) or is_image(sent_mime_type):
+    if is_tiff(mime_type) or is_image(mime_type):
         return None
     return sanitize_filename(name)
 
