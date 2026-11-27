@@ -52,7 +52,7 @@ uipath init
 
 Running `uipath init` will process the graph definitions in the `langgraph.json` file and create the corresponding `entry-points.json` file needed for deployment.
 
-For more details on the configuration format, see the [UiPath configuration specifications](https://github.com/UiPath/uipath-python/blob/main/specs/README.md).
+For more details on the configuration format, see the [UiPath configuration specifications](https://github.com/UiPath/uipath-python/blob/main/packages/uipath/specs/README.md).
 
 ### Authentication
 
