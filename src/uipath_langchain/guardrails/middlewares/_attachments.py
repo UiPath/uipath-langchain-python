@@ -166,12 +166,12 @@ def tool_result_references(
         be scanned.
     """
     groups = referenced_guardrail_attachment_groups(result_data, registry)
-    described = discover_attachments(result_data)
-    if groups is None or described is None:
+    if groups is None or discover_attachments(result_data) is None:
         return None
     held, held_untyped = groups
-    new = [reference for reference in described if reference.id not in registry]
-    _, new_untyped = split_by_guardrail_type(
+    # Filtered here, not after discover_attachments, whose limit of five would let a
+    # held file take the place of a new one.
+    new, new_untyped = split_by_guardrail_type(
         mention
         for mention in iter_attachment_mentions(result_data)
         if mention_id(mention) not in registry
@@ -179,7 +179,7 @@ def tool_result_references(
     return to_references(
         [
             *map(_as_mention, held),
-            *map(_as_mention, new),
+            *new,
             *map(_as_mention, held_untyped),
             *new_untyped,
         ]
@@ -189,8 +189,12 @@ def tool_result_references(
 def _add(registry: dict[str, Attachment], attachments: Iterable[Attachment]) -> None:
     for attachment in attachments:
         key = mention_id(attachment)
-        if key is not None:
-            registry.setdefault(key, attachment)
+        if key is None:
+            continue
+        held = registry.get(key)
+        # A file held without a type gives way to the same file with one.
+        if held is None or (not held.mime_type and attachment.mime_type):
+            registry[key] = attachment
 
 
 def _validated(candidates: Iterable[Any]) -> Iterator[Attachment]:

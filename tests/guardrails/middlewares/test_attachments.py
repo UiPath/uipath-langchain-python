@@ -534,6 +534,36 @@ class TestReferences:
             ("scan.imgx", "application/octet-stream")
         ]
 
+    def test_a_held_file_named_first_never_takes_the_slot_of_a_new_typed_file(
+        self,
+    ) -> None:
+        registry = _registry(_wire(_HELD_ID, name="scan.imgx", mime_type=""))
+        new = [_wire(str(uuid.uuid4()), f"{i}.pdf") for i in range(5)]
+        result = {
+            "files": [_wire(_HELD_ID, name="scan.png", mime_type="image/png"), *new]
+        }
+
+        references = tool_result_references(result, registry)
+
+        assert references is not None
+        assert [r.file_name for r in references] == [f"{i}.pdf" for i in range(5)]
+
+    def test_a_file_returned_without_a_type_gives_way_to_the_same_file_with_one(
+        self,
+    ) -> None:
+        untyped = ToolMessage(
+            content=json.dumps({"file": {"ID": _OTHER_ID, "FullName": "out.imgx"}}),
+            tool_call_id="tc1",
+        )
+        typed = ToolMessage(
+            content=json.dumps({"file": _wire(_OTHER_ID, name="out.pdf")}),
+            tool_call_id="tc2",
+        )
+
+        registry = build_registry({"messages": [untyped, typed]})
+
+        assert _summary(registry) == {_OTHER_ID: ("out.pdf", "application/pdf")}
+
     def test_a_new_untyped_tool_result_file_reaches_the_next_model_check(
         self,
     ) -> None:
