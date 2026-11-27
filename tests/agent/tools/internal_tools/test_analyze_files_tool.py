@@ -1826,6 +1826,33 @@ class TestLlmCallAttachmentIds:
 
         assert _llm_call_attachment_ids(files, _TASK) == {}
 
+    def test_an_image_found_by_its_content_has_no_filename_key(self) -> None:
+        files = [
+            FileInfo(
+                url="https://example.com/receipt",
+                name="receipt.imgx",
+                mime_type="",
+                attachment_id="id-image",
+            ),
+            FileInfo(
+                url="https://example.com/notes",
+                name="receipt-imgx",
+                mime_type="text/plain",
+                attachment_id="id-notes",
+            ),
+        ]
+        message = HumanMessage(
+            content_blocks=[
+                {"type": "text", "text": "task"},
+                _image_part(b"receipt", "id-image"),
+            ]
+        )
+
+        assert _llm_call_attachment_ids(files, message) == {
+            "receipt-imgx": "id-notes",
+            _content_key(b"receipt"): "id-image",
+        }
+
     def test_keys_each_image_part_by_the_sha256_of_its_bytes(self) -> None:
         message = HumanMessage(
             content_blocks=[

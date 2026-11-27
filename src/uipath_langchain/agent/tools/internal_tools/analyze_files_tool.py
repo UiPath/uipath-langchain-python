@@ -189,12 +189,15 @@ def _llm_call_attachment_ids(
         if ids.setdefault(key, att_id) != att_id:
             ambiguous.add(key)
 
+    image_keys = list(_image_part_keys(message))
+    # An image recognized by its content is sent as an image part, with no filename.
+    image_ids = {att_id for _, att_id in image_keys}
     for file in files:
         att_id, name = _sent_attachment(file)
         filename = file_part_filename(name, file.mime_type)
-        if att_id and filename is not None:
+        if att_id and filename is not None and att_id not in image_ids:
             add(filename, att_id)
-    for key, att_id in _image_part_keys(message):
+    for key, att_id in image_keys:
         add(key, att_id)
     linked = {key: att_id for key, att_id in ids.items() if key not in ambiguous}
     content_keys = [key for key in linked if key.startswith(_CONTENT_KEY_PREFIX)]

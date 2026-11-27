@@ -150,6 +150,38 @@ def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
     return head.startswith(_PDF_SIGNATURE)
 
 
+# WebP is checked apart: a RIFF container is also WAV or AVI.
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def unlabeled_image_type(mime_type: str, base64_data: str) -> str | None:
+    """The image type of a file sent with no useful type, read from its content.
+
+    An image with an extension the uploader does not know (``receipt.imgx``)
+    arrives with no type, and providers reject ``application/octet-stream``.
+    Pass the normalized type, so a known extension keeps its own. Only the
+    leading signature bytes are decoded. Returns ``None`` when the file is not
+    a PNG, JPEG, GIF or WebP image.
+    """
+    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
+        return None
+    try:
+        head = base64.b64decode(base64_data[:16])
+    except ValueError:
+        return None
+    for signature, image_type in _IMAGE_SIGNATURES:
+        if head.startswith(signature):
+            return image_type
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 # C0 controls and DEL, except the ones real text holds: TAB, LF, VT, FF, CR and
 # ESC (ANSI colour codes in logs). The same rule as the Agents backend sniffer.
 _DISALLOWED_CONTROLS = re.compile(r"[\x00-\x08\x0e-\x1a\x1c-\x1f\x7f]")

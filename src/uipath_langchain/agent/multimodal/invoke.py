@@ -37,6 +37,7 @@ from .utils import (
     normalize_mime_type,
     sanitize_filename,
     stream_tiff_to_content_blocks,
+    unlabeled_image_type,
 )
 
 logger = logging.getLogger("uipath")
@@ -144,8 +145,9 @@ async def build_file_content_blocks_for(
     instead of being parsed by the provider as a corrupt binary workbook. A
     file declared ``application/octet-stream`` (or with no type) whose bytes
     are a PDF is sent as ``application/pdf``, whatever its extension; one whose
-    type is still unknown after normalization (``client.ovpn``) and whose bytes
-    are text is sent as ``text/plain``.
+    type is still unknown after normalization (``client.ovpn``) is sent with
+    the image type its signature names, or as ``text/plain`` if its bytes are
+    text.
     Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
@@ -210,6 +212,14 @@ async def build_file_content_blocks_for(
             file_info.mime_type,
         )
         mime_type = "application/pdf"
+    elif image_type := unlabeled_image_type(mime_type, base64_file):
+        logger.info(
+            "Attachment '%s' was declared as %r; sending it as %r based on its content",
+            file_info.name,
+            file_info.mime_type,
+            image_type,
+        )
+        mime_type = image_type
     elif is_unlabeled_text(mime_type, base64_file):
         logger.info(
             "Attachment '%s' was declared as %r; sending it as 'text/plain' "

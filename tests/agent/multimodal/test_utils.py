@@ -28,6 +28,7 @@ from uipath_langchain.agent.multimodal.utils import (
     is_unlabeled_pdf,
     is_unlabeled_text,
     normalize_mime_type,
+    unlabeled_image_type,
 )
 
 FILE_URL = "https://blob.storage.example.com/file.pdf"
@@ -867,6 +868,52 @@ class TestIsUnlabeledText:
         assert not is_unlabeled_text("application/octet-stream", "abc")
 
 
+_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+_IMAGE_HEADERS = [
+    (_PNG, "image/png"),
+    (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00", "image/jpeg"),
+    (b"GIF87a\x01\x00\x01\x00", "image/gif"),
+    (b"GIF89a\x01\x00\x01\x00", "image/gif"),
+    (b"RIFF\x24\x00\x00\x00WEBPVP8 ", "image/webp"),
+]
+
+
+class TestUnlabeledImageType:
+    @pytest.mark.parametrize(
+        "mime_type", ["application/octet-stream", "", "Application/Octet-Stream"]
+    )
+    @pytest.mark.parametrize(("header", "expected"), _IMAGE_HEADERS)
+    def test_image_bytes_with_a_useless_type(
+        self, mime_type: str, header: bytes, expected: str
+    ) -> None:
+        data = base64.b64encode(header + b"\x00" * 32).decode()
+        assert unlabeled_image_type(mime_type, data) == expected
+
+    @pytest.mark.parametrize("mime_type", ["image/png", "application/pdf"])
+    def test_declared_type_is_trusted(self, mime_type: str) -> None:
+        assert unlabeled_image_type(mime_type, base64.b64encode(_PNG).decode()) is None
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            b"RIFF\x24\x00\x00\x00WAVEfmt ",
+            b"RIFF\x24\x00\x00\x00AVI LIST",
+            b"client\r\ndev tun\n",
+            b"%PDF-1.7\n%binary",
+        ],
+    )
+    def test_other_bytes(self, data: bytes) -> None:
+        encoded = base64.b64encode(data).decode()
+        assert unlabeled_image_type("application/octet-stream", encoded) is None
+
+    def test_empty_short_or_invalid_data(self) -> None:
+        short = base64.b64encode(_PNG[:7]).decode()
+        assert unlabeled_image_type("application/octet-stream", "") is None
+        assert unlabeled_image_type("application/octet-stream", "!!!") is None
+        assert unlabeled_image_type("application/octet-stream", "abc") is None
+        assert unlabeled_image_type("application/octet-stream", short) is None
+
+
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
 
@@ -1117,6 +1164,45 @@ class TestBuildFileContentBlocksForPdfOnlyModels:
         with patch(_DOWNLOAD, return_value=_b64(b"plain words")):
             blocks = await build_file_content_blocks_for(file)
 
+        assert blocks[0]["mime_type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    @pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+    @pytest.mark.parametrize("pdf_only_documents", [True, False])
+    @pytest.mark.parametrize(("header", "expected"), _IMAGE_HEADERS)
+    async def test_unlabeled_image_is_sent_as_an_image(
+        self, mime_type: str, pdf_only_documents: bool, header: bytes, expected: str
+    ) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="receipt.imgx",
+            mime_type=mime_type,
+            attachment_id=_ATTACHMENT_ID,
+        )
+        data = _b64(header + b"\x00" * 32)
+        with patch(_DOWNLOAD, return_value=data):
+            blocks = await build_file_content_blocks_for(
+                file, pdf_only_documents=pdf_only_documents
+            )
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
+        assert blocks[0]["mime_type"] == expected
+        assert blocks[0]["base64"] == data
+        extras: Any = blocks[0].get("extras")
+        assert extras["uipath_attachment_id"] == _ATTACHMENT_ID
+
+    async def test_unlabeled_image_keeps_its_extension_type(self) -> None:
+        file = FileInfo(
+            url="https://blob/x",
+            name="Budget.docx",
+            mime_type="application/octet-stream",
+        )
+        with patch(_DOWNLOAD, return_value=_b64(_PNG + b"\x00" * 32)):
+            blocks = await build_file_content_blocks_for(file)
+
+        assert blocks[0]["type"] == "file"
         assert blocks[0]["mime_type"] == (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
