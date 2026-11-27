@@ -627,6 +627,93 @@ async def test_an_unlabeled_tiff_reaches_decisions_as_png_pages(
     assert all(url.startswith("data:image/png;base64,") for url in urls)
 
 
+@pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+async def test_an_untyped_pdf_named_like_a_tiff_is_an_unsupported_image(
+    decisions_client: Any, mime_type: str
+) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/s.tif", name="scan.tif", mime_type=mime_type)
+    pdf = base64.b64encode(b"%PDF-1.7\n%binary").decode()
+    streamed = AsyncMock()
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(f"{PACKAGE}.tool.download_file_base64", AsyncMock(return_value=pdf)),
+        patch(f"{PACKAGE}.tool.stream_tiff_to_content_blocks", streamed),
+    ):
+        message = await _tool_message(
+            tool, {"input": "text", "images": [{**ATTACHMENT, "FullName": "scan.tif"}]}
+        )
+
+    streamed.assert_not_awaited()
+    assert message.status == "error"
+    assert "'scan.tif' (application/pdf) is not an image" in message.content
+    decisions_client.acreate.assert_not_awaited()
+
+
+async def test_an_untyped_tiff_named_like_one_reaches_decisions_as_png_pages(
+    decisions_client: Any,
+) -> None:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    frames = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2), "red")]
+    frames[0].save(buf, format="TIFF", save_all=True, append_images=frames[1:])
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/s.tif", name="scan.tif", mime_type="")
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(
+            f"{PACKAGE}.tool.download_file_base64",
+            AsyncMock(return_value=base64.b64encode(buf.getvalue()).decode()),
+        ),
+    ):
+        await tool.ainvoke(
+            _args(
+                tool, {"input": "", "images": [{**ATTACHMENT, "FullName": "scan.tif"}]}
+            )
+        )
+
+    sent_input, _ = decisions_client.acreate.await_args.args
+    urls = [part["image_url"] for part in sent_input[0]["content"]]
+    assert len(urls) == 2
+    assert all(url.startswith("data:image/png;base64,") for url in urls)
+
+
+async def test_a_labeled_tiff_that_does_not_decode_is_a_tool_error(
+    decisions_client: Any,
+) -> None:
+    from PIL import UnidentifiedImageError
+
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/s.tif", name="scan.tif", mime_type="image/tiff")
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(
+            f"{PACKAGE}.tool.stream_tiff_to_content_blocks",
+            AsyncMock(side_effect=UnidentifiedImageError("cannot identify")),
+        ),
+    ):
+        message = await _tool_message(
+            tool, {"input": "text", "images": [{**ATTACHMENT, "FullName": "scan.tif"}]}
+        )
+
+    assert message.status == "error"
+    assert "'scan.tif' is not a valid TIFF image" in message.content
+    decisions_client.acreate.assert_not_awaited()
+
+
 async def test_an_unlabeled_file_that_is_not_an_image_is_a_tool_error(
     decisions_client: Any,
 ) -> None:

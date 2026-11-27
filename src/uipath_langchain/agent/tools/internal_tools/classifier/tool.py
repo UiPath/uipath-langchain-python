@@ -56,6 +56,7 @@ from uipath_langchain.agent.multimodal import (
 )
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES
 from uipath_langchain.agent.multimodal.utils import (
+    FileTooLargeError,
     base64_head,
     content_mime_type,
     is_unlabeled,
@@ -523,22 +524,27 @@ async def _read_images(
     images: list[str] = []
     for file in await resolve_attachments_to_file_infos(list(value)):
         mime_type = normalize_mime_type(file.mime_type, file.name)
-        if is_tiff(mime_type):
+        # Only a declared type vouches for a TIFF before its bytes are read.
+        if is_tiff(mime_type) and not is_unlabeled(file.mime_type):
             try:
                 pages = await stream_tiff_to_content_blocks(
                     file.url, max_size=MAX_FILE_SIZE_BYTES
                 )
-            except ValueError as exc:
+            except FileTooLargeError as exc:
                 raise _input_error(
                     config.llm_writes_images,
                     "Image too large",
                     f"File '{file.name}': {exc}",
                 ) from exc
+            except HTTPError:
+                raise
+            except Exception as exc:
+                raise _invalid_tiff_error(config, file.name) from exc
             if not pages:
                 raise _empty_image_error(config, file.name)
             images.extend(_page_data_urls(pages))
             continue
-        if not is_image(mime_type) and not is_unlabeled(mime_type):
+        if not (is_image(mime_type) or is_tiff(mime_type) or is_unlabeled(mime_type)):
             raise _unsupported_image_error(provider, config, file.name, mime_type)
         try:
             data = await download_file_base64(file.url, max_size=MAX_FILE_SIZE_BYTES)
@@ -555,11 +561,7 @@ async def _read_images(
             try:
                 pages = tiff_to_content_blocks(io.BytesIO(base64.b64decode(data)))
             except Exception as exc:
-                raise _input_error(
-                    config.llm_writes_images,
-                    "Unsupported image",
-                    f"File '{file.name}' is not a valid TIFF image.",
-                ) from exc
+                raise _invalid_tiff_error(config, file.name) from exc
             images.extend(_page_data_urls(pages))
             continue
         if not is_image(mime_type):
@@ -570,6 +572,14 @@ async def _read_images(
 
 def _page_data_urls(pages: list[Any]) -> list[str]:
     return [f"data:{page['mime_type']};base64,{page['base64']}" for page in pages]
+
+
+def _invalid_tiff_error(config: _ClassifierConfig, name: str) -> Exception:
+    return _input_error(
+        config.llm_writes_images,
+        "Unsupported image",
+        f"File '{name}' is not a valid TIFF image.",
+    )
 
 
 def _empty_image_error(config: _ClassifierConfig, name: str) -> Exception:
