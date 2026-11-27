@@ -9,6 +9,7 @@ import logging
 import re
 from typing import Any
 
+import httpx
 from uipath.core.feature_flags import FeatureFlags
 from uipath.platform import UiPath
 from uipath.platform.errors import EnrichedException
@@ -29,7 +30,12 @@ from uipath_langchain.agent.exceptions import (
 from uipath_langchain.agent.multimodal import (
     FileInfo,
     download_file_base64,
-    normalize_mime_type,
+)
+from uipath_langchain.agent.multimodal.utils import (
+    base_mime_type,
+    content_mime_type,
+    is_unlabeled,
+    read_file_head,
 )
 
 logger = logging.getLogger("uipath")
@@ -51,19 +57,39 @@ _REQUEST_VALIDATION_ERROR_CODE = "OPS0006"
 _REJECTED_FILE_TYPE_PATH = re.compile(r"\$\.files\[(\d+)\]\.fileType")
 
 
-def _pii_file_type(file: FileInfo) -> str:
+def _pii_file_type(file: FileInfo, head: bytes = b"") -> str:
     """Return the ``fileType`` to send to PII detection for ``file``.
 
-    A MIME type in :data:`_PII_FILE_TYPES` (after :func:`normalize_mime_type`)
-    maps to its canonical value, so ``.jpg`` is sent as ``jpeg`` and a file
-    without an extension still resolves. Any other file is sent with its
-    lower-cased extension, and the service decides whether it supports it.
+    A MIME type in :data:`_PII_FILE_TYPES` (after :func:`content_mime_type`,
+    given the first bytes of a file declared with no useful type) maps to its
+    canonical value, so ``.jpg`` is sent as ``jpeg`` and a PNG named
+    ``receipt.imgx`` as ``png``. Any other file is sent with its lower-cased
+    extension, and the service decides whether it supports it.
     """
-    mime_type = normalize_mime_type(file.mime_type, file.name)
-    canonical = _PII_FILE_TYPES.get(mime_type.split(";", 1)[0].strip().lower())
+    mime_type = content_mime_type(file.mime_type, file.name, head)
+    canonical = _PII_FILE_TYPES.get(base_mime_type(mime_type))
     if canonical:
         return canonical
     return file.name.rsplit(".", 1)[-1].lower() if "." in file.name else ""
+
+
+async def _content_head(file: FileInfo) -> bytes:
+    """The first bytes of a file declared with no useful type, else nothing.
+
+    A file whose head cannot be read keeps the type its name gives it, which the
+    service rejects if it cannot scan it.
+    """
+    if not is_unlabeled(file.mime_type):
+        return b""
+    try:
+        return await read_file_head(file.url)
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Could not read the start of '%s' to find its type: %s",
+            file.name,
+            type(exc).__name__,
+        )
+        return b""
 
 
 def _raise_for_unsupported_file_type(
@@ -157,7 +183,11 @@ class PiiMasker:
                 PiiDocument(id="user-prompt", role="user", document=analysis_task)
             ],
             files=[
-                PiiFile(file_name=f.name, file_url=f.url, file_type=_pii_file_type(f))
+                PiiFile(
+                    file_name=f.name,
+                    file_url=f.url,
+                    file_type=_pii_file_type(f, await _content_head(f)),
+                )
                 for f in files
             ],
             entity_thresholds=self._entity_thresholds_from_policy() or None,

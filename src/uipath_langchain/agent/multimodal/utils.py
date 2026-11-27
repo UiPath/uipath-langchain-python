@@ -12,7 +12,7 @@ import httpx
 from langchain_core.messages import DataContentBlock
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
-from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES
+from .types import IMAGE_MIME_TYPES, TIFF_MIME_TYPES, FileInfo
 
 
 class FileTooLargeError(ValueError):
@@ -132,6 +132,43 @@ def is_pdf(mime_type: str) -> bool:
 _PDF_SIGNATURE = b"%PDF-"
 
 
+# Enough leading bytes for every signature below.
+CONTENT_HEAD_BYTES = 16
+
+
+def is_unlabeled(mime_type: str) -> bool:
+    """True when the declared type says nothing about the content."""
+    return base_mime_type(mime_type) in _UNLABELED_MIME_TYPES
+
+
+def content_mime_type(mime_type: str, filename: str, head: bytes) -> str:
+    """The type a file really is, from its declared type, its name and its first bytes.
+
+    The single answer for every tool that sends or scans an attachment. The
+    extension repairs a wrong or missing declared type (:func:`normalize_mime_type`).
+    A file declared with no useful type whose bytes are a PDF is a PDF whatever its
+    extension, as connectors keep the source file's name; one whose extension is
+    unknown too has the image type its signature names. ``head`` is the first
+    :data:`CONTENT_HEAD_BYTES` bytes, or the whole file; an empty head leaves the
+    normalized type. Text is not decided here: it needs the whole file
+    (:func:`is_unlabeled_text`).
+    """
+    if is_unlabeled(mime_type) and head.startswith(_PDF_SIGNATURE):
+        return "application/pdf"
+    normalized = normalize_mime_type(mime_type, filename)
+    if is_unlabeled(normalized) and (image_type := _signature_image_type(head)):
+        return image_type
+    return normalized
+
+
+def base64_head(base64_data: str) -> bytes:
+    """The first :data:`CONTENT_HEAD_BYTES` bytes of base64 data, or fewer."""
+    try:
+        return base64.b64decode(base64_data[: (CONTENT_HEAD_BYTES + 2) // 3 * 4])
+    except ValueError:
+        return b""
+
+
 def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
     """True when a file declared with no useful type is a PDF by its content.
 
@@ -141,13 +178,9 @@ def is_unlabeled_pdf(mime_type: str, base64_data: str) -> bool:
     a PDF. Pass the declared type, not the normalized one. Only the leading
     signature bytes are decoded.
     """
-    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
-        return False
-    try:
-        head = base64.b64decode(base64_data[:8])
-    except ValueError:
-        return False
-    return head.startswith(_PDF_SIGNATURE)
+    return is_unlabeled(mime_type) and base64_head(base64_data).startswith(
+        _PDF_SIGNATURE
+    )
 
 
 # WebP is checked apart: a RIFF container is also WAV or AVI.
@@ -170,12 +203,12 @@ def unlabeled_image_type(mime_type: str, base64_data: str) -> str | None:
     leading signature bytes are decoded. Returns ``None`` when the file is not
     a PNG, JPEG, GIF, WebP or TIFF image.
     """
-    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
+    if not is_unlabeled(mime_type):
         return None
-    try:
-        head = base64.b64decode(base64_data[:16])
-    except ValueError:
-        return None
+    return _signature_image_type(base64_head(base64_data))
+
+
+def _signature_image_type(head: bytes) -> str | None:
     for signature, image_type in _IMAGE_SIGNATURES:
         if head.startswith(signature):
             return image_type
@@ -198,7 +231,7 @@ def is_unlabeled_text(mime_type: str, base64_data: str) -> bool:
     decodes almost any NUL-free bytes and no label vouches for the content, so
     more than 1% control characters marks the file as not text.
     """
-    if base_mime_type(mime_type) not in _UNLABELED_MIME_TYPES:
+    if not is_unlabeled(mime_type):
         return False
     try:
         text = decode_text(base64_data)
@@ -453,6 +486,37 @@ def tiff_to_content_blocks(buf: io.BytesIO) -> list[DataContentBlock]:
             png_b64 = base64.b64encode(png_buf.getvalue()).decode("ascii")
             blocks.append(create_image_block(base64=png_b64, mime_type="image/png"))
     return blocks
+
+
+async def read_file_head(url: str, size: int = CONTENT_HEAD_BYTES) -> bytes:
+    """Download only the first ``size`` bytes of a file, or fewer if it is shorter.
+
+    Raises:
+        httpx.HTTPStatusError: If the HTTP request fails.
+    """
+    head = bytearray()
+    async with _stream_download(url) as response:
+        async for chunk in response.aiter_bytes():
+            head += chunk
+            if len(head) >= size:
+                break
+    return bytes(head[:size])
+
+
+async def file_content_mime_type(file_info: FileInfo) -> str:
+    """:func:`content_mime_type` for a file not downloaded yet.
+
+    Reads the head of the file only when its declared type says nothing.
+
+    Raises:
+        httpx.HTTPError: If the head of the file cannot be downloaded.
+    """
+    head = (
+        await read_file_head(file_info.url)
+        if is_unlabeled(file_info.mime_type)
+        else b""
+    )
+    return content_mime_type(file_info.mime_type, file_info.name, head)
 
 
 async def download_file_base64(url: str, *, max_size: int = 0) -> str:

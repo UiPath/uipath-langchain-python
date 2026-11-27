@@ -1,5 +1,7 @@
 """Tests for the classifier tool with the OpenAI Decisions provider."""
 
+import base64
+import io
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -558,6 +560,93 @@ async def test_a_file_that_is_not_an_image_is_a_tool_error(
     assert message.status == "error"
     assert "'a.pdf'" in message.content
     assert "is not an image" in message.content
+    decisions_client.acreate.assert_not_awaited()
+
+
+_PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode()
+
+
+@pytest.mark.parametrize("mime_type", ["", "application/octet-stream"])
+async def test_an_unlabeled_image_reaches_decisions_with_its_image_type(
+    decisions_client: Any, mime_type: str
+) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/r.imgx", name="receipt.imgx", mime_type=mime_type)
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(f"{PACKAGE}.tool.download_file_base64", AsyncMock(return_value=_PNG_B64)),
+    ):
+        await tool.ainvoke(
+            _args(
+                tool,
+                {"input": "", "images": [{**ATTACHMENT, "FullName": "receipt.imgx"}]},
+            )
+        )
+
+    sent_input, _ = decisions_client.acreate.await_args.args
+    assert sent_input[0]["content"] == [
+        {"type": "input_image", "image_url": f"data:image/png;base64,{_PNG_B64}"}
+    ]
+
+
+async def test_an_unlabeled_tiff_reaches_decisions_as_png_pages(
+    decisions_client: Any,
+) -> None:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    frames = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2), "red")]
+    frames[0].save(buf, format="TIFF", save_all=True, append_images=frames[1:])
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/s.imgx", name="scan.imgx", mime_type="")
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(
+            f"{PACKAGE}.tool.download_file_base64",
+            AsyncMock(return_value=base64.b64encode(buf.getvalue()).decode()),
+        ),
+    ):
+        await tool.ainvoke(
+            _args(
+                tool,
+                {"input": "", "images": [{**ATTACHMENT, "FullName": "scan.imgx"}]},
+            )
+        )
+
+    sent_input, _ = decisions_client.acreate.await_args.args
+    urls = [part["image_url"] for part in sent_input[0]["content"]]
+    assert len(urls) == 2
+    assert all(url.startswith("data:image/png;base64,") for url in urls)
+
+
+async def test_an_unlabeled_file_that_is_not_an_image_is_a_tool_error(
+    decisions_client: Any,
+) -> None:
+    tool = create_internal_tool(_resource(), AsyncMock())
+    file = FileInfo(url="https://blob/a.imgx", name="a.imgx", mime_type="")
+    pdf = base64.b64encode(b"%PDF-1.7\n%binary").decode()
+
+    with (
+        patch(
+            f"{PACKAGE}.tool.resolve_attachments_to_file_infos",
+            AsyncMock(return_value=[file]),
+        ),
+        patch(f"{PACKAGE}.tool.download_file_base64", AsyncMock(return_value=pdf)),
+    ):
+        message = await _tool_message(
+            tool, {"input": "text", "images": [{**ATTACHMENT, "FullName": "a.imgx"}]}
+        )
+
+    assert message.status == "error"
+    assert "'a.imgx' (application/pdf) is not an image" in message.content
     decisions_client.acreate.assert_not_awaited()
 
 

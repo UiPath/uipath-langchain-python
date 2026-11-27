@@ -21,6 +21,7 @@ from uipath_langchain.agent.multimodal.invoke import (
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
     accepts_only_pdf_documents,
+    content_mime_type,
     decode_text,
     download_file_base64,
     encode_streamed_base64,
@@ -28,6 +29,7 @@ from uipath_langchain.agent.multimodal.utils import (
     is_unlabeled_pdf,
     is_unlabeled_text,
     normalize_mime_type,
+    read_file_head,
     unlabeled_image_type,
 )
 
@@ -918,6 +920,49 @@ class TestUnlabeledImageType:
 
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
+
+
+_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+class TestContentMimeType:
+    @pytest.mark.parametrize(
+        ("mime_type", "name", "head", "expected"),
+        [
+            ("", "receipt.imgx", _PNG, "image/png"),
+            ("application/octet-stream", "scan", b"II*\x00\x08\x00", "image/tiff"),
+            ("", "Budget.docx", b"%PDF-1.7\n", "application/pdf"),
+            ("application/octet-stream", "photo.png", b"%PDF-1.7\n", "application/pdf"),
+            ("", "Budget.docx", _PNG, _DOCX),
+            ("", "receipt.imgx", b"\x7fELF\x02", ""),
+            ("application/octet-stream", "blob.bin", b"", "application/octet-stream"),
+            ("image/png", "scan.png", b"%PDF-1.7\n", "image/png"),
+            ("text/plain; charset=utf-8", "a.ovpn", _PNG, "text/plain; charset=utf-8"),
+            ("application/vnd.ms-excel", "Budget.csv", _PNG, "text/csv"),
+        ],
+    )
+    def test_type(self, mime_type: str, name: str, head: bytes, expected: str) -> None:
+        assert content_mime_type(mime_type, name, head) == expected
+
+
+class TestReadFileHead:
+    async def test_reads_only_the_first_bytes(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=FILE_URL, stream=_ChunkedStream([_PNG[:4], _PNG[4:], b"\x00" * 4096])
+        )
+
+        assert await read_file_head(FILE_URL) == _PNG[:16]
+
+    async def test_short_file(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=FILE_URL, content=b"%PDF")
+
+        assert await read_file_head(FILE_URL) == b"%PDF"
+
+    async def test_http_error_is_raised(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=FILE_URL, status_code=404)
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await read_file_head(FILE_URL)
 
 
 class TestDecodeText:

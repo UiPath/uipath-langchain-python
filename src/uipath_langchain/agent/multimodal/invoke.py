@@ -27,20 +27,20 @@ from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import (
     FileTooLargeError,
+    base64_head,
     base_mime_type,
+    content_mime_type,
     decode_text,
     download_file_base64,
     is_image,
     is_pdf,
     is_text,
     is_tiff,
-    is_unlabeled_pdf,
     is_unlabeled_text,
     normalize_mime_type,
     sanitize_filename,
     stream_tiff_to_content_blocks,
     tiff_to_content_blocks,
-    unlabeled_image_type,
 )
 
 logger = logging.getLogger("uipath")
@@ -152,15 +152,14 @@ async def build_file_content_blocks_for(
 ) -> list[DataContentBlock]:
     """Build LangChain content blocks for a single file attachment.
 
-    The declared MIME type is first reconciled with the filename extension
-    (see :func:`normalize_mime_type`), so a ``.csv`` labeled
-    ``application/vnd.ms-excel`` by a Windows uploader is sent as ``text/csv``
-    instead of being parsed by the provider as a corrupt binary workbook. A
-    file declared ``application/octet-stream`` (or with no type) whose bytes
-    are a PDF is sent as ``application/pdf``, whatever its extension; one whose
-    type is still unknown after normalization (``client.ovpn``) is sent with
-    the image type its signature names (a TIFF is converted as below), or as
-    ``text/plain`` if its bytes are text.
+    The file is sent with the type :func:`content_mime_type` gives it: the
+    declared MIME type reconciled with the filename extension, so a ``.csv``
+    labeled ``application/vnd.ms-excel`` by a Windows uploader is sent as
+    ``text/csv`` instead of being parsed by the provider as a corrupt binary
+    workbook, and for a file declared with no useful type, the PDF or image
+    type its bytes name (a TIFF is converted as below). One whose type is
+    still unknown (``client.ovpn``) is sent as ``text/plain`` if its bytes are
+    text.
     Images then become image blocks, TIFFs are split into per-page PNG blocks,
     and every other MIME type — PDF, text, office documents, and any
     arbitrary binary — is wrapped in a generic file block. Provider
@@ -215,32 +214,19 @@ async def build_file_content_blocks_for(
         else {}
     )
 
-    # The declared type, not the extension's: a converted PDF can keep its
-    # source name (``Budget.docx``), which normalization would trust.
-    if is_unlabeled_pdf(file_info.mime_type, base64_file):
-        logger.info(
-            "Attachment '%s' was declared as %r; sending it as 'application/pdf' "
-            "based on its content",
-            file_info.name,
-            file_info.mime_type,
-        )
-        mime_type = "application/pdf"
-    elif image_type := unlabeled_image_type(mime_type, base64_file):
+    content_type = content_mime_type(
+        file_info.mime_type, file_info.name, base64_head(base64_file)
+    )
+    if content_type == mime_type and is_unlabeled_text(mime_type, base64_file):
+        content_type = "text/plain"
+    if content_type != mime_type:
         logger.info(
             "Attachment '%s' was declared as %r; sending it as %r based on its content",
             file_info.name,
             file_info.mime_type,
-            image_type,
+            content_type,
         )
-        mime_type = image_type
-    elif is_unlabeled_text(mime_type, base64_file):
-        logger.info(
-            "Attachment '%s' was declared as %r; sending it as 'text/plain' "
-            "based on its content",
-            file_info.name,
-            file_info.mime_type,
-        )
-        mime_type = "text/plain"
+        mime_type = content_type
 
     if is_tiff(mime_type):
         return _downloaded_tiff_content_blocks(file_info, base64_file)

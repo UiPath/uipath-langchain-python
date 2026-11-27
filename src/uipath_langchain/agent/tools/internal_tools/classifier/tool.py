@@ -9,6 +9,8 @@ The tool sends its arguments to the provider and returns one answer object per
 question, keyed by question name.
 """
 
+import base64
+import io
 import json
 import re
 from dataclasses import dataclass
@@ -53,7 +55,13 @@ from uipath_langchain.agent.multimodal import (
     normalize_mime_type,
 )
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES
-from uipath_langchain.agent.multimodal.utils import stream_tiff_to_content_blocks
+from uipath_langchain.agent.multimodal.utils import (
+    base64_head,
+    content_mime_type,
+    is_unlabeled,
+    stream_tiff_to_content_blocks,
+    tiff_to_content_blocks,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
     create_output_model,
@@ -527,22 +535,11 @@ async def _read_images(
                     f"File '{file.name}': {exc}",
                 ) from exc
             if not pages:
-                raise _input_error(
-                    config.llm_writes_images,
-                    "Empty image",
-                    f"File '{file.name}' has no content.",
-                )
-            images.extend(
-                f"data:{page['mime_type']};base64,{page['base64']}" for page in pages
-            )
+                raise _empty_image_error(config, file.name)
+            images.extend(_page_data_urls(pages))
             continue
-        if not is_image(mime_type):
-            raise _input_error(
-                config.llm_writes_images,
-                "Unsupported image",
-                f"File '{file.name}' ({mime_type or 'unknown type'}) is not an "
-                f"image {provider.display_name} can classify.",
-            )
+        if not is_image(mime_type) and not is_unlabeled(file.mime_type):
+            raise _unsupported_image_error(provider, config, file.name, mime_type)
         try:
             data = await download_file_base64(file.url, max_size=MAX_FILE_SIZE_BYTES)
         except ValueError as exc:
@@ -552,13 +549,47 @@ async def _read_images(
                 f"File '{file.name}': {exc}",
             ) from exc
         if not data:
-            raise _input_error(
-                config.llm_writes_images,
-                "Empty image",
-                f"File '{file.name}' has no content.",
-            )
+            raise _empty_image_error(config, file.name)
+        mime_type = content_mime_type(file.mime_type, file.name, base64_head(data))
+        if is_tiff(mime_type):
+            try:
+                pages = tiff_to_content_blocks(io.BytesIO(base64.b64decode(data)))
+            except Exception as exc:
+                raise _input_error(
+                    config.llm_writes_images,
+                    "Unsupported image",
+                    f"File '{file.name}' is not a valid TIFF image.",
+                ) from exc
+            images.extend(_page_data_urls(pages))
+            continue
+        if not is_image(mime_type):
+            raise _unsupported_image_error(provider, config, file.name, mime_type)
         images.append(f"data:{mime_type};base64,{data}")
     return images
+
+
+def _page_data_urls(pages: list[Any]) -> list[str]:
+    return [f"data:{page['mime_type']};base64,{page['base64']}" for page in pages]
+
+
+def _empty_image_error(config: _ClassifierConfig, name: str) -> Exception:
+    return _input_error(
+        config.llm_writes_images, "Empty image", f"File '{name}' has no content."
+    )
+
+
+def _unsupported_image_error(
+    provider: ClassifierProviderAdapter,
+    config: _ClassifierConfig,
+    name: str,
+    mime_type: str,
+) -> Exception:
+    return _input_error(
+        config.llm_writes_images,
+        "Unsupported image",
+        f"File '{name}' ({mime_type or 'unknown type'}) is not an "
+        f"image {provider.display_name} can classify.",
+    )
 
 
 async def _read_tool_input(
