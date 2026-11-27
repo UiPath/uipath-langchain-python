@@ -2,14 +2,17 @@
 
 The validate endpoint payload has no stage field, so e2e/integration tests cannot
 distinguish a PRE-execution call from a POST-execution call for the same validator.
-These unit tests verify the wiring contract at the source: by checking the
-``name`` of each AgentMiddleware instance, which is set from the hook function
-``__name__`` (e.g. ``"Intellectual_Property_Detection_after_model"``).
+These unit tests verify the wiring contract at the source. AGENT scope is
+checked by the ``name`` of each AgentMiddleware instance, which is set from the
+hook function ``__name__`` (e.g. ``"Harmful_Content_Detection_after_agent"``).
+LLM scope has one ``wrap_model_call`` hook around the model call, so its stage
+is checked by running it and recording which side (``PRE`` input, ``POST``
+output) it evaluates.
 
 Contracts under test:
-- ``UiPathIntellectualPropertyMiddleware`` — POST-only (only after_* hooks)
-- ``UiPathUserPromptAttacksMiddleware``    — PRE-only  (only before_* hooks)
-- ``UiPathHarmfulContentMiddleware``       — PRE+POST  (both before_* and after_* hooks)
+- ``UiPathIntellectualPropertyMiddleware`` — POST-only (after_agent; LLM output)
+- ``UiPathUserPromptAttacksMiddleware``    — PRE-only  (LLM input)
+- ``UiPathHarmfulContentMiddleware``       — PRE+POST  (both agent hooks; LLM input and output)
 """
 
 from collections.abc import Iterable
@@ -36,6 +39,8 @@ from uipath_langchain.guardrails.middlewares import (
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
 
+from ._llm_hooks import llm_stages
+
 
 def _hook_names(middleware: Iterable[Any]) -> list[str]:
     """Return the ``name`` attribute of each AgentMiddleware instance."""
@@ -49,21 +54,17 @@ _BLOCK = BlockAction()
 class TestIntellectualPropertyHookWiring:
     """UiPathIntellectualPropertyMiddleware registers only POST (after_*) hooks."""
 
-    def test_llm_scope_registers_only_after_model(self) -> None:
-        """LLM scope produces a single after_model hook, no before_* hooks."""
+    def test_llm_scope_checks_only_the_output(self) -> None:
+        """LLM scope produces a single wrap_model_call hook that checks the output."""
         middleware = UiPathIntellectualPropertyMiddleware(
             scopes=[GuardrailScope.LLM],
             action=_LOG,
             entities=["Text"],
         )
-        names = _hook_names(middleware)
-        assert len(names) == 1
-        assert all("after" in n for n in names), (
-            f"Expected only after_* hooks, got: {names}"
-        )
-        assert not any("before" in n for n in names), (
-            f"No before_* hooks expected, got: {names}"
-        )
+        assert _hook_names(middleware) == [
+            "Intellectual_Property_Detection_post_wrap_model_call"
+        ]
+        assert llm_stages(middleware) == ["POST"]
 
     def test_agent_scope_registers_only_after_agent(self) -> None:
         """AGENT scope produces a single after_agent hook, no before_* hooks."""
@@ -81,59 +82,46 @@ class TestIntellectualPropertyHookWiring:
             f"No before_* hooks expected, got: {names}"
         )
 
-    def test_agent_and_llm_scopes_register_only_after_hooks(self) -> None:
-        """Both scopes produce after_agent + after_model — no before_* hooks."""
+    def test_agent_and_llm_scopes_check_only_outputs(self) -> None:
+        """Both scopes produce after_agent + an output-only wrap_model_call."""
         middleware = UiPathIntellectualPropertyMiddleware(
             scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
             action=_BLOCK,
             entities=["Text", "Code"],
         )
-        names = _hook_names(middleware)
-        assert len(names) == 2
-        assert all("after" in n for n in names), (
-            f"Expected only after_* hooks, got: {names}"
-        )
-        assert not any("before" in n for n in names), (
-            f"No before_* hooks expected, got: {names}"
-        )
+        assert _hook_names(middleware) == [
+            "Intellectual_Property_Detection_after_agent",
+            "Intellectual_Property_Detection_post_wrap_model_call",
+        ]
+        assert llm_stages(middleware) == ["POST"]
 
 
 class TestUserPromptAttacksHookWiring:
     """UiPathUserPromptAttacksMiddleware registers only PRE (before_*) hooks."""
 
-    def test_llm_scope_registers_only_before_model(self) -> None:
-        """LLM scope produces a single before_model hook, no after_* hooks."""
+    def test_llm_scope_checks_only_the_input(self) -> None:
+        """LLM scope produces a single wrap_model_call hook that checks the input."""
         middleware = UiPathUserPromptAttacksMiddleware(
             scopes=[GuardrailScope.LLM],
             action=_BLOCK,
         )
-        names = _hook_names(middleware)
-        assert len(names) == 1
-        assert all("before" in n for n in names), (
-            f"Expected only before_* hooks, got: {names}"
-        )
-        assert not any("after" in n for n in names), (
-            f"No after_* hooks expected, got: {names}"
-        )
+        [name] = _hook_names(middleware)
+        assert name.endswith("_wrap_model_call")
+        assert llm_stages(middleware) == ["PRE"]
 
 
 class TestPromptInjectionHookWiring:
     """UiPathPromptInjectionMiddleware registers only PRE (before_*) hooks."""
 
-    def test_llm_scope_registers_only_before_model(self) -> None:
-        """LLM scope produces a single before_model hook, no after_* hooks."""
+    def test_llm_scope_checks_only_the_input(self) -> None:
+        """LLM scope produces a single wrap_model_call hook that checks the input."""
         middleware = UiPathPromptInjectionMiddleware(
             scopes=[GuardrailScope.LLM],
             action=_BLOCK,
         )
-        names = _hook_names(middleware)
-        assert len(names) == 1
-        assert all("before" in n for n in names), (
-            f"Expected only before_* hooks, got: {names}"
-        )
-        assert not any("after" in n for n in names), (
-            f"No after_* hooks expected, got: {names}"
-        )
+        [name] = _hook_names(middleware)
+        assert name.endswith("_wrap_model_call")
+        assert llm_stages(middleware) == ["PRE"]
 
 
 class TestPIIDetectionHookWiringToolScope:
@@ -168,7 +156,8 @@ class TestPIIDetectionHookWiringToolScope:
 class TestPIIDetectionHookWiringStageGating:
     """PII middleware honors ``stage`` for AGENT/LLM scopes (not just TOOL).
 
-    PRE registers only ``before_*``, POST only ``after_*``, PRE_AND_POST both.
+    PRE registers only ``before_*``, POST only ``after_*``, PRE_AND_POST both;
+    for LLM scope, the one ``wrap_model_call`` hook checks the matching sides.
     """
 
     def _pii(self, scope: GuardrailScope, stage: GuardrailExecutionStage):
@@ -200,22 +189,22 @@ class TestPIIDetectionHookWiringStageGating:
             "PII_Detection_before_agent",
         ]
 
-    def test_llm_pre_registers_only_before_model(self) -> None:
-        names = _hook_names(self._pii(GuardrailScope.LLM, GuardrailExecutionStage.PRE))
-        assert names == ["PII_Detection_before_model"]
-
-    def test_llm_post_registers_only_after_model(self) -> None:
-        names = _hook_names(self._pii(GuardrailScope.LLM, GuardrailExecutionStage.POST))
-        assert names == ["PII_Detection_after_model"]
-
-    def test_llm_pre_and_post_registers_both(self) -> None:
-        names = _hook_names(
-            self._pii(GuardrailScope.LLM, GuardrailExecutionStage.PRE_AND_POST)
-        )
-        assert sorted(names) == [
-            "PII_Detection_after_model",
-            "PII_Detection_before_model",
+    @pytest.mark.parametrize(
+        ("stage", "checked"),
+        [
+            (GuardrailExecutionStage.PRE, ["PRE"]),
+            (GuardrailExecutionStage.POST, ["POST"]),
+            (GuardrailExecutionStage.PRE_AND_POST, ["PRE", "POST"]),
+        ],
+    )
+    def test_llm_stage_gates_what_the_model_hook_checks(
+        self, stage: GuardrailExecutionStage, checked: list[str]
+    ) -> None:
+        middleware = self._pii(GuardrailScope.LLM, stage)
+        assert _hook_names(middleware) == [
+            f"PII_Detection_{stage.name.lower()}_wrap_model_call"
         ]
+        assert llm_stages(middleware) == checked
 
 
 class TestHarmfulContentHookWiringToolScope:
@@ -250,20 +239,17 @@ class TestHarmfulContentHookWiringToolScope:
 class TestHarmfulContentHookWiring:
     """UiPathHarmfulContentMiddleware registers both PRE (before_*) and POST (after_*) hooks."""
 
-    def test_llm_scope_registers_before_and_after_model(self) -> None:
-        """LLM scope produces before_model and after_model hooks."""
+    def test_llm_scope_checks_input_and_output(self) -> None:
+        """LLM scope produces one wrap_model_call hook checking both sides."""
         middleware = UiPathHarmfulContentMiddleware(
             scopes=[GuardrailScope.LLM],
             action=_LOG,
             entities=[HarmfulContentEntity("Hate"), HarmfulContentEntity("Violence")],
         )
-        names = _hook_names(middleware)
-        assert any("before" in n for n in names), (
-            f"Expected a before_* hook, got: {names}"
-        )
-        assert any("after" in n for n in names), (
-            f"Expected an after_* hook, got: {names}"
-        )
+        assert _hook_names(middleware) == [
+            "Harmful_Content_Detection_pre_and_post_wrap_model_call"
+        ]
+        assert llm_stages(middleware) == ["PRE", "POST"]
 
     def test_agent_scope_registers_before_and_after_agent(self) -> None:
         """AGENT scope produces before_agent and after_agent hooks."""
@@ -281,23 +267,21 @@ class TestHarmfulContentHookWiring:
         )
 
     @pytest.mark.parametrize("action", [_LOG, _BLOCK])
-    def test_all_scopes_register_four_hooks(
+    def test_all_scopes_register_three_hooks(
         self, action: LogAction | BlockAction
     ) -> None:
-        """AGENT+LLM produces before_agent, after_agent, before_model, after_model."""
+        """AGENT+LLM produces before_agent, after_agent and wrap_model_call."""
         middleware = UiPathHarmfulContentMiddleware(
             scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
             action=action,
             entities=[HarmfulContentEntity("Hate"), HarmfulContentEntity("Violence")],
         )
-        names = _hook_names(middleware)
-        assert len(names) == 4
-        assert sum(1 for n in names if "before" in n) == 2, (
-            f"Expected 2 before_* hooks: {names}"
-        )
-        assert sum(1 for n in names if "after" in n) == 2, (
-            f"Expected 2 after_* hooks: {names}"
-        )
+        assert _hook_names(middleware) == [
+            "Harmful_Content_Detection_before_agent",
+            "Harmful_Content_Detection_after_agent",
+            "Harmful_Content_Detection_pre_and_post_wrap_model_call",
+        ]
+        assert llm_stages(middleware) == ["PRE", "POST"]
 
 
 class TestHarmfulContentHookWiringStageGating:
@@ -305,6 +289,7 @@ class TestHarmfulContentHookWiringStageGating:
 
     PRE registers only ``before_*``, POST only ``after_*``, PRE_AND_POST both —
     so ``stage=PRE`` no longer also wires ``after_*`` (which would escalate twice).
+    For LLM scope, the one ``wrap_model_call`` hook checks the matching sides.
     """
 
     def _hc(self, scope: GuardrailScope, stage: GuardrailExecutionStage):
@@ -334,19 +319,19 @@ class TestHarmfulContentHookWiringStageGating:
             "Harmful_Content_Detection_before_agent",
         ]
 
-    def test_llm_pre_registers_only_before_model(self) -> None:
-        names = _hook_names(self._hc(GuardrailScope.LLM, GuardrailExecutionStage.PRE))
-        assert names == ["Harmful_Content_Detection_before_model"]
-
-    def test_llm_post_registers_only_after_model(self) -> None:
-        names = _hook_names(self._hc(GuardrailScope.LLM, GuardrailExecutionStage.POST))
-        assert names == ["Harmful_Content_Detection_after_model"]
-
-    def test_llm_pre_and_post_registers_both(self) -> None:
-        names = _hook_names(
-            self._hc(GuardrailScope.LLM, GuardrailExecutionStage.PRE_AND_POST)
-        )
-        assert sorted(names) == [
-            "Harmful_Content_Detection_after_model",
-            "Harmful_Content_Detection_before_model",
+    @pytest.mark.parametrize(
+        ("stage", "checked"),
+        [
+            (GuardrailExecutionStage.PRE, ["PRE"]),
+            (GuardrailExecutionStage.POST, ["POST"]),
+            (GuardrailExecutionStage.PRE_AND_POST, ["PRE", "POST"]),
+        ],
+    )
+    def test_llm_stage_gates_what_the_model_hook_checks(
+        self, stage: GuardrailExecutionStage, checked: list[str]
+    ) -> None:
+        middleware = self._hc(GuardrailScope.LLM, stage)
+        assert _hook_names(middleware) == [
+            f"Harmful_Content_Detection_{stage.name.lower()}_wrap_model_call"
         ]
+        assert llm_stages(middleware) == checked

@@ -83,9 +83,8 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
             Can be a mix of strings (tool names) or BaseTool objects.
             If TOOL scope is not specified, this parameter is ignored.
         stage: Optional execution stage controlling when the guardrail runs.
-            ``PRE`` evaluates before the target executes (registers only the
-            ``before_*`` hook), ``POST`` evaluates after (only the ``after_*``
-            hook), and ``PRE_AND_POST`` evaluates both. Applies to all scopes
+            ``PRE`` evaluates before the target executes, ``POST`` evaluates
+            after, and ``PRE_AND_POST`` evaluates both. Applies to all scopes
             (Agent, LLM, Tool). Defaults to ``GuardrailExecutionStage.PRE_AND_POST``.
         name: Optional name for the guardrail (defaults to "PII Detection")
         description: Optional description for the guardrail

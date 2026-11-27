@@ -23,6 +23,8 @@ from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.guardrails.enums import GuardrailExecutionStage
 from uipath_langchain.guardrails.middlewares import UiPathLLMAsJudgeMiddleware
 
+from ._llm_hooks import llm_stages
+
 _LOG = LogAction()
 _BLOCK = BlockAction()
 
@@ -129,17 +131,13 @@ class TestHookWiring:
         names = _hook_names(_make_mw(stage=GuardrailExecutionStage.POST))
         assert names == ["LLM_as_Judge_after_agent"]
 
-    def test_llm_pre_and_post_registers_both(self) -> None:
-        names = _hook_names(
-            _make_mw(
-                scopes=[GuardrailScope.LLM],
-                stage=GuardrailExecutionStage.PRE_AND_POST,
-            )
+    def test_llm_pre_and_post_checks_both_sides(self) -> None:
+        middleware = _make_mw(
+            scopes=[GuardrailScope.LLM],
+            stage=GuardrailExecutionStage.PRE_AND_POST,
         )
-        assert sorted(names) == [
-            "LLM_as_Judge_after_model",
-            "LLM_as_Judge_before_model",
-        ]
+        assert _hook_names(middleware) == ["LLM_as_Judge_pre_and_post_wrap_model_call"]
+        assert llm_stages(middleware) == ["PRE", "POST"]
 
     def test_tool_scope_registers_single_wrap_hook(self) -> None:
         names = _hook_names(
@@ -162,9 +160,8 @@ class TestHookWiring:
         )
         assert sorted(names) == [
             "LLM_as_Judge_after_agent",
-            "LLM_as_Judge_after_model",
             "LLM_as_Judge_before_agent",
-            "LLM_as_Judge_before_model",
+            "LLM_as_Judge_pre_and_post_wrap_model_call",
             "LLM_as_Judge_wrap_tool_call",
         ]
 

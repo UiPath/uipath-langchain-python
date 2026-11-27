@@ -13,6 +13,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
@@ -41,8 +42,9 @@ from uipath.core.guardrails import (
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.platform.guardrails.decorators import BlockAction, LogAction
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
-from uipath_langchain.guardrails import GuardrailExecutionStage
+from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from uipath_langchain.guardrails import EscalateAction, GuardrailExecutionStage
+from uipath_langchain.guardrails import escalate_action as escalate_module
 from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 from uipath_langchain.guardrails.middlewares import (
     UiPathDeterministicGuardrailMiddleware,
@@ -57,6 +59,8 @@ from uipath_langchain.guardrails.middlewares._grouping import (
     is_exported,
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
+
+from ._llm_hooks import model_hook, model_request
 
 _FAILED = GuardrailValidationResult(
     result=GuardrailValidationResultType.VALIDATION_FAILED, reason="found"
@@ -166,29 +170,35 @@ def _tool_request() -> ToolCallRequest:
     )
 
 
+def _agent_pii(**kwargs: Any) -> UiPathPIIDetectionMiddleware:
+    return _pii(scopes=[GuardrailScope.AGENT], **kwargs)
+
+
 class TestStages:
+    """Agent checks run in their own nodes: their container goes beside them."""
+
     async def test_guardrail_nodes_of_one_stage_share_a_container(
         self, graph: _Graph
     ) -> None:
-        pii = _pii()
-        injection = UiPathPromptInjectionMiddleware(action=LogAction())
-        pii_hook = _hook(pii, "_before_model")
-        injection_hook = _hook(injection, "_before_model")
+        pii = _agent_pii()
+        second = _agent_pii(name="Second PII")
+        pii_hook = _hook(pii, "_before_agent")
+        second_hook = _hook(second, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
-            patch.object(injection, "_evaluate_guardrail", return_value=_FAILED),
+            patch.object(second, "_evaluate_guardrail", return_value=_FAILED),
         ):
-            with graph.node(f"{pii_hook.name}.before_model"):
-                await pii_hook.abefore_model(_STATE, MagicMock())
-            with graph.node(f"{injection_hook.name}.before_model"):
-                await injection_hook.abefore_model(_STATE, MagicMock())
+            with graph.node(f"{pii_hook.name}.before_agent"):
+                await pii_hook.abefore_agent(_STATE, MagicMock())
+            with graph.node(f"{second_hook.name}.before_agent"):
+                await second_hook.abefore_agent(_STATE, MagicMock())
         with graph.node("model") as model:
             model_start = model.start_time  # type: ignore[attr-defined]
         spans = graph.finish()
 
-        [container] = _named(spans, "LLM input guardrail check")
-        assert (container.attributes or {})["span_type"] == "llmPreGuardrails"
+        [container] = _named(spans, "Agent input guardrail check")
+        assert (container.attributes or {})["span_type"] == "agentPreGuardrails"
         assert container.parent is not None
         assert container.parent.span_id == graph.span.get_span_context().span_id
         assert _children(spans, container) == ["Log", "Log"]
@@ -198,139 +208,220 @@ class TestStages:
     async def test_a_container_never_ends_before_its_last_check(
         self, graph: _Graph
     ) -> None:
-        pii = _pii()
-        hook = _hook(pii, "_before_model")
+        pii = _agent_pii()
+        hook = _hook(pii, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
-            graph.node(f"{hook.name}.before_model"),
+            graph.node(f"{hook.name}.before_agent"),
         ):
-            await hook.abefore_model(_STATE, MagicMock())
+            await hook.abefore_agent(_STATE, MagicMock())
         # A coarse clock stamps the next node's start before the check ended.
         with graph.node("model", start_time=time.time_ns() - 10_000_000):
             pass
         spans = graph.finish()
 
-        [container] = _named(spans, "LLM input guardrail check")
+        [container] = _named(spans, "Agent input guardrail check")
         [log] = _named(spans, "Log")
         assert container.end_time is not None
         assert log.end_time is not None
         assert container.end_time >= log.end_time
 
     async def test_the_container_carries_the_execution_id(self, graph: _Graph) -> None:
-        pii = _pii()
-        hook = _hook(pii, "_before_model")
+        pii = _agent_pii()
+        hook = _hook(pii, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
             graph.node(
-                f"{hook.name}.before_model", attributes={"execution.id": "exec-1"}
+                f"{hook.name}.before_agent", attributes={"execution.id": "exec-1"}
             ),
         ):
-            await hook.abefore_model(_STATE, MagicMock())
+            await hook.abefore_agent(_STATE, MagicMock())
         spans = graph.finish()
 
-        [container] = _named(spans, "LLM input guardrail check")
+        [container] = _named(spans, "Agent input guardrail check")
         assert (container.attributes or {})["execution.id"] == "exec-1"
-
-    async def test_a_new_stage_gets_its_own_container(self, graph: _Graph) -> None:
-        pii = _pii(scopes=[GuardrailScope.AGENT, GuardrailScope.LLM])
-        agent_hook = _hook(pii, "_before_agent")
-        model_hook = _hook(pii, "_before_model")
-
-        with patch.object(pii, "_evaluate_guardrail", return_value=_FAILED):
-            with graph.node(f"{agent_hook.name}.before_agent"):
-                await agent_hook.abefore_agent(_STATE, MagicMock())
-            with graph.node(f"{model_hook.name}.before_model"):
-                await model_hook.abefore_model(_STATE, MagicMock())
-        spans = graph.finish()
-
-        assert len(_named(spans, "Agent input guardrail check")) == 1
-        assert len(_named(spans, "LLM input guardrail check")) == 1
 
     async def test_another_node_between_guardrails_splits_the_stage(
         self, graph: _Graph
     ) -> None:
-        pii = _pii()
-        injection = UiPathPromptInjectionMiddleware(action=LogAction())
-        pii_hook = _hook(pii, "_before_model")
-        injection_hook = _hook(injection, "_before_model")
+        pii = _agent_pii()
+        second = _agent_pii(name="Second PII")
+        pii_hook = _hook(pii, "_before_agent")
+        second_hook = _hook(second, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
-            patch.object(injection, "_evaluate_guardrail", return_value=_FAILED),
+            patch.object(second, "_evaluate_guardrail", return_value=_FAILED),
         ):
-            with graph.node(f"{pii_hook.name}.before_model"):
-                await pii_hook.abefore_model(_STATE, MagicMock())
-            with graph.node("SummarizationMiddleware.before_model"):
+            with graph.node(f"{pii_hook.name}.before_agent"):
+                await pii_hook.abefore_agent(_STATE, MagicMock())
+            with graph.node("SummarizationMiddleware.before_agent"):
                 pass
-            with graph.node(f"{injection_hook.name}.before_model"):
-                await injection_hook.abefore_model(_STATE, MagicMock())
+            with graph.node(f"{second_hook.name}.before_agent"):
+                await second_hook.abefore_agent(_STATE, MagicMock())
         spans = graph.finish()
 
-        assert len(_named(spans, "LLM input guardrail check")) == 2
-
-    async def test_llm_output_checks_get_their_container(self, graph: _Graph) -> None:
-        pii = _pii()
-        hook = _hook(pii, "_after_model")
-        state = {"messages": [HumanMessage("hi"), AIMessage("mail a@b.com")]}
-
-        with (
-            patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
-            graph.node(f"{hook.name}.after_model"),
-        ):
-            await hook.aafter_model(state, MagicMock())
-        spans = graph.finish()
-
-        [container] = _named(spans, "LLM output guardrail check")
-        assert _children(spans, container) == ["Log"]
+        assert len(_named(spans, "Agent input guardrail check")) == 2
 
     async def test_a_block_marks_the_container_as_failed(self, graph: _Graph) -> None:
-        pii = _pii(action=BlockAction())
-        hook = _hook(pii, "_before_model")
+        pii = _agent_pii(action=BlockAction())
+        hook = _hook(pii, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
             pytest.raises(AgentRuntimeError),
-            graph.node(f"{hook.name}.before_model"),
+            graph.node(f"{hook.name}.before_agent"),
         ):
-            await hook.abefore_model(_STATE, MagicMock())
+            await hook.abefore_agent(_STATE, MagicMock())
         spans = graph.finish()
 
-        [container] = _named(spans, "LLM input guardrail check")
+        [container] = _named(spans, "Agent input guardrail check")
         assert container.status.status_code == StatusCode.ERROR
 
     async def test_a_grouping_failure_still_runs_the_check(self, graph: _Graph) -> None:
-        pii = _pii(action=BlockAction())
-        hook = _hook(pii, "_before_model")
+        pii = _agent_pii(action=BlockAction())
+        hook = _hook(pii, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
             patch.object(_grouping, "_shared_container", side_effect=RuntimeError),
             pytest.raises(AgentRuntimeError),
-            graph.node(f"{hook.name}.before_model"),
+            graph.node(f"{hook.name}.before_agent"),
         ):
-            await hook.abefore_model(_STATE, MagicMock())
+            await hook.abefore_agent(_STATE, MagicMock())
         spans = graph.finish()
 
-        assert _named(spans, "LLM input guardrail check") == []
+        assert _named(spans, "Agent input guardrail check") == []
         assert len(_named(spans, "Block")) == 1
 
     async def test_a_stage_with_nothing_to_check_leaves_no_container(
         self, graph: _Graph
     ) -> None:
-        pii = _pii()
-        hook = _hook(pii, "_before_model")
+        pii = _agent_pii()
+        hook = _hook(pii, "_before_agent")
 
         with (
             patch.object(pii, "_evaluate_guardrail") as evaluate,
-            graph.node(f"{hook.name}.before_model"),
+            graph.node(f"{hook.name}.before_agent"),
         ):
-            await hook.abefore_model({"messages": []}, MagicMock())
+            await hook.abefore_agent({"messages": []}, MagicMock())
         spans = graph.finish()
 
         evaluate.assert_not_called()
-        assert not _named(spans, "LLM input guardrail check")
+        assert not _named(spans, "Agent input guardrail check")
+
+
+class TestModel:
+    """LLM checks run around the model call: their containers go inside ``model``."""
+
+    @staticmethod
+    def _model_run(graph: _Graph, model: Span) -> Any:
+        async def handler(request: Any) -> AIMessage:
+            with graph.node("Model run", parent=model):
+                return AIMessage("mail a@b.com")
+
+        return handler
+
+    async def test_input_checks_share_a_container_until_the_model_runs(
+        self, graph: _Graph
+    ) -> None:
+        pii = _pii(stage=GuardrailExecutionStage.PRE)
+        injection = UiPathPromptInjectionMiddleware(action=LogAction())
+        outer, inner = model_hook(pii), model_hook(injection)
+
+        with (
+            patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
+            patch.object(injection, "_evaluate_guardrail", return_value=_FAILED),
+            graph.node("model") as model,
+        ):
+            run = self._model_run(graph, model)
+
+            async def through_inner(request: Any) -> Any:
+                return await inner.awrap_model_call(request, run)
+
+            await outer.awrap_model_call(model_request(), through_inner)
+        spans = graph.finish()
+
+        [container] = _named(spans, "LLM input guardrail check")
+        [model_run] = _named(spans, "Model run")
+        assert (container.attributes or {})["span_type"] == "llmPreGuardrails"
+        assert container.parent is not None
+        assert container.parent.span_id == model.get_span_context().span_id
+        assert _children(spans, container) == ["Log", "Log"]
+        assert container.end_time == model_run.start_time
+        assert container.status.status_code == StatusCode.OK
+
+    async def test_output_checks_get_their_container_inside_the_model_span(
+        self, graph: _Graph
+    ) -> None:
+        pii = _pii()
+
+        with (
+            patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
+            graph.node("model") as model,
+        ):
+            await model_hook(pii).awrap_model_call(
+                model_request(), self._model_run(graph, model)
+            )
+        spans = graph.finish()
+
+        [model_span] = _named(spans, "model")
+        [model_run] = _named(spans, "Model run")
+        [before] = _named(spans, "LLM input guardrail check")
+        [after] = _named(spans, "LLM output guardrail check")
+        assert sorted(_children(spans, model_span)) == [
+            "LLM input guardrail check",
+            "LLM output guardrail check",
+            "Model run",
+        ]
+        assert (before.end_time or 0) <= (model_run.start_time or 0)
+        assert (after.start_time or 0) >= (model_run.end_time or 0)
+        assert after.end_time == model_span.end_time
+        assert _children(spans, after) == ["Log"]
+
+    async def test_a_new_stage_gets_its_own_container(self, graph: _Graph) -> None:
+        pii = _pii(scopes=[GuardrailScope.AGENT, GuardrailScope.LLM])
+        agent_hook = _hook(pii, "_before_agent")
+
+        with patch.object(pii, "_evaluate_guardrail", return_value=_FAILED):
+            with graph.node(f"{agent_hook.name}.before_agent"):
+                await agent_hook.abefore_agent(_STATE, MagicMock())
+            with graph.node("model") as model:
+                await model_hook(pii).awrap_model_call(
+                    model_request(), self._model_run(graph, model)
+                )
+        spans = graph.finish()
+
+        assert len(_named(spans, "Agent input guardrail check")) == 1
+        assert len(_named(spans, "LLM input guardrail check")) == 1
+
+    async def test_a_check_that_stops_the_run_marks_the_container_as_failed(
+        self, graph: _Graph
+    ) -> None:
+        # Only Log acts in the model node; a policy block can still stop it there.
+        pii = _pii()
+        hook = model_hook(pii)
+        request = model_request()
+        blocked = AgentRuntimeError(
+            code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+            title="Blocked by policy",
+            detail="blocked",
+        )
+
+        with (
+            patch.object(pii, "_evaluate_guardrail", side_effect=blocked),
+            graph.node("model") as model,
+        ):
+            run = self._model_run(graph, model)
+            with pytest.raises(AgentRuntimeError):
+                await hook.awrap_model_call(request, run)
+        spans = graph.finish()
+
+        [container] = _named(spans, "LLM input guardrail check")
+        assert container.status.status_code == StatusCode.ERROR
+        assert _named(spans, "Model run") == []
 
 
 class TestTools:
@@ -522,12 +613,12 @@ class TestEnabling:
             )
         )
         node = provider.get_tracer(_OPENINFERENCE).start_span(
-            "pii_detection_before_model", context=trace.set_span_in_context(parent)
+            "pii_detection_before_agent", context=trace.set_span_in_context(parent)
         )
         enable_guardrail_grouping(exporter.provider, lambda: node)  # type: ignore[attr-defined]
-        _pii()
+        _agent_pii()
 
-        with guardrail_stage(GuardrailScope.LLM, GuardrailExecutionStage.PRE):
+        with guardrail_stage(GuardrailScope.AGENT, GuardrailExecutionStage.PRE):
             pass
 
         assert node.is_recording()
@@ -621,9 +712,9 @@ class TestEnabling:
         assert not _grouping._state.enabled
 
     async def test_only_guardrail_node_spans_are_hidden(self, graph: _Graph) -> None:
-        pii = _pii()
-        hook = _hook(pii, "_before_model")
-        node_name = f"{hook.name}.before_model"
+        pii = _agent_pii()
+        hook = _hook(pii, "_before_agent")
+        node_name = f"{hook.name}.before_agent"
         user_span = trace.get_tracer("my_app").start_span(node_name)
         user_span.end()
 
@@ -631,16 +722,16 @@ class TestEnabling:
             patch.object(pii, "_evaluate_guardrail", return_value=_FAILED),
             graph.node(node_name),
         ):
-            await hook.abefore_model(_STATE, MagicMock())
+            await hook.abefore_agent(_STATE, MagicMock())
         spans = graph.finish()
 
         hidden = [s for s in spans if not is_exported(s)]
         assert [s.instrumentation_scope.name for s in hidden] == [_OPENINFERENCE]  # type: ignore[union-attr]
-        assert is_exported(_named(spans, "LLM input guardrail check")[0])
+        assert is_exported(_named(spans, "Agent input guardrail check")[0])
 
     def test_a_node_that_cannot_be_grouped_stays_visible(self, graph: _Graph) -> None:
-        hook = _hook(_pii(), "_before_model")
-        node_name = f"{hook.name}.before_model"
+        hook = _hook(_agent_pii(), "_before_agent")
+        node_name = f"{hook.name}.before_agent"
         # A sampler that keeps the nodes although one's parent was dropped.
         provider = TracerProvider(sampler=ALWAYS_ON)
         tracer = provider.get_tracer(_OPENINFERENCE)
@@ -777,6 +868,48 @@ class TestRealAgent:
                 for c in children
             )
 
+    async def test_llm_checks_group_inside_the_model_span(
+        self, exporter: InMemorySpanExporter, instrumented: None
+    ) -> None:
+        with patch.object(
+            _base.BuiltInGuardrailMiddlewareMixin,
+            "_evaluate_guardrail",
+            return_value=_FAILED,
+        ):
+            await self._agent(parallel_calls=1).ainvoke(
+                {"messages": [HumanMessage("a@b.com weather")]}
+            )
+        spans = list(exporter.get_finished_spans())
+        by_id = {s.context.span_id: s for s in spans}
+
+        self._assert_well_formed(spans)
+        containers = [
+            *_named(spans, "LLM input guardrail check"),
+            *_named(spans, "LLM output guardrail check"),
+        ]
+        assert len(containers) == 3
+        for container in containers:
+            assert container.parent is not None
+            assert by_id[container.parent.span_id].name == "model"
+        # Input checks end before the model runs, output checks start after it.
+        # A container never ends before its last check, so on a coarse clock
+        # (Windows) it can end a tick after the model run starts: allow 1 ms.
+        tick = 1_000_000
+        for model in _named(spans, "model"):
+            children = [
+                s
+                for s in spans
+                if s.parent and s.parent.span_id == model.context.span_id
+            ]
+            llm_run = next(s for s in children if s.name == "_ToolCallingModel")
+            [before] = [s for s in children if s.name == "LLM input guardrail check"]
+            assert (before.end_time or 0) <= (llm_run.start_time or 0) + tick
+            for after in (
+                s for s in children if s.name == "LLM output guardrail check"
+            ):
+                assert (after.start_time or 0) >= (llm_run.end_time or 0) - tick
+                assert (before.end_time or 0) <= (after.start_time or 0)
+
     async def test_concurrent_runs_keep_their_own_containers(
         self, exporter: InMemorySpanExporter, instrumented: None
     ) -> None:
@@ -799,3 +932,48 @@ class TestRealAgent:
         containers = _named(spans, "LLM input guardrail check")
         assert len(containers) == 4
         assert all(_children(spans, c) for c in containers)
+
+    async def test_two_output_escalations_check_inside_the_model_span(
+        self, exporter: InMemorySpanExporter, instrumented: None
+    ) -> None:
+        escalations = [
+            hook
+            for name in ("PII", "Second PII")
+            for hook in _pii(
+                name=name,
+                stage=GuardrailExecutionStage.POST,
+                action=EscalateAction(app_name="app", app_folder_path="folder"),
+            )
+        ]
+        agent = create_agent(
+            GenericFakeChatModel(messages=iter([AIMessage("a@b.com")])),
+            middleware=escalations,
+            checkpointer=InMemorySaver(),
+        )
+        no_platform = MagicMock(tenant_name=None, base_url=None)
+        with (
+            patch.object(escalate_module, "UiPathConfig", no_platform),
+            patch.object(
+                _base.BuiltInGuardrailMiddlewareMixin,
+                "_evaluate_guardrail",
+                return_value=_FAILED,
+            ),
+        ):
+            first = await agent.ainvoke(
+                {"messages": [HumanMessage("hi")]},
+                {"configurable": {"thread_id": "trace"}},
+            )
+        assert first["__interrupt__"]
+        spans = list(exporter.get_finished_spans())
+        by_id = {s.context.span_id: s for s in spans}
+
+        self._assert_well_formed(spans)
+        parents = [
+            by_id[c.parent.span_id].name
+            for c in _named(spans, "LLM output guardrail check")
+            if c.parent is not None
+        ]
+        # Both checks share the model's container; the escalation they lead to
+        # runs in the hidden node after the model, its container beside it.
+        assert sorted(parents) == ["LangGraph", "model"]
+        assert not [s for s in spans if "checkpointed" in s.name]
