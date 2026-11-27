@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any, cast
 
+from jsonpath_ng.exceptions import JsonPathParserError  # type: ignore[import-untyped]
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AnyMessage,
@@ -63,6 +64,7 @@ from uipath_langchain.agent.tools.internal_tools.pii_masker import (
     PiiMasker,
     masked_name_for,
 )
+from uipath_langchain.agent.tools.schema_editing import parse_jsonpath_segments
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -95,12 +97,19 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
 # reads this and stamps it on the llmCall span as the ``attachments`` attribute.
 LLM_CALL_ATTACHMENTS_METADATA_KEY = "uipath_llm_call_attachments"
 
-_ANALYSIS_TASK_PATH = "$['analysisTask']"
+def _is_analysis_task_configured(resource: AgentInternalToolResourceConfig) -> bool:
+    for path in resource.argument_properties:
+        try:
+            if parse_jsonpath_segments(path) == ["analysisTask"]:
+                return True
+        except JsonPathParserError:
+            continue
+    return False
 
 
 def _empty_analysis_task_error(resource: AgentInternalToolResourceConfig) -> Exception:
     """A tool error the LLM can correct, or a configuration error."""
-    if _ANALYSIS_TASK_PATH not in resource.argument_properties:
+    if not _is_analysis_task_configured(resource):
         return ToolException(
             "Argument 'analysisTask' is empty. Describe what to find or answer "
             "in the attached files, then call the tool again."

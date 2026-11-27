@@ -567,11 +567,16 @@ class TestCreateAnalyzeFileTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @pytest.mark.parametrize(
+        "path",
+        ["$['analysisTask']", "$.analysisTask", '$["analysisTask"]', "analysisTask"],
+        ids=["bracket", "dot", "double-quoted", "bare"],
+    )
     async def test_empty_configured_analysis_task_is_a_user_error(
-        self, mock_get_wrapper, resource_config, mock_llm
+        self, mock_get_wrapper, resource_config, mock_llm, path
     ):
         resource_config.argument_properties = {
-            "$['analysisTask']": AgentToolStaticArgumentProperties(
+            path: AgentToolStaticArgumentProperties(
                 value="", is_sensitive=False
             )
         }
