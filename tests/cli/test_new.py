@@ -1,6 +1,8 @@
 import os
 import re
+import tomllib
 from importlib.metadata import version
+from pathlib import Path
 
 import pytest
 from packaging.specifiers import SpecifierSet
@@ -53,4 +55,39 @@ class TestUipathLangchainScaffoldPin:
         assert SpecifierSet(match.group(1)).contains(installed, prereleases=True), (
             f"scaffolded pin '{match.group(1)}' does not contain installed "
             f"uipath-langchain {installed}"
+        )
+
+
+TEMPLATE_DIR = Path(__file__).parents[2] / "template"
+
+
+class TestTemplatePin:
+    """``template/`` must track the same minor as ``uipath new``.
+
+    Studio Web builds its coded agent sample from ``template/``, so a stale pin
+    there ships an old uipath-langchain to new projects. When these fail,
+    update the pin in ``template/pyproject.toml`` and run ``uv lock`` in
+    ``template/``.
+    """
+
+    def test_template_pin_admits_installed_version(self) -> None:
+        content = (TEMPLATE_DIR / "pyproject.toml").read_text()
+        match = PIN_RE.search(content)
+        assert match is not None, content
+        installed = version("uipath-langchain")
+        assert SpecifierSet(match.group(1)).contains(installed, prereleases=True), (
+            f"template/pyproject.toml pin '{match.group(1)}' does not contain "
+            f"uipath-langchain {installed}"
+        )
+
+    def test_template_lock_is_on_the_scaffold_minor(self) -> None:
+        lock = tomllib.loads((TEMPLATE_DIR / "uv.lock").read_text())
+        [locked] = [
+            Version(package["version"])
+            for package in lock["package"]
+            if package["name"] == "uipath-langchain"
+        ]
+        assert f"{locked.major}.{locked.minor}" == UIPATH_LANGCHAIN_SCAFFOLD_MINOR, (
+            f"template/uv.lock locks uipath-langchain {locked}, not "
+            f"{UIPATH_LANGCHAIN_SCAFFOLD_MINOR}.x"
         )
